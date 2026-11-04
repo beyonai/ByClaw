@@ -5,20 +5,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanRequireItem;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.CliResult;
 import com.iwhalecloud.byai.manager.domain.connector.provider.dingtalk.DwsDingtalkAuthorizationProvider;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorInfoService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 /**
  * 钉钉群消息扫描服务
@@ -33,6 +31,7 @@ public class DingtalkScanService {
         DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'+08:00'");
 
     private static final String DWS_BIN = "dws";
+    private static final int MAX_OUTPUT_BYTES = 1024 * 1024;
 
     @Autowired
     private ScanLogService scanLogService;
@@ -105,41 +104,31 @@ public class DingtalkScanService {
 
             log.info("[DingtalkScan] executing: {}", String.join(" ", cmd));
 
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.redirectErrorStream(true);
-            // 按源创建者隔离 dws 环境(禁 keychain + DWS_CONFIG_DIR + XDG_DATA_HOME),读其专属授权。
-            dwsAuthService.applyUserDwsEnv(pb.environment(), source.getCreateBy());
-            Process process = pb.start();
-
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line);
-                }
-            }
-
-            boolean finished = process.waitFor(60, TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroyForcibly();
+            // 使用源创建者与连接器授权相同的执行上下文，远程模式不再读 BE 本地凭证。
+            CliResult result = dwsAuthService.runCommand(
+                source.getCreateBy(), cmd, Duration.ofSeconds(60), MAX_OUTPUT_BYTES);
+            if (result.exitCode() == 124) {
                 log.error("[DingtalkScan] command timeout");
                 scanLogService.failLog(logId, "DWS command timeout");
                 return items;
             }
-
-            log.info("[DingtalkScan] exitCode={}, output={}",
-                process.exitValue(), output.toString());
-
-            if (process.exitValue() != 0) {
-                String errDetail = output.toString();
-                log.error("[DingtalkScan] DWS command failed: exitCode={}, output={}", process.exitValue(), errDetail);
-                scanLogService.failLog(logId,
-                    "DWS exit code: " + process.exitValue() + ", output: " + (errDetail.length() > 500 ? errDetail.substring(0, 500) : errDetail));
+            if (result.truncated()) {
+                scanLogService.failLog(logId, "DWS command output truncated");
                 return null;
             }
 
-            JsonNode root = MAPPER.readTree(output.toString());
+            log.info("[DingtalkScan] exitCode={}, output={}",
+                result.exitCode(), result.output());
+
+            if (result.exitCode() != 0) {
+                String errDetail = result.output();
+                log.error("[DingtalkScan] DWS command failed: exitCode={}, output={}", result.exitCode(), errDetail);
+                scanLogService.failLog(logId,
+                    "DWS exit code: " + result.exitCode() + ", output: " + (errDetail.length() > 500 ? errDetail.substring(0, 500) : errDetail));
+                return null;
+            }
+
+            JsonNode root = MAPPER.readTree(result.output());
             JsonNode messages = root.path("result").path("messages");
             if (!messages.isArray() || messages.isEmpty()) {
                 log.warn("[DingtalkScan] no messages found in response");

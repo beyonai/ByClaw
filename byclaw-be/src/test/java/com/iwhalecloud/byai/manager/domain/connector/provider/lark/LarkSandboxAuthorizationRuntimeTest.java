@@ -53,7 +53,7 @@ class LarkSandboxAuthorizationRuntimeTest {
 
         var requestCaptor = org.mockito.ArgumentCaptor.forClass(SandboxCommandRequest.class);
         verify(executor).run(org.mockito.ArgumentMatchers.eq("sandbox-1"), requestCaptor.capture());
-        assertThat(requestCaptor.getValue().argv()).containsExactly("lark-cli", "auth", "logout", "--json");
+        assertThat(requestCaptor.getValue().argv().subList(5, requestCaptor.getValue().argv().size())).containsExactly("lark-cli", "auth", "logout", "--json");
         assertThat(requestCaptor.getValue().environment()).containsAllEntriesOf(Map.of(
             "HOME", "/by/.connector-auth/.lark-cli", "LARK_HOME", "/by/.connector-auth/.lark-cli"));
     }
@@ -138,7 +138,7 @@ class LarkSandboxAuthorizationRuntimeTest {
         assertThat(result.authorizationUrl()).isEqualTo("https://open.feishu.cn/app/init");
         var command = org.mockito.ArgumentCaptor.forClass(SandboxCommandRequest.class);
         verify(fixture.executor).start(eq("sandbox-1"), command.capture());
-        assertThat(command.getValue().argv()).containsExactly(
+        assertThat(command.getValue().argv().subList(5, command.getValue().argv().size())).containsExactly(
             "lark-cli", "config", "init", "--new", "--force-init");
         verify(fixture.executor, times(1)).run(any(), any());
     }
@@ -353,7 +353,7 @@ class LarkSandboxAuthorizationRuntimeTest {
         assertThat(completed.accountId()).isEqualTo("ou_42");
         var command = org.mockito.ArgumentCaptor.forClass(SandboxCommandRequest.class);
         verify(fixture.executor).start(eq("sandbox-1"), command.capture());
-        assertThat(command.getValue().argv()).containsExactly(
+        assertThat(command.getValue().argv().subList(5, command.getValue().argv().size())).containsExactly(
             "lark-cli", "auth", "login", "--device-code", "device-1", "--json");
     }
 

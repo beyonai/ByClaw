@@ -1,11 +1,11 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.File;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -30,6 +31,9 @@ import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationSe
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.CliResult;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.ManagedProcess;
+import com.iwhalecloud.byai.manager.domain.devloop.service.DwsCliExecution.Context;
+import com.iwhalecloud.byai.manager.domain.devloop.service.DwsCliExecution.WorkspaceUnavailableException;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -38,16 +42,16 @@ import lombok.extern.slf4j.Slf4j;
  * 支持 Device Flow 授权，用于定时扫描任务的无人值守运行。
  *
  * 核心设计：
- * - dws CLI 运行在后端容器，token 由 dws 自身持久化（macOS Keychain / Linux 文件）
+ * - 远程模式在用户沙箱执行 CLI，使用与 Agent 相同的凭证存储；本地模式保留后端用户工作区。
  * - 授权通过 device flow：后端启动 dws 进程获取设备码，前端浏览器打开授权URL
- * - 后端 dws 进程后台轮询等待授权完成，token 自动写入后端本地
+ * - dws 进程后台轮询等待授权完成，token 自动写入当前用户的 CLI HOME。
  * - 定时任务只需 check dws auth status 即可
  */
 @Slf4j
 @Service
 public class DwsAuthService {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper().enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     /**
      * 关闭 keychain,改用 file-DEK 后端把登录态加密落到 DWS_CONFIG_DIR。
      * 这是 per-user 目录隔离生效的前提:默认 keychain 模式下 token 存系统钥匙串,DWS_CONFIG_DIR 换目录也读到同一份(全局共享)。
@@ -55,6 +59,9 @@ public class DwsAuthService {
      */
     private static final String DWS_DISABLE_KEYCHAIN_KEY = "DWS_DISABLE_KEYCHAIN";
     private static final String DWS_DISABLE_KEYCHAIN_VALUE = "1";
+    private static final List<String> TRANSPORT_ENVIRONMENT = List.of(
+        "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
+        "http_proxy", "https_proxy", "no_proxy", "all_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR");
 
     private static final Pattern USER_CODE_PATTERN = Pattern.compile("authorization code:\\s*(\\S+)");
     private static final Pattern VERIFY_URL_PATTERN = Pattern.compile("(https://login\\.dingtalk\\.com/oauth2/device/verify\\.htm\\?user_code=\\S+)");
@@ -81,13 +88,10 @@ public class DwsAuthService {
     @Autowired
     private ConnectorCliRunner connectorCliRunner;
 
-    @FunctionalInterface
-    interface DwsProcessLauncher {
+    @Autowired
+    private DwsCliExecution dwsCliExecution;
 
-        Process start(ProcessBuilder builder) throws IOException;
-    }
-
-    static record DeviceFlowRegistration(Long userId, Process process) {
+    static record DeviceFlowRegistration(Long userId, ManagedProcess process) {
     }
 
     public enum DwsCredentialOutcome {
@@ -126,19 +130,9 @@ public class DwsAuthService {
         private final AtomicInteger users = new AtomicInteger();
     }
 
-    private final DwsProcessLauncher processLauncher;
-
     // 后台运行的 device flow 进程，按授权任务隔离。
     final ConcurrentHashMap<String, DeviceFlowRegistration> deviceFlowRegistrations = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, DeviceFlowStartLock> deviceFlowStartLocks = new ConcurrentHashMap<>();
-
-    public DwsAuthService() {
-        this(ProcessBuilder::start);
-    }
-
-    DwsAuthService(DwsProcessLauncher processLauncher) {
-        this.processLauncher = processLauncher;
-    }
 
     /** 解析用户 bucket 的绝对路径根 {fileStorageRoot}/byclaw-{userCode};失败返回 null。 */
     private String resolveBucketBase(Long userId) {
@@ -177,6 +171,10 @@ public class DwsAuthService {
      * @return true 表示成功按用户隔离;false 表示解析不出该用户目录(调用方据此判定未授权,不冒用全局)。
      */
     public boolean applyUserDwsEnv(Map<String, String> env, Long userId) {
+        // Legacy local-only API: callers must use runCommand in remote deployments.
+        if (dwsCliExecution != null && dwsCliExecution.isRemote()) {
+            return false;
+        }
         env.put(DWS_DISABLE_KEYCHAIN_KEY, DWS_DISABLE_KEYCHAIN_VALUE);
         String base = resolveBucketBase(userId);
         if (base == null) {
@@ -189,6 +187,7 @@ public class DwsAuthService {
             return false;
         }
         env.put("HOME", homeDir);
+        env.put("DWS_HOME", homeDir);
         env.put("DWS_CONFIG_DIR", configDir);
         log.info("[DwsAuth] applyUserDwsEnv userId={} home={} configDir={}", userId, homeDir, configDir);
         return true;
@@ -208,17 +207,79 @@ public class DwsAuthService {
         return applyUserDwsEnv(env, uid);
     }
 
-    /**
-     * 构造 dws 子进程:按用户注入隔离 env(禁 keychain + 专属 HOME + DWS_CONFIG_DIR)。
-     * 用于授权动作(startDeviceAuth/injectToken):由当前登录用户发起。
-     */
-    private ProcessBuilder newDwsProcess(Long userId, List<String> cmd) {
-        ProcessBuilder pb = new ProcessBuilder(cmd);
-        pb.redirectErrorStream(true);
-        if (!applyUserDwsEnv(pb.environment(), userId)) {
-            throw new IllegalStateException("Unable to isolate DWS environment for userId=" + userId);
+    private Context resolveExecution(Long userId) {
+        if (!isValidUserId(userId)) throw new WorkspaceUnavailableException();
+        if (dwsCliExecution != null && dwsCliExecution.isRemote()) {
+            return dwsCliExecution.resolve(userId);
         }
-        return pb;
+        Map<String, String> environment = new HashMap<>();
+        if (!applyUserDwsEnv(environment, userId)) throw new WorkspaceUnavailableException();
+        Map<String, String> isolated = localEnvironment(environment, System.getenv());
+        return new Context() {
+            @Override public CliResult run(List<String> command, Duration timeout, int maxOutputBytes) {
+                List<String> executableCommand = resolveLocalExecutable(command, System.getenv("PATH"));
+                return maxOutputBytes == DwsCliExecution.DEFAULT_MAX_OUTPUT_BYTES
+                    ? connectorCliRunner.run(executableCommand, isolated, null, timeout)
+                    : connectorCliRunner.run(executableCommand, isolated, null, timeout, maxOutputBytes);
+            }
+            @Override public ManagedProcess start(List<String> command, Duration timeout) {
+                return connectorCliRunner.start(resolveLocalExecutable(command, System.getenv("PATH")), isolated, null);
+            }
+        };
+    }
+
+    static Map<String, String> localEnvironment(Map<String, String> isolated, Map<String, String> inherited) {
+        Map<String, String> environment = new HashMap<>();
+        for (String key : TRANSPORT_ENVIRONMENT) {
+            String value = inherited.get(key);
+            if (value != null) environment.put(key, value);
+        }
+        environment.putAll(isolated);
+        return Map.copyOf(environment);
+    }
+
+    static List<String> resolveLocalExecutable(List<String> command, String path) {
+        String executable = command.getFirst();
+        if (executable.contains(File.separator) || path == null) return command;
+        // Preserve the old ProcessBuilder lookup for installations such as ~/.local/bin/dws.
+        // ConnectorCliRunner keeps its isolated child environment and cannot add arbitrary PATH entries.
+        for (String directory : path.split(Pattern.quote(File.pathSeparator), -1)) {
+            Path candidate = Paths.get(directory).resolve(executable);
+            if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
+                List<String> resolved = new ArrayList<>(command);
+                resolved.set(0, candidate.toAbsolutePath().normalize().toString());
+                return List.copyOf(resolved);
+            }
+        }
+        return command;
+    }
+
+    /** All DWS consumers share the authorization execution location and credential workspace. */
+    public CliResult runCommand(Long userId, List<String> command, Duration timeout) {
+        return runCommand(userId, command, timeout, DwsCliExecution.DEFAULT_MAX_OUTPUT_BYTES);
+    }
+
+    public CliResult runCommand(String userId, List<String> command, Duration timeout) {
+        return runCommand(parseUserId(userId), command, timeout);
+    }
+
+    public CliResult runCommand(Long userId, List<String> command, Duration timeout, int maxOutputBytes) {
+        DwsCliExecution.validate(command, timeout, maxOutputBytes);
+        return resolveExecution(userId).run(List.copyOf(command), timeout, maxOutputBytes);
+    }
+
+    public CliResult runCommand(String userId, List<String> command, Duration timeout, int maxOutputBytes) {
+        return runCommand(parseUserId(userId), command, timeout, maxOutputBytes);
+    }
+
+    private Long parseUserId(String userId) {
+        try {
+            Long parsed = userId == null ? null : Long.valueOf(userId.trim());
+            if (!isValidUserId(parsed)) throw new WorkspaceUnavailableException();
+            return parsed;
+        } catch (NumberFormatException e) {
+            throw new WorkspaceUnavailableException();
+        }
     }
 
     /**
@@ -252,113 +313,91 @@ public class DwsAuthService {
 
     private Map<String, Object> startDeviceAuthLocked(Long authUserId, String authId, List<String> command) {
         DeviceFlowRegistration existing = deviceFlowRegistrations.get(authId);
-        if (existing != null && existing.process() != null && existing.process().isAlive()) {
-            return Map.of("success", false, "message", "Authorization is already in progress");
-        }
         if (existing != null) {
-            deviceFlowRegistrations.remove(authId, existing);
+            try {
+                if (existing.process() != null && existing.process().isAlive()) {
+                    return Map.of("success", false, "message", "Authorization is already in progress");
+                }
+                deviceFlowRegistrations.remove(authId, existing);
+            } catch (RuntimeException e) {
+                log.warn("[DwsAuth] existing device flow inspection failed, authorizationId={}, userId={}, errorType={}",
+                    authId, authUserId, e.getClass().getSimpleName());
+                return Map.of("success", false,
+                    "message", safeI18n("devloop.dws.auth.start.failed", "启动授权失败"));
+            }
         }
 
         DeviceFlowRegistration registration = null;
-        BufferedReader reader = null;
-        boolean drainStarted = false;
         try {
             log.info("[DwsAuth] starting device flow, authorizationId={}, userId={}", authId, authUserId);
-
-            ProcessBuilder pb = newDwsProcess(authUserId, command);
-            Process process = processLauncher.start(pb);
+            DwsCliExecution.validate(command, Duration.ofSeconds(900), DwsCliExecution.DEFAULT_MAX_OUTPUT_BYTES);
+            ManagedProcess process = resolveExecution(authUserId).start(command, Duration.ofSeconds(900));
+            if (process == null) throw new IllegalStateException("Unable to start DWS authorization");
             registration = new DeviceFlowRegistration(authUserId, process);
             deviceFlowRegistrations.put(authId, registration);
 
-            // 读取前几行输出，提取 userCode 和 verificationUrl
-            // dws 会先输出设备码信息，然后 block 轮询
-            reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
             String userCode = null;
             String verificationUrl = null;
-
-            long startTime = System.currentTimeMillis();
-
-            while (System.currentTimeMillis() - startTime < 10000) {
-                if (reader.ready()) {
-                    String line = reader.readLine();
-                    if (line == null) break;
-
-                    // 解析 authorization code
-                    Matcher codeMatcher = USER_CODE_PATTERN.matcher(line);
-                    if (codeMatcher.find()) {
-                        userCode = codeMatcher.group(1);
-                    }
-
-                    // 解析完整 URL
-                    Matcher urlMatcher = VERIFY_URL_PATTERN.matcher(line);
-                    if (urlMatcher.find()) {
-                        verificationUrl = urlMatcher.group(1);
-                    }
-
-                    // 拿到两个值后就可以返回了，进程继续后台轮询
-                    if (userCode != null && verificationUrl != null) {
-                        break;
-                    }
-                } else {
-                    Thread.sleep(100);
-                }
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (System.nanoTime() < deadline && deviceFlowRegistrations.get(authId) == registration) {
+                String output = process.output();
+                if (process.outputTruncated()) break;
+                boolean outputFinished = !process.isAlive() && process.outputComplete();
+                // Remote output can split in the middle of a URL; preserve BufferedReader's complete-line contract.
+                String completeLines = outputFinished ? output : output.substring(0, output.lastIndexOf('\n') + 1);
+                Matcher codeMatcher = USER_CODE_PATTERN.matcher(completeLines);
+                Matcher urlMatcher = VERIFY_URL_PATTERN.matcher(completeLines);
+                if (codeMatcher.find()) userCode = codeMatcher.group(1);
+                if (urlMatcher.find()) verificationUrl = urlMatcher.group(1);
+                if (userCode != null && verificationUrl != null) break;
+                if (outputFinished) break;
+                Thread.sleep(100);
             }
-
-            if (userCode == null || verificationUrl == null) {
-                log.error("[DwsAuth] failed to parse device flow output, authorizationId={}, userId={}",
-                    authId, authUserId);
+            if (userCode == null || verificationUrl == null || process.outputTruncated()
+                    || deviceFlowRegistrations.get(authId) != registration) {
                 removeAndDestroy(authId, registration);
-                closeReader(reader, authId, authUserId);
                 return Map.of("success", false,
                     "message", safeI18n("devloop.dws.device.code.failed", "获取设备码失败"));
             }
 
-            log.info("[DwsAuth] device flow started, authorizationId={}, userId={}", authId, authUserId);
-            startOutputDrain(reader, authId, authUserId);
-            drainStarted = true;
-
-            // 启动后台线程等待进程结束，处理授权完成/超时
             final DeviceFlowRegistration bgRegistration = registration;
-            final Process bgProcess = bgRegistration.process();
-            Thread waitThread = new Thread(() -> {
-                try {
-                    boolean finished = bgProcess.waitFor(900, TimeUnit.SECONDS);
-                    if (finished && bgProcess.exitValue() == 0) {
-                        log.info("[DwsAuth] device flow completed successfully, authorizationId={}, userId={}",
-                            authId, authUserId);
-                    } else if (!finished) {
-                        log.warn("[DwsAuth] device flow timed out (900s), authorizationId={}, userId={}",
-                            authId, authUserId);
-                        bgProcess.destroyForcibly();
-                    } else {
-                        log.warn("[DwsAuth] device flow exited, authorizationId={}, userId={}, exitCode={}",
-                            authId, authUserId, bgProcess.exitValue());
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    log.debug("[DwsAuth] device flow wait interrupted, authorizationId={}, userId={}",
-                        authId, authUserId);
-                } finally {
-                    deviceFlowRegistrations.remove(authId, bgRegistration);
-                }
-            }, "dws-device-flow-waiter");
+            Thread waitThread = new Thread(() -> awaitDeviceFlow(authId, bgRegistration), "dws-device-flow-waiter");
             waitThread.setDaemon(true);
             waitThread.start();
-
-            return Map.of(
-                "success", true,
-                "userCode", userCode,
-                "verificationUrl", verificationUrl
-            );
+            return Map.of("success", true, "userCode", userCode, "verificationUrl", verificationUrl);
         } catch (Exception e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             removeAndDestroy(authId, registration);
-            if (!drainStarted) {
-                closeReader(reader, authId, authUserId);
-            }
             log.error("[DwsAuth] startDeviceAuth failed, authorizationId={}, userId={}, errorType={}",
                 authId, authUserId, e.getClass().getSimpleName());
             return Map.of("success", false,
                 "message", safeI18n("devloop.dws.auth.start.failed", "启动授权失败"));
+        }
+    }
+
+    private void awaitDeviceFlow(String authId, DeviceFlowRegistration registration) {
+        ManagedProcess process = registration.process();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(900);
+        boolean finished = false;
+        try {
+            while (process.isAlive() && System.nanoTime() < deadline
+                    && deviceFlowRegistrations.get(authId) == registration) {
+                Thread.sleep(100);
+            }
+            if (process.isAlive()) {
+                process.destroy();
+            } else {
+                log.info("[DwsAuth] device flow exited, authorizationId={}, userId={}, exitCode={}",
+                    authId, registration.userId(), process.exitCode());
+            }
+            finished = true;
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            finished = destroyProcess(registration);
+            log.warn("[DwsAuth] device flow wait ended, authorizationId={}, userId={}, errorType={}",
+                authId, registration.userId(), e.getClass().getSimpleName());
+        } finally {
+            if (finished) deviceFlowRegistrations.remove(authId, registration);
         }
     }
 
@@ -372,10 +411,10 @@ public class DwsAuthService {
         if (registration == null || !userId.equals(registration.userId())) {
             return false;
         }
-        if (!deviceFlowRegistrations.remove(authId, registration)) {
+        if (!destroyProcess(registration)) {
             return false;
         }
-        destroyIfAlive(registration);
+        deviceFlowRegistrations.remove(authId, registration);
         return true;
     }
 
@@ -396,15 +435,20 @@ public class DwsAuthService {
     }
 
     private void removeAndDestroy(String authorizationId, DeviceFlowRegistration registration) {
-        if (registration != null) {
+        if (registration != null && destroyProcess(registration)) {
             deviceFlowRegistrations.remove(authorizationId, registration);
-            destroyIfAlive(registration);
         }
     }
 
-    private void destroyIfAlive(DeviceFlowRegistration registration) {
-        if (registration != null && registration.process() != null && registration.process().isAlive()) {
-            registration.process().destroyForcibly();
+    private boolean destroyProcess(DeviceFlowRegistration registration) {
+        try {
+            // Termination must remain possible when the remote status endpoint is unavailable.
+            if (registration != null && registration.process() != null) registration.process().destroy();
+            return true;
+        } catch (RuntimeException e) {
+            log.warn("[DwsAuth] device flow termination failed, userId={}, errorType={}",
+                registration == null ? null : registration.userId(), e.getClass().getSimpleName());
+            return false;
         }
     }
 
@@ -428,33 +472,6 @@ public class DwsAuthService {
         });
     }
 
-    private void startOutputDrain(BufferedReader reader, String authorizationId, Long userId) {
-        Thread drainThread = new Thread(() -> {
-            try (BufferedReader ownedReader = reader) {
-                while (ownedReader.readLine() != null) {
-                    // Drain without retaining or logging device-flow output.
-                }
-            } catch (IOException e) {
-                log.debug("[DwsAuth] device flow output drain ended, authorizationId={}, userId={}, errorType={}",
-                    authorizationId, userId, e.getClass().getSimpleName());
-            }
-        }, "dws-device-flow-output-drain");
-        drainThread.setDaemon(true);
-        drainThread.start();
-    }
-
-    private void closeReader(BufferedReader reader, String authorizationId, Long userId) {
-        if (reader == null) {
-            return;
-        }
-        try {
-            reader.close();
-        } catch (IOException e) {
-            log.debug("[DwsAuth] device flow reader close failed, authorizationId={}, userId={}, errorType={}",
-                authorizationId, userId, e.getClass().getSimpleName());
-        }
-    }
-
     private String safeI18n(String key, String fallback) {
         try {
             return I18nUtil.get(key);
@@ -467,59 +484,15 @@ public class DwsAuthService {
      * 获取 dws auth 状态（包含完整认证信息）
      */
     public Map<String, Object> getAuthStatus(Long userId, List<String> command) {
-        try {
-            ProcessBuilder pb = new ProcessBuilder(List.copyOf(command));
-            pb.redirectErrorStream(true);
-            // 严格按用户隔离(禁 keychain + 专属 HOME + DWS_CONFIG_DIR);解析不出该用户目录则判未授权,绝不冒用全局。
-            if (!applyUserDwsEnv(pb.environment(), userId)) {
-                log.info("[DwsAuth] 无法解析用户 {} 的 dws 隔离目录,判定未授权", userId);
-                return Map.of("authenticated", false, "tokenValid", false);
-            }
-            Process process = pb.start();
-
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line);
-                }
-            }
-
-            process.waitFor(10, TimeUnit.SECONDS);
-            JsonNode node = MAPPER.readTree(output.toString());
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("authenticated", node.path("authenticated").asBoolean(false));
-            result.put("tokenValid", node.path("token_valid").asBoolean(false));
-            if (node.has("refresh_token_valid") && !node.get("refresh_token_valid").isNull()) {
-                result.put("refreshTokenValid", node.get("refresh_token_valid").asBoolean(false));
-            }
-            result.put("expiresAt", node.path("expires_at").asText(""));
-            result.put("refreshExpiresAt", node.path("refresh_expires_at").asText(""));
-            result.put("corpId", node.path("corp_id").asText(""));
-            result.put("corpName", node.path("corp_name").asText(""));
-            result.put("userId", node.path("user_id").asText(""));
-            result.put("userName", node.path("user_name").asText(""));
-            return result;
-        } catch (Exception e) {
-            log.error("[DwsAuth] getAuthStatus failed", e);
-            return Map.of("authenticated", false, "tokenValid", false);
-        }
+        DwsCredentialStatus result = getCredentialStatus(userId, command);
+        return result.outcome() == DwsCredentialOutcome.COMPLETED
+            ? result.status() : Map.of("authenticated", false, "tokenValid", false);
     }
 
     /** Bounded, read-only status query used by connector synchronization. */
     public DwsCredentialStatus getCredentialStatus(Long userId, List<String> command) {
-        Map<String, String> environment = new HashMap<>();
-        if (!applyUserDwsEnv(environment, userId)) {
-            return DwsCredentialStatus.workspaceUnavailable();
-        }
         try {
-            CliResult result = connectorCliRunner.run(
-                List.copyOf(command),
-                environment,
-                null,
-                Duration.ofSeconds(10)
-            );
+            CliResult result = runCommand(userId, command, Duration.ofSeconds(10));
             if (result.exitCode() == 124) {
                 return DwsCredentialStatus.timeout();
             }
@@ -538,9 +511,13 @@ public class DwsAuthService {
             }
             status.put("expiresAt", node.path("expires_at").asText(""));
             status.put("refreshExpiresAt", node.path("refresh_expires_at").asText(""));
+            status.put("corpId", node.path("corp_id").asText(""));
+            status.put("corpName", node.path("corp_name").asText(""));
             status.put("userId", node.path("user_id").asText(""));
             status.put("userName", node.path("user_name").asText(""));
             return DwsCredentialStatus.completed(status);
+        } catch (WorkspaceUnavailableException e) {
+            return DwsCredentialStatus.workspaceUnavailable();
         } catch (Exception e) {
             log.warn("[DwsAuth] bounded credential status query failed, userId={}", userId, e);
             return DwsCredentialStatus.failure();
@@ -549,16 +526,7 @@ public class DwsAuthService {
 
     /** Clears the DWS credential stored in the explicit user's isolated workspace. */
     public void revokeCredential(Long userId, List<String> command) {
-        Map<String, String> environment = new HashMap<>();
-        if (!applyUserDwsEnv(environment, userId)) {
-            throw new IllegalStateException("Unable to isolate DWS credential workspace");
-        }
-        CliResult result = connectorCliRunner.run(
-            List.copyOf(command),
-            environment,
-            null,
-            Duration.ofSeconds(30)
-        );
+        CliResult result = runCommand(userId, command, Duration.ofSeconds(30));
         if (result == null || result.exitCode() != 0 || result.truncated()) {
             throw new IllegalStateException("Unable to revoke DWS credential");
         }

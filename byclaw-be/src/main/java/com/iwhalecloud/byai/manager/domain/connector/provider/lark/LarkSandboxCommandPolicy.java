@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Map;
 
 import com.iwhalecloud.byai.gateway.sandbox.command.SandboxCommandRequest;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorSandboxCommandLauncher;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorSandboxCommandLauncher.Profile;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 
 /** Builds the only Lark commands that the authorization runtime may execute. */
@@ -43,14 +45,14 @@ public final class LarkSandboxCommandPolicy {
             case LOGOUT -> catalog.command("logout", 0);
         };
         validate(argv, action);
-        return new SandboxCommandRequest(
+        return ConnectorSandboxCommandLauncher.wrap(Profile.LARK, new SandboxCommandRequest(
             argv,
             Map.of("HOME", HOME, "LARK_HOME", HOME),
             null,
             timeout,
             maxOutputBytes,
             action == Action.INITIALIZE_APP || action == Action.COMPLETE_USER_AUTHORIZATION
-        );
+        ));
     }
 
     private void validate(List<String> argv, Action action) {

@@ -1,13 +1,9 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.wecom;
 
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
-import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -53,7 +49,6 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliR
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialVerifier;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialRevoker;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService;
-import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialWorkspaceService.ConnectorCliWorkspace;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorManifestCommandResolver;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
@@ -108,8 +103,7 @@ public class WecomCliAuthorizationProvider
     private static final String PROVIDER_CAPACITY_EXCEEDED_MESSAGE =
         "WeCom authorization capacity is unavailable";
 
-    private final ConnectorCliRunner cliRunner;
-    private final ConnectorCredentialWorkspaceService workspaceService;
+    private final WecomCliExecution execution;
     private final ObjectMapper objectMapper;
     private final long startOutputTimeoutNanos;
     private final long startOutputPollIntervalNanos;
@@ -128,6 +122,17 @@ public class WecomCliAuthorizationProvider
     private final AtomicLong terminalSequence = new AtomicLong();
 
     @Autowired
+    public WecomCliAuthorizationProvider(
+        ConnectorCliRunner cliRunner,
+        ConnectorCredentialWorkspaceService workspaceService,
+        ObjectMapper objectMapper,
+        ConnectorManifestCommandResolver manifestCommandResolver,
+        WecomCliExecution execution) {
+        this(cliRunner, workspaceService, objectMapper, DEFAULT_START_OUTPUT_TIMEOUT,
+            DEFAULT_START_OUTPUT_POLL_INTERVAL, Clock.systemUTC(), newCleanupExecutor(),
+            manifestCommandResolver, execution);
+    }
+
     public WecomCliAuthorizationProvider(
         ConnectorCliRunner cliRunner,
         ConnectorCredentialWorkspaceService workspaceService,
@@ -200,8 +205,21 @@ public class WecomCliAuthorizationProvider
         Clock clock,
         ScheduledExecutorService cleanupExecutor,
         ConnectorManifestCommandResolver manifestCommandResolver) {
-        this.cliRunner = Objects.requireNonNull(cliRunner, "cliRunner");
-        this.workspaceService = Objects.requireNonNull(workspaceService, "workspaceService");
+        this(cliRunner, workspaceService, objectMapper, startOutputTimeout, startOutputPollInterval,
+            clock, cleanupExecutor, manifestCommandResolver, new WecomCliExecution(cliRunner, workspaceService));
+    }
+
+    private WecomCliAuthorizationProvider(
+        ConnectorCliRunner cliRunner,
+        ConnectorCredentialWorkspaceService workspaceService,
+        ObjectMapper objectMapper,
+        Duration startOutputTimeout,
+        Duration startOutputPollInterval,
+        Clock clock,
+        ScheduledExecutorService cleanupExecutor,
+        ConnectorManifestCommandResolver manifestCommandResolver,
+        WecomCliExecution execution) {
+        this.execution = Objects.requireNonNull(execution, "execution");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
         this.startOutputTimeoutNanos = positiveNanos(startOutputTimeout, "startOutputTimeout");
         this.startOutputPollIntervalNanos = positiveNanos(startOutputPollInterval, "startOutputPollInterval");
@@ -227,69 +245,20 @@ public class WecomCliAuthorizationProvider
         if (numericUserId == null) {
             throw new IllegalArgumentException(INVALID_USER_MESSAGE);
         }
-        ConnectorCliWorkspace workspace = workspaceService.resolve(numericUserId, PROVIDER_CODE);
+        WecomCliExecution.Context workspace = execution.resolve(numericUserId);
         ManifestCommandCatalog catalog = catalogFor(connector);
         List<String> clearCommand = command(catalog, "logout", CACHE_CLEAR_COMMAND);
         List<String> statusCommand = command(catalog, "status", AUTH_STATUS_COMMAND);
-        Map<String, String> environment = commandEnvironment(workspace);
         // Every 1.3.4 CLI startup can migrate bot.enc through a network request.
         // Remove credentials before launching it so local revocation never triggers migration.
-        removeCredentials(workspace);
-        CliResult result = cliRunner.run(
-            clearCommand,
-            environment,
-            null,
-            CLI_TIMEOUT
-        );
+        workspace.removeCredentials();
+        CliResult result = workspace.run(clearCommand, CLI_TIMEOUT);
         if (result == null || result.exitCode() != 0 || result.truncated()) {
             throw new IllegalStateException("Unable to clear WeCom discovery cache");
         }
-        CliResult status = cliRunner.run(
-            statusCommand,
-            environment, null, CLI_TIMEOUT);
+        CliResult status = workspace.run(statusCommand, CLI_TIMEOUT);
         if (!validAuthorizationStatus(status, "unauthorized")) {
             throw new IllegalStateException("Unable to revoke WeCom credential");
-        }
-    }
-
-    private Map<String, String> commandEnvironment(ConnectorCliWorkspace workspace) {
-        Path wecomConfig = credentialDirectory(workspace);
-        Map<String, String> environment = new HashMap<>(workspace.environment());
-        environment.put("WECOM_CLI_CONFIG_DIR", wecomConfig.toString());
-        // The CLI loads .env before resolving authorization. Keep a parent .env token from
-        // overriding the per-user file even though ConnectorCliRunner clears inherited env.
-        environment.put("WECOM_CLI_ACCESS_TOKEN", "");
-        return Map.copyOf(environment);
-    }
-
-    private Path credentialDirectory(ConnectorCliWorkspace workspace) {
-        Path config = workspace.home().resolve(".config");
-        Path wecomConfig = config.resolve("wecom");
-        try {
-            for (Path directory : List.of(workspace.home(), config, wecomConfig)) {
-                if (Files.exists(directory, LinkOption.NOFOLLOW_LINKS)
-                        && (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)
-                            || !directory.toRealPath().startsWith(workspace.home().toRealPath()))) {
-                    throw new IllegalStateException("Invalid WeCom credential directory");
-                }
-            }
-        } catch (IOException e) {
-            throw new IllegalStateException("Unable to resolve WeCom credential directory");
-        }
-        return wecomConfig;
-    }
-
-    private void removeCredentials(ConnectorCliWorkspace workspace) {
-        // cache clear only removes service discovery metadata in CLI 1.3.4. Delete the
-        // legacy bot too: otherwise the next CLI startup recreates credentials.enc.
-        // Match the existing private projection boundary: fixed file names under the
-        // resolved user home, rejecting symlink directory components before each delete.
-        try {
-            for (String file : List.of("bot.enc", "token.enc", "credentials.enc")) {
-                Files.deleteIfExists(credentialDirectory(workspace).resolve(file));
-            }
-        } catch (IOException e) {
-            throw new IllegalStateException("Unable to remove WeCom credential");
         }
     }
 
@@ -308,9 +277,9 @@ public class WecomCliAuthorizationProvider
         } catch (RuntimeException | JsonProcessingException e) {
             return failedStatus("CONNECTOR_VERIFICATION_FAILED", "Unable to verify connector credential");
         }
-        ConnectorCliWorkspace workspace;
+        WecomCliExecution.Context workspace;
         try {
-            workspace = workspaceService.resolve(userId, PROVIDER_CODE);
+            workspace = execution.resolve(userId);
         } catch (RuntimeException e) {
             return failedStatus(
                 "CREDENTIAL_WORKSPACE_UNAVAILABLE",
@@ -318,12 +287,8 @@ public class WecomCliAuthorizationProvider
             );
         }
         try {
-            CliResult status = cliRunner.run(
-                command(catalogFor(connector), "status", AUTH_STATUS_COMMAND),
-                commandEnvironment(workspace),
-                null,
-                CLI_TIMEOUT
-            );
+            CliResult status = workspace.run(
+                command(catalogFor(connector), "status", AUTH_STATUS_COMMAND), CLI_TIMEOUT);
             if (timedOut(status)) {
                 return credentialVerificationTimeout();
             }
@@ -394,9 +359,9 @@ public class WecomCliAuthorizationProvider
             return admissionFailureStart(admissionResult);
         }
 
-        ConnectorCliWorkspace workspace;
+        WecomCliExecution.Context workspace;
         try {
-            workspace = workspaceService.resolve(userId, PROVIDER_CODE);
+            workspace = execution.resolve(userId);
         } catch (RuntimeException e) {
             return failReservedStart(
                 authorizationId,
@@ -410,7 +375,8 @@ public class WecomCliAuthorizationProvider
             authorizationId,
             lifecycle,
             workspace,
-            initCommand
+            initCommand,
+            Duration.ofSeconds(providerState.authorizationTimeoutSeconds())
         );
         if (processStartFailure != null) {
             return processStartFailure;
@@ -524,19 +490,16 @@ public class WecomCliAuthorizationProvider
             return failedStatus(PROVIDER_CONFIG_INVALID, PROVIDER_CONFIG_INVALID_MESSAGE);
         }
 
-        ConnectorCliWorkspace workspace;
-        try {
-            workspace = workspaceService.resolve(userId, PROVIDER_CODE);
-        } catch (RuntimeException e) {
-            return failedStatus(PROVIDER_WORKSPACE_ERROR, PROVIDER_WORKSPACE_ERROR_MESSAGE);
+        WecomCliExecution.Context workspace = lifecycle.executionContext;
+        if (workspace == null) {
+            return failedStatus(PROVIDER_AUTH_FAILED, PROVIDER_AUTH_FAILED_MESSAGE);
         }
-
         return runAvailabilityProbes(session.commandCatalog(), workspace, lifecycle, processState);
     }
 
     private AuthorizationStatusResult runAvailabilityProbes(
         ManifestCommandCatalog commandCatalog,
-        ConnectorCliWorkspace workspace,
+        WecomCliExecution.Context workspace,
         AuthorizationLifecycle lifecycle,
         ProcessState processState) {
         AuthorizationStatusResult lifecycleResult = lifecycle.completedProbeResult();
@@ -551,12 +514,7 @@ public class WecomCliAuthorizationProvider
         }
         CliResult status;
         try {
-            status = cliRunner.run(
-                command(commandCatalog, "status", AUTH_STATUS_COMMAND),
-                commandEnvironment(workspace),
-                null,
-                CLI_TIMEOUT
-            );
+            status = workspace.run(command(commandCatalog, "status", AUTH_STATUS_COMMAND), CLI_TIMEOUT);
         } catch (RuntimeException e) {
             return probeFailure(processState, PROVIDER_PROBE_FAILED, PROVIDER_PROBE_FAILED_MESSAGE);
         }
@@ -616,7 +574,7 @@ public class WecomCliAuthorizationProvider
     private AuthorizationStartResult waitForAuthorizationUrl(
         String authorizationId,
         AuthorizationLifecycle lifecycle,
-        ConnectorCliWorkspace workspace,
+        WecomCliExecution.Context workspace,
         ProviderState providerState,
         String serializedProviderState,
         ManifestCommandCatalog commandCatalog) {
@@ -891,8 +849,9 @@ public class WecomCliAuthorizationProvider
     private AuthorizationStartResult startAndAttachReservedProcess(
         String authorizationId,
         AuthorizationLifecycle lifecycle,
-        ConnectorCliWorkspace workspace,
-        List<String> initCommand) {
+        WecomCliExecution.Context workspace,
+        List<String> initCommand,
+        Duration timeout) {
         ReentrantReadWriteLock.ReadLock readLock = admissionGate.readLock();
         readLock.lock();
         try {
@@ -906,7 +865,8 @@ public class WecomCliAuthorizationProvider
 
             ManagedProcess process;
             try {
-                process = cliRunner.start(initCommand, commandEnvironment(workspace), null);
+                lifecycle.executionContext = workspace;
+                process = workspace.start(initCommand, timeout);
             } catch (RuntimeException e) {
                 return failReservedStart(
                     authorizationId,
@@ -1500,6 +1460,7 @@ public class WecomCliAuthorizationProvider
     private static final class AuthorizationLifecycle {
 
         private volatile ManagedProcess process;
+        private volatile WecomCliExecution.Context executionContext;
         private volatile long expiresAtMillis;
         private volatile long handoffProtectedUntilMillis = Long.MAX_VALUE;
         private CompletableFuture<AuthorizationStatusResult> probeFuture;
