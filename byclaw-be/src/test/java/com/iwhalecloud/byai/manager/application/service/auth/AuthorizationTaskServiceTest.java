@@ -44,6 +44,8 @@ class AuthorizationTaskServiceTest {
         var source = new UnpooledDataSource("org.h2.Driver", "jdbc:h2:mem:auth_" + UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
         jdbc = new JdbcTemplate(source);
         jdbc.execute("CREATE TABLE au_privilege_grant (grant_obj_id bigint, grant_obj_type varchar(32), status_cd varchar(8), grant_type varchar(32), grant_to_obj_type varchar(32), grant_to_obj_id bigint)");
+        jdbc.execute("CREATE SCHEMA byai");
+        jdbc.execute("CREATE TABLE byai.byai_resource_sync_job (sync_job_id BIGINT PRIMARY KEY, resource_id BIGINT, sync_revision BIGINT)");
         String ddl = Files.readString(Path.of("../deploy/migrations/versions/V0.5.2.1/V0.5.2.1__ddl.sql")).replace("byai.byai_authorization_task", "byai_authorization_task").replace("byai.au_privilege_grant", "au_privilege_grant");
         for (String statement : ddl.split(";")) if (!statement.isBlank()) jdbc.execute(statement);
         jdbc.execute("CREATE TABLE test_grants (resource_id bigint, user_id bigint)");

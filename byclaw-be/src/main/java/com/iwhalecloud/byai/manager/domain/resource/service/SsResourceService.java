@@ -178,6 +178,10 @@ public class SsResourceService {
      * @param resourceId 资源标识
      * @return 实体，主键为空或不存在时返回 null
      */
+    public java.util.List<SsResource> findByIds(java.util.Collection<Long> ids) {
+        return ids.isEmpty() ? java.util.List.of() : ssResourceMapper.selectBatchIds(ids);
+    }
+
     public SsResource findById(Long resourceId) {
 
         if (resourceId == null) {

@@ -1,3 +1,4 @@
+import ResourceSyncProgress from '@/components/ResourceSyncProgress';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { SearchOutlined } from '@ant-design/icons';
@@ -177,6 +178,7 @@ const KnowledgeDetail: React.FC = () => {
         backPath={knowledgeCenterBackPath}
         backState={knowledgeCenterBackState}
       />
+      <ResourceSyncProgress resourceId={resourceId || undefined} />
       <div className={styles.tabsContainer}>
         <CommonTabs
           activeKey={tabKey}

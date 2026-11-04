@@ -916,3 +916,42 @@ PostgreSQL/openGauss 通过有界 `UNION ALL` 分配独立主键，兼容 openGa
 使用单键 SETNX，兼容单机和集群 Redis；账号映射、ID 或资料冲突时保留已有记录，
 不覆盖 DataPortal 用户、密码或企业信息，不切换调用身份、不扩大审核权限。
 非 WhaleAgent 模式保留原有本地用户缓存更新行为。
+
+### Resource synchronization authorization jobs
+
+Enterprise imports through `POST /byaiService/tool/addToolFromThird` now accept authorization work into a durable background queue. Saving a resource is distinct from applying permissions and updating digital employee runtime configuration. A successful HTTP/business response means the request was **accepted**, not that authorization is already effective. Personal imports retain their existing ownership flow.
+
+Optional `requestId` (1–128 ASCII letters, digits, `_`, `.`, `:`, `-`) identifies a retry of the same request for the same resource import identity. Send the same request body and ID after a transport timeout; the response returns the original job. Reusing an ID with different content is rejected. Generate a new ID for an intentional new revision. Without an ID, legacy callers create a new revision on every import.
+
+The import response includes:
+
+```json
+{
+  "accepted": true,
+  "resourceId": "101",
+  "syncRevision": "3",
+  "jobId": "501",
+  "status": "PENDING",
+  "query": {
+    "method": "POST",
+    "path": "/byaiService/tool/queryResourceSyncJob",
+    "body": { "jobId": "501" },
+    "pollAfterMs": 3000
+  },
+  "authorization": { "status": "PENDING", "effective": false }
+}
+```
+
+`association` remains present and contains the same task's status and safe progress summary. External callers such as Whale Agent should display “资源已接收，正在后台授权，可稍后查看进度”, poll the returned path using the same authenticated API client, and stop rapid polling when processing ends. Existing token/signature requirements still apply.
+
+- `POST /byaiService/tool/queryResourceSyncJob`, body `{"jobId":"501"}`: one durable task.
+- `POST /byaiService/tool/queryResourceSyncJobs`, body `{"resourceIds":["101","102"]}`: latest task for each visible resource, at most 100 IDs. Used by existing resource cards and detail views; no separate task center is required.
+- `POST /byaiService/tool/retryResourceSyncJob`, body `{"jobId":"501"}`: an authorized manager retries the latest failed/partial task. Already committed permission writes are not replayed; cache and employee configuration checkpoints resume unfinished work. Attempts remain monotonic so a previous worker cannot regain ownership after retry.
+
+States: `PENDING`, `RUNNING`, `COMPLETED`, `PARTIAL`, `FAILED`, `SUPERSEDED`. Progress `result` includes `phase`, `message`, `authorizationApplied`, `authorizationEffective`, `totalUsers`, `completedUsers`, `employeeCount`, `completedEmployeeCount`, and failure/skip counts when known. Phases distinguish queueing, waiting for an earlier manual grant, applying authorization, and configuring employees. Recipient totals count affected users, including revoked recipients requiring cache cleanup; they are not just the newly granted scope. Do not display a percentage while totals are unknown. `COMPLETED` with `effective=false` can mean skipped recipients (for example, no personal assistant); show these reasons rather than claiming every employee was configured.
+
+Progress is permission checked. Managers can see aggregate counts and retry; ordinary authorized viewers see lifecycle state only. Internal authorization scopes, affected-user arrays, and employee checkpoints are never returned. Failed polling does not mean the background task failed: retain the last known state and offer “刷新进度”; do not resubmit automatically.
+
+Processing uses batched membership/authorization queries, differential grant updates, single-resource Redis hash-field changes, bounded workers, heartbeat leases and revision fences. Grants and the cache checkpoint commit atomically; pending replacements restrict removed recipients without granting new recipients early. Existing manual authorization jobs finish first, while new manual submissions wait until resource synchronization is resolved. Missing authorization fields, explicit `false`, and empty scopes retain their existing semantics. Cleanup-only requests do not report absent personal assistants as incomplete configuration, because they do not request new bindings. Organization/post grants remain rules instead of permanently converting to per-user grants; membership-change cache refresh uses the existing user-organization event path.
+
+Apply the release's incremental migration before starting these application classes. Do not replay older initialization SQL or whole historical migrations against an existing environment. Deploy all backend instances together: previous versions do not understand the pending authorization guard or V3 task states. The new worker can recover unfinished legacy jobs; old workers cannot claim V3 tasks.

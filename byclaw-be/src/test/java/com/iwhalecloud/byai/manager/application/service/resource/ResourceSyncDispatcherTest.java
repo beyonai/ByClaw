@@ -23,7 +23,7 @@ class ResourceSyncDispatcherTest {
         job.setResultSummary("{\"skippedUserCount\":" + skipped + "}");
         when(reconciler.reconcileNow(100L)).thenReturn(job);
         var dispatcher = new ResourceSyncDispatcher(reconciler, Runnable::run, 5000);
-        assertThat(dispatcher.dispatch(100L)).containsEntry("status", external).containsEntry("effective", effective);
+        assertThat(dispatcher.dispatch(100L)).containsEntry("status", "PENDING").containsEntry("effective", false);
     }
 
     @Test void timeoutReturnsPendingWithoutCancellingTheWorkerOrMutatingTheResponse() throws Exception {

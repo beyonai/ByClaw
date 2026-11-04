@@ -1,3 +1,4 @@
+import ResourceSyncProgress from '@/components/ResourceSyncProgress';
 import React, { useState, useEffect } from 'react';
 import { Button, Modal, Spin, Table } from 'antd';
 import { CloseOutlined } from '@ant-design/icons';
@@ -171,7 +172,9 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
       return null;
     }
     // 标题展示关联数字员工数量，便于用户一眼判断当前技能被多少员工使用。
-    const usedEmployeeTitle = `${intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' })}（${employees.length}）`;
+    const usedEmployeeTitle = `${intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' })}（${
+      employees.length
+    }）`;
 
     return renderDetailField(
       usedEmployeeTitle,
@@ -241,6 +244,7 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
         </div>
       ) : (
         <div className={styles.detailFields}>
+          <ResourceSyncProgress resourceId={resourceId} enabled={visible} />
           {renderDetailField(`${resourceName}${intl.formatMessage({ id: 'common.title' })}`, item?.resourceName)}
           {renderDetailField(`${resourceName}${intl.formatMessage({ id: 'common.code' })}`, item?.resourceCode)}
           {renderDetailField(

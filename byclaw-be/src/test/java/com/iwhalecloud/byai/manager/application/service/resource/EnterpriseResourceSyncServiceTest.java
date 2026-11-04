@@ -78,7 +78,12 @@ class EnterpriseResourceSyncServiceTest {
         var response = new HashMap<String, Object>();
         service.completeImport(10L, new EnterpriseResourceSyncRequest(null, true,
             new EnterpriseResourceSyncRequest.Scope(List.of(), List.of(), List.of())), false, response);
-        verify(writes).remove(future); verify(writes).remove(expired);
+        verifyNoInteractions(writes);
+        var jobs = (ResourceSyncJobMapper) ReflectionTestUtils.getField(service, "jobs");
+        var saved = org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.manager.entity.resource.ResourceSyncJob.class);
+        verify(jobs).insert(saved.capture());
+        service.applyAuthorization(resource, saved.getValue());
+        verify(writes).updateAuthorizationBatch(List.of(future, expired), true);
         verify(writes, never()).save(any());
         assertThat(resource.getUseAuthControlled()).isTrue();
     }
@@ -110,8 +115,8 @@ class EnterpriseResourceSyncServiceTest {
 
     @Test void activeUsersAndExistingOrganizationsDoNotRequireTenantMappings() {
         when(subjects.activeUsers(List.of(5L))).thenReturn(List.of(5L));
-        when(subjects.organization(20L)).thenReturn(1);
-        when(subjects.ordinaryPost(30L)).thenReturn(1);
+        when(subjects.organizations(List.of(20L))).thenReturn(List.of(20L));
+        when(subjects.ordinaryPosts(List.of(30L))).thenReturn(List.of(30L));
         service.validate(new EnterpriseResourceSyncRequest(true, true,
             new EnterpriseResourceSyncRequest.Scope(List.of(5L), List.of(20L), List.of(30L))));
         verifyNoInteractions(grants, writes);
@@ -136,13 +141,14 @@ class EnterpriseResourceSyncServiceTest {
         var userQueries = mock(UsersMapper.class);
         ReflectionTestUtils.setField(service, "users", userQueries);
         when(userQueries.findUserIdsByOrgIdListIncludingChildren(List.of(20L))).thenReturn(List.of(5L, 6L));
-        when(userQueries.findUserIdsByPostId(30L)).thenReturn(List.of(6L, 7L));
+        when(userQueries.findUserIdsByPostIds(List.of(30L))).thenReturn(List.of(6L, 7L));
         when(subjects.activeUsers(List.of(5L, 6L, 7L))).thenReturn(List.of(5L, 7L));
         var response = new HashMap<String, Object>();
         service.completeImport(10L, new EnterpriseResourceSyncRequest(true, false,
             new EnterpriseResourceSyncRequest.Scope(List.of(5L), List.of(20L), List.of(30L))), false, response);
-        assertThat(((java.util.Map<?, ?>) response.get("authorization")).get("scopeUserCount")).isEqualTo(2);
-        verify(writes, times(3)).save(any());
+        verifyNoInteractions(userQueries, writes);
+        assertThat(service.activeUsers(service.expand(new EnterpriseResourceSyncRequest.Scope(List.of(5L), List.of(20L), List.of(30L)))))
+            .containsExactly(5L, 7L);
     }
 
     @Test void principalRequiresAnAuthenticatedAdministratorButNoEnterpriseMetadata() {
@@ -174,7 +180,7 @@ class EnterpriseResourceSyncServiceTest {
         previous.setAuthScope("{\"userIds\":[\"7\"],\"orgIds\":[],\"postIds\":[]}");
         previous.setAuthRefreshUserIds("[7]");
         previous.setResultSummary("{\"pendingEmployeeIds\":[\"20\"]}");
-        when(jobs.selectList(any())).thenReturn(List.of(previous));
+        when(jobs.latest(10L)).thenReturn(previous);
         service.completeImport(10L, new EnterpriseResourceSyncRequest(null, false, null), false, new HashMap<>());
         var saved = org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.manager.entity.resource.ResourceSyncJob.class);
         verify(jobs).insert(saved.capture());
@@ -185,7 +191,7 @@ class EnterpriseResourceSyncServiceTest {
         verifyNoInteractions(grants, writes);
     }
 
-    @Test void dispatchesOnlyAfterCommitAndReturnsTheEffectiveResult() {
+    @Test void dispatchesOnlyAfterCommitAndKeepsTheAcceptedResponseImmutable() {
         var dispatcher = mock(ResourceSyncDispatcher.class);
         ReflectionTestUtils.setField(service, "dispatcher", dispatcher);
         var completed = java.util.Map.<String, Object>of("status", "COMPLETED", "jobId", "100", "effective", true);
@@ -195,15 +201,15 @@ class EnterpriseResourceSyncServiceTest {
         verifyNoInteractions(dispatcher);
         var saved = org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.manager.entity.resource.ResourceSyncJob.class);
         verify((ResourceSyncJobMapper) ReflectionTestUtils.getField(service, "jobs")).insert(saved.capture());
-        assertThat(saved.getValue().getStatus()).isEqualTo("PENDING_V2");
+        assertThat(saved.getValue().getStatus()).isEqualTo("PENDING_V3");
         TransactionSynchronizationManager.getSynchronizations().forEach(s -> s.afterCommit());
         verify(dispatcher).dispatch(100L);
-        assertThat(response.get("association")).isSameAs(completed);
+        assertThat((java.util.Map<String, Object>) response.get("association")).containsEntry("status", "PENDING").containsEntry("effective", false);
         verify((AuthApplicationService) ReflectionTestUtils.getField(service, "auth"), never()).syncUsersAuthToRedis(any());
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"TOOLKIT", "MCP", "AGENT", "KG_DOC", "KG_DB", "KG_QA", "KG_TERM"})
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"TOOLKIT", "MCP", "AGENT", "KG_DOC", "KG_DB", "KG_QA", "KG_TERM", "KG_CLOUD"})
     void contentOnlyUpdateQueuesRefreshButKeepsExistingGrantsAndBindings(String type) {
         resource.setResourceBizType(type);
         var response = new HashMap<String, Object>();
@@ -213,7 +219,7 @@ class EnterpriseResourceSyncServiceTest {
         assertThat(saved.getValue().getPackageChanged()).isTrue();
         assertThat(saved.getValue().getAssociationMode()).isEqualTo("NONE");
         assertThat(saved.getValue().getAuthScope()).isNull();
-        assertThat(saved.getValue().getStatus()).isEqualTo("PENDING_V2");
+        assertThat(saved.getValue().getStatus()).isEqualTo("PENDING_V3");
         verifyNoInteractions(grants, writes);
     }
 
@@ -224,6 +230,34 @@ class EnterpriseResourceSyncServiceTest {
         TransactionSynchronizationManager.getSynchronizations().forEach(s -> s.afterCompletion(
             org.springframework.transaction.support.TransactionSynchronization.STATUS_ROLLED_BACK));
         verifyNoInteractions(dispatcher);
+    }
+
+    @Test void tenThousandRecipientsAreOnlyPersistedAtAdmissionAndRetainTheirExactScope() {
+        List<Long> ids = java.util.stream.LongStream.rangeClosed(1, 10000).boxed().toList();
+        var response = new HashMap<String, Object>();
+        service.completeImport(10L, new EnterpriseResourceSyncRequest(true, true,
+            new EnterpriseResourceSyncRequest.Scope(ids, List.of(20L), List.of(30L))), false, response, "request-1", "hash");
+        verifyNoInteractions(grants, writes, subjects, (UsersMapper) ReflectionTestUtils.getField(service, "users"));
+        var saved = org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.manager.entity.resource.ResourceSyncJob.class);
+        verify((ResourceSyncJobMapper) ReflectionTestUtils.getField(service, "jobs")).insert(saved.capture());
+        var intent = com.alibaba.fastjson.JSON.parseObject(saved.getValue().getAuthorizationIntent());
+        assertThat(intent.getJSONObject("useScope").getJSONArray("userIds")).hasSize(10000);
+        assertThat(intent.getJSONObject("viewScope").getJSONArray("orgIds").toJavaList(Long.class)).containsExactly(20L);
+        assertThat(response).containsEntry("accepted", true).containsEntry("jobId", "100");
+    }
+
+    @Test void contentOnlyRevisionInheritsUnappliedViewAndUseIntentWithoutLosingPendingRecipients() {
+        var jobs = (ResourceSyncJobMapper) ReflectionTestUtils.getField(service, "jobs");
+        var previous = new com.iwhalecloud.byai.manager.entity.resource.ResourceSyncJob();
+        previous.setStatus("RUNNING_V3"); previous.setAssociationMode("RECONCILE"); previous.setAuthRefreshUserIds("[7]");
+        previous.setResultSummary("{\"authorizationApplied\":false}");
+        previous.setAuthorizationIntent("{\"viewAuth\":true,\"viewScope\":{\"userIds\":[7]},\"autoAuthorize\":true,\"useScope\":{\"orgIds\":[20]}}");
+        when(jobs.latest(10L)).thenReturn(previous);
+        service.completeImport(10L, new EnterpriseResourceSyncRequest(null, null, null), true, new HashMap<>());
+        var saved = org.mockito.ArgumentCaptor.forClass(com.iwhalecloud.byai.manager.entity.resource.ResourceSyncJob.class);
+        verify(jobs).insert(saved.capture());
+        assertThat(saved.getValue().getAuthorizationIntent()).contains("viewScope", "userIds", "useScope", "orgIds");
+        assertThat(saved.getValue().getAuthRefreshUserIds()).isEqualTo("[7]");
     }
 
     private PrivilegeGrant grant(Long id) {

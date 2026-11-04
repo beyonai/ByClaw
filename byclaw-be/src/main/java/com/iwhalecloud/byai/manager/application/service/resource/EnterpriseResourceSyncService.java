@@ -50,14 +50,20 @@ public class EnterpriseResourceSyncService {
         if (request.viewAuth() != null || request.autoAuthorize() != null) requireSyncPrincipal();
         Scope scope = request.scope();
         if (scope == null) return;
+        if ((long) scope.userIds().size() + scope.orgIds().size() + scope.postIds().size() > 20000) {
+            throw new IllegalArgumentException("单次同步授权对象不能超过 20000 个，请优先使用组织或岗位范围");
+        }
         if (!activeUsers(scope.userIds()).containsAll(scope.userIds())) {
             throw new IllegalArgumentException("授权用户不存在或已停用");
         }
-        for (Long id : scope.orgIds()) {
-            if (scopeMapper.organization(id) != 1) throw new IllegalArgumentException("授权组织不存在: " + id);
-        }
-        for (Long id : scope.postIds()) {
-            if (scopeMapper.ordinaryPost(id) != 1) throw new IllegalArgumentException("授权岗位不存在或属于数字岗位: " + id);
+        validateBatch(scope.orgIds(), scopeMapper::organizations, "授权组织不存在");
+        validateBatch(scope.postIds(), scopeMapper::ordinaryPosts, "授权岗位不存在或属于数字岗位");
+    }
+
+    private void validateBatch(List<Long> ids, java.util.function.Function<List<Long>, List<Long>> query, String message) {
+        for (int start = 0; start < ids.size(); start += 500) {
+            List<Long> batch = ids.subList(start, Math.min(start + 500, ids.size()));
+            if (!query.apply(batch).containsAll(batch)) throw new IllegalArgumentException(message);
         }
     }
 
@@ -86,8 +92,12 @@ public class EnterpriseResourceSyncService {
         Set<Long> result = new LinkedHashSet<>();
         if (scope == null) return result;
         result.addAll(scope.userIds());
-        if (!scope.orgIds().isEmpty()) result.addAll(users.findUserIdsByOrgIdListIncludingChildren(scope.orgIds()));
-        for (Long post : scope.postIds()) result.addAll(users.findUserIdsByPostId(post));
+        for (int start = 0; start < scope.orgIds().size(); start += 500) {
+            result.addAll(users.findUserIdsByOrgIdListIncludingChildren(scope.orgIds().subList(start, Math.min(start + 500, scope.orgIds().size()))));
+        }
+        for (int start = 0; start < scope.postIds().size(); start += 500) {
+            result.addAll(users.findUserIdsByPostIds(scope.postIds().subList(start, Math.min(start + 500, scope.postIds().size()))));
+        }
         result.remove(null);
         return result;
     }
@@ -103,108 +113,149 @@ public class EnterpriseResourceSyncService {
 
     public void completeImport(Long resourceId, EnterpriseResourceSyncRequest request, boolean packageChanged,
                                Map<String, Object> response) {
+        completeImport(resourceId, request, packageChanged, response, null, null);
+    }
+
+    /** Admission never expands memberships or mutates grant rows. The durable job owns those operations. */
+    public void completeImport(Long resourceId, EnterpriseResourceSyncRequest request, boolean packageChanged,
+                               Map<String, Object> response, String requestId, String requestHash) {
+        jobs.lockResource(resourceId);
         SsResource resource = resources.findByIdForUpdate(resourceId);
         validateExisting(resource);
+        ResourceSyncJob previous = jobs.latest(resourceId);
         long revision = Math.addExact(Objects.requireNonNullElse(resource.getThirdSyncRevision(), 0L), 1L);
         resource.setThirdSyncRevision(revision);
-        Set<Long> affected = new LinkedHashSet<>();
-        Set<Long> scopeUsers = expand(request.scope());
-        scopeUsers = activeUsers(scopeUsers);
+        var intent = new com.alibaba.fastjson.JSONObject();
+        var summary = new com.alibaba.fastjson.JSONObject();
+        boolean unfinished = previous != null && !List.of("COMPLETED", "SUPERSEDED").contains(previous.publicStatus());
+        if (unfinished) {
+            var old = previous.getResultSummary() == null ? new com.alibaba.fastjson.JSONObject()
+                : JSON.parseObject(previous.getResultSummary());
+            if (!old.getBooleanValue("authorizationApplied") && previous.getAuthorizationIntent() != null) {
+                intent.putAll(JSON.parseObject(previous.getAuthorizationIntent()));
+            }
+            for (String key : List.of("pendingEmployeeIds", "failedEmployeeIds")) {
+                if (old.containsKey(key)) summary.put(key, old.get(key));
+            }
+        }
         if (request.viewAuth() != null) {
-            replace(resource, List.of(GrantType.ALLOW_VIEW),
-                Boolean.TRUE.equals(request.viewAuth()) ? request.scope() : null, GrantType.ALLOW_VIEW, affected);
+            intent.put("viewAuth", request.viewAuth());
+            intent.put("viewScope", scopeJson(request.scope()));
             resource.setViewAuthControlled(true);
         }
-        if (Boolean.TRUE.equals(request.autoAuthorize())) {
-            resource.setUseAuthControlled(true);
-            replace(resource, List.of(GrantType.AVAILABLE_USE, GrantType.FORCE_USE), request.scope(),
-                GrantType.FORCE_USE, affected);
-            for (Long userId : scopeUsers) {
-                for (PrivilegeGrant pending : grants.selectList(new LambdaQueryWrapper<PrivilegeGrant>()
-                    .eq(PrivilegeGrant::getGrantObjId, resourceId)
-                    .eq(PrivilegeGrant::getGrantObjType, resource.getResourceBizType())
-                    .eq(PrivilegeGrant::getGrantType, GrantType.AVAILABLE_USE)
-                    .eq(PrivilegeGrant::getStatusCd, "P")
-                    .eq(PrivilegeGrant::getGrantToObjType, "USER").eq(PrivilegeGrant::getGrantToObjId, userId))) {
-                    grantService.remove(pending);
-                }
+        if (request.autoAuthorize() != null) {
+            intent.remove("autoAuthorize");
+            intent.remove("useScope");
+            if (Boolean.TRUE.equals(request.autoAuthorize())) {
+                intent.put("autoAuthorize", true);
+                intent.put("useScope", scopeJson(request.scope()));
+                resource.setUseAuthControlled(true);
             }
         }
         resources.updateResourceEntity(resource);
-        affected.addAll(scopeUsers);
-        if (resource.getCreateBy() != null) affected.add(resource.getCreateBy());
-        response.put("syncRevision", String.valueOf(revision));
-        response.put("authorization", Map.of("viewReplaced", request.viewAuth() != null,
-            "useReplaced", Boolean.TRUE.equals(request.autoAuthorize()), "scopeUserCount", scopeUsers.size()));
         String mode = Boolean.TRUE.equals(request.autoAuthorize()) ? "RECONCILE"
             : Boolean.FALSE.equals(request.autoAuthorize()) && request.scope() != null ? "CLEANUP_ONLY" : "NONE";
-        boolean refreshRequired = packageChanged || "SKILL".equals(resource.getResourceBizType())
-            || request.viewAuth() != null || Boolean.TRUE.equals(request.autoAuthorize());
-        Scope jobScope = request.scope();
-        String inheritedResult = null;
-        // Every revision inherits pending runtime refreshes; only omitted autoAuthorize inherits association intent.
-        {
-            List<ResourceSyncJob> previousJobs = jobs.selectList(new LambdaQueryWrapper<ResourceSyncJob>()
-                .eq(ResourceSyncJob::getResourceId, resourceId)
-                .orderByDesc(ResourceSyncJob::getSyncRevision).last("LIMIT 1"));
-            if (!previousJobs.isEmpty() && !List.of("COMPLETED", "SUPERSEDED").contains(previousJobs.get(0).getStatus())) {
-                ResourceSyncJob previous = previousJobs.get(0);
-                inheritedResult = previous.getResultSummary();
-                if (inheritedResult != null) {
-                    var pending = JSON.parseObject(inheritedResult);
-                    refreshRequired |= pending.getJSONArray("pendingEmployeeIds") != null
-                        && !pending.getJSONArray("pendingEmployeeIds").isEmpty();
-                    refreshRequired |= pending.getJSONArray("failedEmployeeIds") != null
-                        && !pending.getJSONArray("failedEmployeeIds").isEmpty();
-                }
-                if (previous.getAuthRefreshUserIds() != null) {
-                    JSON.parseArray(previous.getAuthRefreshUserIds(), Long.class).forEach(affected::add);
-                }
-                if (request.autoAuthorize() == null) mode = previous.getAssociationMode();
-                if (request.autoAuthorize() == null && previous.getAuthScope() != null) {
-                    var wrapper = new com.alibaba.fastjson.JSONObject();
-                    wrapper.put("resourceBizType", "TOOLKIT");
-                    wrapper.put("autoAuthorize", true);
-                    wrapper.put("authScope", JSON.parseObject(previous.getAuthScope()));
-                    jobScope = EnterpriseResourceSyncRequest.parse(wrapper).scope();
-                }
-                refreshRequired |= Boolean.TRUE.equals(previous.getPackageChanged());
-            }
+        String scope = request.scope() == null ? null : JSON.toJSONString(scopeJson(request.scope()));
+        if (unfinished && request.autoAuthorize() == null) {
+            mode = previous.getAssociationMode();
+            scope = previous.getAuthScope();
         }
-        if (!"NONE".equals(mode) || refreshRequired) {
-            ResourceSyncJob job = new ResourceSyncJob();
-            job.setSyncJobId(sequence.nextVal());
-            // Enterprise metadata remains bookkeeping only; legacy resources may not have it populated.
-            job.setComAcctId(Objects.requireNonNullElse(resource.getComAcctId(), 0L));
-            job.setResourceId(resourceId);
-            job.setSyncRevision(revision);
-            job.setOperatorUserId(CurrentUserHolder.getCurrentUserId());
-            job.setAuthScope(jobScope == null ? null : JSON.toJSONString(Map.of("userIds", jobScope.userIds(), "orgIds", jobScope.orgIds(), "postIds", jobScope.postIds())));
-            job.setAuthRefreshUserIds(JSON.toJSONString(affected));
-            job.setResultSummary(inheritedResult);
-            job.setAssociationMode(mode);
-            job.setPackageChanged(refreshRequired);
-            job.setStatus(ResourceSyncJob.PENDING);
-            job.setRetryCount(0);
-            job.setNextRetryTime(new Date());
-            job.setCreateTime(new Date());
-            job.setUpdateTime(new Date());
-            jobs.insert(job);
-            response.put("association", job.associationResult());
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override public void afterCommit() {
-                    response.put("association", dispatcher.dispatch(job.getSyncJobId()));
-                }
-            });
-        } else {
-            response.put("association", Map.of("status", "NOT_REQUESTED"));
-            if (!affected.isEmpty()) {
-                Set<Long> snapshot = Set.copyOf(affected);
-                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                    @Override public void afterCommit() { auth.syncUsersAuthToRedis(snapshot); }
-                });
-            }
+        ResourceSyncJob job = new ResourceSyncJob();
+        job.setSyncJobId(sequence.nextVal());
+        job.setComAcctId(Objects.requireNonNullElse(resource.getComAcctId(), 0L));
+        job.setResourceId(resourceId);
+        job.setSyncRevision(revision);
+        job.setOperatorUserId(CurrentUserHolder.getCurrentUserId());
+        job.setRequestId(requestId);
+        job.setRequestHash(requestHash);
+        job.setAuthorizationIntent(intent.toJSONString());
+        job.setAuthScope(scope);
+        job.setAuthRefreshUserIds(unfinished ? previous.getAuthRefreshUserIds() : "[]");
+        job.setAssociationMode(mode);
+        job.setPackageChanged(packageChanged || "SKILL".equals(resource.getResourceBizType())
+            || !intent.isEmpty() || unfinished && Boolean.TRUE.equals(previous.getPackageChanged()));
+        summary.put("phase", "QUEUED");
+        summary.put("message", "资源已接收，正在排队授权，可离开页面稍后查看进度");
+        summary.put("authorizationApplied", false);
+        summary.put("authorizationEffective", false);
+        job.setResultSummary(summary.toJSONString());
+        job.setStatus(ResourceSyncJob.PENDING);
+        job.setRetryCount(0);
+        job.setNextRetryTime(new Date());
+        job.setCreateTime(new Date());
+        job.setUpdateTime(new Date());
+        jobs.insert(job);
+        putAccepted(response, job);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override public void afterCommit() { dispatcher.dispatch(job.getSyncJobId()); }
+        });
+    }
+
+    public ResourceSyncJob repeated(Long resourceId, String requestId, String hash) {
+        if (resourceId == null || requestId == null) return null;
+        ResourceSyncJob job = jobs.byRequest(resourceId, requestId);
+        if (job != null && !hasSyncPrincipal() && !auth.hasResourceManagePermission(resources.findById(resourceId))) {
+            throw new IllegalArgumentException("无权查询该同步请求");
         }
+        if (job != null && !Objects.equals(hash, job.getRequestHash())) {
+            throw new IllegalArgumentException("requestId 已用于其他同步内容，请为新请求生成新的 requestId");
+        }
+        return job;
+    }
+
+    public void putAccepted(Map<String, Object> response, ResourceSyncJob job) {
+        response.put("resourceId", String.valueOf(job.getResourceId()));
+        response.put("syncRevision", String.valueOf(job.getSyncRevision()));
+        response.put("accepted", true);
+        response.put("jobId", String.valueOf(job.getSyncJobId()));
+        response.put("status", job.publicStatus());
+        response.put("query", job.associationResult().get("query"));
+        response.put("association", job.associationResult());
+        response.put("authorization", Map.of("status", job.publicStatus(), "effective",
+            job.getResultSummary() != null && JSON.parseObject(job.getResultSummary()).getBooleanValue("authorizationEffective")));
+    }
+
+    /** Runs in the worker's fenced transaction; grant rows and the cache checkpoint commit together. */
+    public Set<Long> applyAuthorization(SsResource resource, ResourceSyncJob job) {
+        var intent = job.getAuthorizationIntent() == null ? new com.alibaba.fastjson.JSONObject()
+            : JSON.parseObject(job.getAuthorizationIntent());
+        Set<Long> affected = new LinkedHashSet<>();
+        if (job.getAuthRefreshUserIds() != null) affected.addAll(JSON.parseArray(job.getAuthRefreshUserIds(), Long.class));
+        if (intent.containsKey("viewAuth")) {
+            replace(resource, List.of(GrantType.ALLOW_VIEW), intent.getBooleanValue("viewAuth")
+                ? scope(intent.getJSONObject("viewScope")) : null, GrantType.ALLOW_VIEW, affected);
+        }
+        if (intent.getBooleanValue("autoAuthorize")) {
+            Scope scope = scope(intent.getJSONObject("useScope"));
+            replace(resource, List.of(GrantType.AVAILABLE_USE, GrantType.FORCE_USE), scope, GrantType.FORCE_USE, affected);
+            List<Long> granted = new ArrayList<>(activeUsers(expand(scope)));
+            for (int start = 0; start < granted.size(); start += 500) {
+                grants.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<PrivilegeGrant>()
+                    .eq(PrivilegeGrant::getGrantObjId, resource.getResourceId())
+                    .eq(PrivilegeGrant::getGrantObjType, resource.getResourceBizType())
+                    .eq(PrivilegeGrant::getGrantType, GrantType.AVAILABLE_USE).eq(PrivilegeGrant::getStatusCd, "P")
+                    .eq(PrivilegeGrant::getGrantToObjType, "USER")
+                    .in(PrivilegeGrant::getGrantToObjId, granted.subList(start, Math.min(start + 500, granted.size())))
+                    .set(PrivilegeGrant::getStatusCd, "X").set(PrivilegeGrant::getUpdateDate, new Date())
+                    .set(PrivilegeGrant::getUpdateStaff, job.getOperatorUserId()));
+            }
+            affected.addAll(granted);
+        }
+        if (resource.getCreateBy() != null) affected.add(resource.getCreateBy());
+        return affected;
+    }
+
+    public static Map<String, Object> scopeJson(Scope scope) {
+        return scope == null ? null : Map.of("userIds", scope.userIds(), "orgIds", scope.orgIds(), "postIds", scope.postIds());
+    }
+
+    public static Scope scope(com.alibaba.fastjson.JSONObject json) {
+        if (json == null) return null;
+        return new Scope(ids(json, "userIds"), ids(json, "orgIds"), ids(json, "postIds"));
+    }
+
+    private static List<Long> ids(com.alibaba.fastjson.JSONObject json, String key) {
+        return json.getJSONArray(key) == null ? List.of() : json.getJSONArray(key).toJavaList(Long.class);
     }
 
     private void replace(SsResource resource, List<String> types, Scope scope, String newType, Set<Long> affected) {
@@ -213,30 +264,38 @@ public class EnterpriseResourceSyncService {
             .eq(PrivilegeGrant::getGrantObjType, resource.getResourceBizType())
             .in(PrivilegeGrant::getGrantType, types).eq(PrivilegeGrant::getStatusCd, "A"));
         Map<String, List<Long>> oldSubjects = new LinkedHashMap<>();
+        Map<String, PrivilegeGrant> desired = new LinkedHashMap<>();
+        if (scope != null) {
+            Map.of("USER", scope.userIds(), "ORG", scope.orgIds(), "POST", scope.postIds()).forEach((type, ids) -> ids.forEach(id -> {
+                PrivilegeGrant grant = new PrivilegeGrant();
+                grant.setGrantObjId(resource.getResourceId());
+                grant.setGrantObjType(resource.getResourceBizType());
+                grant.setGrantType(newType);
+                grant.setOperType("READ");
+                grant.setGrantToObjType(type);
+                grant.setGrantToObjId(id);
+                grant.setGrantToType("RED");
+                grant.setAllowUnsubscribe(Constants.NOT_ALLOW_UNSUBSCRIBE);
+                grant.setStatusCd("A");
+                desired.put(type + ":" + id, grant);
+            }));
+        }
+        List<PrivilegeGrant> remove = new ArrayList<>();
+        Date now = new Date();
         for (PrivilegeGrant grant : old) {
             oldSubjects.computeIfAbsent(grant.getGrantToObjType(), ignored -> new ArrayList<>()).add(grant.getGrantToObjId());
-            // Include future and expired rows and every duplicate; never compare by a lossy subject map.
-            grantService.remove(grant);
+            String key = grant.getGrantToObjType() + ":" + grant.getGrantToObjId();
+            if (desired.containsKey(key) && newType.equals(grant.getGrantType()) && "RED".equals(grant.getGrantToType())
+                && "READ".equals(grant.getOperType()) && Constants.NOT_ALLOW_UNSUBSCRIBE.equals(grant.getAllowUnsubscribe())
+                && (grant.getEffDate() == null || !grant.getEffDate().after(now)) && grant.getExpDate() == null) {
+                desired.remove(key);
+            } else remove.add(grant);
         }
+        grantService.updateAuthorizationBatch(remove, true);
+        grantService.saveBatch(new ArrayList<>(desired.values()));
         affected.addAll(expand(new Scope(oldSubjects.getOrDefault("USER", List.of()),
             oldSubjects.getOrDefault("ORG", List.of()), oldSubjects.getOrDefault("POST", List.of()))));
-        for (Long station : oldSubjects.getOrDefault("STATION", List.of())) {
-            affected.addAll(users.findUserIdsByStationId(station));
-        }
-        if (scope == null) return;
-        Map<String, List<Long>> subjects = Map.of("USER", scope.userIds(), "ORG", scope.orgIds(), "POST", scope.postIds());
-        subjects.forEach((type, ids) -> ids.forEach(id -> {
-            PrivilegeGrant grant = new PrivilegeGrant();
-            grant.setGrantObjId(resource.getResourceId());
-            grant.setGrantObjType(resource.getResourceBizType());
-            grant.setGrantType(newType);
-            grant.setOperType("READ");
-            grant.setGrantToObjType(type);
-            grant.setGrantToObjId(id);
-            grant.setGrantToType("RED");
-            grant.setAllowUnsubscribe(Constants.NOT_ALLOW_UNSUBSCRIBE);
-            grant.setStatusCd("A");
-            grantService.save(grant);
-        }));
+        for (Long station : oldSubjects.getOrDefault("STATION", List.of())) affected.addAll(users.findUserIdsByStationId(station));
+        affected.addAll(expand(scope));
     }
 }

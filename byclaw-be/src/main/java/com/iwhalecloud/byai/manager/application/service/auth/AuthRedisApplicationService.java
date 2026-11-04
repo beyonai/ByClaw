@@ -51,6 +51,13 @@ public class AuthRedisApplicationService {
         return USER_AUTH_KEY_PREFIX + userId;
     }
 
+    /** Resource synchronization updates only its own field; each operation addresses one Redis key. */
+    public void writeResourceAuth(Long userId, Long resourceId, String resourceType, boolean allowed) {
+        String key = getUserAuthKey(userId);
+        if (allowed) RedisUtil.hmPutAll(key, Map.of(String.valueOf(resourceId), resourceType));
+        else RedisUtil.hmDelete(key, String.valueOf(resourceId));
+    }
+
     /**
      * 写入用户资源权限到Redis Hash
      * 先清空该用户的权限，再写入新权限

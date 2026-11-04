@@ -1892,25 +1892,27 @@ public class ToolManController {
         return ResponseUtil.success(Map.of("controlled", controlled, "allowed", allowed));
     }
 
+    @Autowired private com.iwhalecloud.byai.manager.application.service.resource.ResourceSyncProgressService syncProgress;
+
     @PostMapping("/queryResourceSyncJob")
     public ResponseUtil<Map<String, Object>> queryResourceSyncJob(@RequestBody Map<String, String> request) {
-        try {
-            enterpriseResourceSyncService.requireSyncPrincipal();
-            Long id = Long.valueOf(request.get("jobId"));
-            var job = resourceSyncJobMapper.selectById(id);
-            if (job == null) {
-                return ResponseUtil.fail("同步任务不存在");
-            }
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("jobId", String.valueOf(id));
-            data.put("resourceId", String.valueOf(job.getResourceId()));
-            data.put("syncRevision", String.valueOf(job.getSyncRevision()));
-            data.put("status", job.publicStatus());
-            data.put("effective", job.associationResult().get("effective"));
-            data.put("retryCount", job.getRetryCount());
-            data.put("result", job.getResultSummary() == null ? Collections.emptyMap() : JSON.parseObject(job.getResultSummary()));
-            return ResponseUtil.success(data);
-        } catch (Exception exception) { return ResponseUtil.fail("无法查询资源同步任务"); }
+        try { return ResponseUtil.success(syncProgress.query(Long.valueOf(request.get("jobId")))); }
+        catch (Exception exception) { return ResponseUtil.fail("同步任务不存在或无权查看"); }
+    }
+
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+    public record SyncProgressBatchQuery(List<Long> resourceIds) { }
+
+    @PostMapping("/queryResourceSyncJobs")
+    public ResponseUtil<List<Map<String, Object>>> queryResourceSyncJobs(@RequestBody SyncProgressBatchQuery request) {
+        try { return ResponseUtil.success(syncProgress.queryBatch(request.resourceIds())); }
+        catch (Exception exception) { return ResponseUtil.fail("无法查询资源同步进度，请稍后刷新"); }
+    }
+
+    @PostMapping("/retryResourceSyncJob")
+    public ResponseUtil<Map<String, Object>> retryResourceSyncJob(@RequestBody Map<String, String> request) {
+        try { return ResponseUtil.success(syncProgress.retry(Long.valueOf(request.get("jobId")))); }
+        catch (IllegalArgumentException exception) { return ResponseUtil.fail(exception.getMessage()); }
     }
 
     private void validateControlledResourceContent(Long resourceId) {

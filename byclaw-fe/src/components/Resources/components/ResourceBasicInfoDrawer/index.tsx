@@ -1,3 +1,4 @@
+import ResourceSyncProgress from '@/components/ResourceSyncProgress';
 import { useEffect, useState } from 'react';
 import { Alert, Descriptions, Drawer, Spin } from 'antd';
 import { queryResourceDetail } from '@/pages/manager/service/resources';
@@ -28,6 +29,7 @@ const ResourceBasicInfoDrawer = ({ resourceId, onClose }: { resourceId: string; 
   }, [resourceId]);
   return (
     <Drawer open title={data?.resourceName || '资源基础信息'} width={420} onClose={onClose}>
+      <ResourceSyncProgress resourceId={resourceId} enabled={!loading && !error && !!data} />
       <Spin spinning={loading}>
         {error ? (
           <Alert type="error" message="无法读取资源基础信息" />

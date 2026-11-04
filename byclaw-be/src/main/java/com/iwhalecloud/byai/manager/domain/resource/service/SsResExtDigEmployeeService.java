@@ -160,6 +160,10 @@ public class SsResExtDigEmployeeService {
      *
      * @param resourceId 资源扩展标识
      */
+    public java.util.List<SsResExtDigEmployee> findByIds(java.util.Collection<Long> ids) {
+        return ids.isEmpty() ? java.util.List.of() : ssResExtDigEmployeeMapper.selectBatchIds(ids);
+    }
+
     public SsResExtDigEmployee findById(Long resourceId) {
         return ssResExtDigEmployeeMapper.selectById(resourceId);
     }

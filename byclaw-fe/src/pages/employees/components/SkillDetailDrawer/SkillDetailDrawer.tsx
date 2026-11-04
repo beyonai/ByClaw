@@ -1,4 +1,5 @@
 /* eslint-disable max-len,@typescript-eslint/no-non-null-assertion */
+import ResourceSyncProgress from '@/components/ResourceSyncProgress';
 import React, { useMemo, useCallback, useState, useEffect } from 'react';
 import classNames from 'classnames';
 import dayjs from 'dayjs';
@@ -755,7 +756,10 @@ export default function SkillDetailDrawer(props: SkillDetailDrawerProps) {
   const detailTitle = title || getTitleByBizType(skillDetail?.resourceBizType);
   const detailContent = (
     <Spin spinning={panel ? loading || isLoading : loading} wrapperClassName="full-height-spin">
-      <div className={classNames(styles.skillDetailDrawer, 'full-height')}>{renderDrawerContent()}</div>
+      <div className={classNames(styles.skillDetailDrawer, 'full-height')}>
+        <ResourceSyncProgress resourceId={resourceId} enabled={!!open} />
+        {renderDrawerContent()}
+      </div>
     </Spin>
   );
 

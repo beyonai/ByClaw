@@ -12,6 +12,21 @@ import org.springframework.mock.web.MockHttpSession;
 
 class ToolManControllerTest {
 
+    @Test
+    void batchProgressAcceptsBrowserLanguageMetadataWithoutParsingItAsUserIds() throws Exception {
+        var controller = new ToolManController();
+        var progress = org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.application.service.resource.ResourceSyncProgressService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "syncProgress", progress);
+        org.mockito.Mockito.when(progress.queryBatch(java.util.List.of(10L))).thenReturn(java.util.List.of(java.util.Map.of("jobId", "100")));
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller).build();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/tool/queryResourceSyncJobs")
+            .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+            .content("{\"resourceIds\":[\"10\"],\"language\":\"zh-CN\"}"))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(0))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data[0].jobId").value("100"));
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"COMPLETED,true,effective", "PENDING,false,processing",
         "RUNNING,false,processing", "PARTIAL,false,incomplete", "COMPLETED,false,incomplete"})
@@ -72,26 +87,17 @@ class ToolManControllerTest {
     }
 
     @Test
-    void resourceSyncJobUsesAuthenticatedJobIdentityWithoutEnterpriseMatching() {
+    void resourceSyncJobDelegatesVisibilityAndReturnsDurableProgress() {
         var controller = new ToolManController();
-        var sync = org.mockito.Mockito.mock(
-            com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncService.class);
-        var jobs = org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.mapper.resource.ResourceSyncJobMapper.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(controller, "enterpriseResourceSyncService", sync);
-        org.springframework.test.util.ReflectionTestUtils.setField(controller, "resourceSyncJobMapper", jobs);
-        var login = new LoginInfo(); login.setUserId(9L); login.setEnterpriseId(1L);
-        CurrentUserHolder.setLoginInfo(login);
-        var job = new com.iwhalecloud.byai.manager.entity.resource.ResourceSyncJob();
-        job.setSyncJobId(100L); job.setResourceId(10L); job.setSyncRevision(2L);
-        job.setComAcctId(2L); job.setStatus("COMPLETED"); job.setRetryCount(0);
-        org.mockito.Mockito.when(jobs.selectById(100L)).thenReturn(job);
+        var progress = org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.application.service.resource.ResourceSyncProgressService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "syncProgress", progress);
+        org.mockito.Mockito.when(progress.query(100L)).thenReturn(java.util.Map.of("jobId", "100", "status", "RUNNING", "effective", false));
         assertThat(controller.queryResourceSyncJob(java.util.Map.of("jobId", "100")).getCode()).isZero();
-        job.setStatus("PARTIAL_V2");
         assertThat(controller.queryResourceSyncJob(java.util.Map.of("jobId", "100")).getData())
-            .containsEntry("status", "PARTIAL").containsEntry("effective", false);
+            .containsEntry("status", "RUNNING").containsEntry("effective", false);
+        org.mockito.Mockito.when(progress.query(101L)).thenThrow(new IllegalArgumentException("unauthorized"));
         assertThat(controller.queryResourceSyncJob(java.util.Map.of("jobId", "101")).getCode()).isEqualTo(-1);
-        org.mockito.Mockito.doThrow(new IllegalArgumentException("unauthorized")).when(sync).requireSyncPrincipal();
-        assertThat(controller.queryResourceSyncJob(java.util.Map.of("jobId", "100")).getCode()).isEqualTo(-1);
+        assertThat(controller.queryResourceSyncJob(java.util.Map.of("jobId", "invalid")).getCode()).isEqualTo(-1);
     }
 
     @Test

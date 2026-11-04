@@ -420,7 +420,17 @@ public class ToolManService {
             throw new IllegalArgumentException(I18nUtil.get("tool.json.resource.biz.type.missing"));
         }
         var request = com.iwhalecloud.byai.manager.dto.resource.EnterpriseResourceSyncRequest.parse(root);
-        enterpriseResourceSyncService.validate(request);
+        String syncRequestId = root.getString("requestId");
+        if (syncRequestId != null && (!syncRequestId.matches("[A-Za-z0-9_.:-]{1,128}"))) {
+            throw new IllegalArgumentException("requestId 必须为 1-128 位字母、数字或 _ . : -");
+        }
+        String syncRequestHash;
+        try {
+            syncRequestHash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(JSON.toJSONString(canonicalSyncRequest(root), com.alibaba.fastjson.serializer.SerializerFeature.MapSortField)
+                    .getBytes(StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+        if (request.viewAuth() != null || request.autoAuthorize() != null) enterpriseResourceSyncService.requireSyncPrincipal();
         if ("SKILL".equals(resourceBizType)) enterpriseResourceSyncService.requireSyncPrincipal();
         Long effectiveCatalogId = resolveAddToolFromThirdCatalogId(root);
         // Omitted authorization flags retain legacy per-resource management checks; explicit false is still sync.
@@ -436,6 +446,16 @@ public class ToolManService {
             // Match the global import identity so enterprise metadata cannot split synchronization locks.
             ssResourceService.lockSkillImport("THIRD_SYNC:" + systemCode + ":" + resourceBizType + ":" + resourceCode);
             SsResource existing = ssResourceService.findByImportIdentity(systemCode, resourceBizType, resourceCode);
+            if (existing != null) {
+                var repeated = enterpriseResourceSyncService.repeated(existing.getResourceId(), syncRequestId, syncRequestHash);
+                if (repeated != null) {
+                    Map<String, Object> accepted = new LinkedHashMap<>();
+                    enterpriseResourceSyncService.putAccepted(accepted, repeated);
+                    accepted.put("updated", true);
+                    return accepted;
+                }
+            }
+            enterpriseResourceSyncService.validate(request);
             boolean knowledge = StringUtils.startsWith(resourceBizType, "KG_");
             boolean localKnowledge = knowledge && datasetApplicationService.isOwnershipManagedLocally(existing);
             // Knowledge import decides ownership from persisted provenance. Whale Agent may also change
@@ -463,10 +483,20 @@ public class ToolManService {
             // Locally managed personal knowledge carries no enterprise authorization semantics.
             if (!localKnowledge || OwnerType.ENTERPRISE.equals(existing.getOwnerType())) {
                 enterpriseResourceSyncService.completeImport(Long.valueOf(result.get("resourceId").toString()),
-                    request, packageChanged, result);
+                    request, packageChanged, result, syncRequestId, syncRequestHash);
             }
             return result;
         }));
+    }
+
+    private static Object canonicalSyncRequest(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> sorted = new java.util.TreeMap<>();
+            map.forEach((key, item) -> sorted.put(String.valueOf(key), canonicalSyncRequest(item)));
+            return sorted;
+        }
+        if (value instanceof java.util.Collection<?> values) return values.stream().map(ToolManService::canonicalSyncRequest).toList();
+        return value;
     }
 
     /**

@@ -676,6 +676,7 @@ public class AuthApplicationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void setResourceManagers(ResourceMemberSettingQo qo) {
+        if (syncGuard != null) syncGuard.beforeManualWrite(qo.getResourceId(), AuthorizationTaskExecution.active());
         // 1. 校验资源存在并拿到真实资源类型。
         SsResource ssResource = getRequiredResource(qo.getResourceId());
         if (isEnterpriseDigitalEmployee(ssResource)) {
@@ -702,6 +703,7 @@ public class AuthApplicationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void setResourceUsers(ResourceMemberSettingQo qo) {
+        if (syncGuard != null) syncGuard.beforeManualWrite(qo.getResourceId(), AuthorizationTaskExecution.active());
         // 1. 校验资源存在并拿到真实资源类型。
         SsResource ssResource = getRequiredResource(qo.getResourceId());
         if (isEnterpriseDigitalEmployee(ssResource)) {
@@ -1707,7 +1709,8 @@ public class AuthApplicationService {
             .filter(item -> GrantType.AVAILABLE_USE.equals(item.getGrantType())
                 || GrantType.FORCE_USE.equals(item.getGrantType()))
             .anyMatch(item -> Color.RED.equalsIgnoreCase(item.getGrantToType()));
-        return (hasManageRedGrant && !hasManageBlackGrant) || (hasUseRedGrant && !hasUseBlackGrant);
+        return (hasManageRedGrant && !hasManageBlackGrant) || (hasUseRedGrant && !hasUseBlackGrant
+            && (syncGuard == null || syncGuard.allows(ssResource, userId, false)));
     }
 
     private List<PrivilegeGrant> resourceUseGrants(SsResource resource, Long userId, List<String> types) {
@@ -1739,6 +1742,7 @@ public class AuthApplicationService {
             if (!Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
         }
         if (CurrentUserHolder.getCurrentUserId() == null) return false;
+        if (syncGuard != null && !syncGuard.allows(resource, CurrentUserHolder.getCurrentUserId(), true)) return false;
         List<PrivilegeGrant> grants = listAuthPrivilegeGrant(null, List.of(resource.getResourceBizType()),
             GrantToObjType.USER, CurrentUserHolder.getCurrentUserId(), List.of(GrantType.ALLOW_VIEW)).stream()
             .filter(grant -> Objects.equals(resource.getResourceId(), grant.getGrantObjId()))
@@ -2084,6 +2088,37 @@ public class AuthApplicationService {
      * @param userIds 用户标识集合
      */
     /** Durable sync jobs retry cache failures; do not use the best-effort asynchronous wrapper here. */
+    @Autowired private com.iwhalecloud.byai.manager.mapper.auth.AuthorizationSubjectMapper syncSubjects;
+    @Autowired private com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper syncGrants;
+    @Autowired private com.iwhalecloud.byai.manager.application.service.resource.ResourceSyncAuthorizationGuard syncGuard;
+
+    public Set<Long> resourceSyncPermittedUsers(SsResource resource, Map<Long, SsResource> employeeByUser) {
+        if (employeeByUser.isEmpty()) return Set.of();
+        List<SsResource> candidates = new ArrayList<>(employeeByUser.values());
+        candidates.add(resource);
+        Set<Long> permitted = new HashSet<>();
+        try (AuthorizationPermissionSnapshot snapshot = new AuthorizationPermissionSnapshot(candidates, employeeByUser.keySet(), syncSubjects, syncGrants)) {
+            // This is preflight only; every mutation is still fenced against the current revision.
+            com.iwhalecloud.byai.manager.application.service.resource.ResourceSyncAuthorizationGuard.knownApplied(resource.getResourceId(), () -> employeeByUser.forEach((userId, employee) -> {
+                if (EnterpriseResourceSyncContext.checkUsePermission(employee, () -> hasResourceUsePermission(employee, userId))
+                    && EnterpriseResourceSyncContext.checkUsePermission(resource, () -> hasResourceUsePermission(resource, userId))) permitted.add(userId);
+            }));
+        }
+        return permitted;
+    }
+
+    /** Caller holds the revision fence; membership and grant reads are batched for this resource. */
+    public void refreshResourceSyncAuth(SsResource resource, Collection<Long> userIds) {
+        try (AuthorizationPermissionSnapshot snapshot = new AuthorizationPermissionSnapshot(List.of(resource), userIds, syncSubjects, syncGrants)) {
+            com.iwhalecloud.byai.manager.application.service.resource.ResourceSyncAuthorizationGuard.knownApplied(resource.getResourceId(), () -> {
+                for (Long userId : userIds) {
+                    boolean allowed = EnterpriseResourceSyncContext.checkUsePermission(resource, () -> hasResourceUsePermission(resource, userId));
+                    authRedisApplicationService.writeResourceAuth(userId, resource.getResourceId(), resource.getResourceBizType(), allowed);
+                }
+            });
+        }
+    }
+
     public void refreshResourceSyncAuth(Collection<Long> userIds) {
         for (Long userId : userIds) authRedisApplicationService.writeUserAuth(userId, buildUserAuthResources(userId));
     }
@@ -3841,11 +3876,11 @@ public class AuthApplicationService {
             boolean synchronizedCapability = EnterpriseResourceSyncContext.isSynchronizedCapability(resource);
             boolean visible = !Objects.equals(resource.getResourceStatus(), ResourceStatus.DELETE.getNum())
                 && (synchronizedCapability
-                    ? permission.isHasUsePermission() || viewPrivilegeIds.contains(resource.getResourceId())
+                    ? permission.isHasUsePermission() || (viewPrivilegeIds.contains(resource.getResourceId()) && (syncGuard == null || syncGuard.allows(resource, CurrentUserHolder.getCurrentUserId(), true)))
                     : (permission.isCanViewDetail()
                     || !Boolean.TRUE.equals(resource.getViewAuthControlled()) && "enterprise".equals(resource.getOwnerType())
                     || Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())
-                        && (viewPrivilegeIds.contains(resource.getResourceId()) || isCurrentUserGlobalResourceManager())));
+                        && ((viewPrivilegeIds.contains(resource.getResourceId()) && (syncGuard == null || syncGuard.allows(resource, CurrentUserHolder.getCurrentUserId(), true))) || isCurrentUserGlobalResourceManager())));
             permission.setHasViewPermission(visible);
             permission.setCanViewBasicInfo(visible);
             populateManageApplyPermission(resource, permission, pendingManageIds);
@@ -4001,7 +4036,8 @@ public class AuthApplicationService {
         if (useBlacklistedIds != null && useBlacklistedIds.contains(resourceId)) {
             return false;
         }
-        return usePermittedIds != null && usePermittedIds.contains(resourceId);
+        return usePermittedIds != null && usePermittedIds.contains(resourceId)
+            && (syncGuard == null || syncGuard.allows(ssResource, currentUserId, false));
     }
 
     /** 仅批量列表使用：每种授权对象查询本页资源，管理及使用授权共用本次读取。 */

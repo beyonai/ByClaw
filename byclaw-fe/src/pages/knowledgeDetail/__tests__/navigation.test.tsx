@@ -1,3 +1,6 @@
+jest.mock('@/components/ResourceSyncProgress', () => ({ resourceId }: any) => (
+  <div data-testid="sync-progress">{resourceId}</div>
+));
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import KnowledgeDetail from '..';
 
@@ -17,7 +20,11 @@ jest.mock('@umijs/max', () => ({
 }));
 
 jest.mock('antd', () => ({
-  Button: ({ children, icon, ...props }: any) => <button {...props}>{children}</button>,
+  Button: ({ children, onClick, disabled }: any) => (
+    <button type="button" onClick={onClick} disabled={disabled}>
+      {children}
+    </button>
+  ),
   Input: () => null,
   Tooltip: ({ children }: any) => children,
   Spin: ({ children }: any) => children,

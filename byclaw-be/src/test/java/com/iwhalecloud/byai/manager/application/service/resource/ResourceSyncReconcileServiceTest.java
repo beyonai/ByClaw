@@ -10,6 +10,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailS
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.*;
 import com.iwhalecloud.byai.manager.mapper.resource.ResourceSyncScopeMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.ResourceSyncJobMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,6 +39,10 @@ class ResourceSyncReconcileServiceTest {
         LoginInfo login = new LoginInfo(); login.setUserId(9L); login.setEnterpriseId(1L);
         CurrentUserHolder.setLoginInfo(login);
         service = new ResourceSyncReconcileService();
+        var initialJobs = mock(ResourceSyncJobMapper.class);
+        when(initialJobs.fenceResource(any(), any())).thenReturn(1);
+        when(initialJobs.owned(any(), any())).thenReturn(1);
+        ReflectionTestUtils.setField(service, "jobs", initialJobs);
         relations = mock(SsResourceRelDetailService.class);
         assistants = mock(ResourceSyncScopeMapper.class);
         when(assistants.activeUsers(any())).thenAnswer(call -> call.getArgument(0));
@@ -48,6 +53,14 @@ class ResourceSyncReconcileServiceTest {
         var extensions = mock(SsResExtDigEmployeeService.class);
         SsResExtDigEmployee extension = new SsResExtDigEmployee(); extension.setAgentType("001");
         when(extensions.findById(20L)).thenReturn(extension);
+        extension.setResourceId(20L);
+        when(resources.findByIds(any())).thenAnswer(call -> ((java.util.Collection<Long>) call.getArgument(0)).stream().map(resources::findById).filter(Objects::nonNull).toList());
+        when(extensions.findByIds(any())).thenAnswer(call -> ((java.util.Collection<Long>) call.getArgument(0)).stream().map(extensions::findById).filter(Objects::nonNull).toList());
+        when(auth.resourceSyncPermittedUsers(any(), anyMap())).thenAnswer(call -> {
+            Map<Long, SsResource> candidates = call.getArgument(1);
+            return candidates.entrySet().stream().filter(entry -> auth.hasResourceUsePermission(entry.getValue(), entry.getKey())
+                && auth.hasResourceUsePermission(call.getArgument(0), entry.getKey())).map(Map.Entry::getKey).collect(java.util.stream.Collectors.toSet());
+        });
         resource = new SsResource(); resource.setResourceId(10L); resource.setResourceBizType("SKILL");
         resource.setResourceStatus(2); resource.setOwnerType("enterprise"); resource.setComAcctId(1L); resource.setThirdSyncRevision(2L);
         employee = new SsResource(); employee.setResourceId(20L); employee.setResourceBizType("DIG_EMPLOYEE");
@@ -69,7 +82,7 @@ class ResourceSyncReconcileServiceTest {
         var sequence = mock(SequenceService.class); when(sequence.nextVal()).thenReturn(99L);
         ReflectionTestUtils.setField(service, "sequence", sequence);
         job = new ResourceSyncJob(); job.setComAcctId(1L); job.setResourceId(10L); job.setSyncRevision(2L);
-        job.setOperatorUserId(9L); job.setAssociationMode("RECONCILE");
+        job.setOperatorUserId(9L); job.setAssociationMode("RECONCILE"); job.setRetryCount(0);
     }
 
     @AfterEach void cleanup() { CurrentUserHolder.setLoginInfo(null); }
@@ -251,6 +264,16 @@ class ResourceSyncReconcileServiceTest {
         verify(assistants, never()).personalAssistants(any());
     }
 
+    @Test void cleanupOnlyDoesNotReportUnrequestedAssistantConfigurationAsIncomplete() {
+        prepareFullReconciliation();
+        job.setAssociationMode("CLEANUP_ONLY");
+        service.reconcile(job);
+        assertThat(job.getStatus()).isEqualTo("COMPLETED");
+        assertThat(job.associationResult()).containsEntry("effective", true);
+        assertThat(job.getResultSummary()).doesNotContain("NO_PERSONAL_ASSISTANT");
+        verify(relations, never()).save(any());
+    }
+
     @Test void fullReconciliationSkipsMissingPersonalAssistants() {
         prepareFullReconciliation();
         service.reconcile(job);
@@ -315,6 +338,9 @@ class ResourceSyncReconcileServiceTest {
         var jobs = mock(com.iwhalecloud.byai.manager.mapper.resource.ResourceSyncJobMapper.class);
         when(jobs.update(isNull(), any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(1);
         ReflectionTestUtils.setField(service, "jobs", jobs);
+        when(jobs.fenceResource(any(), any())).thenReturn(1);
+        when(jobs.owned(any(), any())).thenReturn(1);
+        ReflectionTestUtils.setField(service, "executor", (java.util.concurrent.Executor) Runnable::run);
         ReflectionTestUtils.setField(service, "skills", mock(
             com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService.class));
         ReflectionTestUtils.setField(service, "runtime", mock(
@@ -335,6 +361,9 @@ class ResourceSyncReconcileServiceTest {
         when(jobs.update(isNull(), any(com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(1);
         ReflectionTestUtils.setField(service, "transactionManager", transactions);
         ReflectionTestUtils.setField(service, "jobs", jobs);
+        when(jobs.fenceResource(any(), any())).thenReturn(1);
+        when(jobs.owned(any(), any())).thenReturn(1);
+        ReflectionTestUtils.setField(service, "executor", (java.util.concurrent.Executor) Runnable::run);
         job.setSyncJobId(100L); job.setRetryCount(0);
         Boolean persisted = ReflectionTestUtils.invokeMethod(service, "persistTargets", job, Set.of(20L));
         assertThat(persisted).isTrue();

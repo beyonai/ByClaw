@@ -61,7 +61,7 @@ class ResourceSyncTransactionTest {
         var jobs = mock(ResourceSyncJobMapper.class);
         when(jobs.pending()).thenReturn(List.of(job));
         when(jobs.selectById(100L)).thenReturn(job);
-        when(jobs.claim(100L, 0)).thenAnswer(call -> jdbc.update("UPDATE sync_job SET status='RUNNING_V2' WHERE id=100"));
+        when(jobs.claim(100L, 0)).thenAnswer(call -> jdbc.update("UPDATE sync_job SET status='RUNNING_V3' WHERE id=100"));
         when(jobs.update(isNull(), any(Wrapper.class))).thenAnswer(call ->
             jdbc.update("UPDATE sync_job SET status=? WHERE id=100", job.getStatus()));
 
@@ -92,7 +92,7 @@ class ResourceSyncTransactionTest {
             // A separate transaction must see the committed claim and skills and can update the same row.
             independent.executeWithoutResult(status -> {
                 assertThat(jdbc.queryForObject("SELECT status FROM sync_job WHERE id=100", String.class))
-                    .isEqualTo("RUNNING_V2");
+                    .isEqualTo("RUNNING_V3");
                 assertThat(jdbc.queryForObject("SELECT skills FROM employee WHERE id=20", String.class))
                     .isEqualTo("new");
                 jdbc.update("UPDATE employee SET snapshot=skills WHERE id=20");
@@ -105,6 +105,9 @@ class ResourceSyncTransactionTest {
         when(users.findById(9L)).thenReturn(user);
         var service = new ResourceSyncReconcileService();
         ReflectionTestUtils.setField(service, "jobs", jobs);
+        when(jobs.fenceResource(any(), any())).thenReturn(1);
+        when(jobs.owned(any(), any())).thenReturn(1);
+        ReflectionTestUtils.setField(service, "executor", (java.util.concurrent.Executor) Runnable::run);
         ReflectionTestUtils.setField(service, "resources", resources);
         ReflectionTestUtils.setField(service, "sources", sources);
         ReflectionTestUtils.setField(service, "relations", relations);
@@ -128,7 +131,7 @@ class ResourceSyncTransactionTest {
                             new org.springframework.transaction.support.TransactionSynchronization() {
                                 @Override public void afterCommit() {
                                     assertThat(dispatcher.dispatch(100L)).containsEntry("status",
-                                        "success".equals(mode) ? "COMPLETED" : "PARTIAL");
+                                        "PENDING");
                                 }
                             });
                     });
@@ -140,7 +143,7 @@ class ResourceSyncTransactionTest {
             assertThat(jdbc.queryForObject("SELECT snapshot FROM employee WHERE id=20", String.class))
                 .isEqualTo("success".equals(mode) ? "new" : "old");
             assertThat(jdbc.queryForObject("SELECT status FROM sync_job WHERE id=100", String.class))
-                .isEqualTo("success".equals(mode) ? "COMPLETED" : "PARTIAL_V2");
+                .isEqualTo("success".equals(mode) ? "COMPLETED" : "PARTIAL_V3");
             if (!"success".equals(mode)) {
                 assertThat(com.alibaba.fastjson.JSON.parseObject(job.getResultSummary()).getJSONArray("failedEmployeeIds"))
                     .containsExactly("20");

@@ -28,6 +28,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -51,6 +53,18 @@ class ToolManResourceSyncCompatibilityTest {
     private SsResource resource;
     private Boolean manageDuringImport;
     private DatasetApplicationService datasets;
+
+    @Test
+    void retryFingerprintIgnoresObjectKeyOrderButPreservesArrayOrder() {
+        Object first = ReflectionTestUtils.invokeMethod(ToolManService.class, "canonicalSyncRequest",
+            JSONObject.parseObject("{\"z\":[{\"b\":2,\"a\":1}],\"a\":[7,8]}"));
+        Object reordered = ReflectionTestUtils.invokeMethod(ToolManService.class, "canonicalSyncRequest",
+            JSONObject.parseObject("{\"a\":[7,8],\"z\":[{\"a\":1,\"b\":2}]}"));
+        Object different = ReflectionTestUtils.invokeMethod(ToolManService.class, "canonicalSyncRequest",
+            JSONObject.parseObject("{\"a\":[8,7],\"z\":[{\"a\":1,\"b\":2}]}"));
+        assertThat(JSONObject.toJSONString(first)).isEqualTo(JSONObject.toJSONString(reordered))
+            .isNotEqualTo(JSONObject.toJSONString(different));
+    }
 
     @BeforeEach
     void setUp() {
@@ -80,7 +94,8 @@ class ToolManResourceSyncCompatibilityTest {
 
         sync = spy(new EnterpriseResourceSyncService());
         ReflectionTestUtils.setField(sync, "auth", auth);
-        doNothing().when(sync).completeImport(anyLong(), any(), anyBoolean(), anyMap());
+        ReflectionTestUtils.setField(sync, "scopeMapper", mock(com.iwhalecloud.byai.manager.mapper.resource.ResourceSyncScopeMapper.class));
+        doNothing().when(sync).completeImport(anyLong(), any(), anyBoolean(), anyMap(), any(), any());
         resources = mock(SsResourceService.class);
         when(resources.findByImportIdentity(any(), any(), any())).thenReturn(resource);
         service = spy(new ToolManService());
@@ -137,7 +152,7 @@ class ToolManResourceSyncCompatibilityTest {
         }
 
         verify(auth).hasResourceManagePermission(resource);
-        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap());
+        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap(), any(), any());
     }
 
     @ParameterizedTest
@@ -185,7 +200,7 @@ class ToolManResourceSyncCompatibilityTest {
             .hasMessageContaining("资源管理员");
 
         verify(resources, never()).lockSkillImport(any());
-        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap());
+        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap(), any(), any());
     }
 
     @Test
@@ -206,7 +221,7 @@ class ToolManResourceSyncCompatibilityTest {
         resource.setCreateBy(9L);
         for (String fields : java.util.List.of("{}", "{\"autoAuthorize\":false}")) {
             Map<String, Object> result = service.addToolFromThird(request(type, fields));
-            verify(sync).completeImport(eq(10L), any(), eq(true), same(result));
+            verify(sync).completeImport(eq(10L), any(), eq(true), same(result), isNull(), anyString());
         }
     }
 
@@ -222,7 +237,7 @@ class ToolManResourceSyncCompatibilityTest {
 
         verify(datasets).importDatasetJson(eq("enterprise"), eq(0L), any());
         verify(sync, never()).validateExisting(any());
-        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap());
+        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap(), any(), any());
         assertThat(manageDuringImport).isTrue();
     }
 
@@ -235,7 +250,7 @@ class ToolManResourceSyncCompatibilityTest {
         service.addToolFromThird(request("KG_DOC", "{\"ownerType\":\"enterprise\",\"autoAuthorize\":true,\"authScope\":{}}"));
 
         assertThat(manageDuringImport).isFalse();
-        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap());
+        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap(), any(), any());
     }
 
     @Test
@@ -246,7 +261,7 @@ class ToolManResourceSyncCompatibilityTest {
 
         service.addToolFromThird(request("KG_DOC", "{\"ownerType\":\"enterprise\"}"));
 
-        verify(sync).completeImport(eq(10L), any(), eq(true), anyMap());
+        verify(sync).completeImport(eq(10L), any(), eq(true), anyMap(), isNull(), anyString());
     }
 
     @Test
@@ -262,7 +277,7 @@ class ToolManResourceSyncCompatibilityTest {
 
         assertThat(manageDuringImport).isTrue();
         verify(datasets).importDatasetJson(eq("enterprise"), eq(0L), any());
-        verify(sync).completeImport(eq(10L), any(), eq(true), anyMap());
+        verify(sync).completeImport(eq(10L), any(), eq(true), anyMap(), isNull(), anyString());
     }
 
     @Test
@@ -275,7 +290,7 @@ class ToolManResourceSyncCompatibilityTest {
                 .isInstanceOf(IllegalArgumentException.class);
         }
         verify(datasets, never()).importDatasetJson(any(), any(), any());
-        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap());
+        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap(), any(), any());
     }
 
     private String request(String type, String fields) {

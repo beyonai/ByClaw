@@ -40,6 +40,12 @@ public interface ResourceSyncScopeMapper {
         """)
     List<UserAssistantRow> personalAssistantsBatch(@Param("userIds") List<Long> userIds);
 
+    @Select("<script>SELECT org_id FROM byai.po_organization WHERE org_id IN <foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
+    List<Long> organizations(@Param("ids") List<Long> ids);
+
+    @Select("<script>SELECT position_id FROM byai.po_position WHERE is_digital_position=0 AND position_id IN <foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
+    List<Long> ordinaryPosts(@Param("ids") List<Long> ids);
+
     record UserAssistantRow(Long userId, Long employeeId) { }
 
     /** Recheck the code mapping after the caller has locked the candidate employee resource. */

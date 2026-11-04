@@ -1,3 +1,9 @@
+jest.mock(
+  '@/components/ResourceSyncProgress',
+  () =>
+    ({ resourceId, enabled }: any) =>
+      enabled ? <div data-testid="sync-progress">{resourceId}</div> : null
+);
 import { render, screen, waitFor } from '@testing-library/react';
 import { queryResourceDetail } from '@/pages/manager/service/resources';
 import ResourceBasicInfoDrawer from './index';
@@ -16,6 +22,7 @@ describe('resource metadata viewing', () => {
     render(<ResourceBasicInfoDrawer resourceId="5001" onClose={jest.fn()} />);
     await waitFor(() => expect(queryResourceDetail).toHaveBeenCalledWith({ resourceId: '5001' }));
     expect(await screen.findByText('整理企业报表')).toBeInTheDocument();
+    expect(await screen.findByTestId('sync-progress')).toHaveTextContent('5001');
     expect(screen.queryByText('下载')).not.toBeInTheDocument();
     expect(screen.queryByText('关联')).not.toBeInTheDocument();
   });

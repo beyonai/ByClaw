@@ -1,3 +1,4 @@
+import useSyncProgress from '@/components/ResourceSyncProgress/useSyncProgress';
 import type { ResourceActionFeedback } from '@/utils/resourceActionFeedback';
 import { RESOURCE_FAVORITE_CHANGED_EVENT } from '@/service/resourceFavorites';
 import React, { useCallback, useState, useEffect, useMemo, useRef } from 'react';
@@ -151,6 +152,32 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const [list, setList] = useState<IResourceItem[]>([]);
   const listRef = useRef(list);
   listRef.current = list;
+  const sync = useSyncProgress(
+    list.map((item) => item.resourceId),
+    (completedIds) => {
+      const generation = listGeneration.current;
+      listRef.current
+        .filter((item) => completedIds.includes(String(item.resourceId)))
+        .forEach(async (item) => {
+          if (!item.resourceId) return;
+          try {
+            const response = await queryResourceDetail({ resourceId: item.resourceId });
+            const detail = response?.data || response;
+            if (generation !== listGeneration.current || `${detail?.resourceId}` !== `${item.resourceId}`) return;
+            setList((rows) =>
+              rows.map((row) =>
+                `${row.resourceId}` === `${item.resourceId}`
+                  ? { ...row, ...detail.operationPermissions, operationPermissionsLoaded: true }
+                  : row
+              )
+            );
+          } catch {
+
+            /* 资源权限稍后刷新；同步结果仍可查看。 */
+          }
+        });
+    }
+  );
   const favoriteRevision = useRef(0);
   const applyingResourceIds = useRef(new Set<string>());
   const [installedResourceIds, setInstalledResourceIds] = useState<ReadonlySet<string>>(new Set());
@@ -611,7 +638,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const renderResourceCard = (item: IResourceItem) => (
     <ResourceCard
       key={item.resourceId}
-      resource={item}
+      resource={{ ...item, syncProgress: sync.tasks[String(item.resourceId)], refreshSyncProgress: sync.refresh }}
       resourceType={resourceType}
       variant={isSkillPosterMode ? 'skillPoster' : 'default'}
       enableFavorites={favoriteMode}
@@ -651,6 +678,14 @@ const ResourceList: React.FC<ResourceListProps> = ({
 
   return (
     <div id={getScrollableTarget} className={styles.sectionsContainer}>
+      {sync.error && (
+        <div role="status">
+          {sync.error}
+          <button type="button" onClick={sync.refresh}>
+            刷新进度
+          </button>
+        </div>
+      )}
       <Spin
         wrapperClassName={styles.spinningWrapper}
         tip={intl.formatMessage({ id: 'common.loading' })}

@@ -18,13 +18,13 @@ class ResourceSyncJobMapperTest {
         var jdbc = new JdbcTemplate(source);
         jdbc.execute("CREATE SCHEMA byai");
         jdbc.execute("CREATE TABLE byai.byai_resource_sync_job (sync_job_id BIGINT PRIMARY KEY, status VARCHAR(32),"
-            + " retry_count INT, next_retry_time TIMESTAMP, create_time TIMESTAMP, update_time TIMESTAMP)");
+            + " retry_count INT, retry_limit INT DEFAULT 8, next_retry_time TIMESTAMP, create_time TIMESTAMP, update_time TIMESTAMP)");
         for (int id = 1; id <= 6; id++) {
             String state = switch (id) {
                 case 1 -> "PENDING_V2"; case 2 -> "PARTIAL_V2"; case 3 -> "FAILED_V2";
                 case 4, 5 -> "RUNNING_V2"; default -> "PENDING";
             };
-            jdbc.update("INSERT INTO byai.byai_resource_sync_job VALUES (?, ?, 0, CURRENT_TIMESTAMP,"
+            jdbc.update("INSERT INTO byai.byai_resource_sync_job VALUES (?, ?, 0, 8, CURRENT_TIMESTAMP,"
                 + " CURRENT_TIMESTAMP, CURRENT_TIMESTAMP - INTERVAL '11' MINUTE)", id, state);
         }
         jdbc.update("UPDATE byai.byai_resource_sync_job SET update_time=CURRENT_TIMESTAMP WHERE sync_job_id=5");

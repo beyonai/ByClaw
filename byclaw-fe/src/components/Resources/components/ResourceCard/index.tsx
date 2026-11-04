@@ -1,3 +1,5 @@
+import { SyncProgressBadge } from '@/components/ResourceSyncProgress';
+import type { SyncProgress } from '@/components/ResourceSyncProgress/service';
 import { openEmployeePublication, publicationEntryLabel } from '@/service/employeePublication';
 import { publicationErrorMessage } from '@/utils/publicationError';
 import { showSkillPublication, skillPublicationEntryLabel } from '../../skillPublication';
@@ -42,6 +44,8 @@ export type ResourceCardActionScene = 'personal' | 'enterprise';
 const isTruthyFlag = (value: unknown) => value === true || value === 1 || value === '1' || value === 'true';
 
 export interface IResourceCardItem {
+  syncProgress?: SyncProgress;
+  refreshSyncProgress?: () => void;
   id?: string | number;
   agentId?: string | number;
   resourceId?: string;
@@ -1580,6 +1584,7 @@ const RenderContent = (props: ResourceCardProps) => {
           effectiveCardClick?.(resource);
         }}
       >
+        <SyncProgressBadge task={resource.syncProgress} refresh={resource.refreshSyncProgress || (() => {})} />
         {/* 标签固定到卡片右上角，避免占用标题行并挤压技能名称。 */}
         {effectiveTopRightTag ? (
           <span
@@ -1729,6 +1734,7 @@ const RenderContent = (props: ResourceCardProps) => {
               >
                 {displayTitle}
               </Paragraph>
+              <SyncProgressBadge task={resource.syncProgress} refresh={resource.refreshSyncProgress || (() => {})} />
               {effectiveTopRightTag ? (
                 <span
                   className={classnames(styles.tag, {

@@ -44,6 +44,7 @@ public class AuthorizationTaskService {
     @Autowired private UserService users;
     @Autowired private PlatformTransactionManager transactions;
     @Autowired private com.iwhalecloud.byai.manager.domain.enterprise.service.TenantUserMembershipService memberships;
+    @Autowired private com.iwhalecloud.byai.manager.application.service.resource.ResourceSyncAuthorizationGuard syncGuard;
     private final AtomicBoolean running = new AtomicBoolean();
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> daemon(r, "authorization-worker"));
     private final ScheduledExecutorService heartbeat = Executors.newSingleThreadScheduledExecutor(r -> daemon(r, "authorization-heartbeat"));
@@ -85,7 +86,10 @@ public class AuthorizationTaskService {
         task.setActiveResource(task.getEnterpriseId() + ":" + task.getResourceId());
         task.setMessage("已进入后台队列，可关闭窗口，稍后查看进度");
         try {
-            tasks.insert(task);
+            new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                if (syncGuard != null) syncGuard.beforeManualWrite(task.getResourceId(), false);
+                tasks.insert(task);
+            });
         } catch (DuplicateKeyException duplicate) {
             previous = byRequest(request.getRequestId());
             if (previous != null) return sameRequest(previous, hash);
