@@ -81,10 +81,10 @@ export class SqlHistoryRepository implements HistoryRepository {
       )[0] ?? null
     );
   }
-  /** 凭据查询独立于公开成员投影，同时限制当前租户和有效真人成员。 */
+  /** 失效成员会被移除，因此以当前租户原群中是否存在该真人成员行判断成员身份。 */
   async groupMemberId(sessionId: string, userId: string): Promise<string | null> {
     const [row] = await this.db.query(
-      "SELECT byai_session_member_id FROM byai.byai_session_member WHERE session_id=$1 AND mem_obj_type='USER' AND mem_obj_id=$2 AND com_acct_id=$3 AND state='00A'",
+      "SELECT byai_session_member_id FROM byai.byai_session_member WHERE session_id=$1 AND mem_obj_type='USER' AND mem_obj_id=$2 AND com_acct_id=$3",
       [sessionId, userId, this.tenantId],
     );
     return row?.byai_session_member_id == null ? null : String(row.byai_session_member_id);
@@ -92,7 +92,7 @@ export class SqlHistoryRepository implements HistoryRepository {
   /** Redis 未提供凭据时读取同一有效成员的数据库密钥。 */
   async groupMemberApiKey(sessionId: string, userId: string): Promise<string | null> {
     const [row] = await this.db.query(
-      "SELECT api_key FROM byai.byai_session_member WHERE session_id=$1 AND mem_obj_type='USER' AND mem_obj_id=$2 AND com_acct_id=$3 AND state='00A'",
+      "SELECT api_key FROM byai.byai_session_member WHERE session_id=$1 AND mem_obj_type='USER' AND mem_obj_id=$2 AND com_acct_id=$3",
       [sessionId, userId, this.tenantId],
     );
     return typeof row?.api_key === "string" && row.api_key.trim() !== "" ? row.api_key : null;
