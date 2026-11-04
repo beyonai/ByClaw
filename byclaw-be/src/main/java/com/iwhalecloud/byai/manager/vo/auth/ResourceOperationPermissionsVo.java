@@ -15,6 +15,12 @@ import lombok.Setter;
 @Getter
 @Setter
 public class ResourceOperationPermissionsVo {
+    private String publishScopeMode;
+    private String publishScopeController;
+    private Long publishScopeRevision;
+    private java.util.List<com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess.OrganizationLabel> publishedScope;
+    private boolean canManagePublishScope;
+
 
     /**
      * 资源 ID。

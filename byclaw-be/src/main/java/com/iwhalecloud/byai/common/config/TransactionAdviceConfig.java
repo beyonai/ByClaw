@@ -135,6 +135,18 @@ public class TransactionAdviceConfig {
         NameMatchTransactionAttributeSource source = new NameMatchTransactionAttributeSource() {
             @Override
             public TransactionAttribute getTransactionAttribute(Method method, Class<?> targetClass) {
+                // Resource publication import results and external knowledge creation own independent short transactions.
+                // Catching a publication failure must not mark an already-created resource rollback-only.
+                if (targetClass != null) {
+                    String owner = ClassUtils.getUserClass(targetClass).getName();
+                    if (java.util.Set.of(
+                        "com.iwhalecloud.byai.state.application.service.dataset.KnowledgeProvisionService",
+                        "com.iwhalecloud.byai.state.application.service.dataset.KnowledgeProviderService",
+                        "com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationImportSupport").contains(owner)
+                        || (owner.equals("com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService") && method.getName().equals("createDataset"))
+                        || (owner.equals("com.iwhalecloud.byai.state.domain.resource.service.ResourceCurlService")
+                            && java.util.Set.of("runOpenApiOperationOnce", "runSimpleJsonOperationOnce").contains(method.getName()))) return notSurpportedTx;
+                }
                 // Tenant coordinators explicitly commit reservation/intent before remote work and recover duplicate receipts after rollback.
                 if (targetClass != null) {
                     String owner = ClassUtils.getUserClass(targetClass).getName();

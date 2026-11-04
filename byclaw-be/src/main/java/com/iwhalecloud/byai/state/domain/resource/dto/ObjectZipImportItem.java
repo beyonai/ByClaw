@@ -34,6 +34,9 @@ public class ObjectZipImportItem {
     /** 导入成功但尚未上架，等待官方技能审核。 */
     private boolean reviewRequired;
 
+    /** Import succeeded, but publishing must be retried from resource management. */
+    private String publicationError;
+
     private String message;
 
     private String diffSummary;

@@ -115,6 +115,9 @@ public class ToolManService {
     private com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncService enterpriseResourceSyncService;
 
     @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationService resourcePublicationService;
+
+    @Autowired
     private SsResExtToolService ssResExtToolService;
 
     @Autowired
@@ -256,7 +259,11 @@ public class ToolManService {
     /**
      * 阶段二：用户补全描述后保存入库
      */
+    @Transactional(rollbackFor = Exception.class)
     public void saveTool(ToolSaveRequest request) {
+        String ownerType = StringUtils.defaultIfBlank(request.getOwnerType(), "personal");
+        if (!java.util.Set.of("personal", "enterprise").contains(ownerType)) throw new IllegalArgumentException("无效资源归属");
+        if (request.getPublishScope() != null && !"enterprise".equals(ownerType)) throw new IllegalArgumentException("个人资源不设置组织范围");
         // 1. 用带描述的参数重新生成 OpenAPI JSON
         String openApiJson = CurlParser.toOpenApiJsonWithDesc(request.getResourceName(), request.getResourceDesc(),
             request.getMethod(), request.getUrl(), request.getBodyParams(), request.getQueryParams(),
@@ -270,6 +277,9 @@ public class ToolManService {
         // 3. 写入 ss_resource
         SsResource ssResource = new SsResource();
         ssResource.setResourceId(resourceId);
+        ssResource.setOwnerType(ownerType);
+        ssResource.setPublishScopeMode("enterprise".equals(ownerType) ? "NONE" : "LEGACY");
+        ssResource.setPublishScopeRevision(0L); ssResource.setPublishScopeController("BYAI");
         ssResource.setResourceName(request.getResourceName());
         ssResource.setResourceDesc(request.getResourceDesc());
         ssResource.setResourceBizType("TOOL");
@@ -300,6 +310,7 @@ public class ToolManService {
         authApplicationService.ensureCreatorDefaultPrivileges(ssResource);
         resourceArtifactStorageService.publishResourceJson(wrappedJson, "TOOL", resourceId);
         ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, "TOOL", "curl-tool-json");
+        if (request.getPublishScope() != null) resourcePublicationService.submitLocal(resourceId, request.getPublishScope());
     }
 
     /**
@@ -466,6 +477,8 @@ public class ToolManService {
             if (!localKnowledge || OwnerType.ENTERPRISE.equals(existing.getOwnerType())) {
                 enterpriseResourceSyncService.completeImport(Long.valueOf(result.get("resourceId").toString()),
                     request, packageChanged, result);
+                result.put("publication", resourcePublicationService.synchronize(
+                    Long.valueOf(result.get("resourceId").toString()), request.publishScope(), existing == null));
             }
             return result;
         }));

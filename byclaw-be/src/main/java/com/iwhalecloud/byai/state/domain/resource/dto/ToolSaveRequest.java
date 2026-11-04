@@ -9,6 +9,9 @@ import java.util.List;
  */
 @Data
 public class ToolSaveRequest {
+    private String ownerType;
+    private com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope publishScope;
+
 
     /**
      * 工具名称

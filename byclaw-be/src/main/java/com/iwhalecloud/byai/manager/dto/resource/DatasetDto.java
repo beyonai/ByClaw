@@ -18,4 +18,8 @@ public class DatasetDto extends SsResource {
      */
     private String type;
 
+    private ResourcePublishScope publishScope;
+    private String providerId;
+    private String idempotencyKey;
+
 }

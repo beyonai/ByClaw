@@ -547,6 +547,11 @@ public class SsResourceService {
         if (ssResource == null) {
             return;
         }
+        if (ssResource.getPublishScopeMode() == null) {
+            ssResource.setPublishScopeMode(com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess.supported(ssResource) ? "NONE" : "LEGACY");
+            ssResource.setPublishScopeRevision(0L);
+            ssResource.setPublishScopeController("BYAI");
+        }
         if (ssResource.getResourceId() == null) {
             ssResource.setResourceId(sequenceService.nextVal());
         }

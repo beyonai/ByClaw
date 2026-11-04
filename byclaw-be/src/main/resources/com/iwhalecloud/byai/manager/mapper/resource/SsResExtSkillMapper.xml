@@ -100,7 +100,7 @@
     </select>
 
     <select id="findPublicationCopies" resultMap="ssResExtSkillDtoResultMap">
-        SELECT a.resource_id, a.resource_name, a.resource_status, b.target_content
+        SELECT a.resource_id, a.resource_name, a.resource_status, a.publish_scope_mode, b.target_content
         FROM ss_resource a
         INNER JOIN ss_res_ext_skill b ON a.resource_id = b.resource_id
         WHERE a.resource_biz_type = 'SKILL'

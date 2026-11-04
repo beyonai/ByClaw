@@ -1,6 +1,11 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { publicationErrorMessage } from '@/utils/publicationError';
+import { nanoid } from 'nanoid';
+import { queryKnowledgeCapability, type KnowledgeCapability } from '@/service/knowledgeCenter';
+import ScopeSelector from '@/components/ResourcePublication/ScopeSelector';
+import { validPublishScope } from '@/service/resourcePublication';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 
-import { Form, Input, message, Modal, TreeSelect } from 'antd';
+import { Form, Input, message, Modal, Select, TreeSelect } from 'antd';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
 
@@ -32,6 +37,14 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 }) => {
   const intl = useIntl();
   const [form] = Form.useForm();
+  const creationKey = useRef(nanoid());
+  const [capability, setCapability] = useState<KnowledgeCapability>();
+  useEffect(() => {
+    if (mode === 'create')
+      queryKnowledgeCapability()
+        .then(setCapability)
+        .catch(() => setCapability(undefined));
+  }, [mode]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -101,16 +114,20 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             resourceId: info?.resourceId,
           });
         } else {
-          await createAndShelf({
+          const created = await createAndShelf({
             ...commonPayload,
             ownerType,
+            providerId: values.providerId,
+            idempotencyKey: creationKey.current,
+            publishScope: ownerType === 'enterprise' ? values.publishScope : undefined,
           });
+          if (created?.publicationError) message.warning(intl.formatMessage({ id: 'rp.publicationFailed' }));
         }
         onOk(resourceName);
         message.success(intl.formatMessage({ id: 'common.saveSuccess' }));
       } catch (error) {
         console.error(error);
-        message.error(error as string);
+        message.error(publicationErrorMessage(error, intl.formatMessage({ id: 'rp.failed' })));
       } finally {
         setIsLoading(false);
       }
@@ -150,10 +167,18 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
         initialValues={{
           resourceName: info?.resourceName,
           resourceDesc: info?.resourceDesc,
+          publishScope: { mode: 'COMPANY' },
           type: info?.type || (createType === 'import' ? 'external' : 'dataset'),
           catalogId: info?.catalogId ?? catalogId,
         }}
       >
+        {mode === 'create' && capability?.knowledgeMode === 'THIRD_PARTY' && (
+          <Form.Item name="providerId" label={intl.formatMessage({ id: 'rp.provider' })} rules={[{ required: true }]}>
+            <Select
+              options={capability.creationProviders?.map((p) => ({ value: p.providerId, label: p.providerName }))}
+            />
+          </Form.Item>
+        )}
         <div className="ub">
           <div className={styles.pagePhotoWrap}>
             <AntdIcon type="icon-chuangjianfangshi-wendangku" className={styles.knowledgeLogoIcon} />
@@ -191,6 +216,22 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             </Form.Item>
           </div>
         </div>
+        {mode === 'create' && ownerType === 'enterprise' && (
+          <Form.Item
+            name="publishScope"
+            label={intl.formatMessage({ id: 'rp.scope' })}
+            rules={[
+              {
+                validator: (_, value) =>
+                  validPublishScope(value)
+                    ? Promise.resolve()
+                    : Promise.reject(new Error(intl.formatMessage({ id: 'rp.organizations' }))),
+              },
+            ]}
+          >
+            <ScopeSelector />
+          </Form.Item>
+        )}
         <Form.Item
           name="resourceDesc"
           label={intl.formatMessage({ id: 'addModal.intro' })}

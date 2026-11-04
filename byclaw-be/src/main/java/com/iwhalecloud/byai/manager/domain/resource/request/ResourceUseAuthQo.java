@@ -12,6 +12,12 @@ import java.util.List;
 @ApiModel(description = "我能使用的资源列表查询请求")
 public class ResourceUseAuthQo extends AuthQo implements Serializable {
 
+    private String audienceScopeMode;
+    private List<Long> audienceOrgIds;
+    private Boolean audienceIncludeDescendants;
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess.QueryContext publicationQuery;
+
     /** 仅商业版官方推荐/我的收藏列表请求收藏字段与排序。 */
     private Boolean includeFavorites;
 

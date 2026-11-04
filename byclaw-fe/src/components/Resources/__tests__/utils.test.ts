@@ -9,7 +9,7 @@ import {
   normalizeResourceBizTypeList,
 } from '../utils';
 
-const ALL_RESOURCE_BIZ_TYPE_VALUES = ['MCP', 'TOOLKIT', 'AGENT'];
+const ALL_RESOURCE_BIZ_TYPE_VALUES = ['TOOL', 'MCP', 'TOOLKIT', 'AGENT'];
 const ALL_KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES = ['KG_DOC', 'KG_TERM', 'KG_QA'];
 
 describe('components/Resources utils', () => {
@@ -60,14 +60,14 @@ describe('components/Resources utils', () => {
   it('treats empty and legacy full selections as all resource biz types', () => {
     expect(isAllResourceBizTypeSelected()).toBe(true);
     expect(isAllResourceBizTypeSelected([])).toBe(true);
-    expect(isAllResourceBizTypeSelected(['MCP', 'TOOLKIT', 'AGENT'])).toBe(true);
+    expect(isAllResourceBizTypeSelected(['TOOL', 'MCP', 'TOOLKIT', 'AGENT'])).toBe(true);
     expect(isAllResourceBizTypeSelected(['MCP'])).toBe(false);
   });
 
   it('normalizes all selections to full resource biz type payloads', () => {
     expect(normalizeResourceBizTypeList()).toEqual(ALL_RESOURCE_BIZ_TYPE_VALUES);
     expect(normalizeResourceBizTypeList([])).toEqual(ALL_RESOURCE_BIZ_TYPE_VALUES);
-    expect(normalizeResourceBizTypeList(['MCP', 'TOOLKIT', 'AGENT'])).toEqual(ALL_RESOURCE_BIZ_TYPE_VALUES);
+    expect(normalizeResourceBizTypeList(['TOOL', 'MCP', 'TOOLKIT', 'AGENT'])).toEqual(ALL_RESOURCE_BIZ_TYPE_VALUES);
     expect(normalizeResourceBizTypeList(['MCP'])).toEqual(['MCP']);
     expect(normalizeResourceBizTypeList([], 'KG_DOC')).toEqual(ALL_KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES);
     expect(isAllResourceBizTypeSelected(['KG_DOC', 'KG_TERM', 'KG_QA'], 'KG_DOC')).toBe(true);
@@ -95,11 +95,11 @@ describe('components/Resources utils', () => {
         deptBelong: [{ id: 'org_401', orgId: 401 }],
         orgFilters: [{ type: 'ALL' }],
         resourceStatus: '2',
-        resourceBizTypeList: ['MCP', 'TOOLKIT', 'AGENT'],
+        resourceBizTypeList: ['TOOL', 'MCP', 'TOOLKIT', 'AGENT'],
       })
     ).toEqual({
       resourceStatus: '2',
-      resourceBizTypeList: ['MCP', 'TOOLKIT', 'AGENT'],
+      resourceBizTypeList: ['TOOL', 'MCP', 'TOOLKIT', 'AGENT'],
     });
 
     expect(

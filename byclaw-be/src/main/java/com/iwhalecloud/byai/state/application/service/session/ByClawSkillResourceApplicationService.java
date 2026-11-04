@@ -700,6 +700,14 @@ public class ByClawSkillResourceApplicationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public EnterpriseSkillPublishResult publishSkillToEnterprise(Long sourceId) {
+        return publishSkillToEnterprise(sourceId, com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope.company());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public EnterpriseSkillPublishResult publishSkillToEnterprise(Long sourceId,
+        com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope publishScope) {
+        if (publishScope == null) publishScope = com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope.company();
+        publishScope.selectedIds();
         if (sourceId == null) {
             throw new IllegalArgumentException(I18nUtil.get("resource.resourceid.notnull"));
         }
@@ -728,7 +736,8 @@ public class ByClawSkillResourceApplicationService {
                 }
                 // 驳回后重新提交当前个人技能的快照，保留旧审核历史及被驳回副本。
                 if (!Objects.equals(candidate.getResourceStatus(), ResourceStatus.DELETE.getNum())
-                    && !Objects.equals(candidate.getResourceStatus(), ResourceStatus.AUDIT_REJECT.getNum())) {
+                    && !Objects.equals(candidate.getResourceStatus(), ResourceStatus.AUDIT_REJECT.getNum())
+                    && !skillPublicationService.canRetryWithNewSnapshot(candidate)) {
                     return new EnterpriseSkillPublishResult(candidate, true, personalPublicationDependencies(sourceId));
                 }
             }
@@ -771,6 +780,7 @@ public class ByClawSkillResourceApplicationService {
             source.getResourceDesc(), packageFilename, targetPackage.length);
         SsResource target = saveOrUpdateSkillResource(metadata, OwnerType.ENTERPRISE, source.getCatalogId(), null);
         target.setResourceStatus(ResourceStatus.AUDIT.getNum());
+        target.setPublicationSourceId(sourceId);
         target.setAvatar(source.getAvatar());
         target.setTags(source.getTags());
         target.setSample(source.getSample());
@@ -818,7 +828,7 @@ public class ByClawSkillResourceApplicationService {
                 "enterprise-skill-package");
         }
         copyEnterpriseSkillRelations(sourceId, target.getResourceId());
-        skillPublicationService.submit(source, target);
+        skillPublicationService.submit(source, target, publishScope);
         logger.info("Submitted enterprise skill resource copy: sourceId={}, targetId={}, operatorId={}",
             sourceId, target.getResourceId(), CurrentUserHolder.getCurrentUserId());
         return new EnterpriseSkillPublishResult(target, false, personalPublicationDependencies(sourceId));

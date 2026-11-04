@@ -241,6 +241,7 @@ export interface ResourceImportDiffItem {
  * 单个资源导入的结果记录
  */
 export interface ResourceImportItem {
+  publicationError?: string;
   catalogId?: number; // 目录ID
   catalogName?: string; // 目录名称
   resourceCode: string; // 资源编码
@@ -653,6 +654,9 @@ export interface ResourceOperationPermissions {
   canOnShelf?: boolean; // 是否可上架
   canOffShelf?: boolean; // 是否可下架
   canPublishToEnterprise?: boolean; // 是否可将个人技能复制上架到企业
+  canManagePublishScope?: boolean;
+  publishScopeMode?: string;
+  publishedScope?: import('@/service/resourcePublication').ScopeLabel[];
   skillPublication?: SkillPublicationSummary; // 当前发布快照，包含待审核及驳回结果
   useApplyPending?: boolean; // 使用申请是否待审核
 }
@@ -660,6 +664,7 @@ export interface ResourceOperationPermissions {
 export interface EnterpriseSkillPublishResult {
   personalDependencies?: { resourceId: string; resourceName: string; resourceBizType: string }[];
   resource: {
+    publishScopeMode?: string;
     resourceId: string;
     resourceName: string;
     resourceBizType: string;
@@ -670,6 +675,7 @@ export interface EnterpriseSkillPublishResult {
 }
 
 export interface SkillPublicationSummary {
+  publishScopeMode?: string;
   resourceId: string;
   resourceName: string;
   resourceStatus: number;
@@ -684,10 +690,13 @@ export const getSkillPublicationPermissions = (resourceId: string) =>
   );
 
 /** 独立复制接口，不使用会按技能编码覆盖原资源的导入接口。 */
-export const publishSkillToEnterprise = (resourceId: string) =>
+export const publishSkillToEnterprise = (
+  resourceId: string,
+  publishScope?: import('@/service/resourcePublication').PublishScope
+) =>
   POST<EnterpriseSkillPublishResult>(
     '/byaiService/tool/publishSkillToEnterprise',
-    { resourceId },
+    { resourceId, publishScope },
     { responseCfg: { hideErrorTips: true } }
   );
 

@@ -82,6 +82,7 @@ jest.mock('@ant-design/icons', () => ({
   LoadingOutlined: () => null,
 }));
 
+jest.mock('@/components/ResourcePublication/ScopeSelector', () => () => <div>publication scope selector</div>);
 jest.mock('@/components/AntdIcon', () => () => null);
 jest.mock('@/pages/manager/service/DigitalEmployeeMgr', () => ({ parseCurl: jest.fn() }));
 jest.mock('@/utils', () => ({ getRuntimeActualUrl: jest.fn(() => '') }));
@@ -149,6 +150,7 @@ describe('ResourceImport', () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/resource.import.skillReviewHint/) !== null).toBe(pending);
     expect(mockImportResource.mock.calls[0][2].get('ownerType')).toBe('enterprise');
+    expect(JSON.parse(mockImportResource.mock.calls[0][2].get('publishScope'))).toEqual({ mode: 'COMPANY' });
   });
 
   it('explains that an overwrite awaits review before importing', async () => {

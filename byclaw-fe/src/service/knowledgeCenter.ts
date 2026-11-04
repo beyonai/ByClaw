@@ -8,6 +8,7 @@ const withResourceImplDefaults = (data: any = {}) => ({
 
 export interface KnowledgeCapability {
   knowledgeMode: 'BYAI' | 'THIRD_PARTY';
+  creationProviders?: { providerId: string; providerName: string }[];
   allowKnowledgeBaseCreate: boolean;
   allowKnowledgeBaseEdit: boolean;
   allowKnowledgeBaseDelete: boolean;

@@ -1,7 +1,9 @@
+import { openResourcePublication } from '@/components/ResourcePublication/PublicationPanel';
 import { Modal } from 'antd';
 import { getSkillPublicationPermissions, publishSkillToEnterprise } from '@/pages/manager/service/resources';
 import { showSkillPublication, skillPublicationEntryLabel } from '../skillPublication';
 
+jest.mock('@/components/ResourcePublication/PublicationPanel', () => ({ openResourcePublication: jest.fn() }));
 jest.mock('@umijs/max', () => ({ getIntl: () => ({ formatMessage: ({ id }: any) => id }) }));
 jest.mock('antd', () => ({ Button: () => null, Modal: { confirm: jest.fn() } }));
 jest.mock('@/pages/manager/service/resources', () => ({
@@ -73,4 +75,20 @@ it('does not display stale results or submit when loading fails or permission is
   expect(Modal.confirm).not.toHaveBeenCalled();
   expect(onChange).not.toHaveBeenCalled();
   expect(onPublish).not.toHaveBeenCalled();
+});
+
+it('opens organization review for new publications instead of treating shelf status as approval', async () => {
+  const publication = { ...copy, resourceStatus: 2, publishScopeMode: 'NONE' };
+  (getSkillPublicationPermissions as jest.Mock).mockResolvedValue({
+    canPublishToEnterprise: true,
+    skillPublication: publication,
+  });
+  const onPublish = jest.fn();
+  await showSkillPublication({ sourceId: 'source', onChange: jest.fn(), onPublish });
+  expect(openResourcePublication).toHaveBeenCalledWith(
+    expect.objectContaining({ resourceId: 'copy', onRepublish: expect.any(Function) })
+  );
+  expect(Modal.confirm).not.toHaveBeenCalled();
+  expect(onPublish).not.toHaveBeenCalled();
+  expect(skillPublicationEntryLabel(publication)).toBe('rp.manage');
 });

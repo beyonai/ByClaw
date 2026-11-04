@@ -217,6 +217,7 @@ class DatasetOwnershipManagementTest extends I18nTestSupport {
         ReflectionTestUtils.setField(extensions, "resourceRuntimeInfoResolver", new ResourceRuntimeInfoResolver());
         ReflectionTestUtils.setField(extensions, "resourceTargetJsonBuilder", new ResourceTargetJsonBuilder());
         DatasetApplicationService application = new DatasetApplicationService();
+        ReflectionTestUtils.setField(application, "transactionalSelf", application);
         ReflectionTestUtils.setField(application, "datasetSystem", "");
         ReflectionTestUtils.setField(application, "ssResourceService", resources);
         ReflectionTestUtils.setField(application, "ssResExtDocService", extensions);

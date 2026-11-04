@@ -1,3 +1,4 @@
+import ResourcePublicationAuditList from '@/components/ResourcePublication/AuditList';
 import PublicationAuditList from '@/components/EmployeePublication/AuditList';
 import ResourceAuditCenter from '@/components/Resources/components/ResourceAuditCenter';
 import useApprovalPendingCounts from '@/hooks/useApprovalPendingCounts';
@@ -13,6 +14,7 @@ export default function ApprovalCenter() {
   const [searchParams, setSearchParams] = useSearchParams();
   const capabilities = useEmployeePublicationCapabilities();
   const { counts, refresh } = useApprovalPendingCounts();
+  const [resourceAuditKind, setResourceAuditKind] = useState('use');
   const [employeeAuditKind, setEmployeeAuditKind] = useState('use');
   const activeTab = APPROVAL_TABS.find((tab) => tab.key === searchParams.get('tab')) || APPROVAL_TABS[0];
   const publicationSelected =
@@ -35,7 +37,21 @@ export default function ApprovalCenter() {
       <Tabs
         className={styles.tabs}
         activeKey={activeTab.key}
-        tabBarExtraContent={{ right: employeeKindSelector }}
+        tabBarExtraContent={{
+          right:
+            activeTab.key === 'employee' ? (
+              employeeKindSelector
+            ) : (
+              <Segmented
+                value={resourceAuditKind}
+                options={[
+                  { value: 'use', label: intl.formatMessage({ id: 'rp.useRequests' }) },
+                  { value: 'publication', label: intl.formatMessage({ id: 'rp.publicationReviews' }) },
+                ]}
+                onChange={(v) => setResourceAuditKind(String(v))}
+              />
+            ),
+        }}
         items={APPROVAL_TABS.map((tab) => ({
           key: tab.key,
           label: (
@@ -51,7 +67,13 @@ export default function ApprovalCenter() {
         }}
       />
       <div className={styles.content}>
-        {publicationSelected ? (
+        {activeTab.key !== 'employee' && resourceAuditKind === 'publication' ? (
+          <ResourcePublicationAuditList
+            key={activeTab.key}
+            resourceBizTypeList={activeTab.resourceBizTypeList}
+            onChange={refresh}
+          />
+        ) : publicationSelected ? (
           <PublicationAuditList initialReview onAuditComplete={refresh} />
         ) : (
           // 按类型重建表格，避免切换页签时沿用上一类资源的历史和待审缓存。
