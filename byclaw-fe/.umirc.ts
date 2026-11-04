@@ -12,11 +12,13 @@ const argvOptions = getArgvOptions();
 loadMonorepoEnvForUmi();
 
 /** 开发代理：在仓库根 .env 或 byclaw-fe/.env 中配置，避免改 .umirc.ts 产生冲突 */
-const target = `http://123.56.153.229:8080`;
+const target = `http://${process.env.BE_HOST || process.env.HOST || 'localhost'}:${
+  process.env.BE_SERVER_PORT || '8086'
+}`;
 
-const wsTarget = `http://123.56.153.229:8080`;
+const wsTarget = process.env.BYCLAW_PORTAL_URL_WS?.trim() || 'http://localhost:8082';
 // 本地 noVNC 同时包含页面资源和 WebSocket，需直连 OpenSandbox 网关，保持与生产 Nginx 转发方式一致。
-const sandboxTarget = `http://123.56.153.229:8080`;
+const sandboxTarget = process.env.BYCLAW_SANDBOX_BASE_URL?.trim() || 'http://127.0.0.1:8090';
 
 const isDev = process.env.NODE_ENV === 'development';
 const publicPath = argvOptions.publicPath || '/';
@@ -108,12 +110,6 @@ export default defineConfig({
       .rule('archive-wasm-browser')
       .test(/libarchive-wasm[\\/]dist[\\/]libarchive\.js$/)
       .set('resolve', { alias: { fs: false, path: false, crypto: false } });
-    // RAW 依赖的 BigInt 字面量无法按现有 ES2015/Safari 12 目标压缩，局部转换其语法。
-    config.module
-      .rule('camera-raw-bigint-literals')
-      .test(/(?:@colorhythm[\\/]libraw-wasm[\\/]dist[\\/]libraw\.mjs|typed-cstruct[\\/]dist[\\/].*\.js)$/)
-      .use('raw-bigint-literals')
-      .loader(path.resolve(__dirname, 'config/loaders/raw-bigint-literals.js'));
 
     // 配置 splitChunks，将 slate 和 katex 打包到同一个文件
     config.optimization.splitChunks.merge({
