@@ -30,6 +30,7 @@ COPY middleware/byclaw-harness/scripts/docker-workspace-prepare.mjs /workspace/s
 COPY middleware/byclaw-harness/scripts/prepare-dsh-model-routing-runtime.mjs /workspace/scripts/prepare-dsh-model-routing-runtime.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-startup-021.mjs /workspace/scripts/prepare-dsh-startup-021.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-skill-names-021.mjs /workspace/scripts/prepare-dsh-skill-names-021.mjs
+COPY middleware/byclaw-harness/scripts/prepare-dsh-tool-lookup-021.mjs /workspace/scripts/prepare-dsh-tool-lookup-021.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-lazy-021.mjs /workspace/scripts/prepare-dsh-lazy-021.mjs
 COPY middleware/byclaw-harness/scripts/bundle-dsh-startup-deps.mjs /workspace/scripts/bundle-dsh-startup-deps.mjs
 COPY middleware/byclaw-harness/scripts/verify-startup-bundles.mjs /workspace/scripts/verify-startup-bundles.mjs
@@ -56,6 +57,12 @@ RUN node scripts/prepare-dsh-skill-names-021.mjs /workspace \
     && pnpm exec tsc -b packages/skill/skill/tsconfig.json packages/skill/tool-skill/tsconfig.json \
     && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/skill/skill --filter packages/skill/tool-skill \
     && node --input-type=module -e "const {isSkillName}=await import('./packages/skill/skill/lib/index.js');if(!isSkillName('report_企业')||isSkillName('../report_企业'))throw new Error('DSH Skill name compatibility build is missing')"
+
+# Resolve one tool name without materializing the scope's whole tool view (shared-host main-thread hot path).
+RUN node scripts/prepare-dsh-tool-lookup-021.mjs /workspace \
+    && pnpm exec tsc -b packages/core/tools/tsconfig.json \
+    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/core/tools \
+    && ! grep -q 'return this.view(scope).visible.get(name)' packages/core/tools/lib/index.js
 
 # Apply pinned startup and model-routing changes only in the build workspace.
 # Rebuild affected core packages before consumers; ship source and compiled output together.
