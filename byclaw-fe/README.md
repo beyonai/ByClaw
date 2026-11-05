@@ -230,6 +230,12 @@ docker run -d -p 8080:8080 beyond-frontend
 const target = 'http://your-api-server:8569';
 ```
 
+文件接口专用代理仅在 `FILE_STORAGE_TYPE=file`、主代理 `target` 的 hostname 为
+`localhost` / `127.0.0.1`，且配置了有效远程 `BYCLAW_REMOTE_BE_HOST` 时启用。
+远程文件地址可来自根目录 `.env` 的 `HOST`，端口使用 `BE_SERVER_PORT`（默认 `8086`）。
+主代理指向线上域名或其他远程后端时，`fileBrowser`、文件下载和任务 diff 接口跟随主代理，
+不会被缺失或过期的 `BE_HOST` 配置分流到另一台服务器。修改代理配置后需等待开发服务重载，必要时重启。
+
 ### 路由配置
 
 路由定义位于 `config/route.config.ts`。
