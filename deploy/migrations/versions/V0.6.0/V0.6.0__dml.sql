@@ -188,3 +188,12 @@ INSERT INTO byai.byai_system_config_list (param_id,param_group_code,param_group_
 INSERT INTO byai.byai_system_config_list (param_id,param_group_code,param_group_name,param_name,param_en_name,param_value,param_desc,param_seq) VALUES (nextval('byai.seq_any_table'),'SYSTEM_MODEL_TTS_PROVIDER_NAME','TTS模型插件提供商','MiniMax','MiniMax','MINIMAX','{"adapter":"byclaw-tts","modelProtocol":"MINIMAX_TTS","apiEndpoint":"https://api.minimax.io/v1/t2a_v2","modelCode":"speech-2.8-hd","logo":"/model-providers/minimax.svg"}',19);
 INSERT INTO byai.byai_system_config_list (param_id,param_group_code,param_group_name,param_name,param_en_name,param_value,param_desc,param_seq) VALUES (nextval('byai.seq_any_table'),'SYSTEM_MODEL_TTS_PROVIDER_NAME','TTS模型插件提供商','火山引擎','火山引擎','VOLCENGINE','{"adapter":"byclaw-tts","modelProtocol":"VOLCENGINE_TTS_V3","apiEndpoint":"https://openspeech.bytedance.com/api/v3/tts/unidirectional","modelCode":"seed-tts-2.0","options":{"resourceId":"seed-tts-2.0","speaker":"zh_female_vv_uranus_bigtts","format":"mp3","sampleRate":24000},"logo":"/model-providers/volcengine.svg"}',20);
 INSERT INTO byai.byai_system_config_list (param_id,param_group_code,param_group_name,param_name,param_en_name,param_value,param_desc,param_seq) VALUES (nextval('byai.seq_any_table'),'SYSTEM_MODEL_ASR_PROVIDER_NAME','ASR模型插件提供商','火山引擎','火山引擎','VOLCENGINE','{"adapter":"byclaw-asr","modelProtocol":"VOLCENGINE_ASR_FLASH","apiEndpoint":"https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash","modelCode":"bigmodel","options":{"resourceId":"volc.bigasr.auc_turbo"},"logo":"/model-providers/volcengine.svg"}',21);
+
+/**共享沙箱配置整合**/
+delete from byai.byai_system_config where param_code in('BYCLAW_SANDBOX_SHARED_ALL','BYCLAW_SHARED_DSH_HOST_USERS');
+
+delete from byai.byai_system_config where param_code in('BYCLAW_SANDBOX_SHARED_POLICY');
+INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES(nextval('byai.seq_any_table'), NULL, 'BYCLAW_SANDBOX_SHARED_POLICY', '用户共享沙箱策略模式配置', 'BYCLAW_SANDBOX_SHARED_POLICY', '{
+  "defaultMode": "shared",
+  "excludedUsers": ["zte"]
+}', '用户共享沙箱策略模式配置，默认模式为defaultMode=shared为共享模式，defaultMode=exclusive为单独起沙箱模式，excludedUsers为配置例的用户');

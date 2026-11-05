@@ -96,9 +96,20 @@ remote 模式透传到平台 `POST /internal/platform/sandbox/business/launch`�
 
 ## 常驻（共享）DSH 宿主
 
-配置 `byclaw.sandbox.shared-dsh-host.base-url`/`token`/`web-base-url` 后，系统参数 `BYCLAW_SHARED_DSH_HOST_USERS`
-（`byai_system_config`，逗号、分号或空白分隔的 userCode；不存在、为空或 `*` 表示全部用户）名单内用户的 `byclaw-dsh`
-不再是沙箱：它是常驻宿主进程里的一个用户上下文，BE 不为它写 `ss_sandbox_record`，也不做启动/探测/复用。
+系统参数 `BYCLAW_SANDBOX_SHARED_POLICY`（`byai_system_config`）统一控制平台共享池和常驻 DSH 宿主的用户资格，替代 `BYCLAW_SANDBOX_SHARED_ALL` 和 `BYCLAW_SHARED_DSH_HOST_USERS`，旧参数不再参与判断。
+
+```json
+{"defaultMode":"shared","excludedUsers":["adminvip","zte"]}
+```
+
+字符串先解析为策略对象，再判断：排除名单内用户始终独享，其他用户按 `defaultMode`（`shared` 或 `exclusive`）处理。
+配置使用 Fastjson 直接映射为对象。`excludedUsers` 使用字符串数组，工号去除首尾空白并区分大小写精确匹配，`*` 不作为通配符。
+参数不存在、为空、模式不为 `shared` 或排除名单显式为 null 时不授予共享资格；读取或 JSON 解析失败时记录错误堆栈并返回无共享资格。省略排除名单时默认为空名单；空名单配合 `shared` 表示全部有效用户共享，`exclusive` 表示全部独享。
+旧白名单不能直接迁移为排除名单，否则用户运行模式会反转；部署时需重新确认策略。
+失去共享资格后的平台映射清理沿用既有流程及错误处理。
+
+配置 `byclaw.sandbox.shared-dsh-host.base-url`/`token`/`web-base-url` 且未启用平台共享配置时，符合共享资格用户的 `byclaw-dsh`
+使用常驻宿主进程中的用户上下文，BE 不为它写 `ss_sandbox_record`。
 
 - 启动（登录自启动、问答前的 worker 就绪检查、`launchByUserCode`）= 对宿主做一次幂等的 `PUT /v1/users/{user}`，
   带上 `byclaw-dsh` 规格渲染后的环境；上下文已在时毫秒返回，不在时由宿主加载后返回。问答仍经 Gateway worker 注册转发，
@@ -115,7 +126,7 @@ remote 模式透传到平台 `POST /internal/platform/sandbox/business/launch`�
   为该用户的上下文选 B 的规格；不在名单内或参数读取失败时用宿主默认的 `BYCLAW_TOOL_ENV_SERVICE_KEY`。上下文启动时读取，
   改参数后需该用户的上下文重建（“重启助理”或宿主回收后再次进入）才生效。
 
-决策点只有 `SharedDshHostContexts.routes(userCode, sandboxType)`（`SandboxAutoConfiguration#sharedDshHostContexts`），
+宿主路由通过 `SharedDshHostContexts.routes(userCode, sandboxType)`，复用 `SharedSandboxPolicy.eligible`，
 两种执行模式（本地 / 平台远程）相同。名单每次决策时读取，改参数后下一次请求即生效。
 
 
