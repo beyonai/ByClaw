@@ -33,6 +33,9 @@ public interface PlatformStorageClient {
     @GetMapping("/internal/platform/storage/uploads/capabilities")
     Map<String, Object> uploadCapabilities();
 
+    @GetMapping("/internal/platform/storage/uploads/capabilities")
+    Map<String,Object> uploadCapabilitiesFor(@RequestParam Map<String,Object> query);
+
     @PutMapping("/internal/platform/storage/uploads/chunk")
     Map<String, Object> uploadChunk(@RequestParam Map<String, Object> query,
             @RequestHeader("Content-Type") String contentType, @RequestBody Object placeholder);

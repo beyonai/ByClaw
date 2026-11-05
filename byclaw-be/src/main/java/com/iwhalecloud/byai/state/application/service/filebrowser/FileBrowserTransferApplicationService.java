@@ -48,23 +48,36 @@ public class FileBrowserTransferApplicationService {
 
     public Map<String, Object> capabilities() {
         if (!enabled()) return Map.of("resumable", false);
-        var policy = effectivePolicy();
-        if (policy == null) return Map.of("resumable", false);
+        Map<?,?> details=capabilityDetails();
+        if(Boolean.FALSE.equals(details.get("resumable")))return Map.of("resumable",false);
+        var policy = effectivePolicy(details);
         return Map.of("resumable", true, "maxSize", policy.maxSize(), "chunkSize", policy.chunkSize());
     }
 
-    private com.iwhalecloud.byai.state.application.service.upload.ResumableUploadPolicy effectivePolicy() {
-        Object value = gateway.data(gateway.safe(() -> {
-            try {
-                return clients.getObject().uploadCapabilities();
-            } catch (feign.FeignException failure) {
-                // Older platforms expose only the existing multipart storage API.
-                if (failure.status() == 404) return Map.of("code", 0, "data", Map.of("resumable", false));
-                throw failure;
-            }
-        }));
-        if (value instanceof Map<?, ?> details && Boolean.FALSE.equals(details.get("resumable"))) return null;
-        if (!(value instanceof Map<?, ?> details) || !(details.get("maxSize") instanceof Number max)
+    public boolean supportsRange() {
+        if(!enabled())return false;
+        Object supported=capabilityDetails().get("range");
+        if(!(supported instanceof Boolean))throw new IllegalStateException("Invalid platform range capability response");
+        return Boolean.TRUE.equals(supported);
+    }
+
+    private Map<?,?> capabilityDetails() {
+        return capabilityDetails(com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.getCurrentUserCode());
+    }
+    private Map<?,?> capabilityDetails(String userCode) {
+        // Never share a cached capability between users with different durable backends.
+        Object value=gateway.data(gateway.safe(()->StringUtils.isBlank(userCode)?clients.getObject().uploadCapabilities():clients.getObject().uploadCapabilitiesFor(
+            Map.of("namespace","workspace","bucketOrRoot",UserBucketNameResolver.buildUserBucketName(userCode),"shareType","private"))));
+        if(!(value instanceof Map<?,?> details)||!(details.get("resumable") instanceof Boolean))
+            throw new IllegalStateException("Invalid platform upload capability response");
+        return details;
+    }
+
+    private com.iwhalecloud.byai.state.application.service.upload.ResumableUploadPolicy effectivePolicy(String userCode) {
+        return effectivePolicy(capabilityDetails(userCode));
+    }
+    private com.iwhalecloud.byai.state.application.service.upload.ResumableUploadPolicy effectivePolicy(Map<?,?> details) {
+        if (!Boolean.TRUE.equals(details.get("resumable")) || !(details.get("maxSize") instanceof Number max)
                 || max.longValue() <= 0 || !(details.get("chunkSize") instanceof Number chunk)) {
             throw new IllegalStateException("Invalid platform upload capability response");
         }
@@ -97,8 +110,7 @@ public class FileBrowserTransferApplicationService {
                 }
             } else {
                 if (!"NOT_FOUND".equals(priorState)) throw new IllegalStateException("Invalid upload status response");
-                var policy = effectivePolicy();
-                if (policy == null) throw new IllegalStateException("Platform resumable uploads are unavailable");
+                var policy = effectivePolicy(userCode);
                 validator.validateSize(request.totalSize());
                 if (request.totalSize() > policy.maxSize()) throw new IllegalArgumentException("Upload exceeds current system maximum");
                 gateway.checkPersonalQuota("UPLOAD", request.totalSize());

@@ -56,6 +56,16 @@ public class PlatformRemoteGateway {
         try {
             return call.get();
         } catch (feign.FeignException failure) {
+            if(failure.status()==423||failure.status()==409) {
+                try {
+                    JsonNode error=json.readTree(failure.contentUTF8());
+                    String code=error.path("data").path("errorType").asText();
+                    if((failure.status()==423&&"file_write_in_progress".equals(code))
+                            ||(failure.status()==409&&"file_write_conflict".equals(code)))
+                        throw new com.iwhalecloud.byai.state.common.exception.StorageWriteConflictException(failure.status(),code);
+                }catch(java.io.IOException invalid){/* Preserve non-conflict error handling. */}
+            }
+
             if(failure.status()==409) {
                 try {
                     JsonNode body=json.readTree(failure.contentUTF8());

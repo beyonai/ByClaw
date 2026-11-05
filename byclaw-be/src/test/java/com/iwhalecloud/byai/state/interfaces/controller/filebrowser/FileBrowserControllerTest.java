@@ -135,7 +135,7 @@ class FileBrowserControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTes
     void rangeDownloadRelaysStatusAndClosesUpstreamWithoutUsingLegacyProvider() throws Exception {
         var transfers = mock(com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserTransferApplicationService.class);
         ReflectionTestUtils.setField(controller, "transfers", transfers);
-        when(transfers.enabled()).thenReturn(true);
+        when(transfers.supportsRange()).thenReturn(true);
         var upstream = mock(feign.Response.class);
         var body = mock(feign.Response.Body.class);
         when(upstream.status()).thenReturn(206);
@@ -159,16 +159,28 @@ class FileBrowserControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTes
     void unsatisfiedRangeDoesNotFallBackToFullLegacyDownload() {
         var transfers = mock(com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserTransferApplicationService.class);
         ReflectionTestUtils.setField(controller, "transfers", transfers);
-        when(transfers.enabled()).thenReturn(true);
+        when(transfers.supportsRange()).thenReturn(true);
         var upstream = mock(feign.Response.class);
         when(upstream.status()).thenReturn(416);
-        when(upstream.headers()).thenReturn(java.util.Map.of("content-range", java.util.List.of("bytes */8")));
+        when(upstream.headers()).thenReturn(java.util.Map.of("content-range", java.util.List.of("bytes */8"),"content-length",java.util.List.of("32")));
         when(transfers.download("user001", 42L, "/by/large.bin", "bytes=20-", null)).thenReturn(upstream);
         var result = controller.download(42L, "/by/large.bin", "bytes=20-", null);
         assertThat(result.getStatusCode().value()).isEqualTo(416);
         assertThat(result.getHeaders().getFirst("Content-Range")).isEqualTo("bytes */8");
+        assertThat(result.getHeaders().getContentLength()).isEqualTo(0);
         verify(upstream).close();
         verifyNoInteractions(fileBrowserService);
+    }
+
+    @Test
+    void uploadPreservesDetectedWriteConflictForTheGlobalHandler() throws Exception {
+        MultipartFile file = mock(MultipartFile.class);
+        MultipartFile[] files = {file};
+        var failure = new com.iwhalecloud.byai.state.common.exception.StorageWriteConflictException(
+            423, "file_write_in_progress");
+        org.mockito.Mockito.doThrow(failure).when(fileBrowserService).upload("user001", 42L, "/", files);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> controller.upload(files, 42L, "/"))
+            .isSameAs(failure);
     }
 
 }

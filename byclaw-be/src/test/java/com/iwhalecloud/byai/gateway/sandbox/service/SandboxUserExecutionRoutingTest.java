@@ -54,7 +54,9 @@ class SandboxUserExecutionRoutingTest {
         ReflectionTestUtils.setField(service, "systemParamTargetAgentResolver",
             new SystemParamTargetAgentResolver(config, privateParameters, null));
         ReflectionTestUtils.setField(service, "sandboxProperties", properties);
-        ReflectionTestUtils.setField(service, "sharedSandboxPolicy", new SharedSandboxPolicy(config));
+        SharedSandboxPolicy policy = new SharedSandboxPolicy();
+        ReflectionTestUtils.setField(policy, "byaiSystemConfigService", config);
+        ReflectionTestUtils.setField(service, "sharedSandboxPolicy", policy);
         @SuppressWarnings("unchecked")
         ObjectProvider<PlatformRemoteGateway> provider = mock(ObjectProvider.class);
         when(provider.getObject()).thenReturn(gateway);
@@ -257,7 +259,8 @@ class SandboxUserExecutionRoutingTest {
 
     private SharedSandboxGateway managedShared() {
         when(config.getDcSystemConfigValueByCode("ENABLE_DSH")).thenReturn("1");
-        when(config.getDcSystemConfigValueByCode(SharedSandboxPolicy.USERS)).thenReturn(USER);
+        when(config.getDcSystemConfigValueByCode(SharedSandboxPolicy.POLICY))
+            .thenReturn("{\"defaultMode\":\"shared\",\"excludedUsers\":[]}");
         SharedSandboxGateway shared = mock(SharedSandboxGateway.class);
         when(shared.enabled()).thenReturn(true);
         ReflectionTestUtils.setField(service, "sharedSandboxGateway", shared);

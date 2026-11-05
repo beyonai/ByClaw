@@ -33,7 +33,7 @@ class FileBrowserTransferApplicationServiceTest extends com.iwhalecloud.byai.com
         when(clients.getObject()).thenReturn(client);
         when(gateway.safe(any())).thenAnswer(call -> ((java.util.function.Supplier<?>) call.getArgument(0)).get());
         when(client.uploadCapabilities()).thenReturn(Map.of("code", 0));
-        when(gateway.data(any())).thenReturn(Map.of("chunkSize", 4194304L, "maxSize", 4294967296L));
+        when(gateway.data(any())).thenReturn(Map.of("resumable",true,"range",true,"chunkSize", 4194304L, "maxSize", 4294967296L));
         when(gateway.call(eq("storage"), eq("uploads/create"), any())).thenAnswer(call -> call.getArgument(2));
         Map<?, ?> result = (Map<?, ?>) service.control("Alice", "create", request);
         assertEquals("byclaw-alice", result.get("bucketOrRoot"));
@@ -103,7 +103,7 @@ class FileBrowserTransferApplicationServiceTest extends com.iwhalecloud.byai.com
         when(clients.getObject()).thenReturn(client);
         when(gateway.safe(any())).thenAnswer(call -> ((java.util.function.Supplier<?>) call.getArgument(0)).get());
         when(client.uploadCapabilities()).thenReturn(Map.of("code", 0));
-        when(gateway.data(any())).thenReturn(Map.of("chunkSize", 4194304L, "maxSize", 4294967296L));
+        when(gateway.data(any())).thenReturn(Map.of("resumable",true,"range",true,"chunkSize", 4194304L, "maxSize", 4294967296L));
         assertEquals(Map.of("resumable", true, "chunkSize", 4194304L, "maxSize", 4294967296L), service.capabilities());
     }
 
@@ -119,26 +119,26 @@ class FileBrowserTransferApplicationServiceTest extends com.iwhalecloud.byai.com
         verifyNoInteractions(clients);
     }
 
-    @Test void olderPlatformWithoutUploadApiUsesExistingMultipartTransport() {
-        var client = mock(PlatformStorageClient.class);
+    @Test void explicitUnsupportedCapabilityDoesNotAdvertiseResumableOrUsePolicyFallback() {
+        var client=mock(PlatformStorageClient.class);
         when(clients.getObject()).thenReturn(client);
-        when(gateway.safe(any())).thenAnswer(call -> ((java.util.function.Supplier<?>) call.getArgument(0)).get());
-        when(gateway.data(any())).thenAnswer(call -> ((Map<?, ?>) call.getArgument(0)).get("data"));
-        var missing = mock(feign.FeignException.class);
-        when(missing.status()).thenReturn(404);
-        when(client.uploadCapabilities()).thenThrow(missing);
-        assertEquals(Map.of("resumable", false), service.capabilities());
-        verifyNoInteractions(validator);
+        when(gateway.safe(any())).thenAnswer(call -> ((java.util.function.Supplier<?>)call.getArgument(0)).get());
+        when(client.uploadCapabilities()).thenReturn(Map.of("code",0));
+        when(gateway.data(any())).thenReturn(Map.of("resumable",false,"range",false));
+        assertEquals(Map.of("resumable",false),service.capabilities());
+        verify(validator,never()).resumablePolicy();
     }
 
-    @Test void explicitlyDisabledPlatformUploadsUseExistingMultipartTransport() {
-        var client = mock(PlatformStorageClient.class);
-        when(clients.getObject()).thenReturn(client);
-        when(gateway.safe(any())).thenAnswer(call -> ((java.util.function.Supplier<?>) call.getArgument(0)).get());
-        when(gateway.data(any())).thenAnswer(call -> ((Map<?, ?>) call.getArgument(0)).get("data"));
-        when(client.uploadCapabilities()).thenReturn(Map.of("code", 0, "data", Map.of("resumable", false)));
-        assertEquals(Map.of("resumable", false), service.capabilities());
-        verifyNoInteractions(validator);
+    @Test void authenticatedCapabilityIsScopedToCanonicalUserBucket() {
+        try(var current=org.mockito.Mockito.mockStatic(com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.class)) {
+            current.when(com.iwhalecloud.byai.common.login.auth.CurrentUserHolder::getCurrentUserCode).thenReturn("Alice");
+            var client=mock(PlatformStorageClient.class);when(clients.getObject()).thenReturn(client);
+            when(gateway.safe(any())).thenAnswer(call->((java.util.function.Supplier<?>)call.getArgument(0)).get());
+            when(client.uploadCapabilitiesFor(anyMap())).thenAnswer(call->{Map<?,?> query=call.getArgument(0);assertEquals("byclaw-alice",query.get("bucketOrRoot"));return Map.of("code",0);});
+            when(gateway.data(any())).thenReturn(Map.of("resumable",false,"range",false));
+            assertEquals(Map.of("resumable",false),service.capabilities());
+            verify(client,never()).uploadCapabilities();
+        }
     }
 
     @Test void unavailablePlatformDoesNotPretendResumableUploadsAreDisabled() {
@@ -149,6 +149,17 @@ class FileBrowserTransferApplicationServiceTest extends com.iwhalecloud.byai.com
         when(unavailable.status()).thenReturn(503);
         when(client.uploadCapabilities()).thenThrow(unavailable);
         assertSame(unavailable, assertThrows(feign.FeignException.class, service::capabilities));
+    }
+
+    @Test void rangeCapabilityIsIndependentFromResumableUploads() {
+        var client = mock(PlatformStorageClient.class);
+        when(clients.getObject()).thenReturn(client);
+        when(gateway.safe(any())).thenAnswer(call -> ((java.util.function.Supplier<?>) call.getArgument(0)).get());
+        when(client.uploadCapabilities()).thenReturn(Map.of("code", 0));
+        when(gateway.data(any())).thenReturn(Map.of("resumable", false, "range", true));
+        assertTrue(service.supportsRange());
+        assertEquals(Map.of("resumable", false), service.capabilities());
+        verifyNoInteractions(validator);
     }
 
 }

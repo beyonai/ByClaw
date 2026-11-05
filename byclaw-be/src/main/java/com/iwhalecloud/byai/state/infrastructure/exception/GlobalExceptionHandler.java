@@ -123,6 +123,16 @@ public class GlobalExceptionHandler implements MessageSourceAware {
         return new ResponseEntity<>(ResponseUtil.fail(msg), httpStatus);
     }
 
+    @ExceptionHandler(com.iwhalecloud.byai.state.common.exception.StorageWriteConflictException.class)
+    public ResponseEntity<ResponseUtil<Object>> storageWriteConflict(
+            com.iwhalecloud.byai.state.common.exception.StorageWriteConflictException failure,HttpServletResponse response) {
+        if(response.isCommitted())return null;
+        response.setHeader("Content-Disposition",null);response.setHeader("Content-Length",null);response.setHeader("Content-Range",null);
+        ResponseUtil<Object> body=ResponseUtil.fail(failure.getReason());body.setData(failure.details());
+        return ResponseEntity.status(failure.getStatusCode()).contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+            .header("Retry-After","1").body(body);
+    }
+
     @ExceptionHandler(com.iwhalecloud.byai.state.common.exception.StorageBusyException.class)
     public ResponseEntity<ResponseUtil<Object>> storageBusy(
         com.iwhalecloud.byai.state.common.exception.StorageBusyException failure, HttpServletResponse response) {

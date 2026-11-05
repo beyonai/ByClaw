@@ -13,6 +13,14 @@ BE 与 Platform 在启动时读取此开关，前端在构建或开发服务启�
 [![Java](https://img.shields.io/badge/Java-21%2B-orange)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.x-brightgreen)](https://spring.io/projects/spring-boot)
 
+## AgenticFS 文件传输
+
+远程文件系统传输按当前登录用户的私有 bucket 查询 platform capabilities，分别判断断点上传和 Range 下载能力，不跨用户缓存。上传会话与分块由 platform/storage-node 持久化；明确不支持能力时使用原有接口，网络或协议错误继续报错。
+
+已确认的 `423/file_write_in_progress` 与 `409/file_write_conflict` 返回“文件写入中，请稍后再试”，保留 HTTP 状态、结构化 `errorType` 与 `Retry-After: 1`。普通文件上传、删除、重命名、移动等操作将这类冲突交给全局处理器；权限、配额和网络错误继续按各自类型处理。该提示只覆盖检测到的冲突，不能证明检测到所有 MicroVM/NAS 并发写入。
+
+Range 响应透传 `206`/`416`、`Content-Range` 和校验标识；不转发上游错误正文时返回零长度，流关闭时释放上游连接。
+
 ## 简介
 
 ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发和管理能力，包括：
