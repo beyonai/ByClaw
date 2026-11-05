@@ -8,6 +8,29 @@ const routes = generation => ({
 
 assert.equal(isSafeSharedWorkerRouteRefresh(routes(365), routes(366)), true)
 assert.equal(isSafeSharedWorkerRouteRefresh(routes(12), routes(184)), true)
+assert.equal(isSafeSharedWorkerRouteRefresh({
+  coordinator: 'BYCLAW_DSH_0027029322',
+  member: 'BYCLAW_DSH_0027029322',
+}, routes(392)), true)
+assert.equal(isSafeSharedWorkerRouteRefresh({
+  coordinator: 'BYCLAW_DSH_0027029322',
+  member: 'BYCLAW_DSH_0099999999',
+}, routes(392)), false)
+assert.equal(isSafeSharedWorkerRouteRefresh({
+  coordinator: 'BYCLAW_DSH_0027029322',
+  member: 'BYCLAW_DSH_0027029322',
+}, {
+  coordinator: 'BYCLAW_DSH_SHARED_ctx_user_a_392',
+  member: 'BYCLAW_DSH_SHARED_ctx_user_b_392',
+}), false)
+assert.equal(isSafeSharedWorkerRouteRefresh(routes(392), {
+  coordinator: 'BYCLAW_DSH_0027029322',
+  member: 'BYCLAW_DSH_0027029322',
+}), true)
+assert.equal(isSafeSharedWorkerRouteRefresh(routes(392), {
+  coordinator: 'BYCLAW_DSH_0027029322',
+  member: 'BYCLAW_DSH_0099999999',
+}), false)
 assert.equal(isSafeSharedWorkerRouteRefresh(routes(366), routes(366)), true)
 assert.equal(isSafeSharedWorkerRouteRefresh(routes(366), routes(365)), false)
 assert.equal(isSafeSharedWorkerRouteRefresh(routes(366), {
