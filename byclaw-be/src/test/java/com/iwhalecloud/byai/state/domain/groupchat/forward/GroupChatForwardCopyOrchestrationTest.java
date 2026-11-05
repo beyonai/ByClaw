@@ -99,7 +99,7 @@ class GroupChatForwardCopyOrchestrationTest {
             return allocated;
         });
         var coordinator = new GroupChatForwardService(store, null, contexts, null, resolver, null,
-            attachments, new ForwardUploadReservation(properties), properties);
+            attachments, new ForwardUploadReservation(properties), properties, org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.domain.tenant.TenantModeService.class));
         var caller = Executors.newSingleThreadExecutor();
         Future<TargetLease> result = caller.submit(() -> coordinator.copyTarget(locator, lease, Duration.ofMillis(150)));
         try {

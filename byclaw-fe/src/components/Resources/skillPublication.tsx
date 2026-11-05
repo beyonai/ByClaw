@@ -1,9 +1,11 @@
+import { openResourcePublication } from '@/components/ResourcePublication/PublicationPanel';
 import { Button, Modal } from 'antd';
 import { getIntl } from '@umijs/max';
 import { getSkillPublicationPermissions } from '@/pages/manager/service/resources';
 import type { EnterpriseSkillPublishResult, SkillPublicationSummary } from '@/pages/manager/service/resources';
 
 export const skillPublicationEntryLabel = (publication?: SkillPublicationSummary, failed = false) => {
+  if (publication?.publishScopeMode && publication.publishScopeMode !== 'LEGACY') return 'rp.manage';
   if (publication?.resourceStatus === 4) return 'resource.skillPublicationProgress';
   if (publication?.resourceStatus === 5) return 'resource.skillPublicationReviewResult';
   if (publication) return 'resource.skillPublicationResult';
@@ -28,6 +30,10 @@ export const showSkillPublication = async ({
   if (!permissions.canPublishToEnterprise) throw new Error(t('resource.skillPublicationUnavailable'));
   const publication = permissions.skillPublication;
   onChange(publication);
+  if (publication?.publishScopeMode && publication.publishScopeMode !== 'LEGACY') {
+    openResourcePublication({ resourceId: publication.resourceId, onRepublish: () => void onPublish() });
+    return;
+  }
   const status = publication?.resourceStatus;
   const canResubmit = !publication || status === 5 || status === -1;
   const description =

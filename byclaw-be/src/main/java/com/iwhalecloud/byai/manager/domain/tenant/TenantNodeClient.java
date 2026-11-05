@@ -9,6 +9,7 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import com.iwhaleai.byai.framework.common.RedisClient;
@@ -140,38 +141,78 @@ public class TenantNodeClient {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.node.request.invalid");
         }
         long enterpriseId = context.enterpriseId();
-        String recordId = tenantMapper.selectConfig(enterpriseId, "NODE_SANDBOX_RECORD_ID");
-        String stateJson = tenantMapper.selectConfig(enterpriseId, "PROVISION_STATE");
+        boolean recoveryScan = "/internal/v1/forward-maintenance/scan".equals(path);
+        // 仅收集身份字段和校验结果，避免记录令牌、连接串和原始配置正文。
+        Map<String, Object> diagnostics = new java.util.LinkedHashMap<>();
+        diagnostics.put("enterprise", enterpriseId);
+        diagnostics.put("serviceName", "TENANT_DATA_" + enterpriseId);
+        String step = "readNodeSandboxRecordId";
         try {
+            String recordId = tenantMapper.selectConfig(enterpriseId, "NODE_SANDBOX_RECORD_ID");
+            diagnostics.put("nodeRecordIdPresent", recordId != null);
+            diagnostics.put("nodeRecordIdValid", recordId != null && recordId.matches("[1-9][0-9]*"));
+            if (recordId != null && recordId.matches("[1-9][0-9]*")) diagnostics.put("nodeRecordId", recordId);
+            step = "readProvisionState";
+            String stateJson = tenantMapper.selectConfig(enterpriseId, "PROVISION_STATE");
+            step = "validateProvisionState";
             ProvisionState state = mapper.readValue(stateJson, ProvisionState.class);
+            diagnostics.put("provisionStatePresent", state != null);
             long generation = state.generation();
+            diagnostics.put("provisionStatus", state.status());
+            diagnostics.put("generation", generation);
             if (!"READY".equals(state.status()) || generation <= 0
                 || recordId == null || !recordId.matches("[1-9][0-9]*")) {
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.node.notReady");
             }
+            step = "lookupNodeSandbox";
             SsSandboxRecord record = sandboxMapper.selectActiveTenantByResourceAndType(enterpriseId,
                 "tenant-data-node");
+            step = "validateNodeIdentity";
+            diagnostics.put("sandboxFound", record != null);
+            diagnostics.put("internalTokenConfigured", internalToken != null && !internalToken.isBlank());
+            if (record != null) {
+                diagnostics.put("sandboxId", record.getId());
+                diagnostics.put("sandboxEnterprise", record.getEnterpriseId());
+                diagnostics.put("sandboxOwnerScope", record.getOwnerScope());
+                diagnostics.put("sandboxStatus", record.getStatus());
+            }
             if (record == null || !"TENANT".equals(record.getOwnerScope())
                 || !"RUNNING".equals(record.getStatus()) || record.getId() == null
                 || record.getId() != Long.parseLong(recordId) || record.getEnterpriseId() == null
                 || record.getEnterpriseId() != enterpriseId || internalToken == null || internalToken.isBlank()) {
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.node.identity.mismatch");
             }
+            step = "readDatabaseRecordId";
             String dbRecordId = dbRecordId(enterpriseId);
+            step = "discoverEndpoint";
+            diagnostics.put("expectedDbRecordId", dbRecordId);
             URI base = discover(context, generation, dbRecordId);
+            step = "requestReadiness";
             ReadyView ready = send(base, "/internal/v1/health/ready", "GET", null, context, generation,
                 new TypeReference<ReadyView>() { });
+            step = "validateReadiness";
+            diagnostics.put("readiness", ready);
             if (!ready.ready() || !Long.toString(enterpriseId).equals(ready.enterpriseId())
                 || !Long.toString(generation).equals(ready.generation())
                 || !dbRecordId.equals(ready.dbSandboxRecordId())) {
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.node.readiness.mismatch");
             }
+            step = "requestNodeOperation";
             return send(base, path, method, body, context, generation, responseType);
         }
-        catch (ResponseStatusException e) {
-            throw e;
-        }
         catch (Exception e) {
+            if (recoveryScan) {
+                // 恢复线程统一记录租户和扫描类别，在异常链中保留实际失败阶段。
+                String detail = "Tenant forward scan failed, step=" + step + ", diagnostics=" + diagnostics;
+                if (e instanceof NodeRejection rejection) {
+                    detail += ", nodeStatus=" + rejection.nodeStatus();
+                }
+                throw new IllegalStateException(detail, e);
+            }
+            if (e instanceof ResponseStatusException status) throw status;
+            // 配置读取异常沿用原有传播方式，由调用方处理。
+            if (("readNodeSandboxRecordId".equals(step) || "readProvisionState".equals(step))
+                && e instanceof RuntimeException runtime) throw runtime;
             LOG.warn("Tenant Node transport failed for {} {}: {}", method, path, e.getClass().getSimpleName());
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "tenant.node.unavailable");
         }
@@ -302,7 +343,12 @@ public class TenantNodeClient {
     private static URI registeredEndpoint(String name, long enterpriseId, long generation, String dbRecordId,
                                            List<ServiceInstance> instances, boolean schemaBootstrap) {
         if (instances == null || instances.size() != 1) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.node.registration.unavailable");
+            // 实例数量区分未注册与重复注册，保留原有状态码和错误原因。
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.node.registration.unavailable",
+                new IllegalStateException("serviceName=" + name + ", instanceCount="
+                    + (instances == null ? "null" : instances.size())
+                    + ", expectedEnterprise=" + enterpriseId + ", expectedGeneration=" + generation
+                    + ", expectedDbRecordId=" + dbRecordId));
         }
         ServiceInstance instance = instances.get(0);
         Registration registration = instance.getMetadata() == null ? null
@@ -316,7 +362,11 @@ public class TenantNodeClient {
             || !name.equals(registration.agentType())
             || !"http".equals(instance.getProtocol()) || instance.getHost() == null
             || instance.getPort() <= 0 || instance.getPort() > 65535) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.node.registration.mismatch");
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "tenant.node.registration.mismatch",
+                new IllegalStateException("serviceName=" + name + ", expectedEnterprise=" + enterpriseId
+                    + ", expectedGeneration=" + generation + ", expectedDbRecordId=" + dbRecordId
+                    + ", registration=" + registration + ", protocol=" + instance.getProtocol()
+                    + ", hostPresent=" + (instance.getHost() != null) + ", port=" + instance.getPort()));
         }
         String pathPrefix = instance.getPathPrefix() == null ? "" : instance.getPathPrefix();
         URI prefix;

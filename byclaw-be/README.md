@@ -180,6 +180,113 @@ Agent 回复和发布成果中的 `@` 只表示普通提及或结果署名，均
 Gateway 的 `groupContextSnapshot` 由服务端加载，客户端同名字段会被删除；Harness 将目标、必要群历史及依赖结果显式交给成员，
 不依赖默认 spawn 继承父会话。群历史仍受已有 60 条、30,000 字符预算限制，并携带截断信息。
 
+## 飞书连接器执行沙箱
+
+飞书授权、凭证校验和取消授权通过统一的用户执行环境入口选择沙箱，无需配置连接器专用的沙箱类型。
+执行环境沿用用户现有运行时路由（包括 `ENABLE_DSH`、个人参数和首选规格），并保留规格的 profile。
+共享宿主用户使用已有工具沙箱配置及 `BYCLAW_TOOL_SANDBOX_BY_USER` 用户覆盖；共享用户上下文不能作为命令执行实例。
+目标沙箱须安装 `lark-cli`，并挂载该用户原来的 `/by/.connector-auth/.lark-cli` 持久化目录，供 `HOME` 和 `LARK_HOME` 使用。
+执行环境不可用时直接返回失败，不扫描其他服务或自动改用另一套凭证文件。
+取消授权必须先在沙箱中成功执行凭证清理，才会删除授权绑定；沙箱启动或命令执行失败时保留绑定。
+
+应用配置检查、初始化和登录使用相同的 HOME、CLI workspace 及 profile，继续复用已有应用与身份策略。
+仅当 `config show` 明确报告应用配置不存在时，才进入 `config init --new --force-init` 的应用配置流程；
+profile 选择错误、配置损坏或已有应用的密钥不可用均返回失败，不自动新建应用或覆盖凭证。
+不再执行固定来源的 `config bind --source openclaw`；历史 manifest 中额外的 `contextBind` 命令保持兼容但不会被调用。
+初始化失败、初始化结束仍未配置或后续登录失败会结束本次授权，不持续返回等待中或反复初始化。
+远程初始化进程的首次输出可以为空；后端按输出游标持续读取并拼接完整链接，
+轮询等待预算由 `byclaw.connector.lark.initialization-output-timeout` 控制，默认 `15s`；
+进行中的远程调用仍遵循底层接口超时。
+只有等待超时才返回 `APP_INIT_URL_MISSING`；进程异常退出、输出截断或进程丢失返回
+`APP_INIT_FAILED`，并清理本次初始化进程。收到初始化链接后仍需完成应用初始化和用户授权。
+平台的运行时路由仍负责规格解析、实例复用和共享宿主的工具沙箱选择，连接器不自行指定运行时类型。
+
+飞书首次用户授权优先读取 `lark-cli auth scopes --json` 返回的应用用户权限，再通过
+`auth login --domain all --scope <userScopes> --no-wait --json` 一次申请 CLI 领域权限与应用已开通用户权限的并集。
+命令仍以 Runtime Manifest 为唯一来源：`V0.6.0` DML 为内置默认登录模板补充 `scopesCheck` 和
+`loginWithScopes`，保留原 `login` 两步及自定义模板；先部署支持 `${userScopes}` 的 BE，再应用该迁移。
+只有明确标记为 `tokenType=user` 的权限可加入申请，未分类或应用身份权限不会混入。
+旧 Manifest 沿用原登录命令；查询权限失败时也继续原授权流程，但结果标记为 `unknown`。
+此流程不能自动开通飞书应用后台尚未启用的权限，也不能替代管理员审批。
+
+新授权必须等待本次 device-code 进程结束；默认 JSON 命令取得 `authorization_complete` 后核对用户身份与有效凭证，
+不能由旧 token 仍有效提前判定成功。完成输出按游标拼接并限制大小，只有退出码 0 或带明确缺项结果的 3
+可以进入凭证校验；沙箱将非零退出映射为 `FAILED` 时也遵循同一校验。已有自定义非 JSON 完成命令仍可在本次进程
+成功退出 0 后验证凭证，其权限摘要为 `unknown`；其他失败不会借用旧凭证报告新授权成功。
+接口的可选 `permissionStatus`（`complete`、`partial`、`unknown`）和 `missingScopes` 表示最近一次授权申请的核对结果，
+不是飞书全平台权限保证。已登录但部分权限未授予时保留可用连接，界面提示具体缺项。
+摘要复用已有加密绑定元数据，验证同步保留同账号的最近摘要，新授权结果覆盖旧摘要；token 始终留在沙箱。
+
+飞书、企业微信和钉钉授权 CLI 共用受限的用户身份执行入口：从用户 `/by` 挂载取得 UID/GID，
+准备当前连接器的私有目录，再以该身份执行 CLI，避免平台控制进程的 root 身份创建 Agent 无法读取的凭据。
+只修复固定目录和已知凭据文件的历史 root 属主，目录保持 `0700`、文件保持 `0600`；
+拒绝符号链接、文件硬链接和其他用户拥有的目标，不递归修改其他连接器，不重写密钥或替换锁文件。
+Linux 中飞书的配置位于私有 HOME 的 `.lark-cli`，密钥位于 `.local/share/lark-cli`。
+运行时自定义的 CLI 配置、数据或日志路径需与受管私有目录契约一致；越界覆盖会明确失败。
+平台普通命令和控制进程的执行身份保持不变。
+Linux root 隔离权限回归可运行 `python3 byclaw-be/src/test/python/test_connector_sandbox_identity.py`；
+该测试读取生产 launcher，在临时目录中验证降权、凭据内容和访问边界，非 Linux/root 环境会明确跳过。
+
+## 企业微信 CLI 执行位置
+
+远程 Platform 模式下，企业微信授权初始化、状态检查和撤销通过统一的用户执行环境入口选择沙箱，
+与 Agent 使用同一用户的 `/by/.connector-auth/.wecom-cli` 持久化目录。
+连接器不指定 OpenClaw、DSH 或 MicroVM；共享宿主沿用用户工具沙箱路由。
+一次扫码授权的进程、轮询和完成校验固定在同一沙箱，沙箱失败不能回退到 BE 本机凭据并报告已连接。
+CLI 子进程使用该目录作为 `HOME` 和 `WECOM_HOME`，显式指定 `WECOM_CLI_CONFIG_DIR`，
+并清空继承的 `WECOM_CLI_ACCESS_TOKEN`，避免其他身份覆盖当前用户的文件凭据。
+非远程的嵌入式模式保留 `ConnectorCliRunner` 本地执行方式，仍要求 BE 与业务运行时共享用户凭据挂载。
+
+主 BE、Harness 和 OpenClaw `Dockerfile`，以及 BE 的 `Dockerfile.arthas`、
+Harness 的 `Dockerfile.extensions` / `Dockerfile.tool_slim` 和 OpenClaw 的 `Dockerfile.byclaw`
+均固定 `@wecom/cli@1.3.4`。远程授权要求实际用户工具沙箱安装匹配的 CLI，
+只更新 BE 或共享 Agent 宿主镜像不能更新已经运行的工具沙箱及其中的技能。
+授权启动时，CLI 不支持命令或参数会返回 `PROVIDER_CLI_INCOMPATIBLE`，其他非零退出返回
+`PROVIDER_START_FAILED`；`PROVIDER_AUTH_URL_MISSING` 表示等待授权链接超时。
+错误响应不包含 CLI 的原始输出、凭据或授权链接。遇到版本不兼容，先在实际执行沙箱中检查
+`wecom-cli --version`，再核对该沙箱对应的服务规格、镜像摘要和模板，不能以 BE 中的 CLI 版本代替。
+
+升级前若授权仅保存在 BE 本机，部署此修复后需要在连接器里重新授权一次；不会自动复制或覆盖用户沙箱已有凭据。
+排查“页面已连接、Agent 未授权”时，应核对实际执行沙箱的凭据目录与技能来源，而不是仅查看数据库中的最近验证时间。
+通讯录技能若仍出现 `get_userlist` 和“超过 10 人停止”，需要检查旧镜像、同名关联技能或员工工作区技能，以及旧会话上下文。
+当前技能使用 `contact users search`，须提供真实关键词，一次最多 10 个关键词，并不支持全量导出通讯录。
+
+MicroVM 使用成功构建的云端模板快照。升级独立 Harness 沙箱时，从仓库根目录构建
+`middleware/byclaw-harness/Dockerfile`，使用新镜像标签更新对应服务规格并执行模板重建，
+确认新模板成功后再通过现有生命周期管理替换该用户的计算实例。
+更新必须覆盖实际执行沙箱的服务规格；例如更新 `byclaw-sandbox` 的镜像和模板，
+不会同时更新仍由 `byclaw-dsh` 规格创建的实例，也不会改变用户当前的执行环境路由。
+仅覆盖旧镜像标签或重启原实例不会更新已有模板。替换实例时保留用户 `/by` 及会话目录的持久化卷和 subPath，
+不要删除用户目录。部署后核对实际实例中的 CLI 版本、技能内容与凭据归属，再进行扫码及只读业务验收。
+
+消息 Skill 使用 `message aibot sessions list` 和 `message aibot send`，由智能体在用户要求查询或发送时执行；
+授权 Provider 和文档采集适配器不会发送消息。企业微信频道还有独立的 WebSocket 机器人通道，
+配置来自数字员工 `machineChannel`，由 `channel.stream.enabled` 控制，使用 BotID/Secret，不能由 CLI 授权成功推断已连接。
+
+## 钉钉 CLI 凭据与执行位置
+
+远程 Platform 模式下，钉钉 Device Flow、授权状态查询、撤销，以及群搜索、群消息扫描、待办扫描、
+以用户身份查询联系人和发送消息，统一通过 `DwsAuthService` 在对应用户沙箱执行。
+后台任务按扫描源创建者选择用户，主动消息按发送者选择用户；不会使用请求线程的其他身份或 BE 的旧登录态。
+原有钉钉机器人 SDK/Webhook 通道保持不变。
+
+CLI 子进程的 `HOME` / `DWS_HOME` 为 `/by/.connector-auth/.dws`，`DWS_CONFIG_DIR` 为其下的 `config`，
+`DWS_DISABLE_KEYCHAIN=1` 确保 Linux 文件密钥与 token 位于私有 HOME 的 `.local/share/dws-cli`。
+远程命令清空继承的 `DWS_CLIENT_ID` / `DWS_CLIENT_SECRET`，使用当前用户的 OAuth 凭据。
+沙箱解析、准备或命令执行失败时直接失败，不回退到 BE 本机文件；本地嵌入模式仍使用原来的用户 bucket，
+要求 BE 与业务运行时实际共享同一份用户存储。路径字符串相似并不代表 NFS 与 AgenticFS 之间会自动同步。
+本地模式沿用 BE 的 PATH 查找 CLI 可执行文件，并保留代理与自定义 CA 的传输环境变量；
+不会将共享的 DWS 应用凭据作为当前用户 OAuth 的替代身份。
+
+权限准备只遍历 DWS 的 `config` 和 `.local/share/dws-cli` 两个私有目录树，拒绝链接和其他用户属主，
+原地修正 root 创建的文件并保留密钥内容和锁文件 inode；目录 `0700`、文件 `0600`，新文件使用私有 umask。
+遍历限制为合计 10000 个条目、32 层目录，超过时明确失败，避免不受控遍历。
+不会扫描整个 `/by`、修改其他连接器内容，或自动复制旧 NFS 上的授权。
+
+部署后，原来仅在 BE 本地登录的用户需重新连接钉钉，让凭证写入实际用户存储。
+验收需在页面和 Agent 中分别执行授权状态查询，确认同一用户的凭据可见，并验证群搜索/扫描等只读调用。
+自动测试使用模拟进程及隔离临时目录，不会发送真实消息；线上扫码、业务接口及沙箱镜像仍需部署后验收。
+
 ## 邮箱连接器凭证存储
 
 `mail-form` 连接器（QQ、163、阿里邮箱、Fastmail、自定义 IMAP）按用户和连接器各保存一套账户配置。
@@ -221,6 +328,10 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 - 前端用户资料卡及助手设置统一使用已有的 `GET /system/user/getUserSuas?userId=42`，不新增 `/assiman/getUserSuas` 接口。
 - `userId` 是必填的用户主键（Long），不是工号或姓名；前端附带的 `language` 参数不参与用户查询。用户不存在时返回 `{code: -1, msg: '用户不存在'}`。
 - 成功返回 `{code: 0, data: {...}}`，资料卡读取 `userId`、`userName`、`userCode`（工号）、`phone`（沿用解密脱敏规则）、`pathName`（部门路径）、`positionName`（职位）。保留现有超级助手字段，助手或岗位记录缺失不会导致空指针异常。
+
+## 普通聊天消息姓名持久化
+
+共享库消息新增及缺失补插时，`insertBatch` 将消息对象已有的 `creatorName` 写入 `byai_message.creator_name`，供 `getMessageOutline` 等查询读取。姓名来源沿用现有逻辑：普通用户及助手消息均使用生成消息时的登录用户名；未提供姓名时保存 `NULL`。本次仅补齐 INSERT，不改变已有消息更新、独立租户镜像或群聊写入逻辑，也不回填历史空值。
 
 ## 群列表消息摘要
 

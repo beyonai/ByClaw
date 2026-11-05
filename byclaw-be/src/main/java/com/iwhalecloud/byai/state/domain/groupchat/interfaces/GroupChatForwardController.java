@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.interfaces;
 
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
+
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.domain.tenant.*;
@@ -20,13 +22,15 @@ import java.util.*;
 @RestController
 @RequestMapping("/group-chats")
 public class GroupChatForwardController {
+    private final TenantModeService tenantModes;
     private final GroupChatForwardService forwards;
     private final GroupChatForwardTargetQueryService targets;
     private final GroupChatForwardQueryService queries;
     private final TenantGroupForwardService tenant;
     private final ForwardCodec codec=new ForwardCodec();
     public GroupChatForwardController(GroupChatForwardService forwards,GroupChatForwardTargetQueryService targets,
-        GroupChatForwardQueryService queries,TenantGroupForwardService tenant) {
+        GroupChatForwardQueryService queries,TenantGroupForwardService tenant, TenantModeService tenantModes) {
+        this.tenantModes = tenantModes;
         this.forwards=forwards; this.targets=targets; this.queries=queries; this.tenant=tenant;
     }
     private ForwardActor actor() {
@@ -51,7 +55,7 @@ public class GroupChatForwardController {
         int page=number(query.get("pageNum"),1,Integer.MAX_VALUE),size=number(query.get("pageSize"),20,100);
         String keyword=query.get("keyword");if(keyword!=null && keyword.trim().length()>100)throw new IllegalArgumentException("FORWARD_INVALID_REQUEST");
         var actor=actor();long source=ForwardCodec.parseId(sourceId);
-        var result=TenantRequestContextHolder.get()==null?targets.listTargets(actor,source,page,size,keyword):tenant.targets(actor,source,page,size,keyword);
+        var result=(TenantRequestContextHolder.get()==null || tenantModes.isSharedDataTenant(actor.enterpriseId()))?targets.listTargets(actor,source,page,size,keyword):tenant.targets(actor,source,page,size,keyword);
         return ResponseUtil.successResponse(result);
     }
     @PostMapping("/{sourceId}/message-forwards")

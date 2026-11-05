@@ -1,0 +1,11 @@
+**
+!middleware/
+!middleware/byclaw-harness/
+!middleware/byclaw-harness/scripts/
+!middleware/byclaw-harness/scripts/godot.sh
+!middleware/byclaw-harness/scripts/godot-desktop.sh
+!middleware/byclaw-harness/scripts/godot-entrypoint.sh
+!middleware/byclaw-harness/scripts/godot-business-smoke.sh
+!middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py
+!middleware/byclaw-harness/tool-sandbox/
+!middleware/byclaw-harness/tool-sandbox/godot.capabilities.json

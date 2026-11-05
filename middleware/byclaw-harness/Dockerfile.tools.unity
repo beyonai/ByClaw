@@ -1,22 +1,90 @@
-# Preserve the deployed CN Editor, launchers, SSH/PTC runtime and container config.
-ARG UNITY_IMAGE=byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness-tools-unity@sha256:4e8a75098b97262957d85da69aea5ee6c68bbb90de9d4d2c0e23e411b05141c4
-FROM ${UNITY_IMAGE}
+# Repository-root context. Browser is itself built from Dockerfile.tools.base-slim.
+ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
+# Required: immutable, controlled Unity installation donor (not a runtime snapshot).
+ARG UNITY_DONOR_IMAGE
+FROM ${UNITY_DONOR_IMAGE} AS unity-assets
+
+FROM ${BROWSER_IMAGE} AS tools-unity
 USER root
-ARG UNITY_WEBGL_URL=https://download.unitychina.cn/download_unity/1623fc0bbb97/LinuxEditorTargetInstaller/UnitySetup-WebGL-Support-for-Editor-2022.3.62f3c1.tar.xz
-ARG UNITY_WEBGL_SHA256=7193dfdb816cb244db7604609be9916fdcc6364c777be04246430b7049a9cd8d
+ARG TARGETARCH
+RUN test "${TARGETARCH}" = amd64
+ENV UNITY_PATH=/opt/unity \
+    UPM_REGISTRY=https://packages.unity.cn \
+    BYCLAW_UNITY_DESKTOP_PORT=8083 \
+    UNITY_HUB_DISPLAY=:1
+# Explicit Unity Editor, Electron Hub, software rendering and desktop dependencies.
+# The inherited browser layer retains its own Chromium/byCLI dependency contract.
 RUN set -eux; \
-    test "$(/opt/unity/Editor/Unity -version)" = '2022.3.62f3c1'; \
-    curl --fail --location --retry 3 "${UNITY_WEBGL_URL}" -o /tmp/unity-webgl.tar.xz; \
-    printf '%s  %s\n' "${UNITY_WEBGL_SHA256}" /tmp/unity-webgl.tar.xz | sha256sum -c -; \
-    tar -xJf /tmp/unity-webgl.tar.xz -C /opt/unity ./Editor/Data/PlaybackEngines/WebGLSupport; \
-    rm /tmp/unity-webgl.tar.xz
-RUN set -eux; \
-    test -f /opt/unity/Editor/Data/PlaybackEngines/WebGLSupport/UnityEditor.WebGL.Extensions.dll; \
-    EM_CONFIG=/opt/unity/Editor/Data/PlaybackEngines/WebGLSupport/BuildTools/Emscripten/.emscripten /opt/unity/Editor/Data/PlaybackEngines/WebGLSupport/BuildTools/Emscripten/emscripten/emcc --version; \
-    test -x /usr/local/bin/byclaw-tool-env-sshd; \
-    test -x /usr/local/bin/unity-editor; \
-    test -x /usr/local/bin/unity-build
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential libgtk-3-0t64 libnss3 libasound2t64 libgl1 libglu1-mesa \
+        libgl1-mesa-dri libvulkan1 mesa-vulkan-drivers libxrandr2 libxcursor1 \
+        libxinerama1 libxi6 libxtst6 libxss1 libpulse0 libdbus-1-3 libsecret-1-0 \
+        libxml2 libnotify4 libncursesw6 libtinfo6 zlib1g \
+        xvfb xauth x11vnc openbox dbus-x11 gnome-keyring xdotool ffmpeg; \
+    python3 -m pip install --no-cache-dir websockify==0.13.0; \
+    python3 -m pip check; \
+    rm -rf /var/lib/apt/lists/* /root/.cache
+# Deliberate allowlist: never copy donor /home, /root, /by, /etc or /workspace.
+# No Unity license, Hub login, keyring or project state is an image input.
+COPY --from=unity-assets /opt/unity/Editor/ /opt/unity/Editor/
+COPY --from=unity-assets /opt/unity/agent-template/ /opt/unity/agent-template/
+COPY --from=unity-assets /opt/unity/skill/ /opt/unity/skill/
+COPY --from=unity-assets /opt/unity/desktop/ /opt/unity/desktop/
+COPY --from=unity-assets /opt/unity/version /opt/unity/version
+COPY --from=unity-assets /opt/unityhub/ /opt/unityhub/
+COPY --from=unity-assets /usr/local/bin/unity-* /usr/local/bin/
 COPY middleware/byclaw-harness/tool-sandbox/unity.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
-RUN node -e 'const m=require("/etc/byclaw-tool-sandbox/capabilities.json");if(m.contract!=="byclaw.tool-sandbox/v1"||m.purpose!=="unity"||m.operations.protocol!=="ssh"||m.operations.exposure!=="private"||JSON.stringify(m.capabilities)!==JSON.stringify(["unity","games"]))process.exit(1)'
+# Overlay the reviewed supervisor fix after dependency installation and assets.
+COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
+# Adapt installation-owned launchers for a clean home. First-time Hub login must
+# be visible; :2 remains available for an owner's already configured Hub session.
+# Unity's private RFB port must not overlap browser sessions (5901..6000).
+RUN python3 - <<'PY'
+from pathlib import Path
+
+desktop = Path('/usr/local/bin/unity-desktop')
+source = desktop.read_text()
+old = '''if [ -d "${HOME}/.config/unityhub" ]; then
+  supervise unityhub env DISPLAY=:2 /opt/unityhub/unityhub --no-sandbox --disable-gpu
+fi'''
+assert old in source, 'Unity donor desktop contract changed; review startup before rebuilding'
+source = source.replace(old, 'supervise unityhub env DISPLAY="${UNITY_HUB_DISPLAY:-:1}" /opt/unityhub/unityhub --no-sandbox --disable-gpu')
+source = source.replace('-rfbport 5901', '-rfbport 6901').replace('localhost:5901', 'localhost:6901')
+source = source.replace("# Unity Hub runs on its own hidden", "# Unity Hub can run on a separate hidden")
+source = source.replace("# display :2 with the user's saved sign-in, so the Personal license keeps renewing.", "# display :2 after sign-in; initial login is visible on :1. Licenses belong to the owner.")
+desktop.write_text(source)
+entrypoint = Path('/usr/local/bin/unity-entrypoint')
+source = entrypoint.read_text()
+assert source.count('\nsu -s ') == 2, 'Unity donor entrypoint contract changed; review privilege drop'
+source = source.replace('\nsu -s ', '\nenv -u BYCLAW_TOOL_ENV_HOST_KEY -u BYCLAW_TOOL_ENV_AUTHORIZED_KEY su -s ')
+entrypoint.write_text(source)
+skill = Path('/opt/unity/skill/SKILL.md')
+skill.write_text(skill.read_text().replace('(`$UNITY_PATH`, licensed)', '(`$UNITY_PATH`; requires the owner\'s valid runtime license)'))
+PY
+# Unity Hub dynamically loads ICU through its licensing client; ldd does not detect this dependency.
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libicu76 \
+    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    test -x /opt/unity/Editor/Unity; \
+    test -x /opt/unityhub/unityhub-bin; \
+    test -x /opt/unity/Editor/Data/PlaybackEngines/WebGLSupport/BuildTools/Emscripten/llvm/clang; \
+    test -x /opt/unity/Editor/Data/PlaybackEngines/WebGLSupport/BuildTools/Emscripten/binaryen/bin/wasm-opt; \
+    test -f /opt/unity/agent-template/Assets/Editor/AgentBuild.cs; \
+    test -f /opt/unity/desktop/web/vnc.html; \
+    for script in /usr/local/bin/unity-*; do head -1 "$script" | grep -q python && continue; bash -n "$script"; done; \
+    for binary in /opt/unity/Editor/Unity /opt/unityhub/unityhub-bin \
+        /opt/unity/Editor/Data/PlaybackEngines/WebGLSupport/BuildTools/Emscripten/llvm/clang \
+        /opt/unity/Editor/Data/PlaybackEngines/WebGLSupport/BuildTools/Emscripten/binaryen/bin/wasm-opt; do \
+        ldd "$binary" >/tmp/unity-ldd.txt; \
+        if grep -q 'not found' /tmp/unity-ldd.txt; then cat /tmp/unity-ldd.txt; exit 1; fi; \
+    done; \
+    rm /tmp/unity-ldd.txt; \
+    env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env; \
+    chmod 0644 /etc/byclaw-tool-env.session-env
+EXPOSE 8083
 LABEL io.byclaw.tool-sandbox.contract="byclaw.tool-sandbox/v1" \
       io.byclaw.tool-sandbox.purpose="unity"
+ENTRYPOINT ["/usr/local/bin/unity-entrypoint"]
+CMD ["tools"]

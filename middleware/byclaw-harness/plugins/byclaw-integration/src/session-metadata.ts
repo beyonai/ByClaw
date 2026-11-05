@@ -12,6 +12,7 @@ import { resolve } from 'node:path'
 import { z } from 'zod'
 import { byClawBoundRootSessionId, type ByClawRootBinding } from './session-workspace.ts'
 import { isLegacyProjectWorkspaceTransition } from './session-cwd.ts'
+import { isSafeSharedWorkerRouteRefresh } from './shared-worker-route.ts'
 
 const byClawRootBindingSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('main') }),
@@ -66,6 +67,15 @@ function sameBinding(left: ByClawRootBinding, right: ByClawRootBinding): boolean
   return left.kind === right.kind
     && (left.kind === 'main'
       || (right.kind === 'template' && left.templateId === right.templateId))
+}
+
+function stableGroupCoordination(value: GroupCoordinationSpec): Omit<GroupCoordinationSpec, 'effectiveWorkerAgentTypes'> {
+  const { effectiveWorkerAgentTypes: _routes, ...stable } = value
+  return stable
+}
+
+function sameStableGroupCoordination(left: GroupCoordinationSpec, right: GroupCoordinationSpec): boolean {
+  return JSON.stringify(stableGroupCoordination(left)) === JSON.stringify(stableGroupCoordination(right))
 }
 
 function normalizedRequested(value: EnsureByClawRootMetadata): EnsureByClawRootMetadata {
@@ -131,13 +141,21 @@ export class ByClawSessionMetadataStore {
               throw new Error('An existing ordinary session only accepts an identity-preserving server DIRECT scope upgrade')
             }
           }
-          const routeUpgrade = current.groupCoordination !== undefined && requested.groupCoordination !== undefined
-            && current.groupCoordination.effectiveWorkerAgentTypes === undefined
-            && requested.groupCoordination.effectiveWorkerAgentTypes !== undefined
-            && JSON.stringify(current.groupCoordination) === JSON.stringify({ ...requested.groupCoordination, effectiveWorkerAgentTypes: undefined })
-              ? requested.groupCoordination : undefined
+          const sameStableScope = current.groupCoordination !== undefined && requested.groupCoordination !== undefined
+            && sameStableGroupCoordination(current.groupCoordination, requested.groupCoordination)
+          const currentRoutes = current.groupCoordination?.effectiveWorkerAgentTypes
+          const requestedRoutes = requested.groupCoordination?.effectiveWorkerAgentTypes
+          const routesChanged = requestedRoutes !== undefined
+            && JSON.stringify(currentRoutes) !== JSON.stringify(requestedRoutes)
+          let routeRefresh: GroupCoordinationSpec | undefined
+          if (sameStableScope && currentRoutes === undefined && requestedRoutes !== undefined) {
+            routeRefresh = requested.groupCoordination!
+          } else if (sameStableScope && currentRoutes !== undefined && requestedRoutes !== undefined && routesChanged
+            && isSafeSharedWorkerRouteRefresh(currentRoutes, requestedRoutes)) {
+            routeRefresh = requested.groupCoordination!
+          }
           if (current.groupCoordination !== undefined && requested.groupCoordination !== undefined
-            && routeUpgrade === undefined && JSON.stringify(current.groupCoordination) !== JSON.stringify(requested.groupCoordination)) {
+            && (!sameStableScope || (routesChanged && routeRefresh === undefined))) {
             throw new Error('A persisted group task cannot change its server-bound coordination scope')
           }
           if (!sameBinding(current.binding, requested.binding)) {
@@ -155,12 +173,12 @@ export class ByClawSessionMetadataStore {
               `ByClaw session ${rootSessionId} cannot change cwd from "${current.identity.cwd ?? '<unset>'}" to "${requested.cwd}"`,
             )
           }
-          if (upgrade !== undefined || routeUpgrade !== undefined || workspaceUpgrade) {
+          if (upgrade !== undefined || routeRefresh !== undefined || workspaceUpgrade) {
             const scoped = {
               ...current,
               ...(workspaceUpgrade ? { identity: { ...current.identity, cwd: requested.cwd! } } : {}),
-              ...(upgrade === undefined && routeUpgrade === undefined ? {} : {
-                groupCoordination: structuredClone((upgrade ?? routeUpgrade)!),
+              ...(upgrade === undefined && routeRefresh === undefined ? {} : {
+                groupCoordination: structuredClone((upgrade ?? routeRefresh)!),
               }),
             }
             await this.table.put(rootSessionId, scoped)

@@ -85,7 +85,7 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
   };
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+    <div className="ub ub-ver ub-f1" style={{ width: '100%', minHeight: 0, gap: 16 }}>
       <Space wrap>
         <Input.Search
           placeholder={intl.formatMessage({ id: 'sandboxMgr.shared.search' })}
@@ -99,7 +99,7 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
           value={status}
           onChange={setStatus}
           style={{ width: 150 }}
-          options={['STARTING', 'RUNNING', 'UNKNOWN', 'RELEASING', 'RELEASED', 'FAILED'].map((value) => ({
+          options={['STARTING', 'RUNNING', 'DRAINING', 'UNKNOWN', 'RELEASING', 'RELEASED', 'FAILED'].map((value) => ({
             value,
             label: formatStatus(value),
           }))}
@@ -126,86 +126,100 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
       </Space>
       {launchOpen && <SharedLaunch onClose={() => setLaunchOpen(false)} onLaunched={() => void refresh()} />}
       {error && <Alert type="error" message={error} showIcon />}
-      <Table<SharedRecord>
-        rowKey="id"
-        loading={loading}
-        dataSource={records}
-        scroll={{ x: 1400 }}
-        pagination={{ current: page.pageIndex, pageSize: page.pageSize, total: page.total, onChange: load }}
-        columns={[
-          {
-            title: intl.formatMessage({ id: 'sandboxMgr.table.sandboxId' }),
-            dataIndex: 'sandboxId',
-            render: (value, row) => value || row.id,
-          },
-          { title: intl.formatMessage({ id: 'sandboxMgr.shared.serviceKey' }), dataIndex: 'serviceKey' },
-          { title: intl.formatMessage({ id: 'sandboxMgr.shared.profileKey' }), dataIndex: 'profileKey' },
-          {
-            title: intl.formatMessage({ id: 'sandboxMgr.shared.poolScope' }),
-            dataIndex: 'poolScope',
-            render: (value) =>
-              intl.formatMessage({
-                id: value === 'TENANT' ? 'sandboxMgr.shared.pool.tenant' : 'sandboxMgr.shared.pool.global',
-              }),
-          },
-          {
-            title: intl.formatMessage({ id: 'sandboxMgr.shared.tenant' }),
-            dataIndex: 'enterpriseId',
-            render: (value) => value || '-',
-          },
-          { title: intl.formatMessage({ id: 'sandboxMgr.shared.onlineUsers' }), dataIndex: 'onlineUsers' },
-          {
-            title: intl.formatMessage({ id: 'sandboxMgr.shared.capacity' }),
-            render: (_, row) => `${row.occupiedSlots} / ${row.capacity}`,
-          },
-          {
-            title: intl.formatMessage({ id: 'sandboxMgr.table.status' }),
-            dataIndex: 'status',
-            render: (value) => <Tag>{formatStatus(value)}</Tag>,
-          },
-          {
-            title: intl.formatMessage({ id: 'sandboxMgr.shared.launch.policy' }),
-            dataIndex: 'releasePolicy',
-            render: (value) => intl.formatMessage({ id: `sandboxMgr.shared.launch.${value || 'HEARTBEAT'}` }),
-          },
-          {
-            title: intl.formatMessage({ id: 'sandboxMgr.shared.launch.releaseAt' }),
-            dataIndex: 'releaseAt',
-            render: time,
-          },
-          { title: intl.formatMessage({ id: 'sandboxMgr.table.createTime' }), dataIndex: 'createTime', render: time },
-          { title: intl.formatMessage({ id: 'sandboxMgr.table.releaseTime' }), dataIndex: 'releaseTime', render: time },
-          {
-            title: intl.formatMessage({ id: 'sandboxMgr.table.releaseReason' }),
-            dataIndex: 'releaseReason',
-            render: (value) => formatReleaseReason(intl, value),
-          },
-          {
-            title: intl.formatMessage({ id: 'sandboxMgr.table.action' }),
-            fixed: 'right',
-            render: (_, row) => (
-              <Space>
-                <Button type="link" onClick={() => setSelected(row)}>
-                  {intl.formatMessage({ id: 'sandboxMgr.shared.viewUsers' })}
-                </Button>
-                {canManage && ['STARTING', 'RUNNING'].includes(row.status) && (
-                  <Popconfirm
-                    title={intl.formatMessage({ id: 'sandboxMgr.shared.releaseConfirm' })}
-                    description={intl.formatMessage({ id: 'sandboxMgr.shared.releaseDescription' })}
-                    okText={intl.formatMessage({ id: 'sandboxMgr.shared.release' })}
-                    cancelText={intl.formatMessage({ id: 'sandboxMgr.shared.cancel' })}
-                    onConfirm={() => release(row)}
-                  >
-                    <Button type="link" danger loading={releasing === row.id}>
-                      {intl.formatMessage({ id: 'sandboxMgr.shared.release' })}
-                    </Button>
-                  </Popconfirm>
-                )}
-              </Space>
-            ),
-          },
-        ]}
-      />
+      <div className="ub-f1 shared-table-scroll" style={{ minHeight: 0, overflow: 'auto' }}>
+        <Table<SharedRecord>
+          rowKey="id"
+          loading={loading}
+          dataSource={records}
+          scroll={{ x: 1400, y: 'calc(100vh - 280px)' }}
+          pagination={{
+            current: page.pageIndex,
+            pageSize: page.pageSize,
+            total: page.total,
+            showTotal: (total) => intl.formatMessage({ id: 'sandboxMgr.pagination.total' }, { total }),
+            onChange: load,
+          }}
+          columns={[
+            {
+              title: intl.formatMessage({ id: 'sandboxMgr.table.sandboxId' }),
+              dataIndex: 'sandboxId',
+              width: 280,
+              ellipsis: true,
+              render: (value, row) => value || row.id,
+            },
+            { title: intl.formatMessage({ id: 'sandboxMgr.shared.serviceKey' }), dataIndex: 'serviceKey' },
+            { title: intl.formatMessage({ id: 'sandboxMgr.shared.profileKey' }), dataIndex: 'profileKey' },
+            {
+              title: intl.formatMessage({ id: 'sandboxMgr.shared.poolScope' }),
+              dataIndex: 'poolScope',
+              render: (value) =>
+                intl.formatMessage({
+                  id: value === 'TENANT' ? 'sandboxMgr.shared.pool.tenant' : 'sandboxMgr.shared.pool.global',
+                }),
+            },
+            {
+              title: intl.formatMessage({ id: 'sandboxMgr.shared.tenant' }),
+              dataIndex: 'enterpriseId',
+              render: (value) => value || '-',
+            },
+            { title: intl.formatMessage({ id: 'sandboxMgr.shared.onlineUsers' }), dataIndex: 'onlineUsers' },
+            {
+              title: intl.formatMessage({ id: 'sandboxMgr.shared.capacity' }),
+              render: (_, row) => `${row.occupiedSlots} / ${row.capacity}`,
+            },
+            {
+              title: intl.formatMessage({ id: 'sandboxMgr.table.status' }),
+              dataIndex: 'status',
+              render: (value) => <Tag>{formatStatus(value)}</Tag>,
+            },
+            {
+              title: intl.formatMessage({ id: 'sandboxMgr.shared.launch.policy' }),
+              dataIndex: 'releasePolicy',
+              render: (value) => intl.formatMessage({ id: `sandboxMgr.shared.launch.${value || 'HEARTBEAT'}` }),
+            },
+            {
+              title: intl.formatMessage({ id: 'sandboxMgr.shared.launch.releaseAt' }),
+              dataIndex: 'releaseAt',
+              render: time,
+            },
+            { title: intl.formatMessage({ id: 'sandboxMgr.table.createTime' }), dataIndex: 'createTime', render: time },
+            {
+              title: intl.formatMessage({ id: 'sandboxMgr.table.releaseTime' }),
+              dataIndex: 'releaseTime',
+              render: time,
+            },
+            {
+              title: intl.formatMessage({ id: 'sandboxMgr.table.releaseReason' }),
+              dataIndex: 'releaseReason',
+              render: (value) => formatReleaseReason(intl, value),
+            },
+            {
+              title: intl.formatMessage({ id: 'sandboxMgr.table.action' }),
+              fixed: 'right',
+              render: (_, row) => (
+                <Space>
+                  <Button type="link" onClick={() => setSelected(row)}>
+                    {intl.formatMessage({ id: 'sandboxMgr.shared.viewUsers' })}
+                  </Button>
+                  {canManage && ['STARTING', 'RUNNING', 'DRAINING'].includes(row.status) && (
+                    <Popconfirm
+                      title={intl.formatMessage({ id: 'sandboxMgr.shared.releaseConfirm' })}
+                      description={intl.formatMessage({ id: 'sandboxMgr.shared.releaseDescription' })}
+                      okText={intl.formatMessage({ id: 'sandboxMgr.shared.release' })}
+                      cancelText={intl.formatMessage({ id: 'sandboxMgr.shared.cancel' })}
+                      onConfirm={() => release(row)}
+                    >
+                      <Button type="link" danger loading={releasing === row.id}>
+                        {intl.formatMessage({ id: 'sandboxMgr.shared.release' })}
+                      </Button>
+                    </Popconfirm>
+                  )}
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </div>
       {selected && (
         <SharedMembersDrawer
           key={selected.id}
@@ -215,6 +229,6 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
           onReleased={refresh}
         />
       )}
-    </Space>
+    </div>
   );
 }

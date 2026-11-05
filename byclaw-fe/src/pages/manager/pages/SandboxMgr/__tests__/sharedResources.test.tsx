@@ -79,6 +79,36 @@ test('shows shared capacity and opens members of the selected instance', async (
   expect(screen.queryByRole('button', { name: '释放用户' })).not.toBeInTheDocument();
 });
 
+test('keeps long sandbox ids compact and uses the user-resource pagination layout', async () => {
+  const sandboxId = 'microvm--cn-beijing--sbx-c16bae09-8c69-4767-b631-c86e86ebecce';
+  (listSharedRecords as jest.Mock).mockResolvedValueOnce({
+    records: [
+      {
+        id: 's1',
+        sandboxId,
+        serviceKey: 'byclaw-sandbox',
+        profileKey: 'xs',
+        poolScope: 'GLOBAL',
+        status: 'RUNNING',
+        capacity: 5,
+        occupiedSlots: 1,
+        onlineUsers: 1,
+      },
+    ],
+    total: 140,
+  });
+
+  const { container } = render(<SharedResources canManage={false} />);
+  const idCell = (await screen.findByText(sandboxId)).closest('td');
+
+  expect(idCell).toHaveClass('ant-table-cell-ellipsis');
+  expect(idCell).toHaveAttribute('title', sandboxId);
+  expect(container.querySelector('.ant-table-body')).toHaveStyle({ maxHeight: 'calc(100vh - 280px)' });
+  expect(container.querySelector('.shared-table-scroll')).toHaveStyle({ overflow: 'auto' });
+  expect(container.querySelectorAll('.ant-table-pagination')).toHaveLength(1);
+  expect(screen.getByText('共 140 条')).toBeInTheDocument();
+});
+
 test('queries running records by default and allows clearing the status filter', async () => {
   const { container } = render(<SharedResources canManage={false} />);
   await waitFor(() =>
@@ -98,6 +128,36 @@ test('queries running records by default and allows clearing the status filter',
   await waitFor(() =>
     expect(listSharedRecords).toHaveBeenLastCalledWith(expect.objectContaining({ status: undefined }))
   );
+});
+
+test.each([
+  ['zh-CN', '排空中', '释放实例'],
+  ['en-US', 'Draining', 'Release instance'],
+])('allows managers to release draining shared instances in %s', async (locale, draining, release) => {
+  mockLocale = locale;
+  (listSharedRecords as jest.Mock).mockResolvedValueOnce({
+    records: [
+      {
+        id: 'draining-1',
+        sandboxId: 'sandbox-draining',
+        serviceKey: 'byclaw-sandbox',
+        profileKey: 'xs',
+        poolScope: 'GLOBAL',
+        status: 'DRAINING',
+        capacity: 5,
+        occupiedSlots: 1,
+        onlineUsers: 1,
+      },
+    ],
+    total: 1,
+  });
+
+  render(<SharedResources canManage />);
+
+  expect(await screen.findByText(draining)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: release })).toBeInTheDocument();
+  fireEvent.mouseDown(screen.getAllByRole('combobox')[0]);
+  expect(await screen.findByTitle(draining)).toBeInTheDocument();
 });
 
 test.each([

@@ -150,6 +150,7 @@ public class SsResExtSkillService {
                 summary.setResourceId(copy.getResourceId());
                 summary.setResourceName(copy.getResourceName());
                 summary.setResourceStatus(copy.getResourceStatus());
+                summary.setPublishScopeMode(copy.getPublishScopeMode());
                 result.putIfAbsent(sourceId, summary);
             } catch (JSONException | IllegalArgumentException ignored) {
                 // 无法识别来源的历史数据不提供发布入口摘要。

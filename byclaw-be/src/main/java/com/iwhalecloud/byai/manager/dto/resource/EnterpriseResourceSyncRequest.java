@@ -10,7 +10,10 @@ import java.util.List;
 import java.util.Set;
 
 /** Field presence is part of the synchronization contract; absent and false are different operations. */
-public record EnterpriseResourceSyncRequest(Boolean viewAuth, Boolean autoAuthorize, Scope scope) {
+public record EnterpriseResourceSyncRequest(Boolean viewAuth, Boolean autoAuthorize, Scope scope, ResourcePublishScope publishScope) {
+    public EnterpriseResourceSyncRequest(Boolean viewAuth, Boolean autoAuthorize, Scope scope) {
+        this(viewAuth, autoAuthorize, scope, null);
+    }
     public static final Set<String> TYPES = Set.of("TOOLKIT", "MCP", "AGENT", "KG_DOC", "KG_DB", "KG_QA",
         "KG_TERM", "SKILL");
 
@@ -41,7 +44,14 @@ public record EnterpriseResourceSyncRequest(Boolean viewAuth, Boolean autoAuthor
         if (scope != null && view == null && auto == null) {
             throw new IllegalArgumentException(I18nUtil.get("resource.sync.scope.flags.required"));
         }
-        return new EnterpriseResourceSyncRequest(view, auto, scope);
+        ResourcePublishScope publication = null;
+        if (json.containsKey("publishScope")) {
+            if (!(json.get("publishScope") instanceof JSONObject object)
+                || !Set.of("mode", "orgIds").containsAll(object.keySet())) throw new IllegalArgumentException("发布范围格式无效");
+            publication = new ResourcePublishScope(object.getString("mode"), ids(object, "orgIds"));
+            publication.selectedIds();
+        }
+        return new EnterpriseResourceSyncRequest(view, auto, scope, publication);
     }
 
     private static Boolean flag(JSONObject json, String field) {

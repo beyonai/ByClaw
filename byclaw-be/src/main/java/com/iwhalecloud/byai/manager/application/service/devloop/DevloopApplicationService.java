@@ -2197,28 +2197,19 @@ public class DevloopApplicationService implements PendingTaskConfirmHook {
             cmd.add("--format");
             cmd.add("json");
 
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.redirectErrorStream(true);
-            // 群搜索由当前登录用户发起:按其身份隔离 dws 环境(禁 keychain + DWS_CONFIG_DIR + XDG_DATA_HOME)。
-            dwsAuthService.applyUserDwsEnv(pb.environment(), CurrentUserHolder.getCurrentUserId());
-            Process process = pb.start();
-
-            StringBuilder output = new StringBuilder();
-            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line);
-                }
-            }
-
-            boolean finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroyForcibly();
+            // 当前登录用户的群搜索复用连接器授权的执行上下文。
+            var result = dwsAuthService.runCommand(CurrentUserHolder.getCurrentUserId(), cmd,
+                java.time.Duration.ofSeconds(30), 1024 * 1024);
+            if (result.exitCode() == 124) {
                 return ResponseUtil.failRes(I18nUtil.get("devloop.dingtalk.search.timeout"));
+            }
+            if (result.exitCode() != 0 || result.truncated()) {
+                throw new IllegalStateException(result.truncated()
+                    ? "DWS command output truncated" : "DWS exit code: " + result.exitCode());
             }
 
             var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(output.toString());
+            com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(result.output());
             com.fasterxml.jackson.databind.JsonNode groupsNode = root.path("result").path("groups");
             if (groupsNode.isArray()) {
                 for (com.fasterxml.jackson.databind.JsonNode conv : groupsNode) {

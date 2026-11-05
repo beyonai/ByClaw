@@ -1,6 +1,6 @@
 {
   "contract": "byclaw.tool-sandbox/v1",
-  "runtimeVersion": "D0.6.0-media",
+  "runtimeVersion": "D0.6.0_media",
   "purpose": "media",
   "os": "linux",
   "operations": { "protocol": "ssh", "exposure": "private" },

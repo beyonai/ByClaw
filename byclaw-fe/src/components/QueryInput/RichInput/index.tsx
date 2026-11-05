@@ -35,6 +35,7 @@ import useOnPaste from './useOnPaste';
 import useGlobal from '@/hooks/useGlobal';
 import type { MentionElementType } from './elements/mention';
 import { getEmployeeResourceReplacementTab, isEmployeeResourceAvailable } from './utils/employeeResourceCompatibility';
+import EditableRootWithAria from './EditableRoot';
 
 type SetTextParams = string | Parameters<typeof getDescendantValueByDefaultValue>[0];
 
@@ -131,12 +132,6 @@ const insertDigitalEmployeeAtStart = (editor: Editor, node: MentionElementType) 
     Transforms.select(editor, caretPoint);
   }
 };
-
-/** 带 aria-label 的 Editable 根元素，用于无障碍与测试定位（slate-react 未将 aria-label 透传到 DOM） */
-const EditableRootWithAria = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>((props, ref) => (
-  <div {...props} ref={ref} aria-label="byai-input" />
-));
-EditableRootWithAria.displayName = 'EditableRootWithAria';
 
 export interface RichInputRef {
   setText: (val: SetTextParams) => void;

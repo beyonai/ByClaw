@@ -22,7 +22,8 @@ import org.springframework.stereotype.Component;
 public class ConnectorManifestCommandResolver {
 
     private static final Map<String, ManifestCommandCatalog.PlaceholderPolicy> DEFAULT_PLACEHOLDERS = Map.of(
-        "deviceCode", ManifestCommandCatalog.PlaceholderPolicy.safeValue(512)
+        "deviceCode", ManifestCommandCatalog.PlaceholderPolicy.safeValue(512),
+        "userScopes", ManifestCommandCatalog.PlaceholderPolicy.scopeList(64 * 1024)
     );
 
     private final ObjectMapper objectMapper;

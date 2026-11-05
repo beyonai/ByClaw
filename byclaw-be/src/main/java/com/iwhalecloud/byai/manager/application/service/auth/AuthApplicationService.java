@@ -143,6 +143,9 @@ public class AuthApplicationService {
     @Autowired
     private com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationService skillPublicationService;
 
+    @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess publicationAccess;
+
 
     @Autowired
     private com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationScopeService employeeScopes;
@@ -1749,7 +1752,8 @@ public class AuthApplicationService {
         if (hasResourceAccessPermission(resource)) return true;
         if (!synchronizedCapability) {
             if (isCurrentUserGlobalResourceManager() && Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return true;
-            if (!Boolean.TRUE.equals(resource.getViewAuthControlled())) return "enterprise".equals(resource.getOwnerType());
+            if (!Boolean.TRUE.equals(resource.getViewAuthControlled())) return "enterprise".equals(resource.getOwnerType())
+                && (publicationAccess == null || publicationAccess.inAudience(resource));
             if (!Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
         }
         if (CurrentUserHolder.getCurrentUserId() == null) return false;
@@ -3821,6 +3825,7 @@ public class AuthApplicationService {
         List<Long> personalSkillSourceIds = resources.stream().filter(this::isPersonalSkillPublishSource)
             .map(SsResource::getResourceId).collect(Collectors.toList());
         var skillPublications = ssResExtSkillService.findCurrentPublications(personalSkillSourceIds);
+        var publicationBatch = publicationAccess == null ? null : publicationAccess.loadBatch(resources);
         Map<Long, Boolean> employeePublishPermissions = employeeGovernance == null ? Collections.emptyMap()
             : employeeGovernance.canPublishBatch(resources);
         Map<Long, ResourceOperationPermissionsVo> result = new LinkedHashMap<>();
@@ -3840,10 +3845,12 @@ public class AuthApplicationService {
                     ? permission.isHasUsePermission() || viewPrivilegeIds.contains(resource.getResourceId())
                     : (permission.isCanViewDetail()
                     || !Boolean.TRUE.equals(resource.getViewAuthControlled()) && "enterprise".equals(resource.getOwnerType())
+                        && (publicationAccess == null || publicationAccess.inAudience(resource, publicationBatch))
                     || Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())
                         && (viewPrivilegeIds.contains(resource.getResourceId()) || isCurrentUserGlobalResourceManager())));
             permission.setHasViewPermission(visible);
             permission.setCanViewBasicInfo(visible);
+            fillPublicationPermission(resource, permission, publicationBatch);
             populateManageApplyPermission(resource, permission, pendingManageIds);
             if (permission.isCanPublishToEnterprise()) {
                 permission.setSkillPublication(skillPublications.get(resource.getResourceId()));
@@ -3851,6 +3858,22 @@ public class AuthApplicationService {
         });
         populateEmployeePublicationStatuses(result);
         return result;
+    }
+
+    private void fillPublicationPermission(SsResource resource, ResourceOperationPermissionsVo permission) {
+        fillPublicationPermission(resource, permission, publicationAccess == null ? null : publicationAccess.loadBatch(List.of(resource)));
+    }
+    private void fillPublicationPermission(SsResource resource, ResourceOperationPermissionsVo permission,
+        com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess.Batch batch) {
+        if (publicationAccess == null || !com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess.supported(resource)) return;
+        permission.setPublishScopeMode(com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess.mode(resource));
+        permission.setPublishScopeController(resource.getPublishScopeController());
+        permission.setPublishScopeRevision(resource.getPublishScopeRevision());
+        boolean sameTenant = Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId());
+        permission.setCanManagePublishScope(sameTenant && !Objects.equals(resource.getResourceStatus(), -1)
+            && (permission.isHasManagePermission() || Objects.equals(resource.getCreateBy(), CurrentUserHolder.getCurrentUserId())
+                || isCurrentUserGlobalResourceManager()));
+        permission.setPublishedScope(sameTenant ? publicationAccess.labels(resource.getResourceId(), batch) : List.of());
     }
 
     private ResourceOperationPermissionsVo buildResourceOperationPermissions(SsResource ssResource,
@@ -4104,6 +4127,7 @@ public class AuthApplicationService {
             ? hasUsePermission : canManage || hasUsePermission));
         vo.setHasViewPermission(!isResourceRemoved && hasResourceViewPermission(ssResource));
         vo.setCanViewBasicInfo(vo.isHasViewPermission());
+        fillPublicationPermission(ssResource, vo);
         // 入口权限与发布资格一致，已有副本通过状态摘要切换为查看操作。
         vo.setCanPublishToEnterprise(canPublishSkillToEnterprise(ssResource));
         if (vo.isCanPublishToEnterprise()) {

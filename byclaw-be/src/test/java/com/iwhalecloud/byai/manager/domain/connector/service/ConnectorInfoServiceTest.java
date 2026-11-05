@@ -5,6 +5,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 import com.alibaba.fastjson.JSON;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
+import com.iwhalecloud.byai.manager.dto.connector.ConnectorConnectionDto;
+import com.iwhalecloud.byai.manager.mapper.connector.ConnectorInfoMapper;
+import org.springframework.test.util.ReflectionTestUtils;
+import java.util.List;
+import java.util.Map;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorListDto;
 
 class ConnectorInfoServiceTest {
@@ -210,6 +219,56 @@ class ConnectorInfoServiceTest {
               {"key":"appId","label":"AppID","inputType":"text","maxLength":256}
             ]}}
             """);
+    }
+
+    @Test
+    void connectorListProjectsPermissionWarningWithoutExposingBindingMetadata() throws Exception {
+        ConnectorListDto dto = new ConnectorListDto();
+        dto.setAuthCredential(permissionMetadata());
+        assertThat(JSON.toJSONString(dto)).doesNotContain("authCredential", "private-ref");
+        assertThat(new ObjectMapper().writeValueAsString(dto)).doesNotContain("authCredential", "private-ref");
+
+        ConnectorInfoService.sanitizePermissionSummary(dto);
+
+        assertThat(dto.getPermissionStatus()).isEqualTo("partial");
+        assertThat(dto.getMissingScopes()).containsExactly("contact:user.email:readonly");
+        assertThat(dto.getAuthCredential()).isNull();
+        assertThat(JSON.toJSONString(dto)).doesNotContain("private-ref", "authorizationId");
+    }
+
+    @Test
+    void connectionsProjectTheSamePermissionSummaryAfterRefresh() throws Exception {
+        ConnectorConnectionDto dto = new ConnectorConnectionDto();
+        dto.setAuthCredential(permissionMetadata());
+        assertThat(new ObjectMapper().writeValueAsString(dto)).doesNotContain("authCredential", "private-ref");
+        assertThat(JSON.toJSONString(dto)).doesNotContain("authCredential", "private-ref");
+        ConnectorInfoMapper mapper = mock(ConnectorInfoMapper.class);
+        when(mapper.selectConnectionsByUserId("user-1")).thenReturn(List.of(dto));
+        ConnectorInfoService service = new ConnectorInfoService();
+        ReflectionTestUtils.setField(service, "connectorInfoMapper", mapper);
+
+        assertThat(service.listConnections("user-1")).containsExactly(dto);
+        assertThat(dto.getPermissionStatus()).isEqualTo("partial");
+        assertThat(dto.getMissingScopes()).containsExactly("contact:user.email:readonly");
+        assertThat(dto.getAuthCredential()).isNull();
+    }
+
+    @Test
+    void legacyAndUnreadableBindingsDoNotIntroducePermissionWarnings() {
+        for (String cipher : new String[] {null, "invalid-cipher", Sm4Util.encrypt("{\"accountId\":\"account-1\"}")}) {
+            ConnectorListDto dto = new ConnectorListDto();
+            dto.setAuthCredential(cipher);
+            ConnectorInfoService.sanitizePermissionSummary(dto);
+            assertThat(dto.getPermissionStatus()).isNull();
+            assertThat(dto.getMissingScopes()).isEmpty();
+            assertThat(dto.getAuthCredential()).isNull();
+        }
+    }
+
+    private static String permissionMetadata() {
+        return Sm4Util.encrypt(JSON.toJSONString(Map.of(
+            "permissionStatus", "partial", "missingScopes", "[\"contact:user.email:readonly\"]",
+            "credentialReference", "private-ref", "authorizationId", "private-authorization")));
     }
 
     private static ConnectorListDto credentialConnector(String authConfig) {

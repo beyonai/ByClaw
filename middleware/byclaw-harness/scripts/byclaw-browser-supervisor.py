@@ -189,6 +189,10 @@ def spawn(
     listen_fd: int | None = None,
 ) -> subprocess.Popen[bytes]:
     child_environment = dict(environment)
+    if account.pw_uid != 0:
+        # Only the root SSH child needs the per-instance transport credentials.
+        child_environment.pop("BYCLAW_TOOL_ENV_HOST_KEY", None)
+        child_environment.pop("BYCLAW_TOOL_ENV_AUTHORIZED_KEY", None)
     child_environment["HOME"] = account.pw_dir
     child_environment["USER"] = account.pw_name
     child_environment["LOGNAME"] = account.pw_name
@@ -226,6 +230,9 @@ def bycli_report(
     timeout: float,
 ) -> dict:
     child_environment = dict(environment)
+    if account.pw_uid != 0:
+        child_environment.pop("BYCLAW_TOOL_ENV_HOST_KEY", None)
+        child_environment.pop("BYCLAW_TOOL_ENV_AUTHORIZED_KEY", None)
     child_environment["HOME"] = account.pw_dir
     child_environment["USER"] = account.pw_name
     child_environment["LOGNAME"] = account.pw_name

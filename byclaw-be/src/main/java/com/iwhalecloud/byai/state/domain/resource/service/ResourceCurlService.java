@@ -247,6 +247,23 @@ public class ResourceCurlService {
         return runRawResourceCurl(resourceBizType, sourceContent, curl);
     }
 
+    /** Non-idempotent external creation must not retry a request or follow redirects. */
+    public ResourceCurlRunResult runOpenApiOperationOnce(String resourceBizType, String sourceContent, JSONObject openApi,
+        String operationId, Map<String, Object> body, Map<String, Object> headers) {
+        OpenApiOperation operation = resolveOpenApiOperation(openApi, operationId, Set.of());
+        return runRawResourceCurlOnce(resourceBizType, sourceContent, buildOpenApiOperationCurl(openApi, operation, body, headers));
+    }
+    public ResourceCurlRunResult runSimpleJsonOperationOnce(String resourceBizType, String sourceContent, String url,
+        Map<String, Object> body, Map<String, Object> headers) {
+        return runRawResourceCurlOnce(resourceBizType, sourceContent,
+            buildCurlScript("POST", url, buildJsonHeaders(headers), JSON.toJSONString(body)));
+    }
+    private ResourceCurlRunResult runRawResourceCurlOnce(String resourceBizType, String sourceContent, String curl) {
+        ResourceCurlContent content = new ResourceCurlContent();
+        content.setResourceBizType(resourceBizType); content.setSourceContent(sourceContent); content.setTargetContent(sourceContent);
+        return runCurl(content, curl, false);
+    }
+
     private ResourceCurlRunResult runRawResourceCurl(String resourceBizType, String sourceContent, String curl) {
         ResourceCurlContent content = new ResourceCurlContent();
         content.setResourceBizType(resourceBizType);
@@ -266,6 +283,9 @@ public class ResourceCurlService {
     }
 
     private ResourceCurlRunResult runCurl(ResourceCurlContent content, String curl) {
+        return runCurl(content, curl, true);
+    }
+    private ResourceCurlRunResult runCurl(ResourceCurlContent content, String curl, boolean retry) {
         String normalizedCurl = normalizeCurlLineContinuation(curl);
         validateSafeCurlCommand(normalizedCurl);
 
@@ -275,7 +295,8 @@ public class ResourceCurlService {
 
         long start = System.currentTimeMillis();
         ResourceCurlRunResult result = new ResourceCurlRunResult();
-        OkHttpClient httpClient = OkHttpUtil.getHttpClient();
+        OkHttpClient httpClient = retry ? OkHttpUtil.getHttpClient() : OkHttpUtil.getHttpClient().newBuilder()
+            .retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false).build();
         try (Response response = httpClient.newCall(buildHttpRequest(parsed)).execute()) {
             result.setSuccess(response.isSuccessful());
             result.setStatusCode(response.code());

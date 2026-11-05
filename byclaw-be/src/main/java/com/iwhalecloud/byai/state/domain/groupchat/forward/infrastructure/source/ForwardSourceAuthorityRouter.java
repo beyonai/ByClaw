@@ -6,7 +6,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.
 import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardBackend;
 import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardSnapshotFactory.SourceMessage;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantForwardSourceAuthorityReader;
-import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantMembershipMapper;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
@@ -15,8 +15,8 @@ import org.springframework.stereotype.Component;
 @Component @Primary
 public class ForwardSourceAuthorityRouter implements ForwardSourceAuthorityReader {
     private final LegacyForwardSourceAuthorityReader legacy; private final TenantForwardSourceAuthorityReader tenant;
-    private final TenantAdminTenantMapper tenants; private final TenantMembershipMapper memberships;
-    public ForwardSourceAuthorityRouter(LegacyForwardSourceAuthorityReader legacy,TenantForwardSourceAuthorityReader tenant,TenantAdminTenantMapper tenants,TenantMembershipMapper memberships) {
+    private final TenantModeService tenants; private final TenantMembershipMapper memberships;
+    public ForwardSourceAuthorityRouter(LegacyForwardSourceAuthorityReader legacy,TenantForwardSourceAuthorityReader tenant,TenantModeService tenants,TenantMembershipMapper memberships) {
         this.legacy=legacy;this.tenant=tenant;this.tenants=tenants;this.memberships=memberships;
     }
     private void requireMembership(ForwardActor actor) {
@@ -27,7 +27,7 @@ public class ForwardSourceAuthorityRouter implements ForwardSourceAuthorityReade
 
     private ForwardBackend configuredBackend(ForwardActor actor) {
         requireMembership(actor);
-        return tenants.selectConfig(actor.enterpriseId(), "NODE_SANDBOX_RECORD_ID") == null
+        return tenants.isSharedDataTenant(actor.enterpriseId())
             ? ForwardBackend.LEGACY : ForwardBackend.TENANT;
     }
 

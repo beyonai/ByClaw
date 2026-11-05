@@ -174,7 +174,17 @@ public class DatasetApplicationService {
     private static final int KNOWLEDGE_DIR_SEARCH_MAX_RESULT_SIZE = 500;
 
     @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationService resourcePublications;
+
+    @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess publicationAccess;
+
+    @Autowired
     private SsResourceService ssResourceService;
+
+    @Autowired private KnowledgeProviderService knowledgeProviders;
+    @Autowired private KnowledgeProvisionService knowledgeProvision;
+    @Autowired @org.springframework.context.annotation.Lazy private DatasetApplicationService transactionalSelf;
 
     @Autowired
     private SsResExtDocService ssResExtDocService;
@@ -241,7 +251,10 @@ public class DatasetApplicationService {
         boolean thirdPartyMode = StringUtils.isNotBlank(StringUtils.trimToEmpty(datasetSystem));
         KnowledgeCapabilityVo capabilityVo = new KnowledgeCapabilityVo();
         capabilityVo.setKnowledgeMode(thirdPartyMode ? "THIRD_PARTY" : "BYAI");
-        capabilityVo.setAllowKnowledgeBaseCreate(!thirdPartyMode);
+        var providers = thirdPartyMode && knowledgeProviders != null ? knowledgeProviders.options()
+            : java.util.List.<KnowledgeProviderService.Option>of();
+        capabilityVo.setCreationProviders(providers);
+        capabilityVo.setAllowKnowledgeBaseCreate(!thirdPartyMode || !providers.isEmpty());
         capabilityVo.setAllowKnowledgeBaseEdit(Boolean.TRUE);
         capabilityVo.setAllowKnowledgeBaseDelete(Boolean.TRUE);
         capabilityVo.setAllowKnowledgeImport(Boolean.TRUE);
@@ -255,19 +268,44 @@ public class DatasetApplicationService {
      * @return 新建记录主键 resource_id，未实现时返回 null
      */
     public SsResource createDataset(DatasetDto datasetDto) {
-        // 第三方知识库模式下禁止本系统创建库级知识库，防止绕过前端按钮直接调接口。
-        validateKnowledgeBaseCreationAllowed();
+        if (StringUtils.isNotBlank(datasetSystem) || StringUtils.isNotBlank(datasetDto.getProviderId())) {
+            if (StringUtils.isBlank(datasetDto.getProviderId())) {
+                validateKnowledgeBaseCreationAllowed();
+                throw new IllegalArgumentException("请选择知识服务提供方");
+            }
+            return knowledgeProvision.create(datasetDto);
+        }
 
         // 参数提取
-        String resourceBizType = datasetDto.getResourceBizType();
         String resourceName = datasetDto.getResourceName();
         String resourceDesc = datasetDto.getResourceDesc();
-        String type = datasetDto.getType();
         String ownerType = datasetDto.getOwnerType();
+
+        if (datasetDto.getPublishScope() != null) {
+            if (!OwnerType.ENTERPRISE.equals(ownerType)) throw new IllegalArgumentException("个人资源不设置组织发布范围");
+            publicationAccess.normalize(datasetDto.getPublishScope());
+        }
 
         // 同步创建知识库
         KnowledgeBaseInfo knowledgeBase = this.createKnowledgeBase(resourceName, resourceDesc);
 
+        SsResource myResource = transactionalSelf.saveCreatedLocalDataset(datasetDto, knowledgeBase);
+
+        if (datasetDto.getPublishScope() != null) {
+            try { resourcePublications.submitLocal(myResource.getResourceId(), datasetDto.getPublishScope()); }
+            catch (com.iwhalecloud.byai.common.exception.BaseException error) {
+                myResource.setPublicationError("知识库已创建，发布尚未提交，请从发布管理继续处理");
+            }
+        }
+        return myResource;
+    }
+
+    /** Local rows and extensions commit together before optional organization publication. */
+    @Transactional(rollbackFor = Exception.class)
+    public SsResource saveCreatedLocalDataset(DatasetDto datasetDto, KnowledgeBaseInfo knowledgeBase) {
+        String resourceBizType = datasetDto.getResourceBizType();
+        String resourceName = datasetDto.getResourceName(), resourceDesc = datasetDto.getResourceDesc();
+        String type = datasetDto.getType(), ownerType = datasetDto.getOwnerType();
         // 保存资源表
         String resourceCode = knowledgeBase.getKnCode();
 
@@ -1969,6 +2007,28 @@ public class DatasetApplicationService {
             throw new IllegalArgumentException(I18nUtil.get("dataset.import.domain.url.notempty"));
         }
         return dto;
+    }
+
+    /** Persists a confirmed external creation without calling create_kb again or trusting client provenance. */
+    @Transactional(rollbackFor = Exception.class)
+    public SsResource saveProvisionedDataset(DatasetDto request, KnowledgeProviderService.Provider provider, String code) {
+        JSONObject root = JSON.parseObject(DatasetOwnershipMetadata.stripLocalMarker(provider.description().toJSONString()));
+        root.put("resourceCode", code); root.put("resourceName", request.getResourceName());
+        root.put("resourceDesc", request.getResourceDesc()); root.put("ownerType", request.getOwnerType());
+        root.put("resourceBizType", "KG_DOC"); root.put("type", "external");
+        root.put("systemCode", provider.resource().getSystemCode());
+        root.remove("resourceId"); root.remove("createBy"); root.remove("resourceSourcePkId");
+        root.remove("viewAuth"); root.remove("authScope"); root.remove("autoAuthorize"); root.remove("publishScope");
+        DatasetImportDto dto = parseAndValidateDto(root.toJSONString(), request.getOwnerType());
+        dto.setCatalogId(request.getCatalogId());
+        lockDatasetIdentity(dto.getSystemCode(), dto.getResourceBizType(), code);
+        if (ssResourceService.findByImportIdentity(dto.getSystemCode(), dto.getResourceBizType(), code) != null)
+            throw new IllegalArgumentException("提供方返回的知识库编码已存在，请核对创建任务，禁止覆盖已有知识库");
+        Long id = createDatasetFromImport(dto, root.toJSONString(), request.getOwnerType());
+        SsResExtDoc document = ssResExtDocService.findById(id);
+        document.setSourceContent(DatasetOwnershipMetadata.markLocal(document.getSourceContent(), id));
+        ssResExtDocService.update(document);
+        return ssResourceService.findById(id);
     }
 
     private Long createDatasetFromImport(DatasetImportDto datasetImportDto, String rawJson, String ownerType) {

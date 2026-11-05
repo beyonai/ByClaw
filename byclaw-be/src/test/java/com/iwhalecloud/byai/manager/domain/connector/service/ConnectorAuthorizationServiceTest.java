@@ -56,6 +56,44 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 class ConnectorAuthorizationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
+    void completedSessionRetainsPartialPermissionSummaryAcrossStatusRequests() {
+        RedisAuthorizationSession session = terminalSession(AuthorizationStatus.CONNECTED, 12L, null, null);
+        when(sessionRepository.findOwned(AUTHORIZATION_ID, USER_ID)).thenReturn(Optional.of(session));
+        ConnectorAuth binding = new ConnectorAuth();
+        binding.setAuthMode("CLI_INIT");
+        binding.setAuthCredential(Sm4Util.encrypt(JSON.toJSONString(Map.of(
+            "authorizationId", AUTHORIZATION_ID, "permissionStatus", "partial",
+            "missingScopes", "[\"contact:user.email:readonly\"]", "credentialReference", "private-ref"))));
+        when(connectorAuthMapper.selectOne(any())).thenReturn(binding);
+
+        ConnectorAuthorizationDto result = service.status(AUTHORIZATION_ID, USER_ID);
+
+        assertThat(result.getStatus()).isEqualTo("connected");
+        assertThat(result.getPermissionStatus()).isEqualTo("partial");
+        assertThat(result.getMissingScopes()).containsExactly("contact:user.email:readonly");
+        assertThat(JSON.toJSONString(result)).doesNotContain("private-ref", "authCredential");
+        verifyNoInteractions(providerRegistry);
+    }
+
+    @Test
+    void completedSessionDoesNotBorrowPermissionSummaryFromAnotherAuthorization() {
+        RedisAuthorizationSession session = terminalSession(AuthorizationStatus.CONNECTED, 12L, null, null);
+        when(sessionRepository.findOwned(AUTHORIZATION_ID, USER_ID)).thenReturn(Optional.of(session));
+        ConnectorAuth binding = new ConnectorAuth();
+        binding.setAuthMode("CLI_INIT");
+        binding.setAuthCredential(Sm4Util.encrypt(JSON.toJSONString(Map.of(
+            "authorizationId", "another-authorization", "permissionStatus", "partial",
+            "missingScopes", "[\"contact:user.email:readonly\"]"))));
+        when(connectorAuthMapper.selectOne(any())).thenReturn(binding);
+
+        ConnectorAuthorizationDto result = service.status(AUTHORIZATION_ID, USER_ID);
+
+        assertThat(result.getStatus()).isEqualTo("connected");
+        assertThat(result.getPermissionStatus()).isNull();
+        assertThat(result.getMissingScopes()).isEmpty();
+    }
+
+    @Test
     void cachedProviderErrorsUseTheViewersLocaleWithoutChangingStatusOrExternalDetails() {
         RedisAuthorizationSession session = terminalSession(
             AuthorizationStatus.FAILED, 12L, "PROVIDER_START_FAILED", "Unable to start Lark authorization");
@@ -70,6 +108,31 @@ class ConnectorAuthorizationServiceTest extends com.iwhalecloud.byai.common.i18n
         assertThat(session.errorMessage()).isEqualTo("Unable to start Lark authorization");
         assertThat(ConnectorMessages.localize("Provider detail: account 9007199254740993"))
             .isEqualTo("Provider detail: account 9007199254740993");
+        verifyNoInteractions(providerRegistry);
+    }
+
+    @Test
+    void incompatibleWecomRuntimeErrorIsLocalizedWithoutExposingCliOutput() {
+        org.springframework.test.util.ReflectionTestUtils.setField(
+            com.iwhalecloud.byai.common.i18n.I18nUtil.class, "messageSource",
+            new com.iwhalecloud.byai.state.common.config.I18nConfig().messageSource());
+        String message = "WeCom CLI does not support the required authorization command; upgrade the sandbox image and instance";
+        RedisAuthorizationSession session = terminalSession(
+            AuthorizationStatus.FAILED, 12L, "PROVIDER_CLI_INCOMPATIBLE", message);
+        when(sessionRepository.findOwned(AUTHORIZATION_ID, USER_ID)).thenReturn(Optional.of(session));
+
+        ConnectorAuthorizationDto chinese = service.status(AUTHORIZATION_ID, USER_ID);
+        assertThat(chinese.getErrorCode()).isEqualTo("PROVIDER_CLI_INCOMPATIBLE");
+        assertThat(chinese.getErrorMessage()).isEqualTo("沙箱内企业微信 CLI 不兼容当前授权命令，请升级沙箱镜像并更新实例");
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
+        ConnectorAuthorizationDto english = service.status(AUTHORIZATION_ID, USER_ID);
+        assertThat(english.getErrorMessage()).isEqualTo(message);
+        assertThat(english.getStatus()).isEqualTo("failed");
+        assertThat(ConnectorMessages.localize("connector.wecom.cliIncompatible")).isEqualTo(message);
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.ROOT);
+        assertThat(ConnectorMessages.localize("connector.wecom.cliIncompatible"))
+            .isIn("沙箱内企业微信 CLI 不兼容当前授权命令，请升级沙箱镜像并更新实例", message);
+        assertThat(session.errorMessage()).isEqualTo(message);
         verifyNoInteractions(providerRegistry);
     }
 
@@ -101,6 +164,9 @@ class ConnectorAuthorizationServiceTest extends com.iwhalecloud.byai.common.i18n
         ConnectorAuthorizationDto result = service.callback("github-oauth2", new AuthorizationCallback("code", state, null, null), USER_ID);
 
         assertThat(result.getStatus()).isEqualTo("connected");
+        assertThat(result.getPermissionStatus()).isNull();
+        assertThat(result.getMissingScopes()).isEmpty();
+        assertThat(JSON.toJSONString(result)).doesNotContain("permissionStatus");
         verify(provider).handleCallback(any(AuthorizationSessionContext.class), any(AuthorizationCallback.class));
     }
 
@@ -774,7 +840,8 @@ class ConnectorAuthorizationServiceTest extends com.iwhalecloud.byai.common.i18n
             null,
             new Date(),
             "workspace:lark-cli:user-1001",
-            Map.of("username", "gh_account_42", "principalName", "Example Corp")
+            Map.of("username", "gh_account_42", "principalName", "Example Corp",
+                "permissionStatus", "partial", "missingScopes", "[\"contact:user.email:readonly\"]")
         ));
         when(sessionRepository.compareAndSetStatus(
             eq(AUTHORIZATION_ID), eq(AuthorizationStatus.PENDING), eq(4L), any())).thenReturn(true);
@@ -789,6 +856,8 @@ class ConnectorAuthorizationServiceTest extends com.iwhalecloud.byai.common.i18n
         ConnectorAuthorizationDto terminalPoll = service.status(AUTHORIZATION_ID, USER_ID);
 
         assertThat(winner.getStatus()).isEqualTo("connected");
+        assertThat(winner.getPermissionStatus()).isEqualTo("partial");
+        assertThat(winner.getMissingScopes()).containsExactly("contact:user.email:readonly");
         assertThat(terminalPoll.getStatus()).isEqualTo("connected");
         verify(provider).queryStatus(any());
         ArgumentCaptor<ConnectorAuth> authCaptor = ArgumentCaptor.forClass(ConnectorAuth.class);
@@ -808,10 +877,12 @@ class ConnectorAuthorizationServiceTest extends com.iwhalecloud.byai.common.i18n
             .containsEntry("accountId", "ou_account_42")
             .containsEntry("accountName", "Lark User")
             .containsEntry("username", "gh_account_42")
-            .containsEntry("principalName", "Example Corp");
+            .containsEntry("principalName", "Example Corp")
+            .containsEntry("permissionStatus", "partial")
+            .containsEntry("missingScopes", "[\"contact:user.email:readonly\"]");
         assertThat(credential.keySet()).containsExactlyInAnyOrder(
             "providerCode", "authorizationId", "credentialReference", "accountId", "accountName",
-            "username", "principalName");
+            "username", "principalName", "permissionStatus", "missingScopes");
         verify(sequenceService).nextVal();
 
         ArgumentCaptor<RedisAuthorizationSession> finalSessionCaptor = ArgumentCaptor.forClass(RedisAuthorizationSession.class);

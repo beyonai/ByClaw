@@ -189,6 +189,84 @@ INSERT INTO byai.byai_system_config_list (param_id,param_group_code,param_group_
 INSERT INTO byai.byai_system_config_list (param_id,param_group_code,param_group_name,param_name,param_en_name,param_value,param_desc,param_seq) VALUES (nextval('byai.seq_any_table'),'SYSTEM_MODEL_TTS_PROVIDER_NAME','TTS模型插件提供商','火山引擎','火山引擎','VOLCENGINE','{"adapter":"byclaw-tts","modelProtocol":"VOLCENGINE_TTS_V3","apiEndpoint":"https://openspeech.bytedance.com/api/v3/tts/unidirectional","modelCode":"seed-tts-2.0","options":{"resourceId":"seed-tts-2.0","speaker":"zh_female_vv_uranus_bigtts","format":"mp3","sampleRate":24000},"logo":"/model-providers/volcengine.svg"}',20);
 INSERT INTO byai.byai_system_config_list (param_id,param_group_code,param_group_name,param_name,param_en_name,param_value,param_desc,param_seq) VALUES (nextval('byai.seq_any_table'),'SYSTEM_MODEL_ASR_PROVIDER_NAME','ASR模型插件提供商','火山引擎','火山引擎','VOLCENGINE','{"adapter":"byclaw-asr","modelProtocol":"VOLCENGINE_ASR_FLASH","apiEndpoint":"https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash","modelCode":"bigmodel","options":{"resourceId":"volc.bigasr.auc_turbo"},"logo":"/model-providers/volcengine.svg"}',21);
 
+
+-- WeCom CLI 1.3.4：迁移授权命令和版本，保留隔离目录、执行归属、扩展命令及其他模板字段。
+-- auth show 只检查本地授权状态；业务权限由实际业务调用验证。
+-- cache clear 仅清 discovery 缓存；Provider 另行删除当前及旧版凭据并复核 unauthorized。
+UPDATE byai.byai_connector_info
+SET runtime_manifest = jsonb_set(
+        jsonb_set(
+            jsonb_set(
+                jsonb_set(
+                    runtime_manifest::jsonb,
+                    '{version}',
+                    '"1.3.4"'::jsonb,
+                    true
+                ),
+                '{runtime,commands,login}',
+                '[["wecom-cli","auth","init","--noninteractive","--no-browser"]]'::jsonb,
+                true
+            ),
+            '{runtime,commands,status}',
+            '[["wecom-cli","auth","show","--status"]]'::jsonb,
+            true
+        ),
+        '{runtime,commands,logout}',
+        '[["wecom-cli","cache","clear"]]'::jsonb,
+        true
+    )::text,
+    auth_config = jsonb_set(
+        jsonb_set(
+            COALESCE(NULLIF(auth_config, ''), '{}')::jsonb,
+            '{probeCommand}',
+            '["wecom-cli","auth","show","--status"]'::jsonb,
+            true
+        ),
+        '{authorizationTimeoutSeconds}',
+        '300'::jsonb,
+        true
+    )::text,
+    update_time = CURRENT_TIMESTAMP
+WHERE connector_code = 'wecom'
+  AND provider_code = 'wecom-cli'
+  AND runtime_manifest IS NOT NULL;
+
+-- BEGIN LARK APP USER SCOPE COMMANDS
+-- 飞书首次授权读取应用已开通的用户权限，与 CLI 全领域权限一起申请。
+-- 仅补齐使用内置默认登录命令的模板；自定义登录参数及已有新命令保持原样。
+-- 保留 login[0]/login[1]、其他命令和 Manifest 字段，兼容旧版授权流程。
+UPDATE byai.byai_connector_info
+SET runtime_manifest = jsonb_set(
+        jsonb_set(
+            runtime_manifest::jsonb,
+            '{runtime,commands,scopesCheck}',
+            COALESCE(
+                runtime_manifest::jsonb #> '{runtime,commands,scopesCheck}',
+                '[["lark-cli","auth","scopes","--json"]]'::jsonb
+            ),
+            true
+        ),
+        '{runtime,commands,loginWithScopes}',
+        COALESCE(
+            runtime_manifest::jsonb #> '{runtime,commands,loginWithScopes}',
+            '[["lark-cli","auth","login","--domain","all","--scope","${userScopes}","--no-wait","--json"]]'::jsonb
+        ),
+        true
+    )::text,
+    update_time = CURRENT_TIMESTAMP
+WHERE connector_code = 'lark'
+  AND provider_code = 'lark-cli'
+  AND runtime_manifest IS NOT NULL
+  AND runtime_manifest::jsonb #>> '{runtime,type}' = 'cli'
+  AND jsonb_typeof(runtime_manifest::jsonb #> '{runtime,commands}') = 'object'
+  AND runtime_manifest::jsonb #> '{runtime,commands,login,0}'
+      = '["lark-cli","auth","login","--domain","all","--no-wait","--json"]'::jsonb
+  AND (
+      NOT ((runtime_manifest::jsonb #> '{runtime,commands}') ? 'scopesCheck')
+      OR NOT ((runtime_manifest::jsonb #> '{runtime,commands}') ? 'loginWithScopes')
+  );
+-- END LARK APP USER SCOPE COMMANDS
+
 /**共享沙箱配置整合**/
 delete from byai.byai_system_config where param_code in('BYCLAW_SANDBOX_SHARED_ALL','BYCLAW_SHARED_DSH_HOST_USERS');
 

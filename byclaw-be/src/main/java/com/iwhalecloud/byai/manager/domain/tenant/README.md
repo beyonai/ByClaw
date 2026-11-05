@@ -67,3 +67,7 @@ Java 到 Node 的独立协议 mapper 保持版本号和分页为 JSON 数字；�
 管理员托管租户删除与 `byclaw.integration.enabled` 解耦。该开关关闭或未配置时仍可受理删除；独立定时任务只领取 `DELETE` 命令，外部开通 worker 只领取 `PROVISION`，不会因清理失败租户而重新开启其他开通任务。`MANUAL_REQUIRED / SCHEMA_INIT` 且已绑定沙箱的租户沿用完整资源和 NAS 清理流程。
 
 删除协调器使用显式短事务领取任务和保存结果，须排除全局 Service 的 REQUIRED 事务包装；沙箱删除也不加入外层事务。ACS 已释放的资源状态会先提交，NAS 清理等待只将当前命令置为 `RETRY_WAIT`，不会回滚同批其他租户的删除结果。回归测试同时加载实际全局事务拦截器，覆盖 NAS 等待后恢复完成的路径。
+
+## 邀请数字员工入群
+
+独立 Node 租户的 `POST /group-chats/{sessionId}/members` 在 `type=AGENT` 时，仅要求目标资源存在、`resourceBizType=DIG_EMPLOYEE` 且 `resourceStatus=2`。允许邀请不同归属企业及个人归属的已上架数字员工，不再检查邀请人的资源管理或使用权限。调用人仍须满足群内邀请权限；添加成功后继续为群内用户补充数字员工授权。此规则只调整已有群的添加成员入口，创建群时的初始员工校验保持原有规则。

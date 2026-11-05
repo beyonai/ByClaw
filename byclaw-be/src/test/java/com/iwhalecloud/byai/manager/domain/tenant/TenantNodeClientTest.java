@@ -39,6 +39,41 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class TenantNodeClientTest {
+    @Test
+    void scanFailureExplainsMissingNodeRecordAndPreservesOriginalCause() {
+        var tenants = mock(TenantAdminTenantMapper.class);
+        when(tenants.selectConfig(123L, "PROVISION_STATE"))
+            .thenReturn("{\"status\":\"READY\",\"generation\":\"1\"}");
+        var client = new TenantNodeClient(tenants, mock(SsSandboxRecordMapper.class),
+                new ObjectMapper(), mock(RedisClient.class), "private-test-token");
+        try {
+            assertThatThrownBy(() -> client.serviceRequest(123L, "POST",
+                "/internal/v1/forward-maintenance/scan", Map.of("category", "WORK", "limit", 20),
+                new TypeReference<Map<String, Object>>() {}))
+                .hasMessageContaining("step=validateProvisionState")
+                .hasMessageContaining("enterprise=123")
+                .hasMessageContaining("nodeRecordIdPresent=false")
+                .hasMessageContaining("provisionStatus=READY")
+                .hasMessageContaining("generation=1")
+                .hasMessageNotContaining("private-test-token")
+                .hasCauseInstanceOf(ResponseStatusException.class);
+        } finally {
+            client.close();
+        }
+    }
+
+    @Test
+    void registrationFailureDistinguishesMissingAndDuplicateInstances() {
+        for (var instances : List.of(List.<ServiceInstance>of(),
+                List.of(instance("123", "1", "987", "READY"), instance("123", "1", "987", "READY")))) {
+            assertThatThrownBy(() -> TenantNodeClient.registeredEndpoint("TENANT_DATA_123", 123L,
+                1L, "987", instances))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasRootCauseMessage("serviceName=TENANT_DATA_123, instanceCount=" + instances.size()
+                    + ", expectedEnterprise=123, expectedGeneration=1, expectedDbRecordId=987");
+        }
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {"CREATE_GROUP", "ADD_MEMBERS", "JOIN_GROUP"})
     void commandConsumesSavedRowsWithoutDependingOnInvitationOrChatEvents(String operation) throws Exception {
@@ -352,7 +387,7 @@ class TenantNodeClientTest {
         var tenant = new TenantGroupForwardService(client, policy, properties);
         var contexts = new com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardExecutionContextService(null, tenant, policy);
         var coordinator = new com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardService(
-            null, tenant, contexts, policy, null, null, null, null, properties);
+            null, tenant, contexts, policy, null, null, null, null, properties, mock(TenantModeService.class));
         try {
             var claimed = coordinator.claimWork(backend, 123, null, 20, java.time.Duration.ofMinutes(1));
             assertThat(claimed.leases()).hasSize(1);

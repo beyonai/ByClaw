@@ -36,6 +36,7 @@ import {
   type ConnectorEnableFlag,
   type ConnectorId,
   type ConnectorListItem,
+  type ConnectorPermissionSummary,
   type ConnectorRenewalMode,
 } from '@/service/connector';
 
@@ -107,7 +108,7 @@ export const getCredentialExpirationDisplay = (
 export const CONNECTOR_ENTRY_VISIBLE = true;
 const CONNECTOR_STATE_CHANGED_EVENT = 'byclaw-connector-state-changed';
 
-export type Connector = {
+export type Connector = ConnectorPermissionSummary & {
   id: ConnectorId;
   code: string;
   name: string;
@@ -160,6 +161,8 @@ const mapConnectorListItem = (item: ConnectorListItem): Connector => ({
   credentialExpiresAt: item.credentialExpiresAt,
   authMode: item.authMode,
   credentialForm: item.credentialForm,
+  permissionStatus: item.permissionStatus,
+  missingScopes: item.missingScopes,
 });
 
 // 快捷列表优先展示当前已授权且启用的连接器，同组内保留后端原始顺序。
@@ -529,22 +532,44 @@ const ConnectorControl = ({
       clearAuthorizationTimer();
       activeAuthorizationIdRef.current = undefined;
       setConnectors((items) =>
-        items.map((item) =>
-          `${item.id}` === `${authorization.connectorId}`
-            ? { ...item, enableFlag: 'Y' as const, credentialExpiresAt: undefined }
-            : item
-        )
+        items.map((item) => {
+          if (`${item.id}` !== `${authorization.connectorId}`) return item;
+          return {
+            ...item,
+            enableFlag: 'Y' as const,
+            credentialExpiresAt: undefined,
+            permissionStatus: authorization.permissionStatus,
+            missingScopes: authorization.missingScopes,
+          };
+        })
       );
       window.dispatchEvent(
         new CustomEvent(CONNECTOR_STATE_CHANGED_EVENT, {
-          detail: { connectorId: authorization.connectorId, enableFlag: 'Y' },
+          detail: {
+            connectorId: authorization.connectorId,
+            enableFlag: 'Y',
+            permissionSummary: {
+              permissionStatus: authorization.permissionStatus,
+              missingScopes: authorization.missingScopes,
+            },
+          },
         })
       );
       setAuthorizationSession(undefined);
       setAuthorizingConnector(undefined);
       credentialVerificationInFlightRef.current = false;
       clearCredentialValues();
-      message.success(intl.formatMessage({ id: 'connector.authorization.connected' }, { v0: connector.name }));
+      if (authorization.permissionStatus === 'partial') {
+        message.warning(
+          intl.formatMessage({ id: 'connector.authorization.partialPermissions' }, { name: connector.name })
+        );
+      } else if (authorization.permissionStatus === 'unknown') {
+        message.info(
+          intl.formatMessage({ id: 'connector.authorization.unknownPermissions' }, { name: connector.name })
+        );
+      } else {
+        message.success(intl.formatMessage({ id: 'connector.authorization.connected' }, { v0: connector.name }));
+      }
       void loadAuthorizedConnectors(true);
     },
     [clearAuthorizationTimer, clearCredentialValues, connectors, loadAuthorizedConnectors, intl]
@@ -643,11 +668,19 @@ const ConnectorControl = ({
 
   useEffect(() => {
     const handleConnectorStateChanged = (event: Event) => {
-      const detail = (event as CustomEvent<{ connectorId?: ConnectorId; enableFlag?: ConnectorEnableFlag }>).detail;
+      const detail = (
+        event as CustomEvent<{
+          connectorId?: ConnectorId;
+          enableFlag?: ConnectorEnableFlag;
+          permissionSummary?: ConnectorPermissionSummary;
+        }>
+      ).detail;
       if (detail?.connectorId === undefined || detail.enableFlag === undefined) return;
       setConnectors((items) =>
         items.map((item) =>
-          `${item.id}` === `${detail.connectorId}` ? { ...item, enableFlag: detail.enableFlag } : item
+          `${item.id}` === `${detail.connectorId}`
+            ? { ...item, enableFlag: detail.enableFlag, ...detail.permissionSummary }
+            : item
         )
       );
     };
@@ -704,7 +737,6 @@ const ConnectorControl = ({
           await loadAuthorizedConnectors();
         } catch {
           message.error(intl.formatMessage({ id: 'connector.revoke.failed' }));
-          throw new Error(intl.formatMessage({ id: 'connector.revoke.error' }));
         } finally {
           setRevokingConnectorIds((ids) => {
             const nextIds = new Set(ids);
@@ -1013,6 +1045,12 @@ const ConnectorControl = ({
   };
 
   const renderConnectorItem = (connector: Connector, compact = false) => {
+    const hasPartialPermissions = connector.enableFlag !== null && connector.permissionStatus === 'partial';
+    const missingScopes = [...new Set(connector.missingScopes || [])];
+    const permissionSummary =
+      missingScopes.length > 0
+        ? intl.formatMessage({ id: 'connector.authorization.missingPermissions' }, { count: missingScopes.length })
+        : intl.formatMessage({ id: 'connector.authorization.partialPermissionsDetails' });
     const usesLifecycleMetadata = Boolean(connector.credentialState);
     const displayExpiration = usesLifecycleMetadata ? connector.refreshExpiresAt : connector.credentialExpiresAt;
     const credentialExpiration = displayExpiration ? getCredentialExpirationDisplay(displayExpiration) : undefined;
@@ -1078,6 +1116,27 @@ const ConnectorControl = ({
             >
               {credentialLifecycleText}
             </span>
+          )}
+          {hasPartialPermissions && (
+            <Tooltip
+              trigger={['hover', 'focus', 'click']}
+              title={
+                <div>
+                  <div>{intl.formatMessage({ id: 'connector.authorization.partialPermissionsHint' })}</div>
+                  {missingScopes.length > 0 && (
+                    <ul className={styles.permissionDetails}>
+                      {missingScopes.map((scope) => (
+                        <li key={scope}>{scope}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              }
+            >
+              <button className={styles.permissionSummary} type="button">
+                {permissionSummary}
+              </button>
+            </Tooltip>
           )}
         </div>
         <div className={styles.connectorAction}>{renderConnectorAction(connector)}</div>

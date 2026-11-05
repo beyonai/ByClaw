@@ -15,7 +15,25 @@ it("uses the authenticated actor header for the internal group credential route"
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ api_key: "member-key" });
-    expect(groupMemberApiKey).toHaveBeenCalledExactlyOnceWith("20", "30");
+    expect(groupMemberApiKey).toHaveBeenCalledExactlyOnceWith("20", "30", false);
+  } finally {
+    await app.close();
+  }
+});
+
+it("allows BE to resolve the authenticated membership identity before reading the shared Redis key", async () => {
+  const groupMemberApiKey = vi.fn(async () => ({ byaiSessionMemberId: "81", api_key: null }));
+  const app = Fastify();
+  historyRoutes(app, { groupMemberApiKey } as unknown as HistoryService);
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/internal/v1/group-chats/30/member-api-key?identityOnly=true&userId=99",
+      headers: { "x-actor-user-id": "20" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ byaiSessionMemberId: "81", api_key: null });
+    expect(groupMemberApiKey).toHaveBeenCalledExactlyOnceWith("20", "30", true);
   } finally {
     await app.close();
   }

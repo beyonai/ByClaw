@@ -85,6 +85,7 @@ class ToolManResourceSyncCompatibilityTest extends com.iwhalecloud.byai.common.i
         resources = mock(SsResourceService.class);
         when(resources.findByImportIdentity(any(), any(), any())).thenReturn(resource);
         service = spy(new ToolManService());
+        ReflectionTestUtils.setField(service, "resourcePublicationService", mock(com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationService.class));
         ReflectionTestUtils.setField(service, "enterpriseResourceSyncService", sync);
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         ReflectionTestUtils.setField(service, "authApplicationService", auth);

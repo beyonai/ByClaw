@@ -1,16 +1,13 @@
 import crypto from 'node:crypto';
+import { constants } from 'node:fs';
+import { mkdir, open, realpath } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createArtifactWriter } from '../shared/artifact-writer.mjs';
 import { positiveEnv, runCli } from '../shared/cli-runner.mjs';
 import { readResumeMetadata } from '../shared/resume.mjs';
 import { SOURCE_IDENTITY, handledOutcome } from '../shared/status-model.mjs';
 
-const RESOURCE_BY_URL = [
-  ['/smartsheet/', 'smartsheet'],
-  ['/smartpage/', 'smartpage'],
-  ['/sheet/', 'sheet'],
-  ['/doc/', 'doc'],
-];
-const MAX_POLLS = 12;
+const CLI_VERSION = '1.3.4';
 const MAX_PAGES = 1000;
 const identity = SOURCE_IDENTITY.wecom;
 
@@ -37,7 +34,12 @@ function commandEnvironment(dependencies) {
   if (typeof env.WECOM_HOME !== 'string' || !env.WECOM_HOME.trim()) {
     throw new Error('WECOM_HOME is required for WeCom collection');
   }
-  return { ...env, HOME: env.WECOM_HOME };
+  return {
+    ...env,
+    HOME: env.WECOM_HOME,
+    WECOM_CLI_CONFIG_DIR: join(env.WECOM_HOME, '.config', 'wecom'),
+    WECOM_CLI_ACCESS_TOKEN: '',
+  };
 }
 
 function contextOf(error) {
@@ -76,41 +78,58 @@ function titleFor(kind) {
 function resourceKindFor(request) {
   const url = typeof request?.url === 'string' ? request.url.trim() : '';
   if (!url) throw new Error('url is required');
-  const fromUrl = RESOURCE_BY_URL.find(([fragment]) => url.includes(fragment))?.[1];
-  if (!fromUrl) throw new Error('unsupported WeCom resource URL');
-  if (request.resourceKind && request.resourceKind !== fromUrl) {
-    throw new Error(`resourceKind ${request.resourceKind} conflicts with URL type ${fromUrl}`);
+  let parsed;
+  try { parsed = new URL(url); } catch { throw new Error('unsupported WeCom resource URL'); }
+  const match = parsed.pathname.match(/^\/(doc|sheet|smartsheet|smartpage)\/(?:p\/)?([^/]+)\/?$/);
+  if (parsed.protocol !== 'https:' || !['doc.weixin.qq.com', 'page.weixin.qq.com'].includes(parsed.hostname)
+    || parsed.username || parsed.password || parsed.port || !match
+    || (parsed.hostname === 'page.weixin.qq.com' && match[1] !== 'smartpage')) {
+    throw new Error('unsupported WeCom resource URL');
   }
-  return { url, kind: request.resourceKind || fromUrl };
+  const kind = match[1];
+  if (request.resourceKind && request.resourceKind !== kind) {
+    throw new Error(`resourceKind ${request.resourceKind} conflicts with URL type ${kind}`);
+  }
+  return { url, kind, docid: decodeURIComponent(match[2]) };
 }
 
 function markdown(content, { title, url }) {
   return `---\ntitle: ${JSON.stringify(title)}\nsource: "wecom"\nsource_url: ${JSON.stringify(url)}\ncollection_filters: {}\n---\n\n${content.trim()}\n`;
 }
 
-function parseEnvelope(stdout) {
-  let outer;
-  try {
-    outer = JSON.parse(stdout);
-  } catch {
-    throw new Error('wecom-cli returned invalid JSON');
-  }
-  if (outer?.jsonrpc !== '2.0' || outer?.isError === true) {
-    throw new Error('wecom-cli returned invalid JSON-RPC response');
-  }
-  const text = outer?.result?.content?.find((entry) => typeof entry?.text === 'string')?.text;
-  if (!text) throw new Error('wecom-cli JSON-RPC response has no result.content[].text');
+function parseBusiness(stdout) {
   let business;
+  try { business = JSON.parse(stdout); } catch { throw new Error('wecom-cli returned invalid JSON'); }
+  if (!business || typeof business !== 'object' || Array.isArray(business) || business.jsonrpc) {
+    throw new Error('wecom-cli business response is malformed; version 1.3.4 is required');
+  }
+  if (business.error || business.isError === true) throw new Error('wecom-cli returned a structured error');
+  if (business.errcode !== undefined && business.errcode !== 0) {
+    throw new Error(`wecom-cli business errcode ${business.errcode}`);
+  }
+  return business;
+}
+
+async function readCliFile(writer, outputDir, commandDir, filePath, maxBytes) {
+  if (typeof filePath !== 'string' || !filePath) throw new Error('wecom-cli file_path is malformed');
+  const candidate = resolve(outputDir, filePath);
+  const local = relative(commandDir, candidate);
+  if (!local || local === '..' || local.startsWith(`..${sep}`) || isAbsolute(local)) {
+    throw new Error('wecom-cli file_path is outside the command output directory');
+  }
+  // The artifact writer rejects every symlink component and verifies the session root.
+  writer.absolute(relative(outputDir, candidate));
+  const actual = await realpath(candidate);
+  if (actual !== candidate) throw new Error('wecom-cli file_path contains a symbolic link');
+  const handle = await open(candidate, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
-    business = JSON.parse(text);
-  } catch {
-    throw new Error('wecom-cli result.content[].text is not valid business JSON');
-  }
-  if (!business || typeof business !== 'object' || Array.isArray(business)) {
-    throw new Error('wecom-cli business response is malformed');
-  }
-  if (business.errcode !== 0) throw new Error(`wecom-cli business errcode ${business.errcode}`);
-  return { outer, business };
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.nlink !== 1 || stat.size > maxBytes) {
+      throw new Error('wecom-cli output file is not a bounded regular file');
+    }
+    await handle.chmod(0o600);
+    return await handle.readFile('utf8');
+  } finally { await handle.close(); }
 }
 
 function item({ itemId, title, url, sourceItemId, rawArtifacts, status, reason, markdownPath = null, sanitizedPath = null }) {
@@ -190,7 +209,7 @@ async function collectWecomResource(request, dependencies = {}) {
   } catch (error) {
     return persistFailure(writer, outputDir, request?.url || 'wecom://invalid', 'unknown', [], reasonOf(error));
   }
-  const { url, kind } = resource;
+  const { url, kind, docid } = resource;
   const rawArtifacts = [];
   const bin = dependencies.bin || 'wecom-cli';
   let env;
@@ -199,19 +218,20 @@ async function collectWecomResource(request, dependencies = {}) {
   } catch (error) {
     return persistFailure(writer, outputDir, url, kind, rawArtifacts, reasonOf(error), { stage: 'authentication' });
   }
-  const maxPolls = positiveOption(
-    dependencies.maxPolls,
-    positiveEnv('KNOWLEDGE_COLLECTION_MAX_WECOM_POLLS', MAX_POLLS, env),
-  );
   const maxPages = positiveOption(
     dependencies.maxPages,
     positiveEnv('KNOWLEDGE_COLLECTION_MAX_WECOM_PAGES', MAX_PAGES, env),
   );
 
+  const cliWorkingDir = await realpath(outputDir);
+  let commandIndex = 0;
   const call = async (command, payload, artifact) => {
+    const requestedDir = writer.absolute(`raw/cli-output-${++commandIndex}`);
+    await mkdir(requestedDir, { mode: 0o700 });
+    const commandDir = await realpath(requestedDir);
     let result;
     try {
-      result = await runCli(bin, ['doc', command, JSON.stringify(payload)], { env });
+      result = await runCli(bin, [...command.split(' '), '--json', JSON.stringify(payload), '--output-dir', commandDir], { env, cwd: cliWorkingDir });
     } catch (error) {
       throw new WecomCommandError(reasonOf(error), { stage: 'command', evidence: { command, error: reasonOf(error) } });
     }
@@ -227,22 +247,34 @@ async function collectWecomResource(request, dependencies = {}) {
     }
     let parsed;
     try {
-      parsed = parseEnvelope(result.stdout);
+      parsed = parseBusiness(result.stdout);
+      const maxBytes = positiveEnv('KNOWLEDGE_COLLECTION_MAX_CLI_OUTPUT_BYTES', 10 * 1024 * 1024, env);
+      if (parsed.file_path) {
+        const text = await readCliFile(writer, cliWorkingDir, commandDir, parsed.file_path, maxBytes);
+        if (command === 'doc contents get' || command === 'sheet ranges get') parsed.content = text;
+        else parsed = parseBusiness(text);
+      }
+      if (command === 'smartpage pages get' && Array.isArray(parsed.pages)) {
+        for (const page of parsed.pages) {
+          if (page.file_path) page.content_file_inner = await readCliFile(writer, cliWorkingDir, commandDir, page.file_path, maxBytes);
+        }
+      }
     } catch (error) {
       throw new WecomCommandError(reasonOf(error), {
         stage: 'response', evidence: { command, ...cliEvidence(result) },
       });
     }
-    await writer.writeJson(artifact, parsed.outer);
+    await writer.writeJson(artifact, parsed);
     rawArtifacts.push(artifact);
-    return parsed.business;
+    return parsed;
   };
 
   try {
     let result;
-    if (kind === 'smartsheet') result = await collectSmartsheet(call, url, maxPages);
-    else if (kind === 'smartpage') result = await collectSmartpage(call, url, maxPolls, request.resumeTaskId);
-    else result = await collectDocument(call, url, maxPolls, request.resumeTaskId);
+    if (kind === 'smartsheet') result = await collectSmartsheet(call, docid, maxPages);
+    else if (kind === 'smartpage') result = await collectSmartpage(call, docid, maxPages);
+    else if (kind === 'sheet') result = await collectSheet(call, docid, maxPages);
+    else result = await collectDocument(call, docid);
     const markdownPath = 'markdown/document.md';
     const sanitizedPath = 'sanitized/items/document.md';
     const title = titleFor(kind);
@@ -268,10 +300,11 @@ async function collectWecomResource(request, dependencies = {}) {
       title, url, inventory, canonicalItems: [canonical({ title, url, path: sanitizedPath })],
       sourceMetadata: {
         ...identity,
+        backendCliVersion: CLI_VERSION,
         resourceKind: kind,
         sourceItemId: result.sourceItemId,
         ...(request.legacyMode ? {
-          backendCliVersion: env.WECOM_CLI_VERSION || 'unknown',
+          backendCliVersion: CLI_VERSION,
           scope: 'bot-visible',
         } : {}),
       },
@@ -324,7 +357,7 @@ async function persistFailure(writer, outputDir, url, kind, rawArtifacts, reason
     markdownPath,
     sanitizedPath,
   })];
-  const sourceMetadata = { ...identity, resourceKind: kind, reason, ...metadataContext };
+  const sourceMetadata = { ...identity, backendCliVersion: CLI_VERSION, resourceKind: kind, reason, ...metadataContext };
   await persistBundle(writer, {
     title,
     url,
@@ -343,57 +376,59 @@ async function persistFailure(writer, outputDir, url, kind, rawArtifacts, reason
   };
 }
 
-async function collectDocument(call, url, maxPolls, resumeTaskId = null) {
-  let response;
-  let taskId = resumeTaskId;
-  if (!taskId) {
-    response = await call('get_doc_content', { url, type: 2 }, 'raw/get-doc-content.json');
-    if (typeof response.content === 'string' && response.content.trim()) return { content: response.content, sourceItemId: url };
-    taskId = response.task_id;
-    if (typeof taskId !== 'string' || !taskId) throw new Error('wecom-cli document response has no content or task_id');
+async function collectDocument(call, docid) {
+  const response = await call('doc contents get', { docid, content_type: 'markdown' }, 'raw/get-doc-content.json');
+  if (typeof response.content !== 'string' || !response.content.trim()) {
+    throw new Error('wecom-cli document response has empty content');
   }
-  for (let poll = 1; poll <= maxPolls; poll += 1) {
-    try {
-      response = await call('get_doc_content', { url, type: 2, task_id: taskId }, `raw/poll-${poll}.json`);
-    } catch (error) {
-      throw new PartialCollectionError(reasonOf(error), { ...contextOf(error), stage: 'poll', taskId, lastPoll: poll });
-    }
-    if (response.task_done === true) {
-      if (typeof response.content !== 'string' || !response.content.trim()) {
-        throw new PartialCollectionError('wecom-cli completed document task has empty content', { stage: 'poll', taskId, lastPoll: poll });
-      }
-      return { content: response.content, sourceItemId: taskId };
-    }
-  }
-  throw new PartialCollectionError(`wecom-cli document task did not finish after ${maxPolls} polls`, {
-    stage: 'poll', taskId, lastPoll: maxPolls,
-  });
+  return { content: response.content, sourceItemId: docid };
 }
 
-async function collectSmartpage(call, url, maxPolls, resumeTaskId = null) {
-  let taskId = resumeTaskId;
-  if (!taskId) {
-    const start = await call('smartpage_export_task', { url, content_type: 1 }, 'raw/export-task.json');
-    taskId = start.task_id;
-    if (typeof taskId !== 'string' || !taskId) throw new Error('wecom-cli export response has no task_id');
-  }
-  for (let poll = 1; poll <= maxPolls; poll += 1) {
-    let response;
+async function collectSmartpage(call, docid, maxPages) {
+  const structure = await call('smartpage pages get', { docid }, 'raw/get-pages.json');
+  if (!Array.isArray(structure.pages) || !structure.pages.length) throw new Error('wecom-cli pages response is malformed');
+  const sections = [];
+  const ids = new Set();
+  for (const [index, page] of structure.pages.entries()) {
     try {
-      response = await call('smartpage_get_export_result', { task_id: taskId }, `raw/poll-${poll}.json`);
-    } catch (error) {
-      throw new PartialCollectionError(reasonOf(error), { ...contextOf(error), stage: 'poll', taskId, lastPoll: poll });
-    }
-    if (response.task_done === true) {
-      if (typeof response.content !== 'string' || !response.content.trim()) {
-        throw new PartialCollectionError('wecom-cli completed export task has empty content', { stage: 'poll', taskId, lastPoll: poll });
+      if (index >= maxPages) throw new Error(`wecom-cli pages reached page limit ${maxPages}`);
+      if (typeof page.page_id !== 'string' || !page.page_id || ids.has(page.page_id)) {
+        throw new Error('wecom-cli page ID is missing or repeated');
       }
-      return { content: response.content, sourceItemId: taskId };
+      ids.add(page.page_id);
+      const response = await call('smartpage pages get', {
+        docid, page_id: page.page_id, content_type: 'markdown',
+      }, `raw/page-${index + 1}.json`);
+      const detail = response.pages?.find((entry) => entry?.page_id === page.page_id);
+      if (typeof detail?.content_file_inner !== 'string') throw new Error('wecom-cli page has no content');
+      sections.push(`## ${page.page_title || page.page_id}\n\n${detail.content_file_inner}`);
+    } catch (error) {
+      throw new PartialCollectionError(reasonOf(error), {
+        ...contextOf(error), stage: 'pages', pagesCollected: sections.length, partialContent: sections.join('\n\n'),
+      });
     }
   }
-  throw new PartialCollectionError(`wecom-cli export did not finish after ${maxPolls} polls`, {
-    stage: 'poll', taskId, lastPoll: maxPolls,
-  });
+  return { content: sections.join('\n\n'), sourceItemId: docid };
+}
+
+async function collectSheet(call, docid, maxPages) {
+  const response = await call('sheet get', { docid }, 'raw/get-sheet.json');
+  const sheets = sheetList(response);
+  const sections = [];
+  for (const [index, sheet] of sheets.entries()) {
+    try {
+      if (index >= maxPages) throw new Error(`wecom-cli sheets reached page limit ${maxPages}`);
+      const data = await call('sheet ranges get', { docid, sheet_id: sheet.id, mode: 'csv' }, `raw/sheet-${index + 1}.json`);
+      if (typeof data.content !== 'string') throw new Error('wecom-cli sheet has no CSV content');
+      const fence = '`'.repeat(Math.max(3, ...(data.content.match(/`+/g) || []).map((value) => value.length + 1)));
+      sections.push(`## ${sheet.title}\n\n${fence}csv\n${data.content}\n${fence}`);
+    } catch (error) {
+      throw new PartialCollectionError(reasonOf(error), {
+        ...contextOf(error), stage: 'sheets', pagesCollected: sections.length, partialContent: sections.join('\n\n'),
+      });
+    }
+  }
+  return { content: sections.join('\n\n'), sourceItemId: docid };
 }
 
 async function resumeWecomResource(request, dependencies) {
@@ -403,25 +438,17 @@ async function resumeWecomResource(request, dependencies) {
   try {
     const { metadata } = await readResumeMetadata(sessionDir);
     const sourceMetadata = metadata?.sourceMetadata;
-    const resourceKind = sourceMetadata?.resourceKind;
-    const taskId = sourceMetadata?.taskId;
-    const url = metadata?.collection?.items?.[0]?.sourceUrl;
-    const resumableItem = metadata?.collection?.items?.find((item) => (
-      item?.sourceUrl === url
-      && item?.sourceItemId === taskId
-      && item?.materialization?.status === 'pending'
-    ));
-    if (sourceMetadata?.source !== identity.source
-      || metadata?.collection?.status !== 'partial'
-      || !['doc', 'sheet', 'smartpage'].includes(resourceKind)
-      || typeof taskId !== 'string'
-      || !taskId
-      || typeof url !== 'string'
-      || !url
-      || !resumableItem) {
-      throw new Error('session is not a resumable WeCom document, sheet, or smartpage collection');
+    if (sourceMetadata?.taskId || sourceMetadata?.backendCliVersion !== CLI_VERSION) {
+      throw new Error('legacy WeCom tasks cannot resume in 1.3.4; recollect the original resource URL');
     }
-    return collectWecomResource({ outputDir, url, resourceKind, resumeTaskId: taskId }, dependencies);
+    const resourceKind = sourceMetadata?.resourceKind;
+    const url = metadata?.collection?.items?.[0]?.sourceUrl;
+    if (sourceMetadata?.source !== identity.source || metadata?.collection?.status !== 'partial'
+      || !['doc', 'sheet', 'smartpage', 'smartsheet'].includes(resourceKind) || typeof url !== 'string' || !url) {
+      throw new Error('session is not a resumable WeCom collection');
+    }
+    // Reads are idempotent; refresh the resource instead of reusing deleted 0.x task IDs.
+    return collectWecomResource({ outputDir, url, resourceKind }, dependencies);
   } catch (error) {
     return { ...handledOutcome(identity.connector, 'failed', outputDir), reason: reasonOf(error) };
   }
@@ -431,8 +458,8 @@ function fieldsOf(response) {
   const fields = response.fields;
   if (!Array.isArray(fields)) throw new Error('wecom-cli fields response is malformed');
   return fields.map((field, index) => {
-    const id = field?.field_id ?? field?.id;
-    const title = field?.title ?? field?.name;
+    const title = field?.field_title ?? field?.title ?? field?.name;
+    const id = field?.field_id ?? field?.id ?? title;
     if (typeof id !== 'string' || typeof title !== 'string') throw new Error(`wecom-cli field ${index} is malformed`);
     return { id, title };
   });
@@ -444,7 +471,7 @@ function sheetList(response) {
   return sheets.map((sheet, index) => {
     const id = sheet?.sheet_id ?? sheet?.id;
     if (typeof id !== 'string' || !id) throw new Error(`wecom-cli sheet ${index} is malformed`);
-    return { id, title: typeof sheet.title === 'string' ? sheet.title : id };
+    return { id, title: typeof sheet.title === 'string' ? sheet.title : id, type: sheet.type };
   });
 }
 
@@ -464,38 +491,54 @@ function sheetSection(sheet, fields, rows) {
   return `## ${sheet.title}\n\n${header}\n${rule}\n${body.join('\n')}`;
 }
 
-async function collectSmartsheet(call, url, maxPages) {
-  const sheets = sheetList(await call('smartsheet_get_sheet', { url }, 'raw/get-sheet.json'));
+async function collectSmartsheet(call, docid, maxPages) {
+  const sheets = sheetList(await call('smartsheet sheets list', { docid }, 'raw/get-sheet.json'))
+    .filter((sheet) => sheet.type !== 'dashboard');
   const sections = [];
-  for (const sheet of sheets) {
-    const fields = fieldsOf(await call('smartsheet_get_fields', { url, sheet_id: sheet.id }, `raw/fields-${sheet.id}.json`));
+  for (const [sheetIndex, sheet] of sheets.entries()) {
+    const fields = [];
     const rows = [];
-    const cursors = new Set();
-    let cursor;
-    let page = 1;
-    do {
-      const response = await call('smartsheet_get_records', { url, sheet_id: sheet.id, cursor, limit: 1000 }, `raw/records-${sheet.id}-${page}.json`);
-      if (!Array.isArray(response.records)) throw new Error('wecom-cli records response is malformed');
-      rows.push(...response.records);
-      cursor = response.next_cursor;
-      if (cursor !== undefined && cursor !== null && typeof cursor !== 'string') throw new Error('wecom-cli records cursor is malformed');
-      if (cursor) {
-        if (cursors.has(cursor)) throw new Error('wecom-cli records cursor repeated');
-        cursors.add(cursor);
+    try {
+      for (const [resource, output] of [['fields', fields], ['records', rows]]) {
+        const cursors = new Set();
+        let cursor;
+        for (let page = 1; ; page += 1) {
+          const limit = resource === 'fields' ? 1000 : Math.min(1000, Math.floor(9999 / Math.max(fields.length, 1)));
+          if (limit < 1) throw new Error('wecom-cli sheet exceeds the record cell limit');
+          const response = await call(`smartsheet ${resource} list`, {
+            docid, sheet_title: sheet.title, cursor, limit,
+          }, `raw/${resource}-${sheetIndex + 1}-${page}.json`);
+          const values = resource === 'fields' ? fieldsOf(response) : response.records;
+          if (!Array.isArray(values)) throw new Error(`wecom-cli ${resource} response is malformed`);
+          output.push(...values);
+          if (response.has_more !== undefined && typeof response.has_more !== 'boolean') {
+            throw new Error(`wecom-cli ${resource} has_more is malformed`);
+          }
+          // The service can return a terminal cursor even when pagination is complete.
+          if (response.has_more === false) break;
+          cursor = response.next_cursor;
+          if (cursor !== undefined && cursor !== null && typeof cursor !== 'string') {
+            throw new Error(`wecom-cli ${resource} cursor is malformed`);
+          }
+          if (!cursor) {
+            if (response.has_more === true) throw new Error(`wecom-cli ${resource} continuation is missing`);
+            break;
+          }
+          if (cursors.has(cursor)) throw new Error(`wecom-cli ${resource} cursor repeated`);
+          cursors.add(cursor);
+          if (page >= maxPages) throw new Error(`wecom-cli ${resource} reached page limit ${maxPages}`);
+        }
       }
-      if (cursor && page >= maxPages) {
-        throw new PartialCollectionError(`wecom-cli records reached page limit ${maxPages}`, {
-          stage: 'records-pagination',
-          pagesCollected: page,
-          lastCursor: cursor,
-          partialContent: [...sections, sheetSection(sheet, fields, rows)].join('\n\n'),
-        });
-      }
-      page += 1;
-    } while (cursor);
-    sections.push(sheetSection(sheet, fields, rows));
+      sections.push(sheetSection(sheet, fields, rows));
+    } catch (error) {
+      throw new PartialCollectionError(reasonOf(error), {
+        ...contextOf(error), stage: 'smartsheet-pagination',
+        partialContent: [...sections, ...(rows.length ? [sheetSection(sheet, fields, rows)] : [])].join('\n\n'),
+      });
+    }
   }
-  return { content: sections.join('\n\n'), sourceItemId: url };
+  if (!sections.length) throw new Error('wecom-cli smartsheet has no data sheets');
+  return { content: sections.join('\n\n'), sourceItemId: docid };
 }
 
 export function createWecomAdapter(dependencies = {}) {

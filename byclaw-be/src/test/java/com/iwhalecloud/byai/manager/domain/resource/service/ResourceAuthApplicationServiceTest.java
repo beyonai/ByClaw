@@ -184,6 +184,7 @@ class ResourceAuthApplicationServiceTest {
 
     private ResourceAuthApplicationService service() {
         ResourceAuthApplicationService service = new ResourceAuthApplicationService();
+        ReflectionTestUtils.setField(service, "publicationAccess", org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess.class));
         ReflectionTestUtils.setField(service, "ssResourceMapper", ssResourceMapper);
         ReflectionTestUtils.setField(service, "ssResourceCatalogService", ssResourceCatalogService);
         ReflectionTestUtils.setField(service, "suasSuperassistApplicationService", suasSuperassistApplicationService);

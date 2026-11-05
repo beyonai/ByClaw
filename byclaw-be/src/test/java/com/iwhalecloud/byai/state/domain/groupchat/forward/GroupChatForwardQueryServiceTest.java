@@ -36,7 +36,7 @@ class GroupChatForwardQueryServiceTest {
         db.execute("CREATE TABLE byai.byai_message(message_id BIGINT PRIMARY KEY, session_id BIGINT, usage INT, recalled_at TIMESTAMP, archived_at TIMESTAMP)");
         db.execute("CREATE TABLE byai.po_enterprise_info(enterprise_id BIGINT PRIMARY KEY)");
         // H2 不支持条件索引；这里只验证授权和快照查询，生产索引保留原样。
-        db.execute(Files.readString(Path.of("../deploy/migrations/versions/V0.6.0/V0.6.0__ddl.sql"))
+        db.execute(Files.readString(Path.of("../deploy/migrations/versions/V0.6.0/V0.6.0__ddl.sql")).split("-- RESOURCE_ORGANIZATION_PUBLICATION")[0]
             .replace("SET search_path TO byai;", "SET SCHEMA byai;")
             .replaceAll("(?is)CREATE INDEX IF NOT EXISTS idx_byai_message_user_question_session\\s+ON byai\\.byai_message \\(session_id\\) WHERE usage = 1;", ""));
 
@@ -64,7 +64,7 @@ class GroupChatForwardQueryServiceTest {
                 '{"type":"USER","id":"30","name":"sender"}',TIMESTAMP '2026-10-16 00:00:00',?)
             """, message);
         query = new GroupChatForwardQueryService(db, new DataSourceTransactionManager(source),
-            new ObjectMapper().findAndRegisterModules(), mock(TenantGroupForwardService.class), mock(ForwardPlatformPolicy.class));
+            new ObjectMapper().findAndRegisterModules(), mock(TenantGroupForwardService.class), mock(ForwardPlatformPolicy.class), org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.domain.tenant.TenantModeService.class));
     }
     @AfterEach
     void closeDatabase() {

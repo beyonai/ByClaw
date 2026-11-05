@@ -7904,6 +7904,16 @@
         "summary": "BE 内部读取当前 actor 在原群的有效成员模型凭据；不用于公开群详情。",
         "parameters": [
           {
+            "name": "identityOnly",
+            "in": "query",
+            "description": "为 true 时仅查询有效成员主键，供 BE 优先读取 HACU 共享 Redis；不查询数据库 api_key。",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
             "$ref": "#/components/parameters/enterprise"
           },
           {
@@ -7923,7 +7933,7 @@
         ],
         "responses": {
           "200": {
-            "description": "当前租户 USER 成员的 state=00A 凭据；缺失或空白为 null。",
+            "description": "当前租户 USER 成员的 state=00A 凭据；缺失或空白为 null。identityOnly=true 时另返回 byaiSessionMemberId，api_key 始终为 null。",
             "content": {
               "application/json": {
                 "schema": {
@@ -7931,6 +7941,10 @@
                   "required": ["api_key"],
                   "additionalProperties": false,
                   "properties": {
+                    "byaiSessionMemberId": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "api_key": {
                       "type": "string",
                       "nullable": true

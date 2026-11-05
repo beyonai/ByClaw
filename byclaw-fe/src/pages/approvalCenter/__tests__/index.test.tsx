@@ -70,7 +70,7 @@ jest.mock('@/components/EmployeePublication/AuditList', () => ({
   ),
 }));
 
-const types = ['DIG_EMPLOYEE', 'SKILL', 'KG_DOC', 'KG_QA', 'KG_TERM', 'MCP', 'TOOLKIT', 'AGENT'];
+const types = ['DIG_EMPLOYEE', 'SKILL', 'KG_DOC', 'KG_QA', 'KG_TERM', 'TOOL', 'MCP', 'TOOLKIT', 'AGENT'];
 
 // 等待已 mock 的审批请求和状态更新完成，再检查页签与列表，避免未完成的更新进入下个用例。
 const render = async (ui: Parameters<typeof renderComponent>[0]) => {
@@ -126,7 +126,7 @@ describe('approval center', () => {
     ['employee', ['DIG_EMPLOYEE']],
     ['skill', ['SKILL']],
     ['knowledge', ['KG_DOC', 'KG_QA', 'KG_TERM']],
-    ['tool', ['MCP', 'TOOLKIT', 'AGENT']],
+    ['tool', ['TOOL', 'MCP', 'TOOLKIT', 'AGENT']],
   ])(
     'opens %s directly and isolates pending and history rows',
     async (tab, allowedTypes) => {

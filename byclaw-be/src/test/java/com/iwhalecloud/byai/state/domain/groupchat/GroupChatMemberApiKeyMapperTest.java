@@ -22,15 +22,15 @@ class GroupChatMemberApiKeyMapperTest {
             + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1", "sa", "");
         JdbcTemplate db = new JdbcTemplate(source);
         db.execute("CREATE SCHEMA byai");
-        db.execute("CREATE TABLE byai.byai_session_member(session_id BIGINT, mem_obj_type VARCHAR, mem_obj_id BIGINT, state VARCHAR, api_key VARCHAR)");
+        db.execute("CREATE TABLE byai.byai_session_member(byai_session_member_id BIGINT, session_id BIGINT, mem_obj_type VARCHAR, mem_obj_id BIGINT, state VARCHAR, api_key VARCHAR)");
         db.update("""
             INSERT INTO byai.byai_session_member VALUES
-              (30,'USER',20,'00A','original-group-key'),
-              (50,'USER',20,'00A','task-session-key'),
-              (30,'USER',99,'00A','other-user-key'),
-              (30,'AGENT',20,'00A','agent-key'),
-              (30,'USER',21,'00X','inactive-key'),
-              (30,'USER',22,NULL,'unknown-state-key')
+              (80,30,'USER',20,'00A','original-group-key'),
+              (81,50,'USER',20,'00A','task-session-key'),
+              (82,30,'USER',99,'00A','other-user-key'),
+              (83,30,'AGENT',20,'00A','agent-key'),
+              (84,30,'USER',21,'00X','inactive-key'),
+              (85,30,'USER',22,NULL,'unknown-state-key')
             """);
         Configuration configuration = new Configuration(new Environment("test", new JdbcTransactionFactory(), source));
         String resource = "com/iwhalecloud/byai/manager/mapper/session/ByaiSessionMemberMapper.xml";
@@ -39,6 +39,12 @@ class GroupChatMemberApiKeyMapperTest {
         }
         String query = "com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper.findActiveUserApiKey";
         try (SqlSession session = new SqlSessionFactoryBuilder().build(configuration).openSession()) {
+            String identityQuery = "com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper.findActiveUserMemberId";
+            assertThat((Long) session.selectOne(identityQuery, Map.of("groupSessionId", 30L, "userId", 20L)))
+                .isEqualTo(80L);
+            for (long userId : new long[] {21L, 22L, 23L}) {
+                assertThat((Long) session.selectOne(identityQuery, Map.of("groupSessionId", 30L, "userId", userId))).isNull();
+            }
             assertThat((String) session.selectOne(query, Map.of("groupSessionId", 30L, "userId", 20L)))
                 .isEqualTo("original-group-key");
             assertThat((String) session.selectOne(query, Map.of("groupSessionId", 30L, "userId", 21L))).isNull();

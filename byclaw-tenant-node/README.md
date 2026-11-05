@@ -4,7 +4,9 @@
 
 ## 群成员模型凭据
 
-`GET /internal/v1/group-chats/{id}/member-api-key` 仅供 BE 在群聊派发或私有群任务续聊的 Gateway 出站阶段调用。用户取已鉴权的 `x-actor-user-id`，先校验当前租户原群的访问权，再查询 `session_id={id}`、`mem_obj_type='USER'`、`mem_obj_id=actor`、`com_acct_id=当前租户`、`state='00A'` 的 `api_key`，返回 `{ "api_key": "…" }`；缺失或空白返回 null。该查询不创建凭据。群详情和管理成员响应会排除凭据字段，不能以公开成员列表替代此内部接口。需要与 Java BE 和 Harness 插件一起部署。
+`GET /internal/v1/group-chats/{id}/member-api-key` 仅供 BE 在群聊派发或私有群任务续聊的 Gateway 出站阶段调用。用户取已鉴权的 `x-actor-user-id`，先校验当前租户原群的访问权，再查询 `session_id={id}`、`mem_obj_type='USER'`、`mem_obj_id=actor`、`com_acct_id=当前租户` 的 `api_key`，返回 `{ "api_key": "…" }`；缺失或空白返回 null。失效成员会被移除，身份和凭据查询均以成员行是否存在为准，不依赖成员表的 state 列。该查询不创建凭据。群详情和管理成员响应会排除凭据字段，不能以公开成员列表替代此内部接口。需要与 Java BE 和 Harness 插件一起部署。
+
+BE 优先读取 HACU 共享 Redis 凭据时，先携带 `identityOnly=true` 调用同一接口：仅查询有效成员的 `byaiSessionMemberId`，返回 `{ "byaiSessionMemberId": "…", "api_key": null }`，不查询数据库密钥；不存在有效成员时主键为 null。BE 按该主键读取 `hacu:tokensaver:binding:v1:API_KEY:{byaiSessionMemberId}` 的 `tokenSaverCode`（HACU 保存的 TokenSaver `data.key`），最终放入 Gateway 的 `api_key`；未取得有效密钥后再调用不带该参数的原接口。两个分支均保留当前租户和已认证 actor 的访问校验。
 
 ## 共享 Redis 群成员额度
 

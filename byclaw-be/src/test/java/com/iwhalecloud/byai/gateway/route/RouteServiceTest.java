@@ -141,7 +141,8 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
         ReflectionTestUtils.setField(routeService, "groupCredentials",
             new com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatGatewayCredentialService(
                 mock(com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper.class),
-                mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class)));
+                mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class),
+                mock(org.springframework.data.redis.core.StringRedisTemplate.class), new com.fasterxml.jackson.databind.ObjectMapper()));
         ReflectionTestUtils.setField(routeService, "gatewayClient", gatewayClient);
         ReflectionTestUtils.setField(routeService, "pythonSseService", pythonSseService);
         ReflectionTestUtils.setField(routeService, "gatewayStreamEventProcessor", gatewayStreamEventProcessor);
@@ -177,7 +178,8 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
         when(members.findActiveUserApiKey(30L, 100L)).thenReturn("group-member-key");
         ReflectionTestUtils.setField(routeService, "groupCredentials",
             new com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatGatewayCredentialService(members,
-                mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class)));
+                mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class),
+                mock(org.springframework.data.redis.core.StringRedisTemplate.class), new com.fasterxml.jackson.databind.ObjectMapper()));
         ChatGatewayRequestDecorator decorator = (context, content, params) -> {
             context.setGroupSessionId(30L);
             return content;
@@ -221,7 +223,8 @@ class RouteServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport 
         when(members.findActiveUserApiKey(30L, 100L)).thenReturn("inherited-group-key");
         ReflectionTestUtils.setField(routeService, "groupCredentials",
             new com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatGatewayCredentialService(members,
-                mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class)));
+                mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class),
+                mock(org.springframework.data.redis.core.StringRedisTemplate.class), new com.fasterxml.jackson.databind.ObjectMapper()));
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(), anyString(),
             anyString(), anyString(), anyString(), any(), any()))
             .thenAnswer(call -> { ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx)); return successResponse(); });

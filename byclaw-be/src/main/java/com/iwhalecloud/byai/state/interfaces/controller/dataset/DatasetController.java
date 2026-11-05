@@ -101,6 +101,9 @@ public class DatasetController {
     private final Logger logger = LoggerFactory.getLogger(DatasetController.class);
 
     @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationImportSupport publicationImports;
+
+    @Autowired
     private DatasetApplicationService datasetApplicationService;
 
     @Autowired
@@ -602,15 +605,17 @@ public class DatasetController {
     public ResponseUtil<ObjectZipImportResult> importDatasetJson(
         @RequestParam(value = "ownerType", required = false) String ownerType,
         @RequestParam(value = "catalogId", required = false) Long catalogId,
-        @RequestPart("file") MultipartFile[] file) {
+        @RequestPart("file") MultipartFile[] file,
+        @RequestParam(value = "publishScope", required = false) String publishScope) {
+        var selectedScope = publicationImports.validate(ownerType, publishScope);
         if (file != null && file.length > 1) {
             return ResponseUtil.successResponse(I18nUtil.get("dataset.import.success"),
-                importDatasetJsonBatch(ownerType, catalogId, file));
+                publicationImports.finish(importDatasetJsonBatch(ownerType, catalogId, file), selectedScope));
         }
         try {
             Long resourceId = datasetApplicationService.importDatasetJson(ownerType, catalogId, file[0]);
             return ResponseUtil.successResponse(I18nUtil.get("dataset.import.success"),
-                buildDatasetImportSuccessResult(file[0], resourceId));
+                publicationImports.finish(buildDatasetImportSuccessResult(file[0], resourceId), selectedScope));
         } catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
         } catch (Exception e) {

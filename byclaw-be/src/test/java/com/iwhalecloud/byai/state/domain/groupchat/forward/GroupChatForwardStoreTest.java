@@ -24,7 +24,7 @@ public class GroupChatForwardStoreTest {
         execute("CREATE TABLE byai.po_enterprise_info(enterprise_id BIGINT PRIMARY KEY)");
         // H2 exposes the production database's documented wall-clock function through a test-only alias.
         execute("CREATE ALIAS clock_timestamp FOR \"com.iwhalecloud.byai.state.domain.groupchat.forward.GroupChatForwardStoreTest.clockTimestamp\"");
-        String ddl = Files.readString(Path.of("../deploy/migrations/versions/V0.6.0/V0.6.0__ddl.sql"));
+        String ddl = Files.readString(Path.of("../deploy/migrations/versions/V0.6.0/V0.6.0__ddl.sql")).split("-- RESOURCE_ORGANIZATION_PUBLICATION")[0];
         // H2 不支持条件索引；此消息查询性能索引不属于转发存储断言范围。
         execute(ddl.replace("SET search_path TO byai;", "SET SCHEMA byai;")
             .replaceAll("(?is)CREATE INDEX IF NOT EXISTS idx_byai_message_user_question_session\\s+ON byai\\.byai_message \\(session_id\\) WHERE usage = 1;", ""));

@@ -297,7 +297,14 @@ COPY middleware/byclaw-harness/scripts/startup-module-resolver.cjs /usr/local/li
 
 COPY --chmod=0755 middleware/byclaw-harness/scripts/lean-harness-entrypoint.sh /usr/local/bin/byclaw-lean-entrypoint
 COPY middleware/byclaw-harness/scripts/verify-lean-harness.mjs /usr/local/lib/byclaw/verify-lean-harness.mjs
-RUN node /usr/local/lib/byclaw/verify-lean-harness.mjs \
+COPY middleware/byclaw-harness/scripts/verify-read-image-runtime.mjs /usr/local/lib/byclaw/verify-read-image-runtime.mjs
+# Build-only, offline materialization: preserve the complete native CJS closure
+# beside its consumer without changing image-owned DSH/Cordis peer identities.
+COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/materialize-image-runtime.mjs /tmp/materialize-image-runtime.mjs
+RUN node /tmp/materialize-image-runtime.mjs /workspace \
+    && rm /tmp/materialize-image-runtime.mjs \
+    && node /usr/local/lib/byclaw/verify-lean-harness.mjs \
+    && node /usr/local/lib/byclaw/verify-read-image-runtime.mjs /workspace /opt/byclaw/dsh-managed/profiles/web \
     && node /workspace/scripts/verify-shared-runtime.mjs /workspace /opt/byclaw/dsh-managed/profiles/web \
     && node /usr/local/lib/byclaw/verify-by-framework-runtime.mjs /opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-integration/package.json \
     && DSH_HOME=/opt/byclaw/dsh-managed node apps/cli/lib/bin.js --profile web --dump-config >/tmp/slim-profile.yml \

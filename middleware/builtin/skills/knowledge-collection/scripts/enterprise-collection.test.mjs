@@ -431,21 +431,15 @@ function run(command, args, env) {
 async function createWecomFixture(root, businessFailure = false) {
   const fixturePath = join(root, 'wecom-cli');
   const source = `#!/usr/bin/env node
-const { existsSync, writeFileSync } = require('node:fs');
-const stateFile = process.env.WECOM_FIXTURE_STATE;
-const command = process.argv[3];
-const envelope = (business) => JSON.stringify({ jsonrpc: '2.0', access_token: 'fixture-secret', result: { content: [{ type: 'text', text: JSON.stringify(business) }] }, isError: false });
-if (command === 'smartpage_export_task') {
-  console.log(envelope(${businessFailure ? "{ errcode: 93001, errmsg: 'denied' }" : "{ errcode: 0, task_id: 'task-1', credential: 'nested-secret' }"}));
+const args = process.argv.slice(2);
+if (args.slice(0, 3).join(' ') !== 'smartpage pages get' || !args.includes('--json') || !args.includes('--output-dir')) process.exit(2);
+const payload = JSON.parse(args[args.indexOf('--json') + 1]);
+if (!payload.page_id) {
+  console.log(JSON.stringify(${businessFailure ? "{ errcode: 93001, errmsg: 'denied' }" : "{ errcode: 0, access_token: 'fixture-secret', credential: 'nested-secret', pages: [{ page_id: 'page-1', page_title: 'Exported smartpage' }] }"}));
   process.exit(0);
 }
-if (command === 'smartpage_get_export_result') {
-  if (!existsSync(stateFile)) {
-    writeFileSync(stateFile, 'polled');
-    console.log(envelope({ errcode: 0, task_done: false }));
-  } else {
-    console.log(envelope({ errcode: 0, task_done: true, content: '# Exported smartpage\\n\\nBody' }));
-  }
+if (payload.page_id === 'page-1' && payload.content_type === 'markdown') {
+  console.log(JSON.stringify({ errcode: 0, pages: [{ page_id: 'page-1', content_file_inner: '# Exported smartpage\\n\\nBody' }] }));
   process.exit(0);
 }
 process.exit(2);
@@ -703,9 +697,8 @@ async function testWecomExportWritesCanonicalPrivateArtifacts() {
     });
     assert.equal(result.code, 0, result.stderr);
     for (const relativePath of [
-      'raw/export-task.json',
-      'raw/poll-1.json',
-      'raw/poll-2.json',
+      'raw/get-pages.json',
+      'raw/page-1.json',
       'markdown/document.md',
       'sanitized/items/document.md',
       'sanitized/metadata.json',
@@ -730,7 +723,7 @@ async function testWecomExportWritesCanonicalPrivateArtifacts() {
     assert.equal(collection.items.length, 1);
     assert.equal(collection.items[0].markdown, 'sanitized/items/document.md');
     assert.equal(collection.items[0].fileName, 'sanitized/items/document.md');
-    const raw = await readFile(join(outputDir, 'raw/export-task.json'), 'utf8');
+    const raw = await readFile(join(outputDir, 'raw/get-pages.json'), 'utf8');
     assert.doesNotMatch(raw, /fixture-secret/);
     assert.doesNotMatch(raw, /nested-secret/);
     await assertPrivateTree(outputDir);
@@ -744,11 +737,11 @@ async function testWecomTimeoutPersistsPartialMetadata() {
   const outputDir = join(tempRoot, 'output');
   const fixturePath = join(tempRoot, 'wecom-cli');
   const source = `#!/usr/bin/env node
-const command = process.argv[3];
-const envelope = (business) => JSON.stringify({ jsonrpc: '2.0', result: { content: [{ type: 'text', text: JSON.stringify(business) }] }, isError: false });
-if (command === 'smartpage_export_task') console.log(envelope({ errcode: 0, task_id: 'task-timeout' }));
-else if (command === 'smartpage_get_export_result') console.log(envelope({ errcode: 0, task_done: false }));
-else process.exit(2);
+const args = process.argv.slice(2);
+if (args.slice(0, 3).join(' ') !== 'smartpage pages get') process.exit(2);
+const payload = JSON.parse(args[args.indexOf('--json') + 1]);
+if (!payload.page_id) console.log(JSON.stringify({ errcode: 0, pages: [{ page_id: 'page-timeout' }] }));
+else setTimeout(() => {}, 10000);
 `;
   try {
     await writeFile(fixturePath, source, { mode: 0o700 });
@@ -756,7 +749,7 @@ else process.exit(2);
     const parent = await createParentSession(tempRoot, ['wecom']);
     const result = await run(process.execPath, [scriptPath, 'wecom-smartpage', '--parent-session-dir', parent, '--url', 'https://doc.weixin.qq.com/smartpage/x', '--output-dir', outputDir], {
       WECOM_CLI_BIN: fixturePath,
-      KNOWLEDGE_COLLECTION_MAX_WECOM_POLLS: '2',
+      KNOWLEDGE_COLLECTION_CLI_TIMEOUT_MS: '2000',
       WECOM_HOME: join(tempRoot, 'wecom-home'),
     });
     assert.notEqual(result.code, 0);
@@ -926,13 +919,12 @@ async function testAbsoluteHistoricalPathsDoNotRequireCurrentSessionRoot() {
   }
 }
 
-async function testWecomMissingTaskIdPersistsFailedMetadata() {
-  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-missing-task-'));
+async function testWecomMissingPagesPersistsFailedMetadata() {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'enterprise-collection-missing-pages-'));
   const outputDir = join(tempRoot, 'output');
   const fixturePath = join(tempRoot, 'wecom-cli');
   const source = `#!/usr/bin/env node
-const envelope = (business) => JSON.stringify({ jsonrpc: '2.0', result: { content: [{ type: 'text', text: JSON.stringify(business) }] }, isError: false });
-console.log(envelope({ errcode: 0 }));
+console.log(JSON.stringify({ errcode: 0 }));
 `;
   try {
     await writeFile(fixturePath, source, { mode: 0o700 });
@@ -944,7 +936,7 @@ console.log(envelope({ errcode: 0 }));
       '--parent-session-dir',
       parent,
       '--url',
-      'https://doc.weixin.qq.com/smartpage/missing-task',
+      'https://doc.weixin.qq.com/smartpage/missing-pages',
       '--output-dir',
       outputDir,
     ], { WECOM_CLI_BIN: fixturePath, WECOM_HOME: join(tempRoot, 'wecom-home') });
@@ -952,7 +944,7 @@ console.log(envelope({ errcode: 0 }));
     const metadata = JSON.parse(await readFile(join(outputDir, 'sanitized/metadata.json'), 'utf8'));
     assert.equal(metadata.collection.status, 'failed');
     assert.deepEqual(metadata.collection.items[0].rawArtifacts, [
-      'raw/export-task.json',
+      'raw/get-pages.json',
       'raw/metadata.json',
     ]);
     const collection = JSON.parse(await readFile(join(outputDir, 'collection-result.json'), 'utf8'));
@@ -1088,7 +1080,7 @@ await testWecomRejectsNestedBusinessFailure();
 await testSandboxAllowsAbsoluteWorkspaceOutputDirectory();
 await testSandboxAllowsSessionOutputDirectory();
 await testAbsoluteHistoricalPathsDoNotRequireCurrentSessionRoot();
-await testWecomMissingTaskIdPersistsFailedMetadata();
+await testWecomMissingPagesPersistsFailedMetadata();
 await testWecomTimeoutPersistsPartialMetadata();
 await testEnterpriseCliTimeoutIsBounded();
 await testEnterpriseRunnerDoesNotReuseExistingOutputDir();
