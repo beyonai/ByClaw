@@ -111,6 +111,13 @@ export default defineConfig({
       .test(/libarchive-wasm[\\/]dist[\\/]libarchive\.js$/)
       .set('resolve', { alias: { fs: false, path: false, crypto: false } });
 
+    // pptx-preview 1.0.7 限制图片文件名前缀且缺少 SVG MIME，局部修正媒体加载。
+    config.module
+      .rule('pptx-preview-media')
+      .test(/pptx-preview[\\/]dist[\\/]pptx-preview\.es\.js$/)
+      .use('pptx-preview-media')
+      .loader(path.resolve(__dirname, 'config/loaders/pptx-preview-media.js'));
+
     // 配置 splitChunks，将 slate 和 katex 打包到同一个文件
     config.optimization.splitChunks.merge({
       cacheGroups: umiConfig.cacheGroups,
