@@ -22,11 +22,12 @@ export const getBefore = `  get(name: string, scope?: ScopeKey): ToolDefinition 
 export const getAfter = `  get(name: string, scope?: ScopeKey): ToolDefinition | undefined {
     // ${marker}: resolve one name along the chain instead of materializing view(scope).
     if (name === RUN_CODE_NAME && this.modeFor(scope) !== 'native') return this.requirePtcTransport()
-    const own = this.layers.peek(scope)
+    const stack = this.layers // one read: the registry is reached through the Cordis service proxy
+    const own = stack.peek(scope)
     const mine = own?.tools.get(name)
     if (mine !== undefined) return mine
-    const layers = this.layers.chainLayers(scope)
-    let inherited = this.layers.global.tools.get(name)
+    const layers = stack.chainLayers(scope)
+    let inherited = stack.global.tools.get(name)
     for (const layer of layers) {
       if (layer !== own) inherited = layer.tools.get(name) ?? inherited
     }
