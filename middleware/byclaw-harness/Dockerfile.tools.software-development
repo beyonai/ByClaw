@@ -1,0 +1,66 @@
+# Repository-root context. Pin BROWSER_IMAGE by digest for release builds.
+ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
+FROM ${BROWSER_IMAGE} AS tools-software-development
+USER root
+ARG TARGETARCH
+ARG PNPM_VERSION=11.28.5
+ARG UV_VERSION=0.12.7
+ARG PGVECTOR_PACKAGE_VERSION=0.8.0-1
+RUN test "${TARGETARCH}" = amd64 \
+    && . /etc/os-release && test "$ID" = debian && test "$VERSION_ID" = 13
+ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    npm_config_registry=https://registry.npmmirror.com \
+    COREPACK_NPM_REGISTRY=https://registry.npmmirror.com \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple PIP_EXTRA_INDEX_URL= \
+    UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple UV_EXTRA_INDEX_URL= \
+    UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy \
+    npm_config_disturl=https://npmmirror.com/mirrors/node \
+    npm_package_config_node_gyp_dist_url=https://npmmirror.com/mirrors/node \
+    NEXT_TELEMETRY_DISABLED=1 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+    BYCLAW_SOFTWARE_DEVELOPMENT_PGDATA=/var/lib/postgresql/software-development/17/data
+COPY middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh /tmp/configure-cn-sources.sh
+# Do not initialize a cluster or start a service during package installation.
+# PostgreSQL 17 uses Debian's signed domestic package mirror; no PGDG/GitHub fetch.
+RUN set -eux; \
+    bash /tmp/configure-cn-sources.sh; \
+    mkdir -p /etc/postgresql-common; \
+    printf 'create_main_cluster = false\n' >/etc/postgresql-common/createcluster.conf; \
+    if [ -e /usr/sbin/policy-rc.d ]; then cp -a /usr/sbin/policy-rc.d /tmp/policy-rc.d.saved; fi; \
+    printf '#!/bin/sh\nexit 101\n' >/usr/sbin/policy-rc.d; \
+    chmod 0755 /usr/sbin/policy-rc.d; \
+    apt-get -o APT::Update::Error-Mode=any update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential pkg-config libpq-dev postgresql-17 \
+        "postgresql-17-pgvector=${PGVECTOR_PACKAGE_VERSION}" \
+        sqlite3 ripgrep fd-find lsof iproute2 netcat-openbsd; \
+    if [ -e /tmp/policy-rc.d.saved ]; then mv /tmp/policy-rc.d.saved /usr/sbin/policy-rc.d; \
+    else rm /usr/sbin/policy-rc.d; fi; \
+    python3 -m pip install --no-cache-dir "uv==${UV_VERSION}"; \
+    python3 -m pip check; \
+    npm install --global --registry=https://registry.npmmirror.com "pnpm@${PNPM_VERSION}"; \
+    ln -sf /usr/bin/fdfind /usr/local/bin/fd; \
+    mkdir -p /usr/local/share/byclaw-tool-sandbox; \
+    dpkg-query -W > /usr/local/share/byclaw-tool-sandbox/debian-packages.tsv; \
+    test ! -e "${BYCLAW_SOFTWARE_DEVELOPMENT_PGDATA}/PG_VERSION"; \
+    test -f /usr/share/postgresql/17/extension/vector.control; \
+    rm -rf /var/lib/apt/lists/* /root/.npm /root/.cache /tmp/configure-cn-sources.sh
+COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
+COPY --chmod=0755 middleware/byclaw-harness/scripts/software-development-entrypoint.py /usr/local/bin/byclaw-software-development-entrypoint
+COPY middleware/byclaw-harness/tool-sandbox/software-development.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
+RUN set -eux; \
+    ln -sfn /usr/local/bin/byclaw-software-development-entrypoint /usr/local/bin/byclaw-dsh-entrypoint; \
+    python3 -m py_compile /usr/local/bin/byclaw-software-development-entrypoint; \
+    su -s /bin/sh byclaw -c 'node --version && pnpm --version && uv --version && python3 -c "import sqlite3, ssl, ctypes, venv"'; \
+    /usr/lib/postgresql/17/bin/postgres --version; \
+    node -e 'const m=require("/etc/byclaw-tool-sandbox/capabilities.json"); if(m.purpose!=="software-development")process.exit(1)'; \
+    env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env; \
+    chmod 0644 /etc/byclaw-tool-env.session-env
+WORKDIR /by
+# PostgreSQL is loopback-only; project preview ports are not startup readiness ports.
+EXPOSE 22 8022 8081 19825
+LABEL io.byclaw.tool-sandbox.contract="byclaw.tool-sandbox/v1" \
+      io.byclaw.tool-sandbox.purpose="software-development"
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/byclaw-software-development-entrypoint"]
+CMD ["tools"]
