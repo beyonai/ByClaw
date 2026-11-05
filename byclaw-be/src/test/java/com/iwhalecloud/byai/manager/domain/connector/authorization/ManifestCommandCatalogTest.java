@@ -18,6 +18,29 @@ import org.junit.jupiter.api.condition.OS;
 class ManifestCommandCatalogTest {
 
     @Test
+    void resolvesEnabledUserScopesAsOneArgumentAndRejectsNonScopeInput() {
+        ConnectorInfo connector = connector();
+        connector.setRuntimeManifest(manifest("""
+            {"loginWithScopes":[["lark-cli","auth","login","--domain","all","--scope","${userScopes}","--json"]]}
+            """));
+        ObjectMapper mapper = new ObjectMapper();
+        ConnectorManifestCommandResolver defaultResolver = new ConnectorManifestCommandResolver(
+            mapper, new ConnectorManifestCanonicalizer(mapper));
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> defaultResolver.resolve(connector)).doesNotThrowAnyException();
+        ManifestCommandCatalog catalog = defaultResolver.resolve(connector);
+        assertThat(catalog.command("loginWithScopes", 0, Map.of("userScopes",
+            "contact:user:search contact:department.organize:readonly")))
+            .containsExactly("lark-cli", "auth", "login", "--domain", "all", "--scope",
+                "contact:user:search contact:department.organize:readonly", "--json");
+        for (String invalid : List.of("--help", "contact:user:search\n--profile other", "$(whoami)", "",
+                "contact:user:search;echo", "contact:user:search ".repeat(5000))) {
+            assertThatThrownBy(() -> catalog.command("loginWithScopes", 0, Map.of("userScopes", invalid)))
+                .isInstanceOf(InvalidConnectorManifestException.class);
+        }
+    }
+
+    @Test
     void resolvesCommandsAndFillsARegisteredWholeArgumentPlaceholder() {
         ConnectorInfo connector = connector();
         connector.setRuntimeManifest(manifest("""

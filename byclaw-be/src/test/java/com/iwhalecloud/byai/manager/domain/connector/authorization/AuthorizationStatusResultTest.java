@@ -73,4 +73,42 @@ class AuthorizationStatusResultTest {
         assertThat(result.accountAttributes()).containsExactlyInAnyOrderEntriesOf(
             Map.of("username", "gh_x", "principalName", "XXX公司"));
     }
+    @Test
+    void partialPermissionsRemainConnectedWithOnlyValidatedPublicScopeMetadata() {
+        AuthorizationStatusResult result = AuthorizationStatusResult.connected(
+            "account-1", "Alice", CredentialState.READY, CredentialRenewalMode.NONE,
+            null, null, new Date(), "sandbox-reference", Map.of(
+                "permissionStatus", "partial",
+                "missingScopes", "[\"contact:user.email:readonly\",\"contact:user.email:readonly\"]",
+                "access_token", "must-not-persist"));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.accountAttributes()).containsExactlyInAnyOrderEntriesOf(Map.of(
+            "permissionStatus", "partial", "missingScopes", "[\"contact:user.email:readonly\"]"));
+    }
+
+    @Test
+    void invalidPermissionMetadataNeverClaimsCompleteOrPublishesUnvalidatedValues() {
+        for (String missing : new String[] {"[123]", "{\"token\":\"secret\"}", "[\"https://secret.example/token\"]",
+                "[\"scope\ninvalid\"]", "x".repeat(65537), "[null]"}) {
+            AuthorizationStatusResult result = AuthorizationStatusResult.connected(
+                "account-1", "Alice", CredentialState.READY, CredentialRenewalMode.NONE,
+                null, null, null, "sandbox-reference", Map.of(
+                    "permissionStatus", "complete", "missingScopes", missing));
+            assertThat(result.accountAttributes()).containsExactlyInAnyOrderEntriesOf(
+                Map.of("permissionStatus", "unknown", "missingScopes", "[]"));
+        }
+    }
+
+    @Test
+    void absentPermissionMetadataIsDistinctFromExplicitUnknownCoverage() {
+        assertThat(ConnectorPermissionSummary.fromAttributes(null).permissionStatus()).isNull();
+        assertThat(ConnectorPermissionSummary.fromAttributes(Map.of()).accountAttributes()).isEmpty();
+        assertThat(ConnectorPermissionSummary.fromAttributes(Map.of("username", "Alice")).permissionStatus()).isNull();
+        ConnectorPermissionSummary unknown = ConnectorPermissionSummary.fromAttributes(
+            Map.of("permissionStatus", "unknown", "missingScopes", "[]"));
+        assertThat(unknown.permissionStatus()).isEqualTo("unknown");
+        assertThat(unknown.accountAttributes()).containsEntry("permissionStatus", "unknown");
+    }
+
 }

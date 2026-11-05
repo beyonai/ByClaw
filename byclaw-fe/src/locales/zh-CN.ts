@@ -4231,6 +4231,12 @@ export default {
   'connector.authorization.expiryRefreshFailed': '连接器已授权，但有效期刷新失败，请稍后重试',
   'connector.authorization.listFailed': '连接器列表加载失败，请稍后重试',
   'connector.authorization.connected': '{v0} 已连接',
+  'connector.authorization.partialPermissions': '{name}已连接，部分权限未授予，可在连接器中查看详情',
+  'connector.authorization.unknownPermissions': '{name}已连接，权限范围暂未完整核实',
+  'connector.authorization.missingPermissions': '{count} 项权限未授予，查看详情',
+  'connector.authorization.partialPermissionsDetails': '部分权限未授予，查看详情',
+  'connector.authorization.partialPermissionsHint':
+    '已授予的权限仍可使用。请检查应用权限配置，或重新授权以补充以下权限。',
   'connector.authorization.invalidUrl': '授权服务返回了无效的授权链接',
   'connector.authorization.popupBlocked': '浏览器已阻止自动打开，请点击“继续授权”',
   'connector.authorization.notComplete': '尚未检测到授权完成，请完成授权后重试',

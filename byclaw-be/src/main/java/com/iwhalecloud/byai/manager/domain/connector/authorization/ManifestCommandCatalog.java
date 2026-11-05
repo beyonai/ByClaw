@@ -87,6 +87,10 @@ public final class ManifestCommandCatalog {
         return group.size();
     }
 
+    public boolean hasAction(String action) {
+        return commands.containsKey(action);
+    }
+
     public String digest() {
         return digest;
     }
@@ -160,6 +164,27 @@ public final class ManifestCommandCatalog {
     public interface PlaceholderPolicy {
 
         boolean isValid(String value);
+
+        /** OAuth scope names, passed as one argument, never shell syntax or CLI options. */
+        static PlaceholderPolicy scopeList(int maxLength) {
+            PlaceholderPolicy bounded = safeValue(maxLength);
+            Pattern scope = Pattern.compile("(?:[A-Za-z][A-Za-z0-9_.-]*:[A-Za-z0-9_.:-]+|offline_access)");
+            return value -> {
+                if (!bounded.isValid(value)) {
+                    return false;
+                }
+                String[] names = value.split(" ", -1);
+                if (names.length > 1024) {
+                    return false;
+                }
+                for (String name : names) {
+                    if (name.length() > 256 || !scope.matcher(name).matches()) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+        }
 
         static PlaceholderPolicy safeValue(int maxLength) {
             if (maxLength <= 0) {

@@ -34,6 +34,10 @@ public record AuthorizationStatusResult(
                 }
             });
         }
+        if (accountAttributes != null && (accountAttributes.containsKey("permissionStatus")
+                || accountAttributes.containsKey("missingScopes"))) {
+            sanitized.putAll(ConnectorPermissionSummary.fromAttributes(accountAttributes).accountAttributes());
+        }
         accountAttributes = Map.copyOf(sanitized);
     }
 

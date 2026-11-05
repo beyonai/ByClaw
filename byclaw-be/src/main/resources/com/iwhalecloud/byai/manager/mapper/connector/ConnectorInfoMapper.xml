@@ -10,6 +10,7 @@
         <result column="description" property="description"/>
         <result column="auth_mode" property="authMode"/>
         <result column="auth_config" property="authConfig"/>
+        <result column="auth_credential" property="authCredential"/>
         <result column="enable_flag" property="enableFlag"/>
         <result column="credential_expires_at" property="credentialExpiresAt"/>
         <result column="credential_state" property="credentialState"/>
@@ -27,6 +28,7 @@
                a.description,
                a.auth_mode,
                a.auth_config,
+               b.auth_credential,
                b.access_expire_time AS credential_expires_at,
                b.credential_state,
                b.renewal_mode,
@@ -41,9 +43,10 @@
                    ELSE 'N'
                END AS enable_flag
         FROM byai_connector_info a
-                 LEFT JOIN (SELECT connector_id, enable_flag, credential_state, renewal_mode,
+                 LEFT JOIN (SELECT connector_id, enable_flag, credential_state, renewal_mode, auth_credential,
                                    access_expire_time, refresh_expire_time, last_verified_at
                             FROM (SELECT connector_id,
+                                         auth_credential,
                                          enable_flag,
                                          credential_state,
                                          renewal_mode,
@@ -97,6 +100,7 @@
                    ELSE 'disabled'
                END AS status,
                a.auth_name AS account_name,
+               a.auth_credential,
                a.credential_state,
                a.renewal_mode,
                a.access_expire_time AS access_expires_at,
@@ -105,6 +109,7 @@
         FROM byai_connector_info i
                  JOIN (SELECT connector_id,
                               auth_name,
+                              auth_credential,
                               enable_flag,
                               credential_state,
                               renewal_mode,
@@ -132,6 +137,7 @@
         SELECT i.connector_code AS connector_id,
                'connected' AS status,
                NULL AS account_name,
+               NULL AS auth_credential,
                'READY' AS credential_state,
                'NONE' AS renewal_mode,
                NULL AS access_expires_at,

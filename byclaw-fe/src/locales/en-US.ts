@@ -4383,6 +4383,13 @@ export default {
   'connector.authorization.expiryRefreshFailed': 'Connected, but failed to refresh the expiry time. Try again later.',
   'connector.authorization.listFailed': 'Failed to load connectors. Try again later.',
   'connector.authorization.connected': '{v0} connected',
+  'connector.authorization.partialPermissions':
+    '{name} connected with some permissions missing. See the connector for details.',
+  'connector.authorization.unknownPermissions': '{name} connected. The permission range has not been fully verified.',
+  'connector.authorization.missingPermissions': '{count} permissions not granted. View details',
+  'connector.authorization.partialPermissionsDetails': 'Some permissions were not granted. View details',
+  'connector.authorization.partialPermissionsHint':
+    'Granted permissions remain available. Check the app permissions or authorize again to add the following permissions.',
   'connector.authorization.invalidUrl': 'The authorization service returned an invalid authorization URL.',
   'connector.authorization.popupBlocked': 'Your browser blocked the popup. Click “Continue authorization”.',
   'connector.authorization.notComplete': 'Authorization is not complete yet. Complete it and try again.',

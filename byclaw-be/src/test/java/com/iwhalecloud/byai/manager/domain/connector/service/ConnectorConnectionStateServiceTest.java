@@ -80,6 +80,79 @@ class ConnectorConnectionStateServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void verificationOnlySyncRetainsPartialPermissionsButFreshCompleteReplacesThem() {
+        ConnectorInfo connector = connector();
+        ConnectorAuth existing = activeAuth();
+        existing.setAuthCredential(Sm4Util.encrypt(com.alibaba.fastjson.JSON.toJSONString(Map.of(
+            "providerCode", connector.getProviderCode(), "accountId", "ou_1001",
+            "credentialReference", "workspace-ref", "permissionStatus", "partial",
+            "missingScopes", "[\"contact:user.email:readonly\"]"))));
+        when(connectorAuthMapper.selectOne(any())).thenReturn(existing);
+        var verification = AuthorizationStatusResult.connected("ou_1001", "Tester",
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState.READY,
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode.NONE,
+            null, null, new Date(), "workspace-ref");
+
+        service.saveEnabledAuthorization(USER_ID, connector, verification, "sync-authorization");
+
+        var retained = com.alibaba.fastjson.JSON.parseObject(Sm4Util.decrypt(existing.getAuthCredential()));
+        assertThat(retained.getString("permissionStatus")).isEqualTo("partial");
+        assertThat(retained.getString("missingScopes")).isEqualTo("[\"contact:user.email:readonly\"]");
+        var complete = AuthorizationStatusResult.connected("ou_1001", "Tester",
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState.READY,
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode.NONE,
+            null, null, new Date(), "workspace-ref", Map.of("permissionStatus", "complete", "missingScopes", "[]"));
+
+        service.saveEnabledAuthorization(USER_ID, connector, complete, "new-authorization");
+
+        var replaced = com.alibaba.fastjson.JSON.parseObject(Sm4Util.decrypt(existing.getAuthCredential()));
+        assertThat(replaced.getString("permissionStatus")).isEqualTo("complete");
+        assertThat(replaced.getString("missingScopes")).isEqualTo("[]");
+    }
+
+    @Test
+    void larkVerificationWithNoCredentialReferenceRetainsTheSameUsersPermissionSummary() {
+        ConnectorInfo connector = connector();
+        connector.setProviderCode("lark-cli");
+        ConnectorAuth existing = activeAuth();
+        existing.setAuthCredential(Sm4Util.encrypt(com.alibaba.fastjson.JSON.toJSONString(Map.of(
+            "providerCode", "lark-cli", "accountId", "ou_1001", "permissionStatus", "partial",
+            "missingScopes", "[\"contact:user.email:readonly\"]"))));
+        when(connectorAuthMapper.selectOne(any())).thenReturn(existing);
+        var verification = AuthorizationStatusResult.connected("ou_1001", "Tester",
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState.READY,
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode.NONE,
+            null, null, new Date(), null);
+
+        service.saveEnabledAuthorization(USER_ID, connector, verification, "lark-skill-sync");
+
+        var metadata = com.alibaba.fastjson.JSON.parseObject(Sm4Util.decrypt(existing.getAuthCredential()));
+        assertThat(metadata.getString("permissionStatus")).isEqualTo("partial");
+        assertThat(metadata.getString("missingScopes")).isEqualTo("[\"contact:user.email:readonly\"]");
+        assertThat(metadata).doesNotContainKey("credentialReference");
+    }
+
+    @Test
+    void verificationOfAnotherAccountDoesNotInheritPreviousPermissionSummary() {
+        ConnectorInfo connector = connector();
+        ConnectorAuth existing = activeAuth();
+        existing.setAuthCredential(Sm4Util.encrypt(com.alibaba.fastjson.JSON.toJSONString(Map.of(
+            "providerCode", connector.getProviderCode(), "accountId", "previous-account",
+            "credentialReference", "workspace-ref", "permissionStatus", "partial",
+            "missingScopes", "[\"contact:user.email:readonly\"]"))));
+        when(connectorAuthMapper.selectOne(any())).thenReturn(existing);
+        var verification = AuthorizationStatusResult.connected("another-account", "Tester",
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState.READY,
+            com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode.NONE,
+            null, null, new Date(), "workspace-ref");
+
+        service.saveEnabledAuthorization(USER_ID, connector, verification, "new-authorization");
+
+        var metadata = com.alibaba.fastjson.JSON.parseObject(Sm4Util.decrypt(existing.getAuthCredential()));
+        assertThat(metadata).doesNotContainKeys("permissionStatus", "missingScopes");
+    }
+
+    @Test
     void oauthMailAuthorizationWritesPrivateConfigurationBeforePublishingProjection() {
         ConnectorInfo connector = connector();
         connector.setConnectorCode("gmail-mail");

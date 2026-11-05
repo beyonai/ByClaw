@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -39,6 +40,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorPermissionSummary;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialRenewalMode;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialLifecycleEvaluator;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState;
@@ -63,6 +65,8 @@ public class LarkSandboxAuthorizationRuntime {
     private static final Duration INIT_TIMEOUT = Duration.ofMinutes(10);
     private static final long START_OUTPUT_POLL_MILLIS = 100;
     private static final long DEFAULT_EXPIRES_SECONDS = 600;
+    private static final ManifestCommandCatalog.PlaceholderPolicy SCOPE_LIST =
+        ManifestCommandCatalog.PlaceholderPolicy.scopeList(64 * 1024);
 
     private final SandboxCommandExecutor executor;
     private final UserSandboxResolver sandboxResolver;
@@ -258,10 +262,6 @@ public class LarkSandboxAuthorizationRuntime {
             if (APP_PHASE.equals(text(state, "phase"))) {
                 return queryInitialization(session, state, sandboxId);
             }
-            AuthorizationStatusResult verified = verified(sandboxId, session.commandCatalog());
-            if (verified.status() == AuthorizationStatus.CONNECTED) {
-                return verified;
-            }
             JsonNode process = state.get("process");
             if (process == null || !process.isObject()) {
                 String deviceCode = text(state, "deviceCode");
@@ -282,7 +282,30 @@ public class LarkSandboxAuthorizationRuntime {
             if (status.state() == SandboxProcessSnapshot.State.NOT_FOUND) {
                 return failedStatus("LARK_SANDBOX_PROCESS_LOST", "Lark authorization process was lost");
             }
-            verified = verified(sandboxId, session.commandCatalog());
+            // A previous token can remain usable throughout a new device flow, including after it fails.
+            // Only this flow's successful completion may establish a new authorization result.
+            boolean successfulExit = status.state() == SandboxProcessSnapshot.State.EXITED
+                && Integer.valueOf(0).equals(status.exitCode());
+            // The sandbox adapter represents every nonzero exit as FAILED, including CLI partial grants.
+            boolean possiblePartialExit = Integer.valueOf(3).equals(status.exitCode())
+                && (status.state() == SandboxProcessSnapshot.State.EXITED
+                    || status.state() == SandboxProcessSnapshot.State.FAILED);
+            if (status.truncated() || (!successfulExit && !possiblePartialExit)) {
+                return failedStatus("PROVIDER_AUTH_FAILED", "Unable to complete Lark authorization");
+            }
+            JsonNode completion = readAuthorizationCompletion(sandboxId, processId);
+            if (completion == null) {
+                // Existing custom manifests can use text output. Only this process's successful exit
+                // permits their legacy verification flow; JSON commands must always supply the event.
+                if (!successfulExit || policy.completionUsesJson(session.commandCatalog(), text(state, "deviceCode"))) {
+                    return failedStatus("PROVIDER_AUTH_FAILED", "Unable to complete Lark authorization");
+                }
+            } else if (text(completion, "user_open_id") == null
+                    || (possiblePartialExit
+                        && (scopes(completion.get("missing")) == null || scopes(completion.get("missing")).isEmpty()))) {
+                return failedStatus("PROVIDER_AUTH_FAILED", "Unable to complete Lark authorization");
+            }
+            AuthorizationStatusResult verified = verified(sandboxId, session.commandCatalog(), state, completion);
             return verified.status() == AuthorizationStatus.CONNECTED
                 ? verified : failedStatus("PROVIDER_AUTH_FAILED", "Unable to complete Lark authorization");
         } catch (RuntimeException | JsonProcessingException e) {
@@ -350,8 +373,12 @@ public class LarkSandboxAuthorizationRuntime {
             UserSandboxContext sandbox,
             ObjectNode existingState,
             ManifestCommandCatalog commandCatalog) {
+        ScopeDiscovery discovery = discoverUserScopes(sandbox.sandboxId(), commandCatalog);
+        boolean expanded = !discovery.scopes().isEmpty();
         SandboxCommandResult login = executor.run(sandbox.sandboxId(), policy.build(commandCatalog,
-            LarkSandboxCommandPolicy.Action.START_USER_AUTHORIZATION, null, COMMAND_TIMEOUT,
+            expanded ? LarkSandboxCommandPolicy.Action.START_USER_AUTHORIZATION_WITH_SCOPES
+                : LarkSandboxCommandPolicy.Action.START_USER_AUTHORIZATION,
+            expanded ? String.join(" ", discovery.scopes()) : null, COMMAND_TIMEOUT,
             properties.getMaxOutputBytes()));
         if (isNotConfigured(login)) {
             return failed("PROVIDER_START_FAILED", "Lark application credentials are unavailable");
@@ -372,6 +399,8 @@ public class LarkSandboxAuthorizationRuntime {
             state.put("phase", USER_PHASE);
             state.put("authorizationUrl", url);
             state.put("deviceCode", deviceCode);
+            state.put("scopeDiscovery", discovery.status());
+            state.set("requestedUserScopes", objectMapper.valueToTree(discovery.scopes()));
             state.remove("process");
             return pending(url, new Date(System.currentTimeMillis() + seconds * 1000L), state);
         } catch (JsonProcessingException e) {
@@ -380,10 +409,15 @@ public class LarkSandboxAuthorizationRuntime {
     }
 
     private AuthorizationStatusResult verified(String sandboxId, ManifestCommandCatalog commandCatalog) {
+        return verified(sandboxId, commandCatalog, null, null);
+    }
+
+    private AuthorizationStatusResult verified(String sandboxId, ManifestCommandCatalog commandCatalog,
+                                               JsonNode state, JsonNode completion) {
         SandboxCommandResult result = executor.run(sandboxId, policy.build(commandCatalog,
             LarkSandboxCommandPolicy.Action.VERIFY_AUTHORIZATION, null, COMMAND_TIMEOUT,
             properties.getMaxOutputBytes()));
-        if (result.exitCode() != 0 || result.truncated()) {
+        if (result == null || result.exitCode() != 0 || result.truncated() || result.timedOut()) {
             return failedStatus("PROVIDER_AUTH_FAILED", "Unable to verify Lark authorization");
         }
         try {
@@ -395,27 +429,168 @@ public class LarkSandboxAuthorizationRuntime {
                 return failedStatus("PROVIDER_AUTH_FAILED", "Lark authorization is not active");
             }
             JsonNode identity = data.path("identities").path("user");
+            String accountId = firstText(identity, "openId", "open_id", "userId", "user_id");
+            if (completion != null && !text(completion, "user_open_id").equals(accountId)) {
+                return failedStatus("PROVIDER_AUTH_FAILED", "Lark authorization identity does not match");
+            }
             Date expiresAt = dateValue(identity, data);
             Date refreshExpiresAt = dateValue(identity, data, "refreshExpiresAt", "refresh_expires_at");
             String tokenStatus = firstText(identity, "tokenStatus", "token_status");
-            CredentialState state = CredentialLifecycleEvaluator.evaluate(
+            CredentialState credentialState = CredentialLifecycleEvaluator.evaluate(
                 tokenStatus,
                 null,
                 refreshExpiresAt,
                 new Date()
             );
             return AuthorizationStatusResult.connected(
-                firstText(identity, "openId", "open_id", "userId", "user_id"),
+                accountId,
                 firstText(identity, "name", "displayName", "display_name", "userName", "user_name"),
-                state,
+                credentialState,
                 refreshExpiresAt == null ? CredentialRenewalMode.NONE : CredentialRenewalMode.REFRESH_TOKEN,
                 expiresAt,
                 refreshExpiresAt,
                 new Date(),
-                null);
+                null,
+                state == null ? Map.of() : permissionAttributes(state, identity, completion));
         } catch (JsonProcessingException e) {
             return failedStatus("PROVIDER_PROTOCOL_ERROR", "Lark authorization returned an invalid response");
         }
+    }
+
+    private ScopeDiscovery discoverUserScopes(String sandboxId, ManifestCommandCatalog catalog) {
+        if (!catalog.hasAction("scopesCheck") || !catalog.hasAction("loginWithScopes")) {
+            return new ScopeDiscovery(List.of(), "unsupported");
+        }
+        try {
+            SandboxCommandResult result = executor.run(sandboxId, policy.build(catalog,
+                LarkSandboxCommandPolicy.Action.READ_USER_SCOPES, null, COMMAND_TIMEOUT, properties.getMaxOutputBytes()));
+            if (result == null || result.exitCode() != 0 || result.truncated() || result.timedOut()) {
+                return new ScopeDiscovery(List.of(), "unavailable");
+            }
+            JsonNode root = objectMapper.readTree(result.stdout());
+            JsonNode data = root.has("data") ? root.get("data") : root;
+            // New CLI releases can return unclassified scopes. Those must never be treated as user scopes.
+            if (!"user".equals(text(data, "tokenType")) || !data.path("userScopes").isArray()) {
+                return new ScopeDiscovery(List.of(), "unavailable");
+            }
+            List<String> enabled = scopes(data.get("userScopes"));
+            return new ScopeDiscovery(enabled, "complete");
+        } catch (RuntimeException | JsonProcessingException e) {
+            // Preserve the existing domain-all flow if scope discovery cannot be completed.
+            // The completion report explicitly marks the coverage as unknown instead of claiming completeness.
+            log.warn("Unable to discover Lark user scopes: sandboxId={}", sandboxId);
+            return new ScopeDiscovery(List.of(), "unavailable");
+        }
+    }
+
+    private record ScopeDiscovery(List<String> scopes, String status) { }
+
+    private JsonNode readAuthorizationCompletion(String sandboxId, String processId) throws JsonProcessingException {
+        StringBuilder output = new StringBuilder();
+        long cursor = 0;
+        int bytes = 0;
+        long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+        for (int chunkCount = 0; chunkCount < 64 && System.nanoTime() < deadline; chunkCount++) {
+            SandboxProcessSnapshot chunk = executor.readOutput(sandboxId, processId, cursor);
+            if (chunk == null || chunk.truncated() || chunk.nextCursor() < cursor) {
+                throw new IllegalArgumentException("Invalid Lark authorization output");
+            }
+            String text = chunk.output() == null ? "" : chunk.output();
+            int size = text.getBytes(StandardCharsets.UTF_8).length;
+            if (size > properties.getMaxOutputBytes() - bytes || (!text.isEmpty() && chunk.nextCursor() == cursor)) {
+                throw new IllegalArgumentException("Invalid Lark authorization output");
+            }
+            if (text.isEmpty() && chunk.nextCursor() == cursor) {
+                JsonNode completion = null;
+                // CLI --json emits the completion event as one JSON line; stderr progress may surround it.
+                // Parse only after draining the exited process, so chunk boundaries cannot truncate a JSON line.
+                for (String line : output.toString().split("\\R")) {
+                    String trimmed = line.strip();
+                    if (!trimmed.startsWith("{")) {
+                        continue;
+                    }
+                    JsonNode candidate;
+                    try {
+                        candidate = objectMapper.readTree(trimmed);
+                    } catch (JsonProcessingException ignored) {
+                        continue;
+                    }
+                    if ("authorization_complete".equals(text(candidate, "event"))) {
+                        if (completion != null) {
+                            throw new IllegalArgumentException("Duplicate Lark authorization completion");
+                        }
+                        completion = candidate;
+                    }
+                }
+                return completion;
+            }
+            output.append(text);
+            bytes += size;
+            cursor = chunk.nextCursor();
+        }
+        throw new IllegalArgumentException("Lark authorization output did not drain");
+    }
+
+    private Map<String, String> permissionAttributes(JsonNode state, JsonNode identity, JsonNode completion)
+            throws JsonProcessingException {
+        if (completion == null) {
+            return ConnectorPermissionSummary.unknown().accountAttributes();
+        }
+        List<String> requested = scopes(completion.get("requested"));
+        List<String> granted = scopes(identity.get("scope"));
+        if (granted == null) {
+            granted = scopes(completion.get("granted"));
+        }
+        Set<String> expected = new TreeSet<>();
+        for (JsonNode node : List.of(state.path("requestedUserScopes"), completion.path("requested"),
+                completion.path("missing"))) {
+            List<String> names = scopes(node);
+            if (names != null) {
+                expected.addAll(names);
+            }
+        }
+        if (expected.size() > 1024) {
+            throw new IllegalArgumentException("Too many Lark authorization scopes");
+        }
+        Set<String> missing = new TreeSet<>(expected);
+        if (granted != null) {
+            missing.removeAll(granted);
+        }
+        String status = granted != null && !missing.isEmpty() ? "partial"
+            : requested == null || granted == null || requested.isEmpty()
+                || "unavailable".equals(text(state, "scopeDiscovery")) ? "unknown" : "complete";
+        return Map.of("permissionStatus", status, "missingScopes",
+            objectMapper.writeValueAsString(granted == null ? List.of() : missing));
+    }
+
+    private List<String> scopes(JsonNode value) {
+        if (value == null || value.isNull() || value.isMissingNode()) {
+            return null;
+        }
+        Set<String> names = new TreeSet<>();
+        if (value.isTextual()) {
+            String text = value.textValue();
+            if (text.isEmpty()) {
+                return List.of();
+            }
+            if (!SCOPE_LIST.isValid(text)) {
+                throw new IllegalArgumentException("Invalid Lark scopes");
+            }
+            names.addAll(List.of(text.split(" ")));
+        } else if (value.isArray() && value.size() <= 1024) {
+            for (JsonNode item : value) {
+                if (!item.isTextual() || item.textValue().contains(" ") || !SCOPE_LIST.isValid(item.textValue())) {
+                    throw new IllegalArgumentException("Invalid Lark scope name");
+                }
+                names.add(item.textValue());
+            }
+        } else {
+            throw new IllegalArgumentException("Invalid Lark scope list");
+        }
+        if (!names.isEmpty() && !SCOPE_LIST.isValid(String.join(" ", names))) {
+            throw new IllegalArgumentException("Lark scope list is too large");
+        }
+        return List.copyOf(names);
     }
 
     private AuthorizationStatusResult progress(AuthorizationSessionContext session, String phase, JsonNode state) {

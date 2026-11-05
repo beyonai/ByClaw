@@ -7,6 +7,8 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
+import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorPermissionSummary;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorConnectionDto;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorCredentialFieldDto;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorCredentialFormDto;
@@ -54,7 +56,10 @@ public class ConnectorInfoService {
         Page<ConnectorListDto> page = PageHelper.startPage(qo.getPageNum(), qo.getPageSize());
         List<ConnectorListDto> connectors = connectorInfoMapper.selectConnectorListByQo(qo, userId);
         if (connectors != null) {
-            connectors.forEach(ConnectorInfoService::sanitizeCredentialForm);
+            connectors.forEach(connector -> {
+                sanitizeCredentialForm(connector);
+                sanitizePermissionSummary(connector);
+            });
         }
         return PageHelperUtil.toPageInfo(page);
     }
@@ -68,7 +73,16 @@ public class ConnectorInfoService {
     }
 
     public java.util.List<ConnectorConnectionDto> listConnections(String userId) {
-        return connectorInfoMapper.selectConnectionsByUserId(userId);
+        List<ConnectorConnectionDto> connections = connectorInfoMapper.selectConnectionsByUserId(userId);
+        if (connections != null) {
+            connections.forEach(connection -> {
+                ConnectorPermissionSummary summary = permissionSummary(connection.getAuthCredential());
+                connection.setPermissionStatus(summary.permissionStatus());
+                connection.setMissingScopes(summary.missingScopes());
+                connection.setAuthCredential(null);
+            });
+        }
+        return connections;
     }
 
     /**
@@ -97,6 +111,27 @@ public class ConnectorInfoService {
      */
     public ConnectorInfo findById(Long connectorId) {
         return connectorInfoMapper.selectById(connectorId);
+    }
+
+    static void sanitizePermissionSummary(ConnectorListDto connector) {
+        if (connector == null) {
+            return;
+        }
+        ConnectorPermissionSummary summary = permissionSummary(connector.getAuthCredential());
+        connector.setPermissionStatus(summary.permissionStatus());
+        connector.setMissingScopes(summary.missingScopes());
+        connector.setAuthCredential(null);
+    }
+
+    private static ConnectorPermissionSummary permissionSummary(String credentialCipher) {
+        if (credentialCipher == null || credentialCipher.isBlank()) {
+            return ConnectorPermissionSummary.absent();
+        }
+        try {
+            return ConnectorPermissionSummary.fromAttributes(JSON.parseObject(Sm4Util.decrypt(credentialCipher)));
+        } catch (RuntimeException ignored) {
+            return ConnectorPermissionSummary.absent();
+        }
     }
 
     static void sanitizeCredentialForm(ConnectorListDto connector) {

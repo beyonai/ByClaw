@@ -229,3 +229,39 @@ SET runtime_manifest = jsonb_set(
 WHERE connector_code = 'wecom'
   AND provider_code = 'wecom-cli'
   AND runtime_manifest IS NOT NULL;
+
+-- BEGIN LARK APP USER SCOPE COMMANDS
+-- 飞书首次授权读取应用已开通的用户权限，与 CLI 全领域权限一起申请。
+-- 仅补齐使用内置默认登录命令的模板；自定义登录参数及已有新命令保持原样。
+-- 保留 login[0]/login[1]、其他命令和 Manifest 字段，兼容旧版授权流程。
+UPDATE byai.byai_connector_info
+SET runtime_manifest = jsonb_set(
+        jsonb_set(
+            runtime_manifest::jsonb,
+            '{runtime,commands,scopesCheck}',
+            COALESCE(
+                runtime_manifest::jsonb #> '{runtime,commands,scopesCheck}',
+                '[["lark-cli","auth","scopes","--json"]]'::jsonb
+            ),
+            true
+        ),
+        '{runtime,commands,loginWithScopes}',
+        COALESCE(
+            runtime_manifest::jsonb #> '{runtime,commands,loginWithScopes}',
+            '[["lark-cli","auth","login","--domain","all","--scope","${userScopes}","--no-wait","--json"]]'::jsonb
+        ),
+        true
+    )::text,
+    update_time = CURRENT_TIMESTAMP
+WHERE connector_code = 'lark'
+  AND provider_code = 'lark-cli'
+  AND runtime_manifest IS NOT NULL
+  AND runtime_manifest::jsonb #>> '{runtime,type}' = 'cli'
+  AND jsonb_typeof(runtime_manifest::jsonb #> '{runtime,commands}') = 'object'
+  AND runtime_manifest::jsonb #> '{runtime,commands,login,0}'
+      = '["lark-cli","auth","login","--domain","all","--no-wait","--json"]'::jsonb
+  AND (
+      NOT ((runtime_manifest::jsonb #> '{runtime,commands}') ? 'scopesCheck')
+      OR NOT ((runtime_manifest::jsonb #> '{runtime,commands}') ? 'loginWithScopes')
+  );
+-- END LARK APP USER SCOPE COMMANDS

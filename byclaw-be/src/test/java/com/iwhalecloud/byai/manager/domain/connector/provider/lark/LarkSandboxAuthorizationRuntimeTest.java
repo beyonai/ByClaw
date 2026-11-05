@@ -41,6 +41,309 @@ import com.iwhalecloud.byai.manager.entity.users.Users;
 class LarkSandboxAuthorizationRuntimeTest {
 
     @Test
+    void existingValidTokenDoesNotCompleteANewAuthorization() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(verifiedUser());
+        when(fixture.executor.start(eq("sandbox-1"), any()))
+            .thenReturn(new SandboxProcessHandle("sandbox-1", "auth-process-1", Instant.now()));
+
+        var result = fixture.runtime.queryStatus(userSession(false, commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
+        assertThat(result.progress().providerState()).contains("auth-process-1");
+        verify(fixture.executor, never()).run(any(), any());
+    }
+
+    @Test
+    void pendingDeviceFlowCannotBeCompletedByAnExistingToken() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(verifiedUser());
+        when(fixture.executor.inspect("sandbox-1", "auth-process-1"))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null, "", 0, false));
+
+        var result = fixture.runtime.queryStatus(userSession(true, commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
+        verify(fixture.executor, never()).run(any(), any());
+    }
+
+    @Test
+    void firstAuthorizationIncludesEnabledUserScopesOutsideTheCliDomainCatalog() throws Exception {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any()))
+            .thenReturn(success("{\"configured\":true}"))
+            .thenReturn(success("""
+                {"tokenType":"user","userScopes":["contact:department.organize:readonly",
+                 "contact:user:search","contact:department.organize:readonly"]}
+                """))
+            .thenReturn(loginResponse());
+
+        var result = fixture.runtime.start(startContext(expandedCommandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
+        var requests = org.mockito.ArgumentCaptor.forClass(SandboxCommandRequest.class);
+        verify(fixture.executor, times(3)).run(eq("sandbox-1"), requests.capture());
+        var argv = requests.getAllValues().get(2).argv();
+        assertThat(argv.subList(5, argv.size())).containsExactly("lark-cli", "auth", "login", "--domain", "all",
+            "--scope", "contact:department.organize:readonly contact:user:search", "--no-wait", "--json");
+        assertThat(new ObjectMapper().readTree(result.providerState()).path("requestedUserScopes").toString())
+            .contains("contact:department.organize:readonly", "contact:user:search");
+    }
+
+    @Test
+    void completedPartialGrantKeepsTheConnectionAndReportsMissingPermissions() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(verifiedUser());
+        stubCompletion(fixture, 3, """
+            {"event":"authorization_complete","user_open_id":"ou_42",
+             "requested":["contact:user:search","contact:department.organize:readonly"],
+             "granted":["contact:user:search"],"missing":["contact:department.organize:readonly"]}
+            """);
+
+        var result = fixture.runtime.queryStatus(userSession(true, commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.accountAttributes()).containsEntry("permissionStatus", "partial")
+            .containsEntry("missingScopes", "[\"contact:department.organize:readonly\"]");
+    }
+
+    @Test
+    void failedDeviceFlowCannotReuseOldTokenToReportSuccess() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(verifiedUser());
+        stubCompletion(fixture, 3, "{\"error\":{\"type\":\"authentication\",\"message\":\"access denied\"}}\n");
+
+        var result = fixture.runtime.queryStatus(userSession(true, commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        verify(fixture.executor, never()).run(any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "--json=false"})
+    void customTextCompletionRemainsUsableAfterTheCurrentProcessSucceeds(String jsonFlag) {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(verifiedUser());
+        stubCompletion(fixture, 0, "Authorization completed successfully.\n");
+
+        var result = fixture.runtime.queryStatus(userSession(true, textCompletionCatalog(jsonFlag)));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.accountAttributes()).containsEntry("permissionStatus", "unknown")
+            .containsEntry("missingScopes", "[]");
+    }
+
+    @Test
+    void customTextCompletionStillWaitsForThisProcessInsteadOfReusingAnOldToken() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.inspect("sandbox-1", "auth-process-1"))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null, "", 0, false));
+
+        var result = fixture.runtime.queryStatus(userSession(true, textCompletionCatalog("")));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
+        verify(fixture.executor, never()).run(any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 3})
+    void customTextCompletionCannotHideAFailedProcess(int exitCode) {
+        RuntimeFixture fixture = new RuntimeFixture();
+        stubCompletion(fixture, exitCode, "Authorization failed.\n");
+
+        var result = fixture.runtime.queryStatus(userSession(true, textCompletionCatalog("")));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        verify(fixture.executor, never()).run(any(), any());
+    }
+
+    @Test
+    void jsonCompletionCannotFallBackToAnOldTokenWhenItsEventIsMissing() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        stubCompletion(fixture, 0, "Authorization completed successfully.\n");
+
+        var result = fixture.runtime.queryStatus(userSession(true, commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.FAILED);
+        verify(fixture.executor, never()).run(any(), any());
+    }
+
+    private ManifestCommandCatalog textCompletionCatalog(String jsonFlag) {
+        Map<String, List<List<String>>> commands = new java.util.LinkedHashMap<>();
+        for (String action : List.of("configCheck", "configInitialize", "status", "logout")) {
+            commands.put(action, List.of(commandCatalog().command(action, 0)));
+        }
+        var complete = new java.util.ArrayList<>(List.of(
+            "lark-cli", "auth", "login", "--device-code", "${deviceCode}"));
+        if (!jsonFlag.isEmpty()) {
+            complete.add(jsonFlag);
+        }
+        commands.put("login", List.of(commandCatalog().command("login", 0), complete));
+        return new ManifestCommandCatalog(commands, "text-completion-digest",
+            Map.of("deviceCode", ManifestCommandCatalog.PlaceholderPolicy.safeValue(512)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "{\"scopes\":[\"contact:user:search\"]}",
+        "{\"tokenType\":\"tenant\",\"userScopes\":[\"contact:user:search\"]}",
+        "{\"tokenType\":\"user\",\"userScopes\":[\"--profile attacker\"]}",
+        "{\"tokenType\":\"user\",\"userScopes\":[\"contact:user:search\\n--help\"]}"
+    })
+    void unclassifiedOrInvalidScopesFallBackWithoutLosingTheExistingAuthorizationFlow(String scopeOutput) {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any()))
+            .thenReturn(success("{\"configured\":true}"))
+            .thenReturn(success(scopeOutput))
+            .thenReturn(loginResponse());
+
+        var result = fixture.runtime.start(startContext(expandedCommandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.PENDING);
+        assertThat(result.providerState()).contains("\"scopeDiscovery\":\"unavailable\"");
+        var requests = org.mockito.ArgumentCaptor.forClass(SandboxCommandRequest.class);
+        verify(fixture.executor, times(3)).run(eq("sandbox-1"), requests.capture());
+        assertThat(requests.getAllValues().get(2).argv()).doesNotContain("--scope", "attacker");
+    }
+
+    @Test
+    void discoveryTransportFailureFallsBackAndReportsUnknownCoverage() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any()))
+            .thenReturn(success("{\"configured\":true}"))
+            .thenThrow(new IllegalStateException("unreachable"))
+            .thenReturn(loginResponse())
+            .thenReturn(verifiedUser());
+        when(fixture.executor.start(eq("sandbox-1"), any()))
+            .thenReturn(new SandboxProcessHandle("sandbox-1", "auth-process-1", Instant.now()));
+        stubCompletion(fixture, 0, completeOutput("ou_42"));
+
+        var started = fixture.runtime.start(startContext(expandedCommandCatalog()));
+        var pending = fixture.runtime.queryStatus(new AuthorizationSessionContext("auth-1", "42", 1L,
+            "lark", "lark-cli", null, started.providerState(), started.expiresAt(), expandedCommandCatalog()));
+        var result = fixture.runtime.queryStatus(new AuthorizationSessionContext("auth-1", "42", 1L,
+            "lark", "lark-cli", null, pending.progress().providerState(), started.expiresAt(), expandedCommandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.accountAttributes()).containsEntry("permissionStatus", "unknown");
+    }
+
+    @Test
+    void completedDeviceFlowMustMatchTheVerifiedUser() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(verifiedUser());
+        stubCompletion(fixture, 0, completeOutput("ou_other"));
+
+        assertThat(fixture.runtime.queryStatus(userSession(true, commandCatalog())).status())
+            .isEqualTo(AuthorizationStatus.FAILED);
+    }
+
+    @Test
+    void authorizationSummaryIsReadAcrossOutputChunksAndIgnoresProgressLines() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(verifiedUser());
+        String completion = completeOutput("ou_42");
+        stubCompletion(fixture, 0, "Waiting for authorization...\n" + completion.substring(0, 40));
+        when(fixture.executor.readOutput("sandbox-1", "auth-process-1", 1))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null,
+                completion.substring(40), 2, false));
+        when(fixture.executor.readOutput("sandbox-1", "auth-process-1", 2))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null, "", 2, false));
+
+        var result = fixture.runtime.queryStatus(userSession(true, commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.accountAttributes()).containsEntry("permissionStatus", "complete")
+            .containsEntry("missingScopes", "[]");
+    }
+
+    @Test
+    void currentTokenScopesTakePrecedenceOverTheCompletionClaims() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        when(fixture.executor.run(any(), any())).thenReturn(verifiedUser());
+        stubCompletion(fixture, 0, """
+            {"event":"authorization_complete","user_open_id":"ou_42",
+             "requested":["contact:user:search","contact:department.organize:readonly"],
+             "granted":["contact:user:search","contact:department.organize:readonly"],"missing":[]}
+            """);
+
+        var result = fixture.runtime.queryStatus(userSession(true, commandCatalog()));
+
+        assertThat(result.status()).isEqualTo(AuthorizationStatus.CONNECTED);
+        assertThat(result.accountAttributes()).containsEntry("permissionStatus", "partial")
+            .containsEntry("missingScopes", "[\"contact:department.organize:readonly\"]");
+    }
+
+    @Test
+    void truncatedCompletionOutputCannotAuthorizeAnExistingToken() {
+        RuntimeFixture fixture = new RuntimeFixture();
+        stubCompletion(fixture, 0, completeOutput("ou_42"));
+        when(fixture.executor.readOutput("sandbox-1", "auth-process-1", 0))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null,
+                completeOutput("ou_42"), 1, true));
+
+        assertThat(fixture.runtime.queryStatus(userSession(true, commandCatalog())).status())
+            .isEqualTo(AuthorizationStatus.FAILED);
+        verify(fixture.executor, never()).run(any(), any());
+    }
+
+    private static String completeOutput(String openId) {
+        return """
+            {"event":"authorization_complete","user_open_id":"%s",
+             "requested":["contact:user:search"],"granted":["contact:user:search"],"missing":[]}
+            """.formatted(openId).replace("\n", "");
+    }
+
+    private AuthorizationSessionContext userSession(boolean started, ManifestCommandCatalog catalog) {
+        String process = started ? ",\"process\":{\"processId\":\"auth-process-1\",\"outputCursor\":0}" : "";
+        return new AuthorizationSessionContext("auth-1", "42", 1L, "lark", "lark-cli", null,
+            "{\"sandboxId\":\"sandbox-1\",\"phase\":\"user_authorization\",\"deviceCode\":\"device-1\","
+                + "\"authorizationUrl\":\"https://accounts.feishu.cn/device\"" + process + "}",
+            new Date(System.currentTimeMillis() + 60000), catalog);
+    }
+
+    private static SandboxCommandResult verifiedUser() {
+        return success("""
+            {"identity":"user","verified":true,"identities":{"user":{"openId":"ou_42",
+             "tokenStatus":"valid","scope":"contact:user:search"}}}
+            """);
+    }
+
+    private static void stubCompletion(RuntimeFixture fixture, int exitCode, String output) {
+        String jsonLine = output;
+        try {
+            // The CLI prints authorization_complete using json.Marshal followed by one newline.
+            ObjectMapper mapper = new ObjectMapper();
+            jsonLine = mapper.writeValueAsString(mapper.readTree(output)) + "\n";
+        } catch (java.io.IOException ignored) {
+            // Progress text and partial chunks intentionally remain unmodified.
+        }
+        when(fixture.executor.inspect("sandbox-1", "auth-process-1"))
+            // Match OpenSandboxClient: a terminated command with a nonzero exit code is FAILED.
+            .thenReturn(new SandboxProcessSnapshot(exitCode == 0 ? SandboxProcessSnapshot.State.EXITED
+                : SandboxProcessSnapshot.State.FAILED, exitCode, "", 1, false));
+        when(fixture.executor.readOutput("sandbox-1", "auth-process-1", 0))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null, jsonLine, 1, false));
+        when(fixture.executor.readOutput("sandbox-1", "auth-process-1", 1))
+            .thenReturn(new SandboxProcessSnapshot(SandboxProcessSnapshot.State.RUNNING, null, "", 1, false));
+    }
+
+    private ManifestCommandCatalog expandedCommandCatalog() {
+        Map<String, List<List<String>>> commands = new java.util.LinkedHashMap<>();
+        for (String action : List.of("configCheck", "configInitialize", "status", "logout")) {
+            commands.put(action, List.of(commandCatalog().command(action, 0)));
+        }
+        commands.put("login", List.of(commandCatalog().command("login", 0),
+            List.of("lark-cli", "auth", "login", "--device-code", "${deviceCode}", "--json")));
+        commands.put("scopesCheck", List.of(List.of("lark-cli", "auth", "scopes", "--json")));
+        commands.put("loginWithScopes", List.of(List.of("lark-cli", "auth", "login", "--domain", "all",
+            "--scope", "${userScopes}", "--no-wait", "--json")));
+        return new ManifestCommandCatalog(commands, "scopes-digest", Map.of(
+            "deviceCode", ManifestCommandCatalog.PlaceholderPolicy.safeValue(512),
+            "userScopes", ManifestCommandCatalog.PlaceholderPolicy.safeValue(64 * 1024)));
+    }
+
+    @Test
     void revokesCredentialInsideUserExecutionSandbox() {
         SandboxCommandExecutor executor = mock(SandboxCommandExecutor.class);
         UserSandboxResolver resolver = mock(UserSandboxResolver.class);
@@ -563,11 +866,11 @@ class LarkSandboxAuthorizationRuntimeTest {
         when(fixture.executor.run(any(), any()))
             .thenReturn(success("{\"configured\":true}"))
             .thenReturn(loginResponse())
-            .thenReturn(success("{\"identity\":\"user\",\"verified\":false}"))
             .thenReturn(success("{\"identity\":\"user\",\"verified\":true,"
                 + "\"identities\":{\"user\":{\"openId\":\"ou_42\"}}}"));
         when(fixture.executor.start(eq("sandbox-1"), any()))
             .thenReturn(new SandboxProcessHandle("sandbox-1", "auth-process-1", Instant.now()));
+        stubCompletion(fixture, 0, completeOutput("ou_42"));
         var started = fixture.runtime.start(startContext(commandCatalog()));
 
         var pending = fixture.runtime.queryStatus(session(started));

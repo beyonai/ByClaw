@@ -9,9 +9,15 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 
@@ -70,6 +76,72 @@ class LarkSandboxCommandPolicyTest {
         assertThat(request.argv().subList(5, request.argv().size())).containsExactly(
             "lark-cli", "auth", "login", "--device-code", "device-code-1", "--json");
         assertThat(request.background()).isTrue();
+    }
+
+    @ParameterizedTest
+    @MethodSource("completionJsonModes")
+    void detectsCompletionJsonModeUsingFlagOrderAndArgumentBoundaries(List<String> options, boolean expected) {
+        assertThat(policy.completionUsesJson(completionCatalog(options), "device-code-1")).isEqualTo(expected);
+    }
+
+    private static Stream<Arguments> completionJsonModes() {
+        return Stream.of(
+            Arguments.of(List.of(), false),
+            Arguments.of(List.of("--json"), true),
+            Arguments.of(List.of("--json", "false"), true),
+            Arguments.of(List.of("--json=false", "--json"), true),
+            Arguments.of(List.of("--json", "--json=false"), false),
+            Arguments.of(List.of("--", "--json"), false),
+            Arguments.of(List.of("--json", "--", "--json=false"), true),
+            Arguments.of(List.of("--profile", "--json"), false),
+            Arguments.of(List.of("--scope", "--", "--json"), true)
+        );
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "1,true", "t,true", "T,true", "TRUE,true", "true,true", "True,true",
+        "0,false", "f,false", "F,false", "FALSE,false", "false,false", "False,false"
+    })
+    void acceptsTheCliBooleanSpellings(String value, boolean expected) {
+        assertThat(policy.completionUsesJson(completionCatalog(List.of("--json=" + value)), "device-code-1"))
+            .isEqualTo(expected);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "yes", "no", "TrUe", "2"})
+    void rejectsInvalidJsonBooleansEvenWhenALaterFlagWouldOverrideThem(String value) {
+        assertThatThrownBy(() -> policy.completionUsesJson(
+            completionCatalog(List.of("--json=" + value, "--json")), "device-code-1"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"--json", "--json=false", "--"})
+    void doesNotInterpretTheDeviceCodeAsAnOutputFlag(String deviceCode) {
+        assertThat(policy.completionUsesJson(completionCatalog(List.of()), deviceCode)).isFalse();
+        assertThat(policy.completionUsesJson(completionCatalog(List.of("--json")), deviceCode)).isTrue();
+    }
+
+    @Test
+    void appliesTheExistingCommandAndDeviceCodeValidationWhenDetectingOutputMode() {
+        assertThatThrownBy(() -> policy.completionUsesJson(catalog, "device\ncode"))
+            .isInstanceOf(IllegalArgumentException.class);
+        ManifestCommandCatalog invalid = new ManifestCommandCatalog(
+            Map.of("login", List.of(List.of("lark-cli", "auth", "login"),
+                List.of("lark-cli", "auth", "status", "--device-code", "${deviceCode}"))),
+            "invalid-completion", Map.of("deviceCode", ManifestCommandCatalog.PlaceholderPolicy.safeValue(512)));
+        assertThatThrownBy(() -> policy.completionUsesJson(invalid, "device-code-1"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private ManifestCommandCatalog completionCatalog(List<String> options) {
+        List<String> completion = new ArrayList<>(List.of(
+            "lark-cli", "auth", "login", "--device-code", "${deviceCode}"));
+        completion.addAll(options);
+        return new ManifestCommandCatalog(
+            Map.of("login", List.of(catalog.command("login", 0), completion)),
+            "custom-completion", Map.of("deviceCode", ManifestCommandCatalog.PlaceholderPolicy.safeValue(512)));
     }
 
     @Test

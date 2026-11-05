@@ -10,6 +10,7 @@ import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorPermissionSummary;
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
@@ -337,7 +338,7 @@ public class ConnectorConnectionStateService {
         auth.setAuthMode(connector.getAuthMode());
         auth.setAuthName(accountName(statusResult));
         auth.setExternalAccountId(statusResult == null ? null : statusResult.accountId());
-        auth.setAuthCredential(buildCredential(connector, statusResult, authorizationId));
+        auth.setAuthCredential(buildCredential(connector, statusResult, authorizationId, auth.getAuthCredential()));
         auth.setEnableFlag("Y");
         auth.setStatusCd("00A");
         auth.setLastSyncTime(now);
@@ -361,11 +362,20 @@ public class ConnectorConnectionStateService {
     private String buildCredential(
             ConnectorInfo connector,
             AuthorizationStatusResult statusResult,
-            String authorizationId) {
+            String authorizationId,
+            String previousCredential) {
         if ("NONE".equals(connector.getAuthMode())) {
             return null;
         }
         Map<String, Object> metadata = new LinkedHashMap<>();
+        if (StringUtils.hasText(previousCredential)) {
+            try {
+                metadata.putAll(ConnectorPermissionSummary.retainedAttributes(
+                    JSON.parseObject(Sm4Util.decrypt(previousCredential)), connector.getProviderCode(), statusResult));
+            } catch (RuntimeException ignored) {
+                // An unreadable legacy summary must not block saving verified credentials.
+            }
+        }
         putIfHasText(metadata, "providerCode", connector.getProviderCode());
         putIfHasText(metadata, "authorizationId", authorizationId);
         if (statusResult != null) {

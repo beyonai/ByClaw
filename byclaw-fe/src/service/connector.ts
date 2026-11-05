@@ -27,7 +27,13 @@ export interface ConnectorCredentialForm {
   fields: ConnectorCredentialField[];
 }
 
-export interface ConnectorListItem {
+export interface ConnectorPermissionSummary {
+  // 完整性只针对本次申请范围，不表示已取得第三方平台的所有权限。
+  permissionStatus?: 'complete' | 'partial' | 'unknown' | null;
+  missingScopes?: string[] | null;
+}
+
+export interface ConnectorListItem extends ConnectorPermissionSummary {
   connectorCode: string;
   connectorId: number;
   connectorName: string;
@@ -62,7 +68,7 @@ export interface ConnectorListPage {
 export type ConnectorConnectionStatus = 'connected' | 'disabled' | 'pending' | 'failed' | 'expired' | 'cancelled';
 export type ConnectorAuthorizationPhase = 'app_initialization' | 'user_authorization';
 
-export interface ConnectorConnection {
+export interface ConnectorConnection extends ConnectorPermissionSummary {
   connectorId: ConnectorId;
   status: ConnectorConnectionStatus;
   accountName?: string;
@@ -89,7 +95,7 @@ export interface ConnectorCredentialAuthorizationPayload {
   cancelToken?: AbortController;
 }
 
-export interface ConnectorAuthorization {
+export interface ConnectorAuthorization extends ConnectorPermissionSummary {
   authorizationId: string;
   connectorId: ConnectorId;
   status: ConnectorConnectionStatus;
