@@ -70,6 +70,13 @@ fi
 if [[ "${1:-}" == multi-host ]]; then
     shift
     launcher=/workspace/scripts/byclaw-multi-host.mjs
+    # Every user context shares this one main thread and heap. Node's default heap (~2 GB) runs out near 25 resident
+    # contexts; AsyncLocalStorage on async_hooks and a small young generation each cost the busy loop a large share.
+    # A flag already present in NODE_OPTIONS wins.
+    for flag in --max-old-space-size=8192 --experimental-async-context-frame --max-semi-space-size=64; do
+        [[ " ${NODE_OPTIONS:-} " == *" ${flag%%=*}"[=\ ]* ]] || NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }${flag}"
+    done
+    export NODE_OPTIONS
     if ((EUID == 0)); then
         host_root="${BYCLAW_MULTI_HOST_ROOT-/data/multi-host}"
         python3 - "${host_root}" <<'BYCLAW_SHARED_ROOT'
