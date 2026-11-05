@@ -34,6 +34,7 @@ class SsResExtSkillEnterpriseCopyIntegrationTest {
                 + "(703, 'enterprise-skill-602', 'SKILL', 'enterprise', -1, 'Removed', 1, 2),"
                 + "(704, 'enterprise-skill-601-3', 'SKILL', 'enterprise', 2, 'Other tenant', 2, 4),"
                 + "(705, 'enterprise-skill-6010', 'SKILL', 'enterprise', 2, 'Other source', 1, 4)");
+            sql.execute("ALTER TABLE ss_resource ADD COLUMN publish_scope_mode TEXT DEFAULT 'LEGACY'");
             sql.execute("INSERT INTO ss_res_ext_skill VALUES "
                 + "(701, '{\"sourceResourceId\":601}'),(702, '{\"sourceResourceId\":601}'),"
                 + "(703, '{\"sourceResourceId\":602}'),(704, '{\"sourceResourceId\":601}'),"

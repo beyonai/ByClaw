@@ -27,6 +27,10 @@ public class SkillPublicationService {
     private final SequenceService sequence;
     private final SsResExtSkillService skills;
     private final DigitalEmployeeGovernanceService governance;
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private ResourcePublicationService publications;
+
 
     public boolean canReview() {
         return CurrentUserHolder.isAdminVip() || CurrentUserHolder.isPlatformManager();
@@ -51,27 +55,21 @@ public class SkillPublicationService {
 
     /** 调用方已经锁定个人源技能；创建快照与申请处于同一个事务。 */
     public void submit(SsResource source, SsResource target) {
-        PrivilegeGrant request = new PrivilegeGrant();
-        request.setPrivilegeGrantId(sequence.nextVal());
-        request.setGrantType(GrantType.SKILL_PUBLICATION);
-        request.setGrantObjType("SKILL");
-        request.setGrantObjId(target.getResourceId());
-        request.setGrantToObjId(CurrentUserHolder.getCurrentUserId());
-        request.setGrantToObjType("USER");
-        request.setGrantToType("RED");
-        request.setOperType("READ");
-        boolean automatic = canReview() && (CurrentUserHolder.isAdminVip()
-            || source.getCreateBy() != null && !governance.isAdminVipCreator(source.getCreateBy()));
-        request.setStatusCd(automatic ? "X" : "P");
-        request.setCreateStaff(CurrentUserHolder.getCurrentUserId());
-        request.setCreateDate(new Date());
-        if (automatic) {
-            request.setUpdateStaff(CurrentUserHolder.getCurrentUserId());
-            request.setUpdateDate(new Date());
-        }
-        mapper.insert(request);
-        target.setResourceStatus(automatic ? ResourceStatus.ON_SHELF.getNum() : ResourceStatus.AUDIT.getNum());
+        submit(source, target, com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope.company());
+    }
+
+    public void submit(SsResource source, SsResource target,
+        com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope scope) {
+        // Resource availability and catalog publication have separate lifecycles.
+        target.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        target.setPublishScopeMode("NONE");
+        target.setPublishScopeController("BYAI");
         resources.updateResourceEntity(target);
+        publications.submitLocal(target.getResourceId(), scope);
+    }
+
+    public boolean canRetryWithNewSnapshot(SsResource target) {
+        return !"LEGACY".equals(ResourcePublicationAccess.mode(target)) && publications.canPrepareNewSkillSnapshot(target.getResourceId());
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -79,6 +77,8 @@ public class SkillPublicationService {
         if (!canReview()) throw new IllegalArgumentException(I18nUtil.get("skill.publication.review.denied"));
         // 资源锁串行化同一快照的审核，企业校验避免跨企业审核。
         SsResource target = resources.findByIdForUpdate(resourceId);
+        if (target != null && !"LEGACY".equals(ResourcePublicationAccess.mode(target)))
+            throw new IllegalArgumentException("请从资源发布审核按组织处理该申请");
         if (target == null || !"SKILL".equals(target.getResourceBizType())
             || !"enterprise".equals(target.getOwnerType())
             || CurrentUserHolder.getEnterpriseId() == null

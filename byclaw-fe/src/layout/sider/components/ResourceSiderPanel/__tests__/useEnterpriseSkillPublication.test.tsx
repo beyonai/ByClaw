@@ -1,3 +1,5 @@
+import { choosePublishScope } from '@/components/ResourcePublication/ScopeSelector';
+import { openResourcePublication } from '@/components/ResourcePublication/PublicationPanel';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { Modal, message } from 'antd';
 import { getSkillPublicationPermissions, publishSkillToEnterprise } from '@/pages/manager/service/resources';
@@ -11,12 +13,14 @@ jest.mock('@umijs/max', () => ({
 jest.mock('antd', () => ({
   Button: () => null,
   Modal: { confirm: jest.fn(), warning: jest.fn() },
-  message: { loading: jest.fn(), success: jest.fn(), error: jest.fn() },
+  message: { destroy: jest.fn(), loading: jest.fn(), success: jest.fn(), error: jest.fn() },
 }));
 jest.mock('@/pages/manager/service/resources', () => ({
   publishSkillToEnterprise: jest.fn(),
   getSkillPublicationPermissions: jest.fn(),
 }));
+jest.mock('@/components/ResourcePublication/ScopeSelector', () => ({ choosePublishScope: jest.fn() }));
+jest.mock('@/components/ResourcePublication/PublicationPanel', () => ({ openResourcePublication: jest.fn() }));
 jest.mock('@/pages/manager/service/session', () => ({ getDcSystemConfig: jest.fn() }));
 
 const skill = {
@@ -40,6 +44,7 @@ const setup = () => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  (choosePublishScope as jest.Mock).mockResolvedValue({ mode: 'ORGS', orgIds: ['101'] });
   (publishSkillToEnterprise as jest.Mock).mockReset();
   (getSkillPublicationPermissions as jest.Mock).mockReset().mockResolvedValue({ canPublishToEnterprise: true });
   (getDcSystemConfig as jest.Mock).mockResolvedValue({ paramValue: 'openSource' });
@@ -80,7 +85,8 @@ it.each([false, true])('confirms once and updates only the source item (existing
   expect(Modal.confirm).toHaveBeenCalledTimes(1);
   expect(publishSkillToEnterprise).not.toHaveBeenCalled();
   await act(async () => (Modal.confirm as jest.Mock).mock.calls[0][0].onOk());
-  expect(publishSkillToEnterprise).toHaveBeenCalledWith('personal-skill');
+  expect(publishSkillToEnterprise).toHaveBeenCalledWith('personal-skill', { mode: 'ORGS', orgIds: ['101'] });
+  expect(openResourcePublication).toHaveBeenCalledWith({ resourceId: 'copy' });
   expect(onPublished).toHaveBeenCalledWith('personal-skill', expect.objectContaining({ resourceId: 'copy' }));
   expect(message.success).toHaveBeenCalled();
   expect(result.current.publishingId).toBeNull();
@@ -165,4 +171,15 @@ it('uses structured API errors and recovers a committed request after a lost res
   expect(result.current.entryLabel({ ...skill, skillPublication: publication })).toBe(
     'resource.skillPublicationProgress'
   );
+});
+
+it('cancelling the organization selection leaves the personal skill unpublished', async () => {
+  (choosePublishScope as jest.Mock).mockResolvedValue(undefined);
+  const { result, onPublished } = setup();
+  await waitFor(() => expect(result.current.canPublish(skill)).toBe(true));
+  act(() => result.current.publish(skill));
+  await act(async () => (Modal.confirm as jest.Mock).mock.calls[0][0].onOk());
+  expect(publishSkillToEnterprise).not.toHaveBeenCalled();
+  expect(onPublished).not.toHaveBeenCalled();
+  expect(result.current.publishingId).toBeNull();
 });

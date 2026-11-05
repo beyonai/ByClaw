@@ -1,4 +1,6 @@
 package com.iwhalecloud.byai.state.domain.groupchat.forward.application;
+
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
 import com.iwhalecloud.byai.manager.domain.tenant.*;
 import com.iwhalecloud.byai.state.domain.groupchat.forward.infrastructure.LegacyGroupChatForwardStore;
 import com.iwhalecloud.byai.state.domain.groupchat.forward.port.GroupChatForwardStore;
@@ -16,6 +18,7 @@ import java.util.concurrent.*;
 /** Remote source reads and ordinary uploads run outside transactions; stores own each short durable transition. */
 @Service
 public class GroupChatForwardService {
+    private final TenantModeService tenantModes;
     @org.springframework.beans.factory.annotation.Autowired
     private org.springframework.beans.factory.ObjectProvider<GroupChatForwardRecoveryService> recovery;
     private static final org.slf4j.Logger LOG=org.slf4j.LoggerFactory.getLogger(GroupChatForwardService.class);
@@ -36,7 +39,8 @@ public class GroupChatForwardService {
             || lease.sourceSessionId() != binding.sourceSessionId()) throw new IllegalArgumentException("RESOURCE_NOT_ACCESSIBLE");
         return store.commit(lease);
     }
-    public GroupChatForwardService(LegacyGroupChatForwardStore legacy,TenantGroupForwardService tenant,GroupChatForwardExecutionContextService contexts,ForwardPlatformPolicy policy,ForwardSourceResolver resolver,ForwardReferenceClassifier classifier,GroupChatForwardAttachmentService attachments,ForwardUploadReservation locations,GroupChatForwardProperties properties) {
+    public GroupChatForwardService(LegacyGroupChatForwardStore legacy,TenantGroupForwardService tenant,GroupChatForwardExecutionContextService contexts,ForwardPlatformPolicy policy,ForwardSourceResolver resolver,ForwardReferenceClassifier classifier,GroupChatForwardAttachmentService attachments,ForwardUploadReservation locations,GroupChatForwardProperties properties, TenantModeService tenantModes) {
+        this.tenantModes = tenantModes;
         this.legacy=legacy;
         this.tenant=tenant;
         this.contexts=contexts;
@@ -51,7 +55,7 @@ public class GroupChatForwardService {
         var current=TenantRequestContextHolder.get();
         if(current==null)return legacy;
         if(current.userId()!=actor.userId()||current.enterpriseId()!=actor.enterpriseId())throw new IllegalArgumentException("RESOURCE_NOT_ACCESSIBLE");
-        return tenant;
+        return tenantModes.isSharedDataTenant(actor.enterpriseId()) ? legacy : tenant;
     }
     public ForwardOperation create(ForwardActor actor,long source,ForwardInput input) {
         var store=interactive(actor);

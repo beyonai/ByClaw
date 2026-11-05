@@ -1,3 +1,4 @@
+import { resourcePublicationCounts } from '@/service/resourcePublication';
 import { clearCache, useRequest } from 'ahooks';
 import { useCallback } from 'react';
 import { useLocation, useSelector } from '@umijs/max';
@@ -13,9 +14,10 @@ import {
 
 export const queryApprovalPendingCounts = async (): Promise<ApprovalCounts> => {
   // 聚合接口继续由后端按当前用户的审核权限过滤，员工发布保留独立计数链路。
-  const [resources, publications] = await Promise.allSettled([
+  const [resources, publications, resourcePublications] = await Promise.allSettled([
     queryResourceUseApplyAudit({ history: false, resourceBizTypeList: ALL_APPROVAL_BIZ_TYPES }),
     getPublicationPendingCount(),
+    resourcePublicationCounts(),
   ]);
   const counts = { ...EMPTY_APPROVAL_COUNTS };
   if (resources.status === 'fulfilled') {
@@ -24,6 +26,14 @@ export const queryApprovalPendingCounts = async (): Promise<ApprovalCounts> => {
     });
   }
   if (publications.status === 'fulfilled') counts.employee += Math.max(0, Number(publications.value) || 0);
+  if (resourcePublications.status === 'fulfilled') {
+    APPROVAL_TABS.forEach((tab) => {
+      counts[tab.key] += tab.resourceBizTypeList.reduce(
+        (total, type) => total + (Number(resourcePublications.value[type]) || 0),
+        0
+      );
+    });
+  }
   return counts;
 };
 

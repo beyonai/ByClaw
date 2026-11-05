@@ -351,7 +351,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         assertThat(target.getResourceCode()).isEqualTo("enterprise-skill-7001");
         assertThat(target.getOwnerType()).isEqualTo("enterprise");
         assertThat(target.getResourceStatus()).isEqualTo(4);
-        verify(publications).submit(source, target);
+        verify(publications).submit(eq(source), eq(target), eq(com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope.company()));
         assertThat(target.getResourceName()).isEqualTo(enterpriseName(source.getResourceName()));
         verify(ssResourceService).existsEnterpriseSkillByName(enterpriseName(source.getResourceName()));
         assertThat(target.getAvatar()).isEqualTo("skill-logo");
@@ -514,7 +514,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
     }
 
     private void verifyNoPublicationCreated() {
-        verify(publications, never()).submit(any(), any());
+        verify(publications, never()).submit(any(), any(), any());
         verify(ssResourceService, never()).saveResource(any());
     }
 
@@ -527,7 +527,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         assertThat(result.resource().getResourceCode()).isEqualTo("enterprise-skill-7001-2");
         assertThat(result.resource().getResourceStatus()).isEqualTo(4);
         assertThat(rejected.getResourceStatus()).isEqualTo(5);
-        verify(publications).submit(any(), eq(result.resource()));
+        verify(publications).submit(any(), eq(result.resource()), eq(com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope.company()));
     }
 
     @Test
@@ -612,7 +612,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         var result = service.publishSkillToEnterprise(7001L);
 
         assertThat(result.resource().getResourceStatus()).isEqualTo(4);
-        verify(publications).submit(any(), eq(result.resource()));
+        verify(publications).submit(any(), eq(result.resource()), eq(com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope.company()));
         verify(ssResourceService).findByIdList(java.util.Set.of(2001L, 3001L));
     }
 
@@ -621,7 +621,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         prepareEnterpriseCopy();
         stubPublicationManifest("", "{\"resources\":[]}");
         var result = service.publishSkillToEnterprise(7001L);
-        verify(publications).submit(any(), eq(result.resource()));
+        verify(publications).submit(any(), eq(result.resource()), eq(com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope.company()));
         verify(ssResourceService, never()).findByIdList(any());
     }
 
@@ -634,7 +634,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
         when(ssResourceService.findByIdList(java.util.Set.of(2001L)))
             .thenReturn(List.of(publicationResource(2001L, type, "enterprise", "企业资源")));
         var result = service.publishSkillToEnterprise(7001L);
-        verify(publications).submit(any(), eq(result.resource()));
+        verify(publications).submit(any(), eq(result.resource()), eq(com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope.company()));
     }
 
     @ParameterizedTest
@@ -805,7 +805,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
 
         assertThatThrownBy(() -> service.publishSkillToEnterprise(7001L))
             .isInstanceOf(IllegalStateException.class).hasMessage("Upload unavailable");
-        verify(publications, never()).submit(any(), any());
+        verify(publications, never()).submit(any(), any(), any());
         verify(ssResExtSkillService, never()).saveOrUpdate(any());
         org.mockito.Mockito.verifyNoInteractions(ssResourceArtifactService);
         assertThat(ssResExtSkillService.findById(7001L).getSkillUrl())
@@ -895,7 +895,7 @@ class ByClawSkillResourceApplicationServiceTest extends com.iwhalecloud.byai.com
 
         verify(ssResourceService, never()).saveResource(any());
         verify(resourceArtifactStorageService, never()).uploadToSubdirectory(any(byte[].class), any(), any(), any());
-        verify(publications, never()).submit(any(), any());
+        verify(publications, never()).submit(any(), any(), any());
     }
 
     private String enterpriseName(String name) {

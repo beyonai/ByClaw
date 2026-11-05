@@ -86,6 +86,9 @@ public class ResourceAuthApplicationService {
     @Autowired
     private ResourceFavoriteService resourceFavoriteService;
 
+    @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess publicationAccess;
+
     /**
      * 组织-资源授权明细列表查询
      *
@@ -108,6 +111,7 @@ public class ResourceAuthApplicationService {
         }
         fillPublishOrgIds(resourceUseAuthQo);
         fillCatalogIds(resourceUseAuthQo);
+        publicationAccess.prepareQuery(resourceUseAuthQo);
 
         PageInfo<ResourceAuthVo> pageInfo = privilegeGrantService.listResourceAuth(resourceUseAuthQo);
         fillOperationPermissions(pageInfo.getList());

@@ -1,3 +1,4 @@
+import { ScopeTags, openResourcePublication } from '@/components/ResourcePublication/PublicationPanel';
 import React, { useState, useEffect } from 'react';
 import { Button, Modal, Spin, Table } from 'antd';
 import { CloseOutlined } from '@ant-design/icons';
@@ -9,6 +10,15 @@ import dayjs from 'dayjs';
 import styles from './index.module.less';
 
 interface IResourceItem {
+  resourceId?: string | number;
+  ownerType?: string;
+  publishScopeMode?: string;
+  publishedScope?: import('@/service/resourcePublication').ScopeLabel[];
+  canManagePublishScope?: boolean;
+  operationPermissions?: {
+    canManagePublishScope?: boolean;
+    publishedScope?: import('@/service/resourcePublication').ScopeLabel[];
+  };
   resourceCode?: string;
   resourceName: string;
   description?: string;
@@ -245,6 +255,19 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
         <div className={styles.detailFields}>
           {renderDetailField(`${resourceName}${intl.formatMessage({ id: 'common.title' })}`, item?.resourceName)}
           {renderDetailField(`${resourceName}${intl.formatMessage({ id: 'common.code' })}`, item?.resourceCode)}
+          {item?.ownerType === 'enterprise' && item?.publishScopeMode && (
+            <div>
+              <ScopeTags
+                mode={item.publishScopeMode}
+                scopes={item.operationPermissions?.publishedScope || item.publishedScope}
+              />
+              {(item.operationPermissions?.canManagePublishScope || item.canManagePublishScope) && (
+                <button type="button" onClick={() => openResourcePublication({ resourceId: String(item.resourceId) })}>
+                  {intl.formatMessage({ id: 'rp.manage' })}
+                </button>
+              )}
+            </div>
+          )}
           {renderDetailField(
             `${resourceName}${intl.formatMessage({ id: 'common.description' })}`,
             <div className={styles.descriptionContent}>{item?.resourceDesc || item?.description || '-'}</div>

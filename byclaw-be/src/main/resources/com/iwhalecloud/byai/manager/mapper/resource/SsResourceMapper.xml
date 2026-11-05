@@ -26,6 +26,9 @@
         <result column="update_time" property="updateTime" />
         <result column="com_acct_id" property="comAcctId" />
         <result column="resource_status" property="resourceStatus" />
+        <result column="publish_scope_mode" property="publishScopeMode" />
+        <result column="publish_scope_revision" property="publishScopeRevision" />
+        <result column="publish_scope_controller" property="publishScopeController" />
         <result column="resource_d_verid" property="resourceDVerid" />
         <result column="resource_r_verid" property="resourceRVerid" />
         <result column="auth_status" property="authStatus"/>

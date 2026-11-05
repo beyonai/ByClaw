@@ -1,3 +1,4 @@
+import { resourcePublicationCounts } from '@/service/resourcePublication';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { clearCache } from 'ahooks';
 import useApprovalPendingCounts, { queryApprovalPendingCounts } from '../useApprovalPendingCounts';
@@ -12,11 +13,13 @@ jest.mock('@umijs/max', () => ({
   useSelector: (selector: (state: any) => any) => selector({ user: { userInfo: { userId: mockUserId } } }),
 }));
 jest.mock('@/pages/manager/service/resources', () => ({ queryResourceUseApplyAudit: jest.fn() }));
+jest.mock('@/service/resourcePublication', () => ({ resourcePublicationCounts: jest.fn().mockResolvedValue({}) }));
 jest.mock('@/service/employeePublication', () => ({ getPublicationPendingCount: jest.fn() }));
 
 describe('shared approval pending counts', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (resourcePublicationCounts as jest.Mock).mockResolvedValue({});
     clearCache();
     mockUserId = 'user-1';
     mockPathname = '/approvalCenter';
@@ -35,7 +38,7 @@ describe('shared approval pending counts', () => {
   afterEach(() => clearCache());
 
   it('counts all four scopes, excludes invalid resources and includes employee publication', async () => {
-    expect(await queryApprovalPendingCounts()).toEqual({ employee: 3, skill: 1, knowledge: 3, tool: 3 });
+    expect(await queryApprovalPendingCounts()).toEqual({ employee: 3, skill: 1, knowledge: 3, tool: 4 });
     expect(queryResourceUseApplyAudit).toHaveBeenCalledWith({
       history: false,
       resourceBizTypeList: ALL_APPROVAL_BIZ_TYPES,
@@ -48,14 +51,14 @@ describe('shared approval pending counts', () => {
     expect(await queryApprovalPendingCounts()).toEqual(
       source === 'resources'
         ? { employee: 2, skill: 0, knowledge: 0, tool: 0 }
-        : { employee: 1, skill: 1, knowledge: 3, tool: 3 }
+        : { employee: 1, skill: 1, knowledge: 3, tool: 4 }
     );
   });
 
   it('shares refreshed counts between the sidebar and page subscribers', async () => {
     const { result } = renderHook(() => ({ sidebar: useApprovalPendingCounts(), page: useApprovalPendingCounts() }));
-    await waitFor(() => expect(result.current.sidebar.total).toBe(10));
-    expect(result.current.page.total).toBe(10);
+    await waitFor(() => expect(result.current.sidebar.total).toBe(11));
+    expect(result.current.page.total).toBe(11);
     (queryResourceUseApplyAudit as jest.Mock).mockResolvedValue({ data: [] });
     (getPublicationPendingCount as jest.Mock).mockResolvedValue(0);
     // 审批成功在同一毫秒触发时，也必须重新获取数据。
@@ -68,7 +71,7 @@ describe('shared approval pending counts', () => {
 
   it('hides the previous account counts during logout and loads counts after account switching', async () => {
     const { result, rerender } = renderHook(() => useApprovalPendingCounts());
-    await waitFor(() => expect(result.current.total).toBe(10));
+    await waitFor(() => expect(result.current.total).toBe(11));
     mockUserId = undefined;
     rerender();
     expect(result.current.total).toBe(0);
@@ -80,4 +83,11 @@ describe('shared approval pending counts', () => {
     expect(result.current.total).toBe(0);
     await waitFor(() => expect(result.current.total).toBe(5));
   });
+});
+
+it('adds resource publication counts to the corresponding resource type only', async () => {
+  (queryResourceUseApplyAudit as jest.Mock).mockResolvedValue({ data: [] });
+  (getPublicationPendingCount as jest.Mock).mockResolvedValue(0);
+  (resourcePublicationCounts as jest.Mock).mockResolvedValue({ KG_DOC: 2, SKILL: 3, MCP: 4 });
+  expect(await queryApprovalPendingCounts()).toEqual({ employee: 0, skill: 3, knowledge: 2, tool: 4 });
 });

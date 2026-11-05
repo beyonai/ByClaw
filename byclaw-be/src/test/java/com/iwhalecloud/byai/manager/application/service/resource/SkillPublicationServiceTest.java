@@ -49,76 +49,23 @@ class SkillPublicationServiceTest {
         CurrentUserHolder.setLoginInfo(null);
     }
 
-    @Test
-    void submissionCreatesAuditSnapshotInsteadOfPublishing() {
-        CurrentUserHolder.getLoginInfo().setUserCode("ordinary-user");
-        SsResource source = new SsResource();
-        source.setResourceId(100L);
-        SsResource target = new SsResource();
-        target.setResourceId(101L);
-        when(sequence.nextVal()).thenReturn(200L);
-        service.submit(source, target);
-        ArgumentCaptor<PrivilegeGrant> request = ArgumentCaptor.forClass(PrivilegeGrant.class);
-        verify(mapper).insert(request.capture());
-        assertThat(request.getValue().getStatusCd()).isEqualTo("P");
-        assertThat(request.getValue().getGrantType()).isEqualTo("SKILL_PUBLICATION");
-        assertThat(request.getValue().getGrantObjId()).isEqualTo(101L);
-        assertThat(request.getValue().getGrantToObjId()).isEqualTo(10L);
-        assertThat(target.getResourceStatus()).isEqualTo(4);
-    }
-
-    @Test
-    void platformSubmittingAdminvipSkillQueuesOnlyAdminvipReview() {
-        platformLogin();
-        SsResource source = new SsResource(); source.setCreateBy(7L);
-        when(governance.isAdminVipCreator(7L)).thenReturn(true);
+    @ParameterizedTest @ValueSource(strings = {"ordinary-user", "platform", "adminvip"})
+    void everyNewPublicationUsesOrganizationReviewWithoutCreatingUseGrants(String userCode) {
+        CurrentUserHolder.getLoginInfo().setUserCode(userCode);
+        var publications = mock(ResourcePublicationService.class);
+        ReflectionTestUtils.setField(service, "publications", publications);
+        SsResource source = new SsResource(); source.setResourceId(100L);
         SsResource target = pendingTarget();
-        target.setCreateBy(10L); // 企业副本的创建人是代发布人，不能据此获得审核权。
-        var ext = new com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill();
-        ext.setTargetContent("{\"sourceCreatorId\":\"7\"}");
-        when(skills.findById(101L)).thenReturn(ext);
-        service.submit(source, target);
-        ArgumentCaptor<PrivilegeGrant> request = ArgumentCaptor.forClass(PrivilegeGrant.class);
-        verify(mapper).insert(request.capture());
-        assertThat(request.getValue().getStatusCd()).isEqualTo("P");
-        assertThat(request.getValue().getUpdateStaff()).isNull();
-        assertThat(target.getResourceStatus()).isEqualTo(4);
-        assertThat(service.canReview(target)).isFalse();
+        var scope = new com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope("ORGS", List.of(123L));
+        service.submit(source, target, scope);
+        verify(publications).submitLocal(101L, scope);
+        verifyNoInteractions(mapper);
+        assertThat(target.getResourceStatus()).isEqualTo(2);
+        assertThat(target.getPublishScopeMode()).isEqualTo("NONE");
+        assertThat(target.getPublishScopeController()).isEqualTo("BYAI");
         when(resources.findByIdForUpdate(101L)).thenReturn(target);
-        assertThatThrownBy(() -> service.review(101L, 10L, true)).hasMessage("skill.publication.review.adminvip.only");
-        assertThatThrownBy(() -> service.review(101L, 10L, false)).hasMessage("skill.publication.review.adminvip.only");
-        verify(mapper, never()).updateById(any(PrivilegeGrant.class));
         CurrentUserHolder.getLoginInfo().setUserCode("adminvip");
-        assertThat(service.canReview(target)).isTrue();
-        when(mapper.selectOne(any())).thenReturn(request.getValue());
-        service.review(101L, 10L, true);
-        assertThat(target.getResourceStatus()).isEqualTo(2);
-        assertThat(request.getValue().getStatusCd()).isEqualTo("X");
-    }
-
-    @ParameterizedTest @ValueSource(booleans = {false, true})
-    void authorizedAdministratorsPublishPlatformSkillImmediatelyAndKeepReviewRecord(boolean superAdmin) {
-        if (!superAdmin) platformLogin();
-        SsResource source = new SsResource(); source.setCreateBy(7L);
-        SsResource target = pendingTarget();
-        service.submit(source, target);
-        ArgumentCaptor<PrivilegeGrant> request = ArgumentCaptor.forClass(PrivilegeGrant.class);
-        verify(mapper).insert(request.capture());
-        assertThat(request.getValue().getStatusCd()).isEqualTo("X");
-        assertThat(request.getValue().getUpdateStaff()).isEqualTo(10L);
-        assertThat(request.getValue().getUpdateDate()).isNotNull();
-        assertThat(target.getResourceStatus()).isEqualTo(2);
-    }
-
-    @Test
-    void adminvipCanPublishOwnSkillImmediatelyWithReviewRecord() {
-        SsResource source = new SsResource(); source.setCreateBy(10L);
-        when(governance.isAdminVipCreator(10L)).thenReturn(true);
-        SsResource target = pendingTarget();
-        service.submit(source, target);
-        verify(mapper).insert(argThat((PrivilegeGrant request) -> "X".equals(request.getStatusCd())
-            && Long.valueOf(10L).equals(request.getUpdateStaff()) && request.getUpdateDate() != null));
-        assertThat(target.getResourceStatus()).isEqualTo(2);
+        assertThatThrownBy(() -> service.review(101L, 10L, true)).hasMessageContaining("按组织处理");
     }
 
     private void platformLogin() {

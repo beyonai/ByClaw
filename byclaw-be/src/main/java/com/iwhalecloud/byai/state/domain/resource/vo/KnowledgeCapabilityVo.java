@@ -19,6 +19,8 @@ public class KnowledgeCapabilityVo {
 
     private String knowledgeMode;
 
+    private java.util.List<com.iwhalecloud.byai.state.application.service.dataset.KnowledgeProviderService.Option> creationProviders = java.util.List.of();
+
     private Boolean allowKnowledgeBaseCreate;
 
     private Boolean allowKnowledgeBaseEdit;

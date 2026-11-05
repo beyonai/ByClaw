@@ -15,6 +15,12 @@ import java.util.Date;
 @Getter
 @Setter
 public class ResourceAuthVo extends AuthVo {
+    private String publishScopeMode;
+    private String publishScopeController;
+    private Long publishScopeRevision;
+    private java.util.List<com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess.OrganizationLabel> publishedScope;
+    private boolean canManagePublishScope;
+
 
     private Boolean favorited;
 

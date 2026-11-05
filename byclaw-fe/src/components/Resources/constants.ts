@@ -65,6 +65,7 @@ export const RESOURCE_BIZ_TYPE_KG_DOC_VALUE = 'KG_DOC'; // 文档知识
 export const RESOURCE_BIZ_TYPE_KG_TERM_VALUE = 'KG_TERM'; // 术语知识
 export const RESOURCE_BIZ_TYPE_KG_QA_VALUE = 'KG_QA'; // 问答知识
 export const ALL_RESOURCE_BIZ_TYPE_VALUES = [
+  'TOOL',
   RESOURCE_BIZ_TYPE_MCP_VALUE,
   RESOURCE_BIZ_TYPE_TOOLKIT_VALUE,
   RESOURCE_BIZ_TYPE_AGENT_VALUE,
@@ -81,6 +82,7 @@ export const resourceBizTypeOptions = [
     label: 'common.all',
     value: RESOURCE_BIZ_TYPE_ALL_VALUE,
   },
+  { label: 'rp.atomicTool', value: 'TOOL' },
   {
     label: 'resource.agent',
     value: RESOURCE_BIZ_TYPE_AGENT_VALUE,

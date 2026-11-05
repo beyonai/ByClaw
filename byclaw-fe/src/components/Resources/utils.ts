@@ -95,6 +95,9 @@ export const buildResourceListFilterParam = (activeTab: string, filterParam?: Re
   if (activeTab === 'personal') {
     ignoredKeys.add('belong');
     ignoredKeys.add('orgFilters');
+    ignoredKeys.add('audienceScopeMode');
+    ignoredKeys.add('audienceOrgIds');
+    ignoredKeys.add('audienceIncludeDescendants');
   }
 
   return Object.entries(filterParam || {}).reduce((acc, [key, value]) => {
@@ -102,6 +105,10 @@ export const buildResourceListFilterParam = (activeTab: string, filterParam?: Re
       return acc;
     }
 
+    if (key === 'audienceScopeMode' && value === 'ORGS' && !filterParam?.audienceOrgIds?.length) {
+      acc[key] = 'ALL';
+      return acc;
+    }
     acc[key] = value;
     return acc;
   }, {} as Record<string, any>);

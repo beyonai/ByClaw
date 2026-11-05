@@ -1,3 +1,5 @@
+import { choosePublishScope } from '@/components/ResourcePublication/ScopeSelector';
+import { openResourcePublication, ScopeTags } from '@/components/ResourcePublication/PublicationPanel';
 import { openEmployeePublication, publicationEntryLabel } from '@/service/employeePublication';
 import { publicationErrorMessage } from '@/utils/publicationError';
 import { showSkillPublication, skillPublicationEntryLabel } from '../../skillPublication';
@@ -84,6 +86,9 @@ export interface IResourceCardItem {
   canOnShelf?: boolean;
   canOffShelf?: boolean;
   canPublishToEnterprise?: boolean;
+  canManagePublishScope?: boolean;
+  publishScopeMode?: string;
+  publishedScope?: import('@/service/resourcePublication').ScopeLabel[];
   skillPublication?: SkillPublicationSummary;
   canUnShelf?: boolean;
   canDeleteData?: boolean;
@@ -793,7 +798,11 @@ const RenderContent = (props: ResourceCardProps) => {
       }
       sourceId = String(sourceSkill.resourceId);
       setPublicationSourceId(sourceId);
-      const result = await publishSkillToEnterprise(sourceId);
+      message.destroy(messageKey);
+      const publishScope = await choosePublishScope();
+      if (!publishScope) return;
+      const result = await publishSkillToEnterprise(sourceId, publishScope);
+      openResourcePublication({ resourceId: result.resource.resourceId });
       // 关联个人资源只做提醒，提交已经成功，不要求用户再次确认。
       if (result.personalDependencies?.length) {
         Modal.warning({
@@ -820,11 +829,13 @@ const RenderContent = (props: ResourceCardProps) => {
           <span>
             {intl.formatMessage({
               id:
-                result.resource.resourceStatus === 4
-                  ? 'resource.enterpriseSkillPending'
-                  : result.alreadyExists
-                    ? 'resource.enterpriseSkillExists'
-                    : 'resource.publishToEnterpriseSuccess',
+                result.resource.publishScopeMode && result.resource.publishScopeMode !== 'LEGACY'
+                  ? 'rp.copySaved'
+                  : result.resource.resourceStatus === 4
+                    ? 'resource.enterpriseSkillPending'
+                    : result.alreadyExists
+                      ? 'resource.enterpriseSkillExists'
+                      : 'resource.publishToEnterpriseSuccess',
             })}
             {onEnterpriseSkillDetail && result.resource.resourceStatus === 2 && (
               <Button type="link" onClick={() => onEnterpriseSkillDetail(result.resource)}>
@@ -951,6 +962,14 @@ const RenderContent = (props: ResourceCardProps) => {
             />
           </ConfirmMenuLabel>
         ),
+      });
+    }
+
+    if (resource.canManagePublishScope && resource.resourceId) {
+      items.push({
+        key: 'resourcePublication',
+        label: intl.formatMessage({ id: 'rp.manage' }),
+        onClick: () => openResourcePublication({ resourceId: resource.resourceId }),
       });
     }
 
@@ -1936,6 +1955,11 @@ const RenderContent = (props: ResourceCardProps) => {
               </div>
             )}
 
+            {resource.ownerType === 'enterprise' && resource.publishScopeMode && (
+              <div>
+                <ScopeTags mode={resource.publishScopeMode} scopes={resource.publishedScope} />
+              </div>
+            )}
             <Paragraph
               className={styles.resourceDescription}
               ellipsis={{
