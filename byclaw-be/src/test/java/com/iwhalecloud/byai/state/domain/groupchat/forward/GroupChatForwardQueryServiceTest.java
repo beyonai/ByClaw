@@ -64,7 +64,7 @@ class GroupChatForwardQueryServiceTest {
                 '{"type":"USER","id":"30","name":"sender"}',TIMESTAMP '2026-10-16 00:00:00',?)
             """, message);
         query = new GroupChatForwardQueryService(db, new DataSourceTransactionManager(source),
-            new ObjectMapper().findAndRegisterModules(), mock(TenantGroupForwardService.class), mock(ForwardPlatformPolicy.class));
+            new ObjectMapper().findAndRegisterModules(), mock(TenantGroupForwardService.class), mock(ForwardPlatformPolicy.class), org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.domain.tenant.TenantModeService.class));
     }
     @AfterEach
     void closeDatabase() {

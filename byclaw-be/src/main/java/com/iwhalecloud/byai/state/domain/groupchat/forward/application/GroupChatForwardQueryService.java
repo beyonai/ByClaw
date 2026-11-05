@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.domain.groupchat.forward.application;
 
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantGroupForwardService;
@@ -19,6 +21,7 @@ import java.util.function.Consumer;
 /** Target snapshot records are read in a short owning-store transaction. */
 @Service
 public class GroupChatForwardQueryService {
+    private final TenantModeService tenantModes;
     private final JdbcTemplate db;
     private final TransactionTemplate tx;
     private final ObjectMapper json;
@@ -26,13 +29,18 @@ public class GroupChatForwardQueryService {
     private final ForwardPlatformPolicy policy;
 
     public GroupChatForwardQueryService(JdbcTemplate db, PlatformTransactionManager manager, ObjectMapper json,
-        TenantGroupForwardService tenant, ForwardPlatformPolicy policy) {
+        TenantGroupForwardService tenant, ForwardPlatformPolicy policy, TenantModeService tenantModes) {
+        this.tenantModes = tenantModes;
         this.db=db; this.tx=new TransactionTemplate(manager); this.json=json; this.tenant=tenant; this.policy=policy;
     }
     private boolean tenant(ForwardActor actor) {
         var context=TenantRequestContextHolder.get();
         if(context==null) { policy.requireNewWork(actor,ForwardBackend.LEGACY); return false; }
         if(context.userId()!=actor.userId() || context.enterpriseId()!=actor.enterpriseId()) throw denied();
+        if (tenantModes.isSharedDataTenant(actor.enterpriseId())) {
+            policy.requireNewWork(actor, ForwardBackend.LEGACY);
+            return false;
+        }
         return true;
     }
     private static IllegalArgumentException denied() { return new IllegalArgumentException("RESOURCE_NOT_ACCESSIBLE"); }
