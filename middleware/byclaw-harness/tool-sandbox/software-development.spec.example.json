@@ -1,0 +1,46 @@
+{
+  "image": "byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness-tools:D0.6.0_software-development",
+  "startup": {
+    "entrypoint": ["/usr/local/bin/byclaw-software-development-entrypoint", "tools"]
+  },
+  "env": {
+    "TZ": "Asia/Shanghai",
+    "USER_CODE": "${USER_CODE}",
+    "BYCLAW_TOOL_ENV_PORT": "2222",
+    "BYCLAW_TOOL_ENV_WS_PORT": "8080",
+    "BYCLAW_TOOL_ENV_HOST_KEY": "${envVars.BYCLAW_TOOL_ENV_HOST_KEY}",
+    "BYCLAW_TOOL_ENV_AUTHORIZED_KEY": "${envVars.BYCLAW_TOOL_ENV_AUTHORIZED_KEY}",
+    "BYCLAW_BROWSER_STARTUP": "eager",
+    "BYCLAW_SOFTWARE_DEVELOPMENT_PGDATA": "/var/lib/postgresql/software-development/17/data",
+    "BYCLAW_SOFTWARE_DEVELOPMENT_DATABASE": "development"
+  },
+  "servicePort": 8080,
+  "ports": [
+    { "port": 8080, "instance": "ssh", "protocol": "http", "exposure": "private" },
+    { "port": 8081, "instance": "vnc", "protocol": "http", "exposure": "public" }
+  ],
+  "resourceRequests": { "cpu": "2", "memory": "4Gi" },
+  "resourceLimits": { "cpu": "4", "memory": "8Gi" },
+  "timeout": 1800,
+  "volumes": [
+    {
+      "key": "base", "type": "persistent", "scope": "PRIVATE",
+      "subPath": "byclaw-${user_code}/by", "mountPath": "/by",
+      "volumeRef": "workspace", "readOnly": false
+    }
+  ],
+  "runtimeOptions": {
+    "lifecycle": { "autoStart": "false" },
+    "toolSandbox": {
+      "contract": "byclaw.tool-sandbox/v1",
+      "templateKey": "software-development",
+      "purpose": "software-development",
+      "enabled": "true",
+      "imageTag": "D0.6.0_software-development",
+      "description": "用于 TypeScript、Next.js 和 Python 项目的编码、构建、测试与浏览器验收，内置仅本机访问的 PostgreSQL 和 pgvector。",
+      "capabilities": "[\"process.exec\",\"filesystem\",\"software.development\",\"database.postgresql\",\"database.pgvector\",\"browser.automation\"]",
+      "operations": "{\"protocol\":\"ssh\",\"exposure\":\"private\"}",
+      "display": "{\"available\":true,\"defaultExposure\":\"public\",\"auth\":\"byclaw-session\"}"
+    }
+  }
+}

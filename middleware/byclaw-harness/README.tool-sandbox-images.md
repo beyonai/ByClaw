@@ -9,6 +9,7 @@ Build from the repository root on host53 for `linux/amd64`. Dockerfile parents u
 | `Dockerfile.tools.media` | `D0.6.0_media` | Browser business layer; HyperFrames/GSAP, FFmpeg/FFprobe |
 | `Dockerfile.tools.unity` | `D0.6.0_unity` | Browser business layer; Unity Editor/Hub, WebGL/Linux toolchains and game desktop |
 | `Dockerfile.tools.godot` | `D0.6.0_godot` | Browser business layer; Godot editor, built-in GDScript, Web/Linux exports and game desktop |
+| `Dockerfile.tools.software-development` | `D0.6.0_software-development` | Browser business layer; pnpm/uv, compilers, PostgreSQL 17 + pgvector, software development/testing |
 
 GDScript is provided by Godot. There is no separate GDScript image or service.
 
@@ -32,3 +33,5 @@ After all53 image builds, checks and publications finish, remove this run's vali
 Unity project import, Player builds and WebGL export require the owner's valid runtime license. Verify those separately from Editor/Hub and installed toolchain readiness.
 
 See [base details](README.tools-base-slim.md), [Unity](README.tools.unity.md) and [Godot](README.tools.godot.md).
+
+[软件开发工具沙箱](README.tools.software-development.md) includes runtime-managed loopback-only PostgreSQL and pgvector. Its own smoke test rejects an exported image rootfs of 4 GiB or more; database/project growth is a separate runtime storage budget. The default database is local and reproducible, not persisted on the user AgenticFS mount.
