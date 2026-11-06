@@ -56,7 +56,8 @@ RUN set -eux; \
     test -f /opt/byclaw/novnc/core/rfb.js; \
     bycli --version; \
     test -f /opt/nvm/current/lib/node_modules/@sovovs/bycli/extension/manifest.json; \
-    grep -q '^BYCLAW_BROWSER_EXTENSIONS=/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension$' /etc/byclaw-tool-env.session-env; \
+    grep -q '^BYCLAW_BROWSER_EXTENSIONS=/opt/byclaw/bycli-extension$' /etc/byclaw-tool-env.session-env; \
+    test -f /opt/byclaw/bycli-extension/manifest.json; \
     grep -q '^BYCLAW_BROWSER_VIEWER=shared-novnc$' /etc/byclaw-tool-env.session-env; \
     browser_lib=/opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-browser-use/lib; \
     test -f "${browser_lib}/browserd.js"; \
