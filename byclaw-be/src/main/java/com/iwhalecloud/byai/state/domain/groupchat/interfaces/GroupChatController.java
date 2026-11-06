@@ -185,6 +185,14 @@ public class GroupChatController {
         return ResponseUtil.successResponse(messageSearchService.search(sessionId, request));
     }
 
+    /** Desktop local turns persist a message projection without remote dispatch. */
+    @PostMapping("/{sessionId}/messages/persist")
+    public ResponseUtil<Long> persistMessage(@PathVariable Long sessionId,
+        @RequestBody com.iwhalecloud.byai.state.domain.ws.model.ChatMessage request) {
+        request.setSessionId(sessionId);
+        return ResponseUtil.successResponse(applicationService.persistRuntimeMessage(request));
+    }
+
     @GetMapping("/{sessionId}/messages/{messageId}/context")
     public ResponseUtil<GroupChatContextResponse> messageContext(@PathVariable Long sessionId,
         @PathVariable Long messageId) {

@@ -182,6 +182,7 @@ public class GroupChatTaskService {
     public List<ByaiGroupChatTask> list(Long groupSessionId) {
         groupAuthorizationService.requireCurrentUserMember(groupSessionId);
         List<ByaiGroupChatTask> result = taskMapper.selectByGroup(groupSessionId);
+        result.forEach(task -> task.setExecutionBackend("REMOTE"));
         if (coordinationService != null) result.forEach(coordinationService::attach);
         return result;
     }

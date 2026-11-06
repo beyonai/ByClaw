@@ -306,7 +306,7 @@ public class GroupChatApplicationService {
             message.setRelatedResources(JSON.toJSONString(resources));
         }
         message.setUsage(1);
-        message.setMessageRef(command.getReplyToMessageId());
+        message.setMessageRef(command.getReplyToMessageId() != null ? command.getReplyToMessageId() : command.getSourceMessageId());
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("scene", "GROUP_CHAT");
         metadata.put("clientRequestId", command.getClientRequestId());
@@ -385,6 +385,58 @@ public class GroupChatApplicationService {
         else {
             eventPublisher.publish(session.getSessionId(), event, null);
         }
+        return messageId;
+    }
+
+    /**
+     * Persist a Desktop-produced group projection without dispatching a second
+     * remote agent turn. The caller remains the authenticated group member;
+     * agent identity is metadata supplied by the local runtime projection.
+     */
+    @Transactional
+    public Long persistRuntimeMessage(ChatMessage command) {
+        sessionService.lockById(command.getSessionId());
+        ByaiSession session = authorizationService.requireGroup(command.getSessionId());
+        authorizationService.requireCurrentUserMember(session.getSessionId());
+        if (!"LOCAL".equalsIgnoreCase(command.getExecutionBackend())) {
+            throw new IllegalArgumentException("executionBackend must be LOCAL");
+        }
+        if ("assistant".equalsIgnoreCase(command.getRole()) && command.getCreatorId() != null) {
+            boolean agentMember = !memberService.findSessionMembers(session.getSessionId(), "AGENT", command.getCreatorId()).isEmpty();
+            if (!agentMember) throw new IllegalArgumentException("local assistant is not a group member");
+        }
+        if (command.getClientRequestId() != null) {
+            ByaiMessage existing = messageMapper.selectGroupMessageByClientRequestId(session.getSessionId(), command.getClientRequestId());
+            if (existing != null) return existing.getMessageId();
+        }
+        Long messageId = sequenceService.nextVal();
+        ByaiMessage message = new ByaiMessage();
+        message.setId(messageId);
+        message.setMessageId(messageId);
+        message.setSessionId(session.getSessionId());
+        message.setProjectId(session.getProjectId());
+        message.setCreatorId(command.getCreatorId() == null ? CurrentUserHolder.getCurrentUserId() : command.getCreatorId());
+        message.setCreatorName(StringUtils.defaultIfBlank(command.getCreatorName(), CurrentUserHolder.getCurrentUserName()));
+        message.setMessageContent(command.getChatContent());
+        message.setMessageRef(command.getReplyToMessageId());
+        message.setUsage("assistant".equalsIgnoreCase(command.getRole()) ? 2 : 1);
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("scene", "GROUP_CHAT");
+        metadata.put("executionBackend", "LOCAL");
+        metadata.put("clientRequestId", command.getClientRequestId());
+        metadata.put("resourceList", command.getResourceList());
+        metadata.put("sourceMessageId", command.getSourceMessageId());
+        metadata.put("targetAgentId", command.getTargetAgentId());
+        message.setMetadata(JSON.toJSONString(metadata));
+        if (command.getFiles() != null && !command.getFiles().isEmpty()) {
+            MessageResourceDto resources = new MessageResourceDto();
+            resources.setFiles(command.getFiles());
+            message.setRelatedResources(JSON.toJSONString(resources));
+        }
+        message.setCreateTime(new Date());
+        message.setUpdateTime(new Date());
+        message.setIsComplete(true);
+        topicService.persistMessage(message);
         return messageId;
     }
 

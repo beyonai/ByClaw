@@ -18,7 +18,7 @@ import {
 import { addMembers, removeMember, changeRole, groupSettings } from "./member-writer.js";
 import { publishTask } from "./task-publication.js";
 import { createTask, changeTask, claimTask } from "./task-writer.js";
-import { sendGroupMessage } from "./group-message-writer.js";
+import { sendGroupMessage, persistGroupMessage } from "./group-message-writer.js";
 import { updateFeedback, updateMessageStructure } from "./message-update-writer.js";
 
 import { acknowledgeMessage } from "./message-ack-writer.js";
@@ -61,6 +61,7 @@ const handlers = {
   RECALL_MESSAGE: recallMessage,
   UNDO_RECALL_MESSAGE: undoRecallMessage,
   SEND_GROUP_MESSAGE: sendGroupMessage,
+  PERSIST_GROUP_MESSAGE: persistGroupMessage,
   UPDATE_FEEDBACK: updateFeedback,
   UPDATE_MESSAGE_STRUCTURE: updateMessageStructure,
 };

@@ -182,6 +182,15 @@ public class TenantGroupChatRoutingAspect {
                 body.values().removeIf(java.util.Objects::isNull);
                 return write(context, requirePath(path) + "/messages/search", body);
             }
+            case "persistMessage": {
+                com.iwhalecloud.byai.state.domain.ws.model.ChatMessage request =
+                    (com.iwhalecloud.byai.state.domain.ws.model.ChatMessage) args[1];
+                if (request == null || !"LOCAL".equalsIgnoreCase(request.getExecutionBackend())) throw unsupported();
+                Map<String, Object> body = mapper.convertValue(request,
+                    new TypeReference<Map<String, Object>>() { });
+                body.values().removeIf(java.util.Objects::isNull);
+                return write(context, requirePath(path) + "/messages/persist", body);
+            }
             case "messageContext":
                 // messageContext 读取单条消息上下文。
                 return read(context, requirePath(path) + "/messages/" + id(args[1]) + "/context");

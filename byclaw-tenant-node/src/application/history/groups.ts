@@ -199,7 +199,7 @@ export class GroupHistory extends HistoryAccess {
     return Promise.all(
       (await this.repository.tasks(sessionId)).map(async (task) => {
         const scope = await this.coordination(task.taskSessionId);
-        return { ...task, ...(scope ? { groupCoordination: scope } : {}) };
+        return { ...task, executionBackend: "REMOTE", ...(scope ? { groupCoordination: scope } : {}) };
       }),
     );
   }

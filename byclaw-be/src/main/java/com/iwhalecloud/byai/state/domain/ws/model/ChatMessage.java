@@ -37,4 +37,12 @@ public class ChatMessage extends AssistantChatDto {
     /** Notify all current human group members; never dispatch digital employees. */
     private Boolean mentionAllUsers;
 
+    /** Local Desktop turns persist their projection without dispatching another runtime. */
+    private String executionBackend;
+    private String role;
+    private Long sourceMessageId;
+    private Long creatorId;
+    private String creatorName;
+    private Long targetAgentId;
+
 }
