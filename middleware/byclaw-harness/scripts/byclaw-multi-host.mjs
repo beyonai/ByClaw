@@ -58,6 +58,8 @@
  *   BYCLAW_TOOL_ENV_IDLE_MS        tool-environment idle time (default 600000).
  *   BYCLAW_DSH_TOOL_ENV            defaults to `opensandbox` for every context of this process.
  *   BYCLAW_RIPGREP_PATH            ripgrep glob/grep spawn; `rg` (from PATH where they run) unless the backend is `none`.
+ *   BYCLAW_CREDENTIAL_SECRET_FILE  the host's service secret; with the session database, it encrypts the users'
+ *                                  credential store and tool-environment SSH identities kept in `dsh_host_file`.
  *   REDIS_HOST, REDIS_PORT, REDIS_USERNAME, REDIS_PASSWORD, REDIS_DATABASE  Redis for the user claims.
  *
  * Redis claim: while a user is starting or ready this host keeps
@@ -71,6 +73,7 @@
  */
 import { ManagedUserRegistry, limitContextStartup, startupDiagnostics, validateStorageBinding, userNasPoolKey } from './byclaw-managed-host.mjs'
 export { ManagedUserRegistry } from './byclaw-managed-host.mjs'
+import { DurableFiles, deriveFileKey, sqlFileStore } from './host-durable-files.mjs'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { lstat, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises'
@@ -1249,6 +1252,26 @@ export function managedRuntimeActivity(ctx) {
   } catch { return { busy: true, activeRequests: 0 } }
 }
 
+/**
+ * The store for users' credential files and SSH identities: the session database, keyed by the
+ * service secret. `undefined` (no secret file or no database) keeps them only on this host's disk.
+ * @param config - host config ({ sessionDbUrl, managedProfile }).
+ * @param env - process environment (BYCLAW_CREDENTIAL_SECRET_FILE).
+ */
+export async function openHostFileStore(config, env, loadPg = () => {
+  const require = createRequire(join(config.managedProfile, 'package.json'))
+  return createRequire(require.resolve('@byclaw/dsh-session-persistence-db/package.json'))('pg')
+}) {
+  const secretFile = env.BYCLAW_CREDENTIAL_SECRET_FILE?.trim()
+  if (config.sessionDbUrl === undefined || !secretFile) return undefined
+  const key = deriveFileKey(await readFile(secretFile, 'utf8'))
+  const pg = loadPg()
+  const pool = new pg.Pool({ connectionString: config.sessionDbUrl, max: 2, idleTimeoutMillis: 60_000, connectionTimeoutMillis: 30_000, query_timeout: 30_000 })
+  // An idle connection dying emits 'error'; unhandled, that would kill the host and every user on it.
+  pool.on('error', error => log(`host file store: idle database connection failed: ${error.message}`))
+  return { key, store: sqlFileStore(pool), end: () => pool.end() }
+}
+
 /** The database a user's session logs go to; `undefined` keeps them in files. `*` lists everyone. */
 export function sessionDbFor(config, user) {
   if (config.sessionDbUrl === undefined) return undefined
@@ -1420,91 +1443,106 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
   const { home, workspace, profile: dir, runtimeDir } = userContextPaths(config, user, request)
   await verifyUserStorageHome(config, user, request)
   await mkdir(home, { recursive: true, mode: 0o700 })
-  if (config.toolEnvBackend === 'none') await mkdir(workspace, { recursive: true, mode: 0o700 })
-  await mkdir(dir, { recursive: true, mode: 0o700 })
-  await writeFile(join(dir, 'package.json'), await readFile(join(config.managedProfile, 'package.json'), 'utf8'))
-  await ensureLink(join(config.managedProfile, 'node_modules'), join(dir, 'node_modules'))
-  await writeFile(join(dir, 'cordis.yml'), '[]\n')
-  await writeFile(join(dir, 'cordis.patch.yml'), '[]\n', { flag: 'wx' }).catch(error => { if (error.code !== 'EEXIST') throw error })
-  phase('directories-ready')
+  // Credentials and SSH identities come back from the database before any plugin reads them.
+  const durable = config.hostFiles !== undefined && sessionDbFor(config, user) !== undefined
+    ? new DurableFiles({ ...config.hostFiles, user, home, log })
+    : undefined
+  if (durable !== undefined) {
+    await durable.restore()
+    durable.start()
+  }
+  try {
+    if (config.toolEnvBackend === 'none') await mkdir(workspace, { recursive: true, mode: 0o700 })
+    await mkdir(dir, { recursive: true, mode: 0o700 })
+    await writeFile(join(dir, 'package.json'), await readFile(join(config.managedProfile, 'package.json'), 'utf8'))
+    await ensureLink(join(config.managedProfile, 'node_modules'), join(dir, 'node_modules'))
+    await writeFile(join(dir, 'cordis.yml'), '[]\n')
+    await writeFile(join(dir, 'cordis.patch.yml'), '[]\n', { flag: 'wx' }).catch(error => { if (error.code !== 'EEXIST') throw error })
+    phase('directories-ready')
 
-  const profile = loadProfileDirectory(BIN, dir, config.installAnchor)
-  const resolution = await createRuntimeResolution({ installAnchor: config.installAnchor, profile })
-  phase('resolution-ready')
-  const base = {
-    name: 'web', dir, patchPath: profile.patchPath ?? join(dir, 'cordis.patch.yml'), installAnchor: config.installAnchor,
-    startedBundles: profile.layers.map(layer => layer.packageName),
-    cwd: workspace, home, overlays: [], telemetryDisabledEnv: '1',
-  }
-  const spec = {
-    ...request,
-    contextKey: user,
-    runtimeDir,
-    env: request.env,
-    toolEnvBackend: config.toolEnvBackend,
-    toolEnvTemplate: config.toolEnvTemplate,
-    toolEnvCatalog: config.toolEnvCatalog,
-    toolEnvBe: config.toolEnvBe,
-    toolEnvIdleMs: config.toolEnvIdleMs,
-    sessionDb: sessionDbFor(config, user),
-    publicUrl: userPublicUrl(config.publicBase, user),
-  }
-  const { profileContext, patches } = prepareUserProfile({ composeEntries, readProfilePatches }, base, profile, user, spec)
-  const environment = createLaunchEnvironmentSnapshot([
-    { source: 'process', values: launchEnvironmentValues(process.env, request.env, request.managed ? request.userCode : user, request.managed) },
-  ])
-  phase('overlays-ready')
-  const ctx = await boot(BIN, join(dir, 'cordis.yml'), patches, async (hostCtx) => {
-    if (request.managed) hostCtx.provide('byclawManagedAdmission', hooks.admission)
-    hooks.isPluginFailure = reason => isLoaderFailure(hostCtx, reason)
-    hostCtx.dshHomePath = (...parts) => join(home, ...parts)
-    hostCtx.provide('profileContext', profileContext)
-    hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment)
-    // The CLI's `web-startup` row (flag parsing) is not part of a hosted context; rows
-    // that inject `webStartup` (e.g. better-sidebar's trusted-host fence) get the
-    // listener values this host chose instead.
-    hostCtx.provide('webStartup', webStartupValues(spec))
-    // The byclaw-be backend asks here when BE rejects the token it holds (see dsh-tool-env's BE_TOKEN_SOURCE).
-    if (config.toolEnvBackend === 'byclaw-be' && tokenSource !== undefined) hostCtx.provide('byclawBeTokenSource', tokenSource)
-    await hostCtx.plugin(PluginPackages, { resolution })
-  })
-  if (config.toolEnvBackend === 'none') installChatOnlyPolicy(ctx)
-  phase('plugins-ready')
-  const handle = {
-    get port() { return ctx.get('webServer')?.port },
-    auth: createUpstreamAuth({
-      port: () => handle.port,
-      launchUrl: (origin) => {
-        const connection = ctx.get('connection')
-        if (connection === undefined) throw new Error('context has no connection service')
-        return connection.authenticatedUrl(origin)
+    const profile = loadProfileDirectory(BIN, dir, config.installAnchor)
+    const resolution = await createRuntimeResolution({ installAnchor: config.installAnchor, profile })
+    phase('resolution-ready')
+    const base = {
+      name: 'web', dir, patchPath: profile.patchPath ?? join(dir, 'cordis.patch.yml'), installAnchor: config.installAnchor,
+      startedBundles: profile.layers.map(layer => layer.packageName),
+      cwd: workspace, home, overlays: [], telemetryDisabledEnv: '1',
+    }
+    const spec = {
+      ...request,
+      contextKey: user,
+      runtimeDir,
+      env: request.env,
+      toolEnvBackend: config.toolEnvBackend,
+      toolEnvTemplate: config.toolEnvTemplate,
+      toolEnvCatalog: config.toolEnvCatalog,
+      toolEnvBe: config.toolEnvBe,
+      toolEnvIdleMs: config.toolEnvIdleMs,
+      sessionDb: sessionDbFor(config, user),
+      publicUrl: userPublicUrl(config.publicBase, user),
+    }
+    const { profileContext, patches } = prepareUserProfile({ composeEntries, readProfilePatches }, base, profile, user, spec)
+    const environment = createLaunchEnvironmentSnapshot([
+      { source: 'process', values: launchEnvironmentValues(process.env, request.env, request.managed ? request.userCode : user, request.managed) },
+    ])
+    phase('overlays-ready')
+    const ctx = await boot(BIN, join(dir, 'cordis.yml'), patches, async (hostCtx) => {
+      if (request.managed) hostCtx.provide('byclawManagedAdmission', hooks.admission)
+      hooks.isPluginFailure = reason => isLoaderFailure(hostCtx, reason)
+      hostCtx.dshHomePath = (...parts) => join(home, ...parts)
+      hostCtx.provide('profileContext', profileContext)
+      hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment)
+      // The CLI's `web-startup` row (flag parsing) is not part of a hosted context; rows
+      // that inject `webStartup` (e.g. better-sidebar's trusted-host fence) get the
+      // listener values this host chose instead.
+      hostCtx.provide('webStartup', webStartupValues(spec))
+      // The byclaw-be backend asks here when BE rejects the token it holds (see dsh-tool-env's BE_TOKEN_SOURCE).
+      if (config.toolEnvBackend === 'byclaw-be' && tokenSource !== undefined) hostCtx.provide('byclawBeTokenSource', tokenSource)
+      await hostCtx.plugin(PluginPackages, { resolution })
+    })
+    if (config.toolEnvBackend === 'none') installChatOnlyPolicy(ctx)
+    phase('plugins-ready')
+    const handle = {
+      get port() { return ctx.get('webServer')?.port },
+      auth: createUpstreamAuth({
+        port: () => handle.port,
+        launchUrl: (origin) => {
+          const connection = ctx.get('connection')
+          if (connection === undefined) throw new Error('context has no connection service')
+          return connection.authenticatedUrl(origin)
+        },
+      }),
+      activity: () => managedRuntimeActivity(ctx),
+      stopAdmission: () => ctx.get('byclawManagedRuntime')?.stopAdmission(),
+      forceStop: async () => {
+        const runtime = ctx.get('byclawManagedRuntime')
+        if (typeof runtime?.stopExecution !== 'function') throw new Error('forced context stop is not supported')
+        await runtime.stopExecution()
       },
-    }),
-    activity: () => managedRuntimeActivity(ctx),
-    stopAdmission: () => ctx.get('byclawManagedRuntime')?.stopAdmission(),
-    forceStop: async () => {
-      const runtime = ctx.get('byclawManagedRuntime')
-      if (typeof runtime?.stopExecution !== 'function') throw new Error('forced context stop is not supported')
-      await runtime.stopExecution()
-    },
-    dispose: () => ctx.fiber.dispose(),
-    // BE mints the user's BEYOND_TOKEN for every PUT; the byclaw-be backend keeps
-    // using the one from boot otherwise, which expires long before a resident
-    // context goes away (then every launch of B is a 401).
-    renew: request => { renewUserToken(ctx, config, request.env); renewLaunchEnvironment(ctx, request.env, request.managed ? request.userCode : user) },
+      dispose: async () => {
+        try { await ctx.fiber.dispose() } finally { await durable?.close() }
+      },
+      // BE mints the user's BEYOND_TOKEN for every PUT; the byclaw-be backend keeps
+      // using the one from boot otherwise, which expires long before a resident
+      // context goes away (then every launch of B is a 401).
+      renew: request => { renewUserToken(ctx, config, request.env); renewLaunchEnvironment(ctx, request.env, request.managed ? request.userCode : user) },
+    }
+    if (request.managed) {
+      const deadline = Date.now() + 60_000
+      while (!ctx.get('byclawManagedRuntime')?.ready && Date.now() < deadline && hooks.admission.allowed()) await new Promise(resolve => setTimeout(resolve, 50))
+      if (!ctx.get('byclawManagedRuntime')?.ready) { await ctx.fiber.dispose(); throw new Error('managed worker did not become ready') }
+    }
+    if (!handle.port) {
+      await ctx.fiber.dispose()
+      throw new Error('context booted without a web listener')
+    }
+    phase('worker-ready')
+    log(`user ${user} ready in ${String(Math.round(performance.now() - started))} ms; web=127.0.0.1:${String(handle.port)}; sandboxId=${request.sandboxId};`, memory())
+    return handle
+  } catch (error) {
+    await durable?.close().catch(closeError => log(`storing durable files for ${user} failed: ${closeError.message}`))
+    throw error
   }
-  if (request.managed) {
-    const deadline = Date.now() + 60_000
-    while (!ctx.get('byclawManagedRuntime')?.ready && Date.now() < deadline && hooks.admission.allowed()) await new Promise(resolve => setTimeout(resolve, 50))
-    if (!ctx.get('byclawManagedRuntime')?.ready) { await ctx.fiber.dispose(); throw new Error('managed worker did not become ready') }
-  }
-  if (!handle.port) {
-    await ctx.fiber.dispose()
-    throw new Error('context booted without a web listener')
-  }
-  phase('worker-ready')
-  log(`user ${user} ready in ${String(Math.round(performance.now() - started))} ms; web=127.0.0.1:${String(handle.port)}; sandboxId=${request.sandboxId};`, memory())
-  return handle
 }
 
 export function createHostRedis(Redis, env) {
@@ -1554,6 +1592,8 @@ async function main() {
   // user, loading employee resources or starting a tool environment.
   const preloaded = await preloadHostRuntime(config)
   log(`compiled runtime ready; elapsedMs=${Math.round(performance.now() - runtimeStarted)}; modules=${preloaded.loaded}; failed=${JSON.stringify(preloaded.failed)}`)
+  config.hostFiles = await openHostFileStore(config, process.env)
+  if (config.sessionDbUrl !== undefined && config.hostFiles === undefined) log('BYCLAW_CREDENTIAL_SECRET_FILE is not set: credential stores and SSH identities stay on this host only')
   const Redis = createRequire(join(config.managedProfile, 'package.json'))('ioredis')
   const redis = createHostRedis(Redis, process.env)
   redis.on('error', error => log('redis:', error.message))

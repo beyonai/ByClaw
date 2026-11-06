@@ -1101,6 +1101,23 @@ test('glob/grep run rg from PATH in the tool environment, and the packaged one w
   assert.equal(explicit.BYCLAW_RIPGREP_PATH, '/opt/rg/bin/rg')
 })
 
+test('credential files are stored in the database only with both the secret file and the database', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'host-file-store-'))
+  try {
+    const secretFile = join(dir, 'service-secret')
+    await writeFile(secretFile, 'a-service-secret-of-enough-length\n')
+    const queries = []
+    const pg = { Pool: class { constructor(options) { this.options = options } on() {} async query(text, values) { queries.push([text, values]); return { rows: [], rowCount: 0 } } async end() {} } }
+    assert.equal(await host.openHostFileStore({ sessionDbUrl: undefined }, { BYCLAW_CREDENTIAL_SECRET_FILE: secretFile }, () => pg), undefined)
+    assert.equal(await host.openHostFileStore({ sessionDbUrl: 'postgres://db' }, {}, () => pg), undefined)
+    const opened = await host.openHostFileStore({ sessionDbUrl: 'postgres://db' }, { BYCLAW_CREDENTIAL_SECRET_FILE: secretFile }, () => pg)
+    assert.equal(opened.key.length, 32)
+    assert.deepEqual(await opened.store.list('u1'), [])
+    assert.match(queries.at(-1)[0], /SELECT name, value FROM byai\.dsh_host_file WHERE user_code = \$1/)
+    assert.deepEqual(queries.at(-1)[1], ['u1'])
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
 test('the session database password never reaches a launch environment', () => {
   const values = launchEnvironmentValues({ KEEP: '1', BYCLAW_SESSION_DB_URL: 'postgres://u:secret@db' }, {}, 'u1')
   assert.equal(values.KEEP, '1')

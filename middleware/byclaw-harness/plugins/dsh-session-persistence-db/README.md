@@ -11,6 +11,8 @@ Other users keep files. The same users' storage units (workspace, session roots,
 
 The tables (`byai.dsh_session`, `byai.dsh_session_event`) are created on first use.
 
+With `BYCLAW_CREDENTIAL_SECRET_FILE` (the host's service secret) also set, the host keeps the same users' credential store (`.credentials.yaml`) and tool-environment SSH identities and sandbox records in `byai.dsh_host_file`, encrypted (AES-256-GCM, key derived from the secret, bound to user and file name). It restores them before a context boots and writes each change back (`scripts/host-durable-files.mjs`). They are secrets, so they never go to the user's `/by`, which commands in the tool sandbox can read.
+
 ## Behaviour
 
 - **One writer, enforced by the database.** Opening a session for writing raises its epoch; a host still holding the old epoch gets `SessionOwnershipLostError` on its next append, and its turn fails at the next `session/flush`.

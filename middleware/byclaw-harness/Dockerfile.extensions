@@ -252,7 +252,7 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/fs/tool-fs-
 COPY middleware/byclaw-harness/scripts/verify-by-framework-runtime.mjs /usr/local/lib/byclaw/verify-by-framework-runtime.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/prune-dsh-profile.mjs /tmp/prune-dsh-profile.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/link-dsh-installation-peers.mjs /tmp/link-dsh-installation-peers.mjs
-COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/byclaw-multi-host.mjs middleware/byclaw-harness/scripts/byclaw-managed-host.mjs middleware/byclaw-harness/scripts/verify-shared-runtime.mjs /workspace/scripts/
+COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/byclaw-multi-host.mjs middleware/byclaw-harness/scripts/byclaw-managed-host.mjs middleware/byclaw-harness/scripts/host-durable-files.mjs middleware/byclaw-harness/scripts/verify-shared-runtime.mjs /workspace/scripts/
 # The build decisions the plugin-builder folded together. This stage starts from
 # the pristine base again, whose own workspace never saw the plugins, and the
 # packed plugins carry no pnpm-workspace.yaml of their own — so the merged file
