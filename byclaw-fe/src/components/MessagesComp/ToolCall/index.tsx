@@ -1,5 +1,6 @@
+import { normalizeInstanceRefs } from '@/utils/desktopInstances';
 import React, { useEffect, useRef } from 'react';
-import { message, Tooltip } from 'antd';
+import { Button, Dropdown, message, Tooltip } from 'antd';
 import {
   CheckOutlined,
   CloseOutlined,
@@ -54,6 +55,7 @@ export type IProps = {
   message?: { sessionId?: string | number };
   messageListItemContent?: {
     substance?: IToolCallSubstance | string;
+    instanceRefs?: import('@/utils/desktopInstances').SandboxInstanceRef[];
   };
 };
 
@@ -91,6 +93,15 @@ const ToolCall: ToolCallComponent = (props) => {
   const { title, input, output, status, description } =
     typeof substance === 'string' ? ({ title: substance } as IToolCallSubstance) : substance || {};
 
+  const refs = normalizeInstanceRefs(props.messageListItemContent?.instanceRefs);
+  const openDesktop = (index: number) => {
+    if (!props.message?.sessionId) return;
+    window.dispatchEvent(
+      new CustomEvent('byclaw-desktop-open', {
+        detail: { owner: JSON.stringify(['session', String(props.message.sessionId)]), ref: refs[index] },
+      })
+    );
+  };
   const inputText = formatDetail(input);
   const outputText = formatDetail(output);
   const hasDetail = Boolean(inputText || outputText);
@@ -183,6 +194,22 @@ const ToolCall: ToolCallComponent = (props) => {
         {hasDetail && <span className={styles.collapseIcon}>{expanded ? <DownOutlined /> : <RightOutlined />}</span>}
       </div>
 
+      {refs.length > 0 &&
+        props.message?.sessionId &&
+        (refs.length === 1 ? (
+          <Button size="small" onClick={() => openDesktop(0)}>
+            查看桌面
+          </Button>
+        ) : (
+          <Dropdown
+            menu={{
+              items: refs.map((ref, index) => ({ key: String(index), label: `${ref.instance} · ${ref.sandboxId}` })),
+              onClick: ({ key }) => openDesktop(Number(key)),
+            }}
+          >
+            <Button size="small">查看桌面</Button>
+          </Dropdown>
+        ))}
       {expanded && hasDetail && (
         <div className={styles.detail}>
           {inputText && renderSection('input', inputText, isContextEvent ? 'contextEvent.input' : undefined)}

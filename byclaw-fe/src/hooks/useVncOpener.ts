@@ -1,151 +1,172 @@
+import { openDrawerView } from '@/utils/drawerView';
 import { useCallback, useEffect, useRef } from 'react';
-import { message } from 'antd';
-import { getIntl } from '@umijs/max';
 import useAppStore from '@/models/common/useAppStore';
-import { getVNCUrl, resolveSandboxesInfo, type DesktopInstance } from '@/utils/chat';
+import {
+  isExplicitNonDesktop,
+  withDesktopTimeout,
+  listDesktops,
+  resolveDesktop,
+  type SandboxInstanceRef,
+} from '@/utils/desktopInstances';
+import {
+  desktopAuthEpoch,
+  migrateDesktopOwner,
+  mountDesktopOwner,
+  getDesktopOwner,
+  registerDesktops,
+  updateDesktopOwner,
+  useDesktopWorkspace,
+} from '@/utils/desktopWorkspace';
 import { normalizeSessionId, type SessionIdInput } from '@/utils/sessionId';
 import useGlobal from './useGlobal';
 
 export type VncOpenOptions = {
   key?: string;
   isCurrent?: () => boolean;
-
-  /** Which declared desktop to open; the browser's (`vnc`) unless given. */
-  instance?: DesktopInstance;
+  instance?: string;
+  instanceRefs?: SandboxInstanceRef[];
 };
 
-type OpenRequest = VncOpenOptions & {
-  cancelled: boolean;
-  refreshes: number;
-  timer?: ReturnType<typeof setTimeout>;
-};
-
-// The desktop is served by the user's tool sandbox, which starts its browser on the
-// first browser tool call: allow about a minute for the endpoint and the viewer.
-const MAX_REFRESHES = 30;
-const RETRY_DELAY_MS = 2000;
-
-/**
- * Whether the viewer behind `url` answers. The sandbox proxy returns 5xx while the
- * desktop is not listening yet (or no longer); opening the iframe then would leave
- * the user on the proxy's error page. Same-origin request, so the session cookie applies.
- */
-export async function isViewerReady(url: string): Promise<boolean> {
-  try {
-    const response = await fetch(url, { method: 'GET', credentials: 'include', redirect: 'manual', cache: 'no-store' });
-    return response.type === 'opaqueredirect' || (response.status > 0 && response.status < 500);
-  } catch {
-    return false;
-  }
-}
-
-export default function useVncOpener(sessionId?: SessionIdInput) {
-  const normalizedSessionId = normalizeSessionId(sessionId);
+export default function useVncOpener(sessionId?: SessionIdInput, ownerType = 'session') {
+  const id = normalizeSessionId(sessionId);
+  const temporary = useRef(`temporary:${Math.random().toString(36).slice(2)}`);
+  const owner = id ? JSON.stringify([ownerType, id]) : temporary.current;
+  const previousOwner = useRef(owner);
   const { EventEmitter } = useGlobal();
-  const emitterRef = useRef(EventEmitter);
-  emitterRef.current = EventEmitter;
-  const requestRef = useRef<OpenRequest | undefined>(undefined);
-  const viewRef = useRef({ sessionId: normalizedSessionId, openedKeys: new Set<string>() });
-
-  // A new object also invalidates requests from an earlier A -> B -> A visit.
-  if (viewRef.current.sessionId !== normalizedSessionId) {
-    viewRef.current = { sessionId: normalizedSessionId, openedKeys: new Set<string>() };
-  }
-
-  const cancelRequest = useCallback(() => {
-    const request = requestRef.current;
-    if (!request) return;
-    request.cancelled = true;
-    if (request.timer) clearTimeout(request.timer);
-    requestRef.current = undefined;
-  }, []);
-
-  useEffect(() => cancelRequest, [normalizedSessionId, cancelRequest]);
-
-  return useCallback(
+  const current = useRef(owner);
+  const pendingIntent = useRef<number>();
+  current.current = owner;
+  useEffect(() => {
+    current.current = owner;
+    desktopAuthEpoch();
+    if (previousOwner.current.startsWith('temporary:') && previousOwner.current !== owner)
+      migrateDesktopOwner(previousOwner.current, owner);
+    previousOwner.current = owner;
+    const releaseOwner = mountDesktopOwner(owner);
+    return () => {
+      current.current = '';
+      const state = useDesktopWorkspace.getState();
+      if (state.pendingOwner === owner && state.revision === pendingIntent.current)
+        useDesktopWorkspace.setState({ pendingOwner: '', revision: state.revision + 1 });
+      releaseOwner();
+    };
+  }, [owner]);
+  const openVnc = useCallback(
     (options: VncOpenOptions = {}) => {
-      const view = viewRef.current;
-      if (!view.sessionId || (options.key && view.openedKeys.has(options.key))) return;
-      if (options.key && requestRef.current?.key === options.key) return;
-      cancelRequest();
-
-      const request: OpenRequest = { ...options, cancelled: false, refreshes: 0 };
-      requestRef.current = request;
-      const isCurrent = () => {
-        return (
-          !request.cancelled &&
-          requestRef.current === request &&
-          viewRef.current === view &&
-          (request.isCurrent?.() ?? true)
+      if ((!id && options.key) || (options.instanceRefs !== undefined && !options.instanceRefs.length)) return;
+      const epoch = desktopAuthEpoch();
+      registerDesktops(owner, options.instanceRefs, Boolean(options.key));
+      const automatic = Boolean(options.key);
+      if (!automatic) useDesktopWorkspace.setState((state) => ({ revision: state.revision + 1, pendingOwner: '' }));
+      const state = getDesktopOwner(owner);
+      if (automatic && (state.handled || process.env.UMI_APP_MULTI_DESKTOP_ENABLED === 'false')) return;
+      updateDesktopOwner(owner, { handled: true });
+      if (automatic && useDesktopWorkspace.getState().panel && useDesktopWorkspace.getState().panel !== 'desktop')
+        return;
+      if (automatic) useDesktopWorkspace.setState((state) => ({ revision: state.revision + 1 }));
+      const intent = useDesktopWorkspace.getState().revision;
+      const open = () => {
+        if (
+          current.current !== owner ||
+          desktopAuthEpoch() !== epoch ||
+          options.isCurrent?.() === false ||
+          intent !== useDesktopWorkspace.getState().revision
+        )
+          return;
+        useDesktopWorkspace.setState({ activeOwner: owner, visible: true, pendingOwner: '' });
+        openDrawerView(
+          EventEmitter,
+          owner,
+          {
+            drawerType: 'desktop',
+            title: '远程桌面',
+            canClose: true,
+            width: window.innerWidth < 768 ? '100vw' : '50vw',
+            maxWidth: '100vw',
+            canFullScreen: false,
+          },
+          { owner }
         );
       };
+      if (!automatic) {
+        open();
+        return;
+      }
+      pendingIntent.current = intent;
+      useDesktopWorkspace.setState({ pendingOwner: owner });
 
-      const attempt = async (refresh: boolean): Promise<void> => {
-        if (!isCurrent()) {
-          if (requestRef.current === request) cancelRequest();
+      // Claim the opportunity before asynchronous directory access. Other tool frames only register.
+      const started = Date.now();
+      let attempts = 0;
+      const attempt = async (): Promise<void> => {
+        attempts += 1;
+        if (
+          current.current !== owner ||
+          desktopAuthEpoch() !== epoch ||
+          options.isCurrent?.() === false ||
+          intent !== useDesktopWorkspace.getState().revision
+        )
           return;
-        }
-
-        let sandboxes: unknown;
+        const front = useDesktopWorkspace.getState();
+        if (front.activeOwner !== owner || (front.visible && getDesktopOwner(owner).selected !== state.selected))
+          return;
+        let rows: any[] = [];
         try {
-          const state = useAppStore.getState();
-          if (refresh) {
-            request.refreshes += 1;
-            sandboxes = await state.getSandboxesInfoUrl();
-          } else {
-            sandboxes = await resolveSandboxesInfo(state.sandboxesInfo);
-          }
+          rows = await withDesktopTimeout(
+            useAppStore.getState().getSandboxesInfoUrl(),
+            Math.min(5000, Math.max(1, 60000 - (Date.now() - started)))
+          );
         } catch {
-          // A failed lookup can be retried while the sandbox is starting.
+          rows = [];
         }
-
-        if (!isCurrent()) {
-          if (requestRef.current === request) cancelRequest();
+        if (
+          current.current !== owner ||
+          desktopAuthEpoch() !== epoch ||
+          intent !== useDesktopWorkspace.getState().revision ||
+          options.isCurrent?.() === false
+        )
           return;
-        }
-
-        let url = '';
-        try {
-          url = getVNCUrl(Array.isArray(sandboxes) ? sandboxes : [], request.instance);
-        } catch {
-          // Invalid endpoints must never open an empty or malformed iframe.
-        }
-        if (url && !(await isViewerReady(url))) url = '';
-        if (!isCurrent()) {
-          if (requestRef.current === request) cancelRequest();
-          return;
-        }
-        if (url) {
-          if (request.key) view.openedKeys.add(request.key);
-          cancelRequest();
-          useAppStore.getState().setSiderCollapsed(true);
-          emitterRef.current.emit('beyond-main-driver-open-type', {
-            drawerType: 'vnc',
-            canClose: true,
-            width: '50vw',
+        if (options.instanceRefs?.length && options.instanceRefs.every((ref) => isExplicitNonDesktop(rows, ref))) {
+          const previous = getDesktopOwner(owner);
+          useDesktopWorkspace.setState({ pendingOwner: '' });
+          updateDesktopOwner(owner, {
+            handled: false,
+            refs: previous.refs.filter((ref) => !isExplicitNonDesktop(rows, ref)),
           });
-          emitterRef.current.emit('beyond-main-driver-message', { url });
-          emitterRef.current.emit('beyond-chat-vnc-opened', { sessionId: view.sessionId });
           return;
         }
-
-        if (!refresh) {
-          await attempt(true);
-        } else if (request.refreshes < MAX_REFRESHES) {
-          request.timer = setTimeout(() => {
-            request.timer = undefined;
-            void attempt(true);
-          }, RETRY_DELAY_MS);
-        } else {
-          cancelRequest();
-          // A click (no tool key) deserves an answer; the desktop only exists while the
-          // assistant's browser is open in its tool sandbox.
-          if (!request.key) message.info(getIntl().formatMessage({ id: 'common.remoteComputerUnavailable' }));
+        let refs = options.instanceRefs;
+        if (refs === undefined) {
+          const choices = listDesktops(rows).filter(
+            (entry) => !options.instance || entry.ref.instance === options.instance
+          );
+          if (choices.length > 1) {
+            open();
+            return;
+          }
+          if (!choices.length) {
+            if (attempts < 30 && Date.now() - started < 60000) setTimeout(() => void attempt(), 2000);
+            else useDesktopWorkspace.setState({ pendingOwner: '' });
+            return;
+          }
+          refs = [choices[0].ref];
         }
+        if (refs.some((ref) => resolveDesktop(rows, ref))) {
+          if (options.instanceRefs === undefined) registerDesktops(owner, refs);
+          const selected = refs.find((ref) => resolveDesktop(rows, ref));
+          if (selected)
+            updateDesktopOwner(owner, {
+              selected: JSON.stringify([selected.sandboxId, selected.mappingId ?? null, selected.instance]),
+            });
+          open();
+          return;
+        }
+        if (attempts < 30 && Date.now() - started < 60000) setTimeout(() => void attempt(), 2000);
+        else useDesktopWorkspace.setState({ pendingOwner: '' });
       };
-
-      void attempt(false);
+      void attempt();
     },
-    [cancelRequest]
+    [owner, id, EventEmitter]
   );
+  return Object.assign(openVnc, { owner });
 }

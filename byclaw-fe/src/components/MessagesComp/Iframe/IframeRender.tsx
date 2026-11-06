@@ -1,12 +1,18 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Spin } from 'antd';
 
 import styles from './index.module.less';
 import useIframeAutoHeight from './useIframeAutoHeight';
+import useIframeBridge from './useIframeBridge';
+import type { IframeConnectionSnapshot } from './iframeConnection';
 
 type IProps = {
   url: string;
   autoHeight?: boolean;
+  connectionBridge?: boolean;
+  allowedOrigins?: string[];
+  allowOpaqueOrigin?: boolean;
+  onConnectionStateChange?: (snapshot: IframeConnectionSnapshot) => void;
   iframePayload?: Record<string, any>;
   onMessage?: (data: { type: string; data: any }) => void;
   onLoad?: (iframeRef: React.RefObject<HTMLIFrameElement | null>) => void;
@@ -15,91 +21,17 @@ type IProps = {
 const emptyObj = {};
 
 function IframeRender(props: IProps) {
-  const { url, autoHeight = false, iframePayload = emptyObj, onMessage, onLoad } = props;
+  const { url, autoHeight = false, iframePayload = emptyObj } = props;
   const iframeRef = useRef<HTMLIFrameElement>(null);
-
-  const [iframeSrc, setIframeSrc] = useState(url);
   const [isLoading, setIsLoading] = useState(true);
-
-  const pauseAutoHeight = useIframeAutoHeight(iframeRef, autoHeight, iframeSrc);
-
-  // 记录上次发送的payload，避免重复发送
-  const lastPayloadRef = useRef<any>(emptyObj);
-
-  // 发送postMessage到iframe
-  const postPayloadToIframe = useCallback(() => {
-    if (!iframeRef.current) return;
-    try {
-      const payload = iframePayload || {};
-      // 只在payload变化时发送
-      if (!payload || JSON.stringify(lastPayloadRef.current) === JSON.stringify(payload)) {
-        return;
-      }
-
-      lastPayloadRef.current = payload;
-
-      iframeRef.current.contentWindow?.postMessage(
-        {
-          type: 'beyond-iframe-payload',
-          data: payload,
-        },
-        '*'
-      );
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.warn('postMessage to iframe error', e);
-    }
-  }, [iframePayload]);
-
-  // iframe 加载完成后发送payload
-  const handleIframeLoad = useCallback(() => {
-    setIsLoading(false);
-    postPayloadToIframe();
-    onLoad?.(iframeRef);
-  }, [postPayloadToIframe, onLoad]);
-
-  // 监听payload变化，iframe已加载时也发送
-  useEffect(() => {
-    postPayloadToIframe();
-  }, [postPayloadToIframe]);
-
-  useEffect(() => {
-    setIframeSrc(url);
-  }, [url]);
-
-  useEffect(() => {
-    // 监听来自iframe的postMessage事件
-    const handleMessage = (event: MessageEvent) => {
-      const { data } = event;
-      console.log('handleMessage', event);
-      // 可根据需要校验event.origin或event.source
-      if (data.type === 'beyond-iframe-receive-payload') {
-        if (typeof onMessage === 'function') {
-          onMessage(data.data);
-        }
-      }
-      if (data.type === 'iframe-set-height' && iframeRef.current) {
-        const heightValue = typeof data.data === 'number' ? `${data.data}px` : String(data.data ?? '');
-
-        pauseAutoHeight();
-        iframeRef.current.style.height = heightValue;
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => {
-      window.removeEventListener('message', handleMessage);
-    };
-  }, [onMessage, pauseAutoHeight]);
-
-  useEffect(() => {
-    const onLoaded = () => {
-      handleIframeLoad();
-    };
-    iframeRef.current?.addEventListener('load', onLoaded, { once: true });
-    return () => {
-      iframeRef.current?.removeEventListener('load', onLoaded);
-    };
-  }, []);
+  const pauseAutoHeight = useIframeAutoHeight(iframeRef, autoHeight, url);
+  const handleIframeLoad = useIframeBridge({
+    ...props,
+    iframePayload,
+    iframeRef,
+    setLoading: setIsLoading,
+    pauseAutoHeight,
+  });
 
   return (
     <div className={autoHeight ? `full-width ${styles.autoHeight}` : 'full-width full-height'}>
@@ -109,7 +41,6 @@ function IframeRender(props: IProps) {
           width="100%"
           height="100%"
           frameBorder="0"
-          src={iframeSrc}
           style={{
             border: 'none',
             overflow: 'hidden',

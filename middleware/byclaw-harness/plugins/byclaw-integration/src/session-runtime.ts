@@ -1,3 +1,4 @@
+import { describeSessionToolInstanceRefs, onToolInstanceRefs, toolInstanceSourceSeq } from './instance-refs.ts'
 /** Durable DSH root-session runtime used by the BYCLAW_DSH Worker. */
 
 import { ASR_NO_SPEECH_MESSAGE, ByClawVoiceRuntime, VoiceSummaryStreamFilter, byClawVoicePayload, voiceRequestFingerprint, withVoiceCancellation } from './voice-runtime.ts'
@@ -730,6 +731,7 @@ export interface DshEventDescription {
   summary: string
   text?: string
   toolName?: string
+  instanceRefs?: Array<{ sandboxId: string; instance: string; mappingId?: string }>
   toolCallId?: string
   arguments?: string
   result?: string
@@ -767,7 +769,7 @@ export async function loadPersistedSessionById(
 }
 
 /** Convert a durable DSH event to its ByClaw transcript meaning, omitting internal lifecycle records. */
-export function describeDshSessionEvent(event: SessionEvent): DshEventDescription | undefined {
+export function describeDshSessionEvent(event: SessionEvent, instanceMetadata?: { supported?: boolean; terminal?: 'success' | 'error' }): DshEventDescription | undefined {
   if (event.type === 'user/message') {
     if (event.data.source.kind === 'user') return undefined
     const source = event.data.source as unknown as Record<string, unknown>
@@ -808,6 +810,7 @@ export function describeDshSessionEvent(event: SessionEvent): DshEventDescriptio
     return {
       eventKind: 'tool.call', status: 'running', summary: `Tool call · ${event.data.name}`,
       toolName: event.data.name, toolCallId: String(event.data.callId), arguments: event.data.arguments,
+      ...(instanceMetadata?.supported ? { instanceRefs: [] } : {}),
     }
   }
   if (event.type === 'tool/result') {
@@ -827,6 +830,7 @@ export function describeDshSessionEvent(event: SessionEvent): DshEventDescriptio
       eventKind: 'tool.call', status: 'running', summary: `Tool call · ${event.data.name}`,
       toolName: event.data.name, toolCallId: String(event.data.subCallId),
       arguments: JSON.stringify(event.data.arguments),
+      ...(instanceMetadata?.supported ? { instanceRefs: [] } : {}),
     }
   }
   if (event.type === 'tool/ptc-dispatch') {
@@ -860,6 +864,7 @@ export function sessionEventProjection(
       phase: eventKind === 'tool.call' ? 'start' : details.isError === true ? 'error' : 'success',
       toolCallId: details.toolCallId ?? `${context.messageIdPrefix ?? context.parentMessageId}:tool:${context.sequence}`,
       toolName: details.toolName,
+      instanceRefs: details.instanceRefs,
       ...(eventKind === 'tool.call' && details.arguments !== undefined ? { input: details.arguments } : {}),
       ...(eventKind === 'tool.result' && details.result !== undefined ? { output: details.result } : {}),
       description: summary,
@@ -1373,6 +1378,8 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   private readonly queues = new Map<string, Promise<unknown>>()
   private readonly coldRecoveryParking = new ColdRecoveryAskParking()
   private readonly disposeSessionEvents: () => void
+  private readonly disposeInstanceRefs: () => void
+  private readonly instanceCallSequences = new WeakMap<ActiveTurn, Map<string, number>>()
   private readonly disposeAgentStatusEvents: () => void
   private readonly disposeAssistantStreamEvents: () => void
   private readonly disposeInboxEvents: () => void
@@ -1394,6 +1401,26 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
 
   constructor(private readonly ctx: Context, private readonly options: ByClawDshSessionRuntimeOptions) {
     this.questions = new ByClawQuestionBroker(options.interactionStore)
+    this.disposeInstanceRefs = onToolInstanceRefs(ctx, (session, data) => {
+      const turn = this.activeTurnFor(session)
+      const saved = options.sessionMetadata.recordToolInstanceRefs(session, data)
+      // Metadata still persists when a tool finishes after its foreground turn.
+      // Attach the rejection handler immediately, before a possibly slow projection queue.
+      const settled = saved.catch((error: unknown) => {
+        this.ctx.logger.warn(`[byclaw-dsh] tool instance metadata failed: ${sanitizeByClawOperationalLog(error)}`)
+        return undefined
+      })
+      if (turn === undefined) return
+      this.queueForwarding(turn, 'tool instance projection', async () => {
+        const record = await settled
+        if (record === undefined || this.instanceCallSequences.get(turn)?.get(`${session.id}:${data.callId}`) !== data.sourceCallSeq) return
+        const { eventKind, status, summary, ...details } = describeSessionToolInstanceRefs(session, record)
+        await this.emitSessionEvent(turn, session, `instance:${data.sourceCallSeq}:${record.revision}`, eventKind, status, summary, {
+          ...details,
+          toolName: turn.toolNames.get(`${session.id}:${data.callId}`),
+        })
+      })
+    })
     this.disposeInboxEvents = ctx.root.on('agent/inbox/claimed', ({ agent, message, turn: turnNumber }) => {
       const pending = this.pendingForeground.get(String(agent.id))
       const turn = pending?.inputMessageId === String(message.id) ? pending.turn : this.activeTurnFor(agent.session)
@@ -2043,6 +2070,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     this.voiceControllers.clear()
     this.voiceRequests.clear()
     this.disposeSessionEvents()
+    this.disposeInstanceRefs()
     this.disposeInboxEvents()
     this.disposeAssistantStreamEvents()
     this.disposeAgentStatusEvents()
@@ -2832,6 +2860,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     if (event.type === 'tool/ptc-dispatch-start') {
       turn.toolNames.set(`${session.id}:${event.data.subCallId}`, event.data.name)
     }
+    if (event.type === 'tool/call' || event.type === 'tool/ptc-dispatch-start') {
+      let calls = this.instanceCallSequences.get(turn)
+      if (calls === undefined) { calls = new Map(); this.instanceCallSequences.set(turn, calls) }
+      calls.set(`${session.id}:${event.type === 'tool/call' ? event.data.callId : event.data.subCallId}`, event.seq)
+    }
 
     const projectedEditDiff = await this.forwardEditDiff(turn, session, event)
     const projectedPlan = event.type === 'todo/write' && root
@@ -2840,8 +2873,24 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       await this.emitPlan(turn, root ? session : this.ctx.root.sessions?.get(SessionId(turn.rootSessionId)),
         root ? undefined : String(session.id))
     }
-    const description = projectedPlan || projectedEditDiff ? undefined : describeDshSessionEvent(event)
+    let instanceMetadata: { supported?: boolean; terminal?: 'success' | 'error' } | undefined
+    if (event.type === 'tool/call' || event.type === 'tool/ptc-dispatch-start') {
+      const agent = this.ctx.root.agents?.get(String(session.id) as never)
+      const definition = this.ctx.tools?.get(event.data.name, agent) as { byclawInstanceRefsVersion?: number } | undefined
+      instanceMetadata = { supported: definition?.byclawInstanceRefsVersion === 1 }
+    }
+    const description = projectedPlan || projectedEditDiff ? undefined : describeDshSessionEvent(event, instanceMetadata)
     if (description !== undefined) {
+      if (description.toolCallId !== undefined) {
+        try {
+          const sourceCallSeq = event.type === 'tool/result' && event.sourceEventSeqs?.length === 1
+            ? event.sourceEventSeqs[0] : toolInstanceSourceSeq(session, description.toolCallId, event.seq)
+          const record = sourceCallSeq === undefined ? undefined : this.options.sessionMetadata.getToolInstanceRefs(session, description.toolCallId, sourceCallSeq)
+          if (record !== undefined) description.instanceRefs = record.instanceRefs
+        } catch (error: unknown) {
+          this.ctx.logger.warn(`[byclaw-dsh] tool instance lookup failed: ${sanitizeByClawOperationalLog(error)}`)
+        }
+      }
       const { eventKind, status, summary, ...details } = description
       const toolName = details.toolName ?? (details.toolCallId === undefined
         ? undefined
@@ -3290,6 +3339,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       text?: string
       toolName?: string
       toolCallId?: string
+      instanceRefs?: Array<{ sandboxId: string; instance: string; mappingId?: string }>
       arguments?: string
       result?: string
       isError?: boolean

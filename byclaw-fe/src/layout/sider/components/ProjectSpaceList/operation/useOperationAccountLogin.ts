@@ -1,11 +1,18 @@
-import { useCallback, useRef, useState } from 'react';
+import { desktopAuthEpoch, useDesktopWorkspace } from '@/utils/desktopWorkspace';
+import { openDrawerView, closeDrawerView, type DrawerViewHandle } from '@/utils/drawerView';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { App } from 'antd';
 import { useIntl, useSelector } from '@umijs/max';
 import { get, concat } from 'lodash';
 import useGlobal from '@/hooks/useGlobal';
 import useAppStore from '@/models/common/useAppStore';
 import { loginOperationAccount } from '@/service/devloop';
-import { getBrowserServiceKey, getSandboxInfo, launchSandboxByUserCode, navigateSandboxBrowser } from '@/service/sandbox';
+import {
+  getBrowserServiceKey,
+  getSandboxInfo,
+  launchSandboxByUserCode,
+  navigateSandboxBrowser,
+} from '@/service/sandbox';
 import type { ISandboxesInfo } from '@/models/common/useAppStore';
 import { getVNCUrl } from '@/utils/chat';
 import type { OperationAccount, OperationIdentifier } from './types';
@@ -42,41 +49,72 @@ export function useOperationAccountLogin(onLoggedIn?: () => void | Promise<void>
   const [loginPreparingAccountId, setLoginPreparingAccountId] = useState<OperationIdentifier | null>(null);
   const [loginConfirming, setLoginConfirming] = useState(false);
   const loginSandboxIdRef = useRef('');
+  const desktopHandle = useRef<DrawerViewHandle>();
+  const loginGeneration = useRef(0);
+
+  useEffect(
+    () => () => {
+      loginGeneration.current += 1;
+      closeDrawerView(EventEmitter, desktopHandle.current);
+    },
+    [EventEmitter]
+  );
 
   // 关闭账号登录时同步收起全局远程桌面，避免切换账号或项目后保留旧平台页面。
   const closeRemoteDesktop = useCallback(() => {
+    loginGeneration.current += 1;
     loginSandboxIdRef.current = '';
     setLoginTarget(null);
     setLoginPreparingAccountId(null);
     setLoginConfirming(false);
-    EventEmitter.emit('beyond-main-driver-open-type', '');
+    closeDrawerView(EventEmitter, desktopHandle.current);
+    desktopHandle.current = undefined;
   }, [EventEmitter]);
 
-  // 优先复用采集流程已经启动的沙箱；尚无带远程桌面的沙箱时拉起承载该用户浏览器的沙箱（常驻宿主用户为工具沙箱，其他用户为 openclaw）。
-  const resolveSandbox = useCallback(async (): Promise<ISandboxesInfo> => {
-    const currentSandboxes = (await getSandboxInfo({})) || EmptyArr;
-    const runningSandbox =
-      currentSandboxes?.find(
-        (sandbox) => sandbox.status === 'RUNNING' && !!sandbox.sandboxId && get(sandbox, 'instanceEndpoints.vnc')
-      ) || currentSandboxes?.find((sandbox) => !!sandbox.sandboxId && get(sandbox, 'instanceEndpoints.vnc'));
-    if (runningSandbox) {
-      useAppStore.setState({ sandboxesInfo: currentSandboxes });
-      return runningSandbox;
-    }
-    if (!userInfo?.userCode) throw new Error('missing_user_code');
-    const launchedSandbox = await launchSandboxByUserCode({
-      userCode: userInfo.userCode,
-      serviceKey: browserSandboxServiceKey(await getBrowserServiceKey().catch(() => null)),
-    });
-    const sandboxInfo: ISandboxesInfo = {
-      ...launchedSandbox,
-      userCode: userInfo.userCode,
-      sandboxType: 'byclaw',
-      status: 'RUNNING',
+  useEffect(() => {
+    let epoch = desktopAuthEpoch();
+    const onAuth = () => {
+      const next = desktopAuthEpoch();
+      if (next === epoch) return;
+      epoch = next;
+      closeRemoteDesktop();
     };
-    useAppStore.setState({ sandboxesInfo: [...currentSandboxes, sandboxInfo] });
-    return sandboxInfo;
-  }, [userInfo?.userCode]);
+    window.addEventListener('byclaw-auth-change', onAuth);
+    return () => window.removeEventListener('byclaw-auth-change', onAuth);
+  }, [closeRemoteDesktop]);
+
+  // 优先复用采集流程已经启动的沙箱；尚无带远程桌面的沙箱时拉起承载该用户浏览器的沙箱（常驻宿主用户为工具沙箱，其他用户为 openclaw）。
+  const resolveSandbox = useCallback(
+    async (isCurrent: () => boolean): Promise<ISandboxesInfo> => {
+      const currentSandboxes = (await getSandboxInfo({})) || EmptyArr;
+      if (!isCurrent()) throw new Error('CANCELLED');
+      const runningSandbox =
+        currentSandboxes?.find(
+          (sandbox) => sandbox.status === 'RUNNING' && !!sandbox.sandboxId && get(sandbox, 'instanceEndpoints.vnc')
+        ) || currentSandboxes?.find((sandbox) => !!sandbox.sandboxId && get(sandbox, 'instanceEndpoints.vnc'));
+      if (runningSandbox) {
+        useAppStore.setState({ sandboxesInfo: currentSandboxes });
+        return runningSandbox;
+      }
+      if (!userInfo?.userCode) throw new Error('missing_user_code');
+      const serviceKey = browserSandboxServiceKey(await getBrowserServiceKey().catch(() => null));
+      if (!isCurrent()) throw new Error('CANCELLED');
+      const launchedSandbox = await launchSandboxByUserCode({
+        userCode: userInfo.userCode,
+        serviceKey,
+      });
+      if (!isCurrent()) throw new Error('CANCELLED');
+      const sandboxInfo: ISandboxesInfo = {
+        ...launchedSandbox,
+        userCode: userInfo.userCode,
+        sandboxType: 'byclaw',
+        status: 'RUNNING',
+      };
+      useAppStore.setState({ sandboxesInfo: [...currentSandboxes, sandboxInfo] });
+      return sandboxInfo;
+    },
+    [userInfo?.userCode]
+  );
 
   // 沙箱准备完成后立即打开远程桌面，再异步导航登录页，避免导航等待期间用户看不到扫码入口。
   const handleLogin = useCallback(
@@ -88,23 +126,36 @@ export function useOperationAccountLogin(onLoggedIn?: () => void | Promise<void>
       }
       if (loginPreparingAccountId !== null) return;
       setLoginPreparingAccountId(account.id);
+      const generation = ++loginGeneration.current;
+      const authEpoch = desktopAuthEpoch();
+      const intent = useDesktopWorkspace.getState().revision;
+      let opened = false;
+      const isAttemptCurrent = () => generation === loginGeneration.current && authEpoch === desktopAuthEpoch();
+      const isCurrent = () => isAttemptCurrent() && (opened || intent === useDesktopWorkspace.getState().revision);
       try {
-        const sandboxInfo = await resolveSandbox();
+        const sandboxInfo = await resolveSandbox(isCurrent);
+        if (!isCurrent()) return;
+        opened = true;
         loginSandboxIdRef.current = sandboxInfo.sandboxId;
         setLoginTarget(account);
-        EventEmitter.emit('beyond-main-driver-open-type', {
-          drawerType: 'vnc',
-          title: intl.formatMessage({ id: 'projectSpace.operation.accountLogin.remoteDesktop' }),
-          canClose: true,
-          // 账号管理页保持原位，远程桌面只覆盖右侧区域，不参与主页面宽度计算。
-          overlay: true,
-          width: '50vw',
-        });
-        EventEmitter.emit('beyond-main-driver-message', { url: getVNCUrl(concat([], sandboxInfo)) });
+        desktopHandle.current = openDrawerView(
+          EventEmitter,
+          `external:operation-account:${account.id}`,
+          {
+            drawerType: 'vnc',
+            title: intl.formatMessage({ id: 'projectSpace.operation.accountLogin.remoteDesktop' }),
+            canClose: true,
+            // 账号管理页保持原位，远程桌面只覆盖右侧区域，不参与主页面宽度计算。
+            overlay: true,
+            width: '50vw',
+          },
+          { url: getVNCUrl(concat([], sandboxInfo)) }
+        );
         try {
           // 首次登录时浏览器可能还在启动，导航失败后自动重试一次
           let navigateSuccess = false;
           try {
+            if (!isCurrent()) return;
             await navigateSandboxBrowser({
               sandboxId: sandboxInfo.sandboxId,
               targetUrl: loginUrl,
@@ -116,6 +167,7 @@ export function useOperationAccountLogin(onLoggedIn?: () => void | Promise<void>
             await new Promise((resolve) => {
               setTimeout(resolve, 5000);
             });
+            if (!isCurrent()) return;
             await navigateSandboxBrowser({
               sandboxId: sandboxInfo.sandboxId,
               targetUrl: loginUrl,
@@ -123,17 +175,20 @@ export function useOperationAccountLogin(onLoggedIn?: () => void | Promise<void>
             });
             navigateSuccess = true;
           }
-          if (navigateSuccess) {
+          if (navigateSuccess && isCurrent()) {
             message.success(intl.formatMessage({ id: 'projectSpace.operation.accountLogin.navigateSuccess' }));
           }
         } catch {
+          if (!isCurrent()) return;
+
           // 导航失败时保留远程桌面，用户仍可在沙箱浏览器中手工进入对应平台完成登录。
           message.warning(intl.formatMessage({ id: 'projectSpace.operation.accountLogin.navigateFailed' }));
         }
       } catch {
+        if (!isCurrent()) return;
         message.error(intl.formatMessage({ id: 'projectSpace.operation.accountLogin.startFailed' }));
       } finally {
-        setLoginPreparingAccountId(null);
+        if (isAttemptCurrent()) setLoginPreparingAccountId(null);
       }
     },
     [EventEmitter, intl, loginPreparingAccountId, message, resolveSandbox]
@@ -142,16 +197,24 @@ export function useOperationAccountLogin(onLoggedIn?: () => void | Promise<void>
   const handleConfirmLogin = useCallback(async () => {
     const sandboxId = loginSandboxIdRef.current;
     if (!loginTarget || !sandboxId || loginConfirming) return;
+    const generation = loginGeneration.current;
+    const authEpoch = desktopAuthEpoch();
+    const view = desktopHandle.current;
+    const isCurrent = () =>
+      generation === loginGeneration.current && authEpoch === desktopAuthEpoch() && view === desktopHandle.current;
     setLoginConfirming(true);
     try {
       await loginOperationAccount(loginTarget.id, sandboxId);
+      if (!isCurrent()) return;
       await onLoggedIn?.();
+      if (!isCurrent()) return;
       message.success(intl.formatMessage({ id: 'projectSpace.operation.account.loginSuccess' }));
       closeRemoteDesktop();
     } catch {
+      if (!isCurrent()) return;
       message.error(intl.formatMessage({ id: 'projectSpace.operation.accountLogin.confirmFailed' }));
     } finally {
-      setLoginConfirming(false);
+      if (isCurrent()) setLoginConfirming(false);
     }
   }, [closeRemoteDesktop, intl, loginConfirming, loginTarget, message, onLoggedIn]);
 

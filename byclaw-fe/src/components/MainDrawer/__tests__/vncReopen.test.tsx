@@ -5,6 +5,7 @@ import { EventEmitter$Cls } from '@/utils/eventEmitter';
 import useVncOpener from '@/hooks/useVncOpener';
 import VNC from '@/components/ChatLayoutComp/components/VNC';
 import MainDrawer from '../index';
+import { useDesktopWorkspace } from '@/utils/desktopWorkspace';
 
 let mockEventEmitter = new EventEmitter$Cls();
 const mockAppState = {
@@ -59,9 +60,14 @@ const ChatDesktop = ({ latestMessage }: { latestMessage: IMessage }) => {
 describe('chat VNC reopening', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    sessionStorage.clear();
+    localStorage.removeItem('enterpriseId');
+    useDesktopWorkspace.setState({ owners: {}, visible: false, activeOwner: '', panel: '', revision: 0 });
     mockEventEmitter = new EventEmitter$Cls();
-    mockAppState.sandboxesInfo = [{ status: 'RUNNING', instanceEndpoints: { vnc: '/v1/sandboxes/test/proxy/8081' } }];
-    mockAppState.getSandboxesInfoUrl.mockResolvedValue([]);
+    mockAppState.sandboxesInfo = [
+      { sandboxId: 'test', status: 'RUNNING', instanceEndpoints: { vnc: '/v1/sandboxes/test/proxy/8081' } },
+    ];
+    mockAppState.getSandboxesInfoUrl.mockImplementation(() => Promise.resolve(mockAppState.sandboxesInfo));
     // The opener probes the desktop before showing it; here it always answers.
     (globalThis as any).fetch = jest.fn().mockResolvedValue({ type: 'basic', status: 200 });
   });
@@ -75,31 +81,54 @@ describe('chat VNC reopening', () => {
     );
 
     view.rerender(<ChatDesktop latestMessage={nextAnswer} />);
-    fireEvent.click(screen.getByRole('img', { name: 'close' }));
+    fireEvent.click(screen.getAllByRole('img', { name: 'close' })[0]);
     expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
-    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
+    expect(screen.getByTitle('远程桌面')).toBeInTheDocument();
 
-    await act(async () => fireEvent.click(screen.getByTitle('common.remoteComputer')));
+    await act(async () => fireEvent.click(screen.getByTitle('远程桌面')));
     expect(screen.getByTitle('remote desktop')).toBeInTheDocument();
   });
 
-  it('does not retain the icon for a failed desktop opening', async () => {
+  it('keeps the entry reachable and opens an empty workspace when no desktop exists', async () => {
     mockAppState.sandboxesInfo = [];
-    jest.useFakeTimers();
-    try {
-      const view = render(<ChatDesktop latestMessage={browserAnswer} />);
-      await act(async () => fireEvent.click(screen.getByTitle('common.remoteComputer')));
-      await act(async () => {
-        await jest.runAllTimersAsync();
-      });
+    render(<ChatDesktop latestMessage={nextAnswer} />);
+    await act(async () => fireEvent.click(screen.getByTitle('远程桌面')));
+    expect(screen.getByRole('combobox', { name: '全部桌面' })).toBeInTheDocument();
+    expect(screen.getByText('从全部桌面添加当前会话的远程桌面')).toBeInTheDocument();
+    expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
+  });
 
-      // The click is answered with a notice instead of an empty drawer.
-      expect(await screen.findByText('common.remoteComputerUnavailable')).toBeInTheDocument();
-      view.rerender(<ChatDesktop latestMessage={nextAnswer} />);
-      expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
-      expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
-    } finally {
-      jest.useRealTimers();
-    }
+  it('keeps the desktop for unchanged identity and unloads it on a real tenant change', async () => {
+    render(<ChatDesktop latestMessage={browserAnswer} />);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Browser tool' })));
+    expect(screen.getByTitle('remote desktop')).toBeInTheDocument();
+
+    act(() => window.dispatchEvent(new Event('byclaw-auth-change')));
+    expect(screen.getByTitle('remote desktop')).toBeInTheDocument();
+
+    act(() => {
+      localStorage.setItem('enterpriseId', 'new-tenant');
+      window.dispatchEvent(new Event('byclaw-auth-change'));
+    });
+    expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
+    expect(useDesktopWorkspace.getState().owners).toEqual({});
+  });
+
+  it('unloads the desktop when the chat leaves while the global drawer remains mounted', async () => {
+    const ChatEntry = () => {
+      const openVnc = useVncOpener('session-1');
+      return <button onClick={() => openVnc({ key: 'live-tool' })}>Open desktop</button>;
+    };
+    const Host = ({ chatVisible }: { chatVisible: boolean }) => (
+      <>
+        {chatVisible && <ChatEntry />}
+        <MainDrawer />
+      </>
+    );
+    const view = render(<Host chatVisible />);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Open desktop' })));
+    expect(screen.getByTitle('remote desktop')).toBeInTheDocument();
+    view.rerender(<Host chatVisible={false} />);
+    expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
   });
 });

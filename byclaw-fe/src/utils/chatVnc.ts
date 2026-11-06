@@ -214,6 +214,7 @@ const isBrowserTool = (title: unknown) =>
   typeof title === 'string' && (title.includes('jarvis_run_flow') || title.includes('browser'));
 
 export function isVncToolMessage(message?: Partial<IMessageListItem> | null): boolean {
+  if (message?.content && Object.prototype.hasOwnProperty.call(message.content, 'instanceRefs')) return false;
   const substance = parseObject(message?.content?.substance);
   switch (String(message?.contentType)) {
     case String(SSEMessageType.toolCall): {

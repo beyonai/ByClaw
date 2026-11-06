@@ -339,7 +339,11 @@ describe('IframeRender height', () => {
     resize(layout.contentDocument.documentElement, layout.contentDocument.body);
     fireEvent(
       window,
-      new MessageEvent('message', { data: { type: 'iframe-set-height', data: 384 }, source: iframe.contentWindow })
+      new MessageEvent('message', {
+        data: { type: 'iframe-set-height', data: 384 },
+        source: iframe.contentWindow,
+        origin: window.location.origin,
+      })
     );
     expect(iframe.style.height).toBe('384px');
     layout.contentDocument.body.textContent = 'Changed after explicit sizing';
@@ -349,7 +353,11 @@ describe('IframeRender height', () => {
 
     fireEvent(
       window,
-      new MessageEvent('message', { data: { type: 'iframe-set-height', data: '42vh' }, source: iframe.contentWindow })
+      new MessageEvent('message', {
+        data: { type: 'iframe-set-height', data: '42vh' },
+        source: iframe.contentWindow,
+        origin: window.location.origin,
+      })
     );
     layout.setHeights(600, 600);
     layout.contentDocument.body.textContent = 'Changed after CSS sizing';
@@ -370,7 +378,11 @@ describe('IframeRender height', () => {
     attachDocument(iframe, 260, 260);
     fireEvent(
       window,
-      new MessageEvent('message', { data: { type: 'iframe-set-height', data: 384 }, source: iframe.contentWindow })
+      new MessageEvent('message', {
+        data: { type: 'iframe-set-height', data: 384 },
+        source: iframe.contentWindow,
+        origin: window.location.origin,
+      })
     );
     expect(iframe.style.height).toBe('384px');
 
@@ -396,7 +408,11 @@ describe('IframeRender height', () => {
     const consoleLog = jest.spyOn(console, 'log').mockImplementation(() => {});
     fireEvent(
       window,
-      new MessageEvent('message', { data: { type: 'iframe-set-height', data: 384 }, source: iframe.contentWindow })
+      new MessageEvent('message', {
+        data: { type: 'iframe-set-height', data: 384 },
+        source: iframe.contentWindow,
+        origin: window.location.origin,
+      })
     );
 
     expect(iframe.style.height).toBe('384px');

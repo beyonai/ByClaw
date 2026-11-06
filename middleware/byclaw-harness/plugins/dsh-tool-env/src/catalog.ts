@@ -1,3 +1,4 @@
+import { instanceRefsFor, type SandboxInstanceContext } from './instance-context.ts'
 import { randomUUID } from 'node:crypto'
 
 export interface SandboxTemplate {
@@ -10,7 +11,7 @@ export interface SandboxResult { exitCode: number | null; stdout: string; stderr
 /** Every operation, including the manifest handshake, is performed by the SSH runtime. */
 export interface SandboxRuntime {
   handshake(): Promise<unknown>
-  identity?(): { sandboxId?: string; workspaceRoot?: string }
+  identity?(): { sandboxId?: string; workspaceRoot?: string; instanceContext?: SandboxInstanceContext }
   execute(argv: readonly string[], cwd?: string, signal?: AbortSignal): Promise<SandboxResult>
   release(destroy?: boolean): Promise<void>
 }
@@ -20,6 +21,7 @@ export interface ExecutionLease {
   templateKey: string
   serviceKey: string
   sandboxId?: string
+  instanceContext?: SandboxInstanceContext
   workspaceRoot: string
   operations: { protocol: 'ssh'; exposure: 'private' }
 }
@@ -161,6 +163,9 @@ export class ToolSandboxManager {
       this.event({ phase: 'leased', templateKey, handleId: handle.id, leaseId })
       return value
     } finally { handle.pendingAcquires-- }
+  }
+  instanceRefs(actor: string, leaseId: string, capability?: string) {
+    return instanceRefsFor(this.owned(actor, leaseId).public.instanceContext, capability)
   }
   async execute(actor: string, leaseId: string, argv: readonly string[], cwd?: string, signal?: AbortSignal): Promise<SandboxResult> {
     if (this.actorReleases.has(actor)) throw new Error('ACTOR_RELEASING')

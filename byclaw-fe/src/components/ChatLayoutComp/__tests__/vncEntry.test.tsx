@@ -66,7 +66,11 @@ jest.mock('../hooks/useEventEmitterHooks', () => () => ({
 }));
 jest.mock('../ChatResourceWorkspace/useChatResourceProject', () => ({ useChatResourceProject: () => ({}) }));
 jest.mock('@/utils', () => ({ isRootPage: () => false }));
-jest.mock('@/utils/auth', () => ({ isAdminVip: () => false }));
+jest.mock('@/utils/auth', () => ({
+  isAdminVip: () => false,
+  getDesktopIdentitySnapshot: () => ({ account: 'user', enterpriseId: 'tenant' }),
+  getAuthSnapshot: () => ({ sessionId: 'auth', token: '', ssoToken: '' }),
+}));
 jest.mock('@/utils/session', () => ({
   isNotificationSession: () => false,
   sessionHandler: (session: unknown) => session,
@@ -121,206 +125,40 @@ const renderChat = (sessionId = 'session-1') => <ChatLayoutComp sessionId={sessi
 describe('chat remote computer entry', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    sessionStorage.clear();
     mockEventEmitter = new EventEmitter$Cls();
-    jest.spyOn(mockEventEmitter, 'emit');
     mockGlobal.EventEmitter = mockEventEmitter;
     mockMessages = [];
-    mockAppStore.sandboxesInfo = [];
-    mockAppStore.getSandboxesInfoUrl = jest.fn();
   });
-
-  it('restores the latest employee browser entry from history without opening it', () => {
-    mockMessages = [employeeMessage('answer-1', true)];
-
+  it('keeps the entry reachable with zero references and without browser activity', () => {
     render(renderChat());
-
-    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
-    expect(mockOpenVnc).not.toHaveBeenCalled();
-    expect(mockEventEmitter.emit).not.toHaveBeenCalled();
-  });
-
-  it('restores the browser entry when upload returned a numeric session ID', () => {
-    mockMessages = [employeeMessage('answer-1', true, '11273519')];
-
-    render(renderChat(11273519 as unknown as string));
-
-    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
-    expect(mockOpenVnc).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    [11273519, '11273519'],
-    ['11273519', 11273519],
-  ])('retains an opened entry across equivalent session event ID types (%p, %p)', (sessionId, eventSessionId) => {
-    const view = render(renderChat(sessionId as string));
-    act(() => mockEventEmitter.emit('beyond-chat-vnc-opened', { sessionId: eventSessionId }));
-    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
-
-    view.rerender(renderChat(String(sessionId)));
-    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
-  });
-
-  it('hides an older browser entry when the latest employee message has no browser activity', () => {
-    mockMessages = [employeeMessage('answer-1', true), employeeMessage('answer-2')];
-
-    render(renderChat());
-
-    expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
-  });
-
-  it('keeps the latest employee entry when a user message is last in the list', () => {
-    mockMessages = [
-      employeeMessage('answer-1', true),
-      { ...employeeMessage('query-2'), creatorId: 'user', fromBeyond: false, usage: '1' },
-    ];
-
-    render(renderChat());
-
-    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
-  });
-
-  it('does not restore browser activity from another conversation', () => {
-    mockMessages = [employeeMessage('answer-1'), employeeMessage('answer-other', true, 'session-2')];
-
-    render(renderChat());
-
-    expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
-  });
-
-  it('does not expose a stale browser entry when another drawer opens', () => {
-    mockMessages = [employeeMessage('answer-1', true), employeeMessage('answer-2')];
-    mockAppStore.sandboxesInfo = [{ status: 'RUNNING', instanceEndpoints: { vnc: 'https://example.com/vnc' } }];
-    render(renderChat());
-
-    act(() => mockEventEmitter.emit('beyond-main-driver-open-type', { drawerType: 'vnc' }));
-
-    expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
-  });
-
-  it('updates the entry when messages change without remounting the chat', () => {
-    mockMessages = [employeeMessage('answer-1', true)];
-    const view = render(renderChat());
-    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
-
-    mockMessages = [...mockMessages, employeeMessage('answer-2')];
-    view.rerender(renderChat());
-    expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
-
-    mockMessages = [...mockMessages, employeeMessage('answer-3', true)];
-    view.rerender(renderChat());
-    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
-    expect(mockOpenVnc).not.toHaveBeenCalled();
-  });
-
-  it('keeps an opened desktop entry across new answers and permits reopening during another answer', () => {
-    mockMessages = [employeeMessage('answer-1', true)];
-    const view = render(renderChat());
-    act(() => mockEventEmitter.emit('beyond-chat-vnc-opened', { sessionId: 'session-1' }));
-
-    mockMessages = [...mockMessages, employeeMessage('answer-2')];
-    view.rerender(renderChat());
-    act(() => mockEventEmitter.emit('beyond-driver-close'));
-    fireEvent.click(screen.getByTitle('common.remoteComputer'));
-    const options = mockOpenVnc.mock.calls[0][0];
-
-    mockMessages = [...mockMessages, employeeMessage('answer-3')];
-    view.rerender(renderChat());
-    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
-    expect(options.isCurrent()).toBe(true);
-  });
-
-  it('resets an opened desktop entry on A to B to A navigation', () => {
-    mockMessages = [employeeMessage('answer-1')];
-    const view = render(renderChat());
-    act(() => mockEventEmitter.emit('beyond-chat-vnc-opened', { sessionId: 'session-1' }));
-    expect(screen.getByTitle('common.remoteComputer')).toBeInTheDocument();
-
-    mockMessages = [employeeMessage('answer-2', false, 'session-2')];
-    view.rerender(renderChat('session-2'));
-    expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
-    act(() => mockEventEmitter.emit('beyond-chat-vnc-opened', { sessionId: 'session-1' }));
-    expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
-
-    mockMessages = [employeeMessage('answer-1')];
-    view.rerender(renderChat());
-    expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
-  });
-
-  it('keeps pending opening during updates to the same answer and cancels it for a new answer', () => {
-    mockMessages = [employeeMessage('answer-1', true)];
-    const view = render(renderChat());
-
-    fireEvent.click(screen.getByTitle('common.remoteComputer'));
+    fireEvent.click(screen.getByTitle('远程桌面'));
     expect(mockOpenVnc).toHaveBeenCalledTimes(1);
-    const options = mockOpenVnc.mock.calls[0][0];
-    expect(options.isCurrent()).toBe(true);
-
-    mockMessages = [{ ...mockMessages[0], updateKey: 'stream-update' }];
-    view.rerender(renderChat());
-    expect(options.isCurrent()).toBe(true);
-
-    mockMessages = [...mockMessages, employeeMessage('answer-2', true)];
-    view.rerender(renderChat());
-    expect(options.isCurrent()).toBe(false);
   });
-
-  describe('a tool sandbox with its own desktop', () => {
-    const ownDesktop = [
-      {
-        status: 'RUNNING',
-        instanceEndpoints: {
-          vnc: '/v1/sandboxes/tool-1/proxy/8081?token=t',
-          desktop: '/v1/sandboxes/tool-1/proxy/8083?token=t',
-        },
-      },
-    ];
-
-    it('offers the entry without browser activity and opens the sandbox desktop', async () => {
-      mockMessages = [employeeMessage('answer-1')];
-      mockAppStore.getSandboxesInfoUrl = jest.fn().mockResolvedValue(ownDesktop);
-
-      render(renderChat());
-
-      fireEvent.click(await screen.findByTitle('common.remoteComputer'));
-      const options = mockOpenVnc.mock.calls[0][0];
-      expect(options.instance).toBe('desktop');
-      expect(options.isCurrent()).toBe(true);
-    });
-
-    it('opens the browser desktop when the latest answer used the browser', async () => {
-      mockMessages = [employeeMessage('answer-1', true)];
-      mockAppStore.getSandboxesInfoUrl = jest.fn().mockResolvedValue(ownDesktop);
-
-      render(renderChat());
-      await act(async () => {});
-
-      fireEvent.click(screen.getByTitle('common.remoteComputer'));
-      expect(mockOpenVnc.mock.calls[0][0].instance).toBe('vnc');
-    });
-
-    it('does not offer the entry for a sandbox that only declares the browser desktop', async () => {
-      mockMessages = [employeeMessage('answer-1')];
-      mockAppStore.getSandboxesInfoUrl = jest
-        .fn()
-        .mockResolvedValue([
-          { status: 'RUNNING', instanceEndpoints: { vnc: '/v1/sandboxes/tool-1/proxy/8081?token=t' } },
-        ]);
-
-      render(renderChat());
-      await act(async () => {});
-
-      expect(mockAppStore.getSandboxesInfoUrl).toHaveBeenCalled();
-      expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
-    });
-
-    it('does not offer the entry when that sandbox is not running', async () => {
-      mockMessages = [employeeMessage('answer-1')];
-      mockAppStore.getSandboxesInfoUrl = jest.fn().mockResolvedValue([{ ...ownDesktop[0], status: 'STOPPED' }]);
-
-      render(renderChat());
-      await act(async () => {});
-
-      expect(screen.queryByTitle('common.remoteComputer')).not.toBeInTheDocument();
-    });
+  it('keeps the desktop entry reachable in the centered new-chat composer before an ID exists', () => {
+    render(<ChatLayoutComp sessionId="" isBottom={false} readOnly />);
+    fireEvent.click(screen.getByTitle('远程桌面'));
+    expect(mockOpenVnc).toHaveBeenCalledTimes(1);
+  });
+  it('restores history without automatically opening the workspace', () => {
+    mockMessages = [employeeMessage('answer-1', true)];
+    render(renderChat());
+    expect(screen.getByTitle('远程桌面')).toBeInTheDocument();
+    expect(mockOpenVnc).not.toHaveBeenCalled();
+  });
+  it('keeps the entry reachable through answer updates and route changes', () => {
+    const view = render(renderChat());
+    mockMessages = [employeeMessage('answer-2')];
+    view.rerender(renderChat('session-2'));
+    expect(screen.getByTitle('远程桌面')).toBeInTheDocument();
+    view.rerender(renderChat());
+    expect(screen.getByTitle('远程桌面')).toBeInTheDocument();
+    expect(mockOpenVnc).not.toHaveBeenCalled();
+  });
+  it('accepts numeric session IDs and preserves the manual entry when another panel is open', () => {
+    render(renderChat(11273519 as unknown as string));
+    act(() => mockEventEmitter.emit('beyond-main-driver-open-type', { drawerType: 'preview' }));
+    fireEvent.click(screen.getByTitle('远程桌面'));
+    expect(mockOpenVnc).toHaveBeenCalledTimes(1);
   });
 });

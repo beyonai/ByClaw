@@ -305,3 +305,38 @@ and relaunch flows against fake servers, the SSH identity files, environment
 scrubbing and the profile patch staying inert by default. `tests/fixtures/split-driver.ts` boots the real SSH provider
 composition through this service against a live sshd. It checks files,
 processes, PTY, PTC and sandbox confinement, plus a reconnect after B restarts.
+
+### Desktop instance references
+
+The ByClaw BE adapter retains optional `instanceContext` from the actual allocation
+response or an exact-ID directory lookup. The snapshot stays on the execution
+lease and is omitted from model-visible acquisition output. Capability-specific
+bindings take precedence over an explicit `default`; arbitrary shell argv and
+stdout never select a desktop. Missing or invalid context leaves execution usable
+and emits no guessed target.
+
+Supported tool definitions advertise `byclawInstanceRefsVersion: 1` to the host
+presenter. Each invocation emits the Cordis `byclaw/tool-instance-refs` notification,
+using the real call ID and the precise native/PTC call-start sequence captured
+at invocation start, first with `[]`, then with trusted references before long
+execution. This notification is never appended to the DSH session log: the SDK
+rejects unknown required event types when reopening stored sessions.
+ByClaw integration persists references in its existing `byclaw_sessions` domain,
+scoped by session identity, lifecycle creation time, call ID and `sourceCallSeq`.
+References form a stable union; later empty arrays do not erase known targets.
+Old calls without metadata retain the absent field. The 3015 projection carries
+`instanceRefs` only on the AnswerDelta root, and late metadata preserves the
+exact call's success/error without attaching to a later turn that reuses its ID.
+
+Browser adapters only read the explicit `browser.automation` binding; reporting
+never accesses the allocating SSH `ready` getter. They report before execution,
+after a real browser open (including the automatic open inside a first `runGoal`),
+and in `finally`. Display observers cannot block close/control operations or
+replace the controller's actual errors.
+
+Set `BYCLAW_INSTANCE_REFS_ENABLED=false` on the Harness process to stop new tool
+reference production and definition markers without disabling tool execution.
+The integration reader continues to accept previously persisted references.
+Only a browser configured with `workspaceOnToolEnvironment` uses the SSH
+provider's binding; a local browser reports `[]` even if an unrelated SSH
+provider is available in the same context.

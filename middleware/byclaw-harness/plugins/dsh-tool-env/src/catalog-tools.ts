@@ -1,6 +1,33 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
+import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
+import type { SandboxInstanceRef } from './instance-context.ts'
 import type { ToolSandboxManager } from './catalog.ts'
+
+function markInstanceTool(tool: ToolDefinition): ToolDefinition {
+  if (process.env.BYCLAW_INSTANCE_REFS_ENABLED === 'false') return tool
+  return Object.assign(tool, { byclawInstanceRefsVersion: 1 })
+}
+
+const sourceCalls = new WeakMap<ToolRunContext, number | undefined>()
+function reportInstances(ctx: Context, exec: ToolRunContext, instanceRefs: SandboxInstanceRef[]): void {
+  if (process.env.BYCLAW_INSTANCE_REFS_ENABLED === 'false') return
+  // Display observers are optional and must not interrupt actual tool execution.
+  try {
+    const session = exec.agent?.session
+    if (!session) return
+    if (!sourceCalls.has(exec)) {
+      const call = [...(session.snapshotEvents?.() ?? [])].reverse().find(event => (
+        (event.type === 'tool/call' && String(event.data.callId) === String(exec.callId))
+        || (event.type === 'tool/ptc-dispatch-start' && String(event.data.subCallId) === String(exec.callId))))
+      sourceCalls.set(exec, call?.seq)
+    }
+    const sourceCallSeq = sourceCalls.get(exec)
+    if (sourceCallSeq === undefined) return
+    const events = ctx.root as unknown as { emit(type: string, session: unknown, data: unknown): void }
+    events.emit('byclaw/tool-instance-refs', session, { callId: String(exec.callId), sourceCallSeq, instanceRefs })
+  } catch { /* display only */ }
+}
 
 const output = {
   schema: { type: 'object', additionalProperties: false, properties: { json: { type: 'string', required: true } } },
@@ -34,26 +61,31 @@ export function registerCatalogTools(ctx: Context, manager: ToolSandboxManager):
     name: 'sandbox_templates', description: 'List the current user-authorized self-built tool sandbox marketplace. Browser and media templates are separate execution environments. Operations always use private SSH. Enabled cold templates are available for acquisition even when verification is not-yet-verified. Acquire the template to start it and verify its actual runtime contract; do not treat a cold template as unavailable.',
     parameters: {}, output, execute: async () => { await manager.refreshCatalog(); return { json: JSON.stringify(manager.catalog()) } },
   }))
-  ctx.tools.register(defineTool({
+  ctx.tools.register(markInstanceTool(defineTool({
     name: 'sandbox_acquire', description: 'Acquire a task-owned lease for the selected tool template over private SSH and verify its contract. Turn end returns leases and retains compute. Use sandbox_release only for user-requested destruction; later turns need a new request_id.',
     parameters: { template_key: { type: 'string', required: true }, request_id: { type: 'string', required: true, description: 'Idempotency key for this task acquisition; reuse only while its lease is active. Use a new key after release or turn end.' } }, output,
     execute: async (args, exec) => {
+      reportInstances(ctx, exec, [])
       exec.signal.throwIfAborted()
       const actor = String(exec.agent?.id ?? 'interactive')
       const lease = await manager.acquire(actor, args.template_key, args.request_id)
       if (exec.signal.aborted) { await manager.release(actor, lease.leaseId, 'task-end'); exec.signal.throwIfAborted() }
-      return { json: JSON.stringify(lease) }
+      reportInstances(ctx, exec, manager.instanceRefs(actor, lease.leaseId))
+      const { instanceContext: _privateContext, ...publicLease } = lease
+      return { json: JSON.stringify(publicLease) }
     },
-  }))
-  ctx.tools.register(defineTool({
+  })))
+  ctx.tools.register(markInstanceTool(defineTool({
     name: 'sandbox_exec', description: 'Execute an argv array inside the environment selected by the lease, exclusively over private SSH. This never runs on the shared Harness host. Use browser leases for collection and media leases for voice/subtitle/video rendering. Files under /by are the same user AgenticFS storage, so one environment can consume another environment\'s authorized output. Reports real exit status and bounded stdout/stderr. Nonzero exit means the command failed.',
     parameters: { lease_id: { type: 'string', required: true }, argv: { type: 'array', items: { type: 'string' }, required: true }, cwd: { type: 'string' }, timeout_ms: { type: 'integer', description: 'Execution deadline in milliseconds, from 1000 to 900000.' } }, output,
     execute: async (args, exec) => {
+      reportInstances(ctx, exec, [])
+      reportInstances(ctx, exec, manager.instanceRefs(String(exec.agent?.id ?? 'interactive'), args.lease_id))
       const timeout = args.timeout_ms ?? 300000
       if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 900000) throw new Error('INVALID_EXECUTION_TIMEOUT')
       return { json: JSON.stringify(await manager.execute(String(exec.agent?.id ?? 'interactive'), args.lease_id, args.argv, args.cwd, AbortSignal.any([exec.signal, AbortSignal.timeout(timeout)]))) }
     },
-  }))
+  })))
   ctx.tools.register(defineTool({
     name: 'sandbox_release', description: 'For user-requested destruction, return this task\'s lease; the last reference destroys compute. Other tasks retain their environments. Turn end returns leases without destruction. Failed destruction retains ownership for retry.',
     parameters: { lease_id: { type: 'string', required: true } }, output,

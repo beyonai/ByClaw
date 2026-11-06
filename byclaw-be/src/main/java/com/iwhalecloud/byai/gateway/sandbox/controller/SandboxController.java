@@ -208,6 +208,8 @@ public class SandboxController {
         result.put("sandboxId", sandboxInfo.getSandboxId());
         result.put("endpoints", sandboxInfo.getEndpoints());
         result.put("instanceEndpoints", sandboxInfo.getInstanceEndpoints());
+        result.put("instanceContext", sandboxInfo.getInstanceContext());
+        result.put("instanceDescriptors", sandboxInfo.getInstanceDescriptors());
         result.put("token", sandboxInfo.getGatewayToken());
         result.put("remoteExpiresAt", sandboxInfo.getRemoteExpiresAt());
         result.put("lastHeartbeatTime", sandboxInfo.getLastHeartbeatTime());
@@ -257,6 +259,8 @@ public class SandboxController {
                     result.put("sandboxId", sandbox.getSandboxId());
                     result.put("endpoints", sandbox.getEndpoints());
                     result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
+                    result.put("instanceContext", sandbox.getInstanceContext());
+                    result.put("instanceDescriptors", sandbox.getInstanceDescriptors());
                     result.put("endpointHeaders", sandbox.getEndpointHeaders());
                     result.put("token", sandbox.getGatewayToken());
                     result.put("isShared", shared);
@@ -460,6 +464,8 @@ public class SandboxController {
             result.put("sandboxId", data.getSandboxId());
             result.put("endpoints", data.getEndpoints());
             result.put("instanceEndpoints", data.getInstanceEndpoints());
+            result.put("instanceContext", data.getInstanceContext());
+            result.put("instanceDescriptors", data.getInstanceDescriptors());
             result.put("endpointHeaders", data.getEndpointHeaders());
             return ResponseUtil.successResponse(result);
         } catch (Exception e) {

@@ -1,3 +1,4 @@
+import { instanceRefsFor } from './instance-context.ts'
 /**
  * ByClaw tool environment: run DSH's file, process, terminal, PTC and sandbox
  * providers in a separate sandbox (B) while this process (A) keeps the Web UI,
@@ -199,7 +200,7 @@ export class ToolEnv extends ToolEnvConnection {
         return executeSandboxProcess(process, signal)
       }
       return {
-        identity: () => ({ workspaceRoot: workspace, ...(runtime.ssh.sandboxId === undefined ? {} : { sandboxId: runtime.ssh.sandboxId }) }),
+        identity: () => ({ ...(runtime.ssh.instanceContext === undefined ? {} : { instanceContext: runtime.ssh.instanceContext }), workspaceRoot: workspace, ...(runtime.ssh.sandboxId === undefined ? {} : { sandboxId: runtime.ssh.sandboxId }) }),
         handshake: async () => { await runtime.ssh.ready; const result = await execute(['cat', '/etc/byclaw-tool-sandbox/capabilities.json']); if (result.exitCode !== 0) throw new Error('CAPABILITY_MANIFEST_UNAVAILABLE'); return JSON.parse(result.stdout) as unknown },
         execute,
         release: async (destroy = true) => { await runtime.ssh.releaseOwned(destroy); this.catalogRuntimes.delete(runtime.ssh); await fiber.dispose() },
@@ -218,6 +219,10 @@ export class ToolEnv extends ToolEnvConnection {
    * be launched after the first token expired. Other backends ignore it.
    */
   /** Current provider resource, exposed without ingress credentials for lifecycle correlation. */
+  instanceRefs(capability?: string) { return instanceRefsFor(this.instanceContext, capability) }
+
+  get instanceContext() { return this.beBackend?.instanceContext }
+
   get sandboxId(): string | undefined { return this.beBackend?.sandboxId }
 
   renewBeToken(token: string): void {

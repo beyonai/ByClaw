@@ -1,3 +1,5 @@
+import DesktopWorkspace from '@/components/DesktopWorkspace';
+import { updateDesktopOwner, useDesktopWorkspace } from '@/utils/desktopWorkspace';
 import { ArrowsAltOutlined, CloseOutlined } from '@ant-design/icons';
 import React, { lazy, Suspense, useMemo, useRef } from 'react';
 import { Drawer, Space } from 'antd';
@@ -119,6 +121,8 @@ const MyDrawer = (props: IMyDrawerProps) => {
 function MainDrawer() {
   const { EventEmitter } = useGlobal();
 
+  const activeOwner = useDesktopWorkspace((state) => state.activeOwner);
+  const visible = useDesktopWorkspace((state) => state.visible);
   const keyRef = useRef(getRandomNumber(0, 100));
 
   const {
@@ -129,8 +133,13 @@ function MainDrawer() {
     driverOpen,
   } = useActionEffect();
 
+  React.useEffect(() => {
+    if (drawerType === 'desktop' && (contentPayload.owner !== activeOwner || !visible)) driverOpen('');
+  }, [activeOwner, visible, drawerType, contentPayload.owner, driverOpen]);
+
   const ContentComp = React.useMemo<React.ComponentType<any>>(() => {
     keyRef.current = getRandomNumber(0, 100);
+    if (drawerType === 'desktop') return DesktopWorkspace;
     if (['iframe', 'vnc'].includes(drawerType)) {
       return IframeRender;
     }
@@ -156,6 +165,10 @@ function MainDrawer() {
     <MyDrawer
       open={!!drawerType}
       onClose={() => {
+        if (drawerType === 'desktop' && contentPayload.owner) {
+          updateDesktopOwner(contentPayload.owner, { handled: true });
+          useDesktopWorkspace.setState({ visible: false });
+        }
         driverOpen('');
       }}
       drawerCfg={drawerCfg}

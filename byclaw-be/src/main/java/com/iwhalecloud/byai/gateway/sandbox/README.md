@@ -160,3 +160,13 @@ BE 两种 Docker 镜像的健康检查使用 `/byaiService/actuator/health`，�
 提前创建账号可以把这段等待移到首次登录之前，刚注册立即聊天仍使用原有等待流程。
 
 文件上传能力探测兼容较早版本 Platform：仅在分片上传能力接口返回 HTTP 404 或显式 `resumable=false` 时告知前端使用既有 multipart 上传接口；认证、网络和服务端错误继续上报。该兼容不会将远程存储切换为 BE 本地存储。
+
+## Instance presentation context
+
+A spec may declare `ports[].presentation: {viewer, label}` and `instanceBindings: {capability: [instance]}`. Publishing validates unique instance names, valid ports and existing binding targets. Runtime readers tolerate damaged optional presentation metadata; it must not stop sandbox execution.
+
+Newly created runtimes return credential-free `instanceContext` (version 1, normalized sandboxId, optional mappingId, instanceBindings and instanceDescriptors). The launch CAS persists it separately in `ss_sandbox_record.instance_context_snapshot`; apply the authorized V0.6.0 migration before deploying this reader. Directory and allocation responses restore this snapshot and filter it to authorized endpoint keys. Existing NULL records and provider recovery without an actual creation snapshot remain legacy; current templates never reinterpret them. Shared context projection must not expose physical-host-only endpoints.
+
+Restoration also validates nested descriptor types. A damaged optional snapshot disables its presentation context while preserving existing endpoints and runtime reuse; it does not rewrite the saved record.
+
+Tool events carry optional root `AnswerDelta.instanceRefs` identities. Missing values retain legacy behavior; present invalid values become an explicit empty list. MessageContext unions valid identities by the exact sandbox/mapping/instance tuple and preserves them through streamed snapshots and stored messageStruct history. References never contain URLs, headers or tokens.

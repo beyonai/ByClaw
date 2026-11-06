@@ -138,6 +138,8 @@ export default {
 
       CookieUtil.set('uc', myUserInfo.userCode);
       localStorage.setItem('uc', myUserInfo.userCode);
+      localStorage.setItem('enterpriseId', String(myUserInfo.enterpriseId ?? ''));
+      window.dispatchEvent(new Event('byclaw-auth-change'));
 
       if (!myUserInfo.registerType) {
         set(myUserInfo, 'isRetented', true);

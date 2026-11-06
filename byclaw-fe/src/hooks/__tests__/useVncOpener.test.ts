@@ -1,305 +1,253 @@
-const mockEventEmitter = { emit: jest.fn() };
-const mockMessageInfo = jest.fn();
-const mockFetch = jest.fn();
-
-jest.mock('antd', () => ({ message: { info: (...args: unknown[]) => mockMessageInfo(...args) } }));
-jest.mock('@umijs/max', () => ({ getIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }) }));
-const mockRefreshSandboxes = jest.fn();
-const mockSetSiderCollapsed = jest.fn();
-let mockAppState: any;
-
-jest.mock('@/models/common/useAppStore', () => ({
-  __esModule: true,
-  default: { getState: () => mockAppState },
-}));
-
-jest.mock('../useGlobal', () => ({
-  __esModule: true,
-  default: () => ({ EventEmitter: mockEventEmitter }),
-}));
-
+import { StrictMode } from 'react';
 import { act, renderHook } from '@testing-library/react';
 import useVncOpener from '../useVncOpener';
+import { desktopAuthEpoch, getDesktopOwner, updateDesktopOwner, useDesktopWorkspace } from '@/utils/desktopWorkspace';
 
-const readySandboxes = [
-  {
-    status: 'RUNNING',
-    instanceEndpoints: { vnc: '/v1/sandboxes/test/proxy/8081?token=test-token' },
-  },
-];
-
+const mockEmit = jest.fn();
+const mockLookup = jest.fn();
+let mockIdentity = 'tenant';
+jest.mock('../useGlobal', () => ({ __esModule: true, default: () => ({ EventEmitter: { emit: mockEmit } }) }));
+jest.mock('@/models/common/useAppStore', () => ({
+  __esModule: true,
+  default: { getState: () => ({ getSandboxesInfoUrl: mockLookup }) },
+}));
+jest.mock('@/utils/auth', () => ({
+  getDesktopIdentitySnapshot: () => ({ account: 'user', enterpriseId: mockIdentity }),
+  getAuthSnapshot: () => ({ sessionId: 'auth', token: '', ssoToken: '' }),
+}));
+const refA = { sandboxId: 'a', instance: 'vnc' };
+const refB = { sandboxId: 'b', instance: 'vnc' };
+const owner = JSON.stringify(['session', 'chat']);
+const row = (sandboxId: string) => ({ sandboxId, instanceEndpoints: { vnc: `https://${sandboxId}/vnc.html` } });
 const flush = async () => {
-  await act(async () => {});
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
 };
-
-describe('useVncOpener', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    jest.useFakeTimers();
-    mockFetch.mockResolvedValue({ type: 'basic', status: 200 });
-    (globalThis as any).fetch = mockFetch;
-    mockRefreshSandboxes.mockResolvedValue([]);
-    mockAppState = {
-      sandboxesInfo: readySandboxes,
-      getSandboxesInfoUrl: mockRefreshSandboxes,
-      setSiderCollapsed: mockSetSiderCollapsed,
-    };
+beforeEach(() => {
+  mockIdentity = 'tenant';
+  desktopAuthEpoch();
+  sessionStorage.clear();
+  useDesktopWorkspace.setState({ owners: {}, panel: '', activeOwner: '', visible: false, revision: 0 });
+  mockEmit.mockClear();
+  mockLookup.mockReset();
+  mockLookup.mockResolvedValue([row('b'), row('a')]);
+});
+it('always opens the empty workspace manually', async () => {
+  mockLookup.mockResolvedValue([]);
+  const { result } = renderHook(() => useVncOpener('chat'));
+  act(() => result.current());
+  expect(mockEmit).toHaveBeenCalledWith(
+    'beyond-drawer-view',
+    expect.objectContaining({ action: 'open', config: expect.objectContaining({ drawerType: 'desktop' }) })
+  );
+});
+it('registers later instances without stealing selection or reopening', async () => {
+  const { result } = renderHook(() => useVncOpener('chat'));
+  act(() => result.current({ key: 'toolA', instanceRefs: [refA] }));
+  await flush();
+  const first = getDesktopOwner(owner).selected;
+  mockEmit.mockClear();
+  act(() => result.current({ key: 'toolB', instanceRefs: [refB] }));
+  await flush();
+  expect(getDesktopOwner(owner).refs).toEqual([refA, refB]);
+  expect(getDesktopOwner(owner).selected).toBe(first);
+  expect(mockEmit).not.toHaveBeenCalled();
+});
+it('claims pending once; B neither cancels nor replaces A', async () => {
+  let resolve!: (rows: any[]) => void;
+  mockLookup.mockReturnValue(
+    new Promise((done) => {
+      resolve = done;
+    })
+  );
+  const { result } = renderHook(() => useVncOpener('chat'));
+  act(() => result.current({ key: 'A', instanceRefs: [refA] }));
+  act(() => result.current({ key: 'B', instanceRefs: [refB] }));
+  await act(async () => {
+    resolve([row('a'), row('b')]);
   });
-
-  afterEach(() => {
-    jest.useRealTimers();
+  expect(mockLookup).toHaveBeenCalledTimes(1);
+  expect(getDesktopOwner(owner).selected).toContain('"a"');
+  expect(mockEmit.mock.calls.filter(([event]) => event === 'beyond-drawer-view')).toHaveLength(1);
+});
+it('does not replace another work panel and consumes the first chance', async () => {
+  const { result } = renderHook(() => useVncOpener('chat'));
+  useDesktopWorkspace.setState({ panel: 'preview' });
+  act(() => result.current({ key: 'A', instanceRefs: [refA] }));
+  expect(getDesktopOwner(owner).handled).toBe(true);
+  expect(mockLookup).not.toHaveBeenCalled();
+  expect(mockEmit).not.toHaveBeenCalled();
+});
+it('cancels pending when user intent or owner changes', async () => {
+  let resolve!: (rows: any[]) => void;
+  mockLookup.mockReturnValue(
+    new Promise((done) => {
+      resolve = done;
+    })
+  );
+  const { result, rerender } = renderHook(({ id }) => useVncOpener(id), { initialProps: { id: 'chat' } });
+  act(() => result.current({ key: 'A', instanceRefs: [refA] }));
+  rerender({ id: 'other' });
+  await act(async () => {
+    resolve([row('a')]);
   });
-
-  it('opens a ready desktop with its endpoint token and proxy slash', async () => {
-    const { result } = renderHook(() => useVncOpener('session-a'));
-    act(() => result.current({ key: 'answer-a:tool-a' }));
-    await flush();
-
-    expect(mockSetSiderCollapsed).toHaveBeenCalledWith(true);
-    expect(mockEventEmitter.emit).toHaveBeenNthCalledWith(1, 'beyond-main-driver-open-type', {
-      drawerType: 'vnc',
-      canClose: true,
-      width: '50vw',
-    });
-    expect(mockEventEmitter.emit).toHaveBeenNthCalledWith(2, 'beyond-main-driver-message', {
-      url: `${window.location.origin}/v1/sandboxes/test/proxy/8081/?token=test-token&autoconnect=true&resize=scale`,
-    });
-    expect(mockEventEmitter.emit).toHaveBeenNthCalledWith(3, 'beyond-chat-vnc-opened', { sessionId: 'session-a' });
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
-    expect(mockRefreshSandboxes).not.toHaveBeenCalled();
+  expect(mockEmit).not.toHaveBeenCalled();
+  expect(getDesktopOwner(owner).refs).toEqual([refA]);
+});
+it('does not resurrect hidden entries on repeated tool events', async () => {
+  const { result } = renderHook(() => useVncOpener('chat'));
+  act(() => result.current({ key: 'A', instanceRefs: [refA] }));
+  await flush();
+  const key = getDesktopOwner(owner).selected!;
+  updateDesktopOwner(owner, { hidden: [key] });
+  act(() => result.current({ key: 'again', instanceRefs: [refA] }));
+  expect(getDesktopOwner(owner).hidden).toEqual([key]);
+});
+it('does not consume the opportunity for explicit empty or known non-desktop references', async () => {
+  mockLookup.mockResolvedValue([
+    { sandboxId: 'a', instanceEndpoints: { web: 'https://a/' }, instanceDescriptors: { web: { viewer: 'iframe' } } },
+  ]);
+  const { result } = renderHook(() => useVncOpener('chat'));
+  act(() => result.current({ key: 'empty', instanceRefs: [] }));
+  expect(getDesktopOwner(owner).handled).not.toBe(true);
+  act(() => result.current({ key: 'web', instanceRefs: [{ sandboxId: 'a', instance: 'web' }] }));
+  await flush();
+  expect(getDesktopOwner(owner).handled).toBe(false);
+  expect(getDesktopOwner(owner).refs).toEqual([]);
+  expect(mockEmit).not.toHaveBeenCalled();
+});
+it('opens the picker for ambiguous legacy targets without registering a guessed target', async () => {
+  const { result } = renderHook(() => useVncOpener('chat'));
+  act(() => result.current({ key: 'legacy' }));
+  await flush();
+  expect(mockEmit).toHaveBeenCalledWith('beyond-drawer-view', expect.objectContaining({ action: 'open' }));
+  expect(getDesktopOwner(owner).refs).toEqual([]);
+});
+it('opens a local draft owner manually and migrates its associations once a formal ID exists', async () => {
+  const { result, rerender } = renderHook(({ id }: { id?: string }) => useVncOpener(id), {
+    initialProps: { id: undefined },
   });
-
-  it('opens the desktop instance it is asked for', async () => {
-    mockAppState.sandboxesInfo = [
-      {
-        status: 'RUNNING',
-        instanceEndpoints: {
-          vnc: '/v1/sandboxes/test/proxy/8081?token=test-token',
-          desktop: '/v1/sandboxes/test/proxy/8083?token=test-token',
-        },
-      },
-    ];
-    const { result } = renderHook(() => useVncOpener('session-a'));
-    act(() => result.current({ instance: 'desktop' }));
-    await flush();
-
-    expect(mockEventEmitter.emit).toHaveBeenCalledWith('beyond-main-driver-message', {
-      url: `${window.location.origin}/v1/sandboxes/test/proxy/8083/?token=test-token&autoconnect=true&resize=scale`,
-    });
+  const draft = result.current.owner;
+  act(() => result.current({ key: 'not-yet-real', instanceRefs: [refA] }));
+  expect(mockEmit).not.toHaveBeenCalled();
+  act(() => result.current());
+  expect(mockEmit).toHaveBeenCalledWith('beyond-drawer-view', expect.objectContaining({ content: { owner: draft } }));
+  updateDesktopOwner(draft, { refs: [refA], selected: JSON.stringify(['a', null, 'vnc']), hidden: ['hidden'] });
+  rerender({ id: 'chat' });
+  expect(getDesktopOwner(owner)).toMatchObject({
+    refs: [refA],
+    selected: JSON.stringify(['a', null, 'vnc']),
+    hidden: ['hidden'],
+    handled: true,
   });
+  expect(useDesktopWorkspace.getState().owners[draft]).toBeUndefined();
+  mockEmit.mockClear();
+  act(() => result.current({ key: 'first-real', instanceRefs: [refA] }));
+  expect(mockEmit).not.toHaveBeenCalled();
+});
+it('restores the current owner after navigation effect cleanup so the next owner can open', () => {
+  const { result, rerender } = renderHook(({ id }) => useVncOpener(id), { initialProps: { id: 'chat' } });
+  rerender({ id: 'other' });
+  act(() => result.current());
+  expect(mockEmit).toHaveBeenCalledWith(
+    'beyond-drawer-view',
+    expect.objectContaining({ content: { owner: JSON.stringify(['session', 'other']) } })
+  );
+});
 
-  it('refreshes an empty cache and opens when the sandbox becomes ready', async () => {
-    mockAppState.sandboxesInfo = [];
-    mockRefreshSandboxes.mockResolvedValue(readySandboxes);
-    const { result } = renderHook(() => useVncOpener('session-a'));
-    act(() => result.current());
-    await flush();
+it('keeps the opener valid after StrictMode setup-cleanup replay', () => {
+  const { result } = renderHook(() => useVncOpener('strict-chat'), { wrapper: StrictMode });
+  act(() => result.current());
+  expect(mockEmit).toHaveBeenCalledWith(
+    'beyond-drawer-view',
+    expect.objectContaining({ content: { owner: JSON.stringify(['session', 'strict-chat']) } })
+  );
+});
 
-    expect(mockRefreshSandboxes).toHaveBeenCalledTimes(1);
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
-    expect(mockEventEmitter.emit).toHaveBeenCalledWith('beyond-chat-vnc-opened', { sessionId: 'session-a' });
+it('releases a visible desktop only after the last opener for its chat unmounts', () => {
+  const stream = renderHook(() => useVncOpener('chat'));
+  const title = renderHook(() => useVncOpener('chat'));
+  act(() => title.result.current());
+  stream.unmount();
+  expect(useDesktopWorkspace.getState()).toMatchObject({ activeOwner: owner, visible: true });
+  title.unmount();
+  expect(useDesktopWorkspace.getState()).toMatchObject({ activeOwner: '', visible: false, pendingOwner: '' });
+});
+
+it('opens the first live desktop after identity changes without requiring route remount', async () => {
+  const { result } = renderHook(() => useVncOpener('chat'));
+  act(() => {
+    mockIdentity = 'next-tenant';
+    desktopAuthEpoch();
   });
+  act(() => result.current({ key: 'new-identity', instanceRefs: [refA] }));
+  await flush();
+  expect(mockEmit).toHaveBeenCalledWith('beyond-drawer-view', expect.objectContaining({ action: 'open' }));
+  expect(useDesktopWorkspace.getState().pendingOwner).toBe('');
+});
 
-  it('retries STARTING sandboxes until there is a usable RUNNING endpoint', async () => {
-    mockAppState.sandboxesInfo = [{ status: 'STARTING' }];
-    mockRefreshSandboxes.mockResolvedValueOnce([{ status: 'STARTING' }]).mockResolvedValueOnce(readySandboxes);
-    const { result } = renderHook(() => useVncOpener('session-a'));
-    act(() => result.current({ key: 'tool-a' }));
-    await flush();
-    expect(mockEventEmitter.emit).not.toHaveBeenCalled();
-
-    await act(async () => {
-      await jest.advanceTimersByTimeAsync(2000);
-    });
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
-    expect(mockEventEmitter.emit).toHaveBeenCalledWith('beyond-chat-vnc-opened', { sessionId: 'session-a' });
+it('does not close a newer chat when an older owner finishes unmounting', () => {
+  const old = renderHook(() => useVncOpener('old'));
+  const next = renderHook(() => useVncOpener('next'));
+  act(() => next.result.current());
+  old.unmount();
+  expect(useDesktopWorkspace.getState()).toMatchObject({
+    activeOwner: JSON.stringify(['session', 'next']),
+    visible: true,
   });
+});
 
-  it('stops retrying missing endpoints without opening an empty iframe', async () => {
-    mockAppState.sandboxesInfo = [{ status: 'RUNNING', instanceEndpoints: {} }];
-    const { result } = renderHook(() => useVncOpener('session-a'));
-    act(() => result.current());
-    await flush();
-    await act(async () => {
-      await jest.runAllTimersAsync();
-    });
+it('migrates the title draft while its separate stream opener also receives the formal ID', () => {
+  const { result, rerender, unmount } = renderHook(
+    ({ id }: { id?: string }) => ({ stream: useVncOpener(id), title: useVncOpener(id) }),
+    { initialProps: { id: undefined } }
+  );
+  const titleDraft = result.current.title.owner;
+  act(() => result.current.title());
+  act(() => updateDesktopOwner(titleDraft, { refs: [refA], selected: JSON.stringify(['a', null, 'vnc']) }));
+  rerender({ id: 'chat' });
+  expect(getDesktopOwner(owner)).toMatchObject({ refs: [refA], selected: JSON.stringify(['a', null, 'vnc']) });
+  act(() => result.current.title());
+  expect(useDesktopWorkspace.getState().visible).toBe(true);
+  unmount();
+  expect(useDesktopWorkspace.getState()).toMatchObject({ activeOwner: '', visible: false });
+});
 
-    expect(mockEventEmitter.emit).not.toHaveBeenCalled();
-    expect(mockRefreshSandboxes.mock.calls.length).toBeGreaterThan(0);
-    expect(mockRefreshSandboxes.mock.calls.length).toBeLessThanOrEqual(30);
-    expect(jest.getTimerCount()).toBe(0);
-    // A click that finds no desktop is told so.
-    expect(mockMessageInfo).toHaveBeenCalledWith('common.remoteComputerUnavailable');
-  });
+it('clears only the unmounted subscriber pending request while its chat title remains', async () => {
+  let resolve!: (rows: any[]) => void;
+  mockLookup.mockReturnValue(
+    new Promise((done) => {
+      resolve = done;
+    })
+  );
+  const stream = renderHook(() => useVncOpener('chat'));
+  const title = renderHook(() => useVncOpener('chat'));
+  act(() => stream.result.current({ key: 'pending', instanceRefs: [refA] }));
+  expect(useDesktopWorkspace.getState().pendingOwner).toBe(owner);
+  stream.unmount();
+  expect(useDesktopWorkspace.getState()).toMatchObject({ activeOwner: owner, pendingOwner: '' });
+  await act(async () => resolve([row('a')]));
+  expect(mockEmit).not.toHaveBeenCalled();
+  title.unmount();
+});
 
-  it('waits for the desktop to answer before opening it', async () => {
-    // The sandbox proxy answers 502 until the browser's desktop listens in the tool sandbox.
-    mockFetch
-      .mockResolvedValueOnce({ type: 'basic', status: 502 })
-      .mockResolvedValueOnce({ type: 'basic', status: 502 })
-      .mockResolvedValue({ type: 'opaqueredirect', status: 0 });
-    mockRefreshSandboxes.mockResolvedValue(readySandboxes);
-    const { result } = renderHook(() => useVncOpener('session-a'));
-    act(() => result.current({ key: 'answer-a:tool-a' }));
-    await flush();
-    expect(mockEventEmitter.emit).not.toHaveBeenCalled();
-    await act(async () => {
-      await jest.advanceTimersByTimeAsync(2000);
-    });
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
-    expect(mockFetch).toHaveBeenCalledTimes(3);
-    expect(mockFetch.mock.calls[0][1]).toMatchObject({ credentials: 'include', redirect: 'manual' });
-  });
-
-  it('gives up quietly when a tool call never brings up the desktop', async () => {
-    mockFetch.mockResolvedValue({ type: 'basic', status: 502 });
-    mockRefreshSandboxes.mockResolvedValue(readySandboxes);
-    const { result } = renderHook(() => useVncOpener('session-a'));
-    act(() => result.current({ key: 'answer-a:tool-a' }));
-    await flush();
-    await act(async () => {
-      await jest.runAllTimersAsync();
-    });
-    expect(mockEventEmitter.emit).not.toHaveBeenCalled();
-    expect(mockMessageInfo).not.toHaveBeenCalled();
-    expect(jest.getTimerCount()).toBe(0);
-  });
-
-  it('treats a failed probe as not ready', async () => {
-    mockFetch.mockRejectedValueOnce(new Error('network')).mockResolvedValue({ type: 'basic', status: 200 });
-    mockRefreshSandboxes.mockResolvedValue(readySandboxes);
-    const { result } = renderHook(() => useVncOpener('session-a'));
-    act(() => result.current());
-    await flush();
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-  });
-
-  it('handles a rejected cache and refresh without an unhandled rejection', async () => {
-    mockAppState.sandboxesInfo = Promise.reject(new Error('cache unavailable'));
-    mockRefreshSandboxes.mockRejectedValue(new Error('sandbox unavailable'));
-    const { result } = renderHook(() => useVncOpener('session-a'));
-    act(() => result.current());
-    await flush();
-    await act(async () => {
-      await jest.runAllTimersAsync();
-    });
-    expect(mockEventEmitter.emit).not.toHaveBeenCalled();
-    expect(jest.getTimerCount()).toBe(0);
-  });
-
-  it('coalesces repeated stream frames for the same tool while pending and after opening', async () => {
-    let resolveSandboxes: (value: any) => void = () => {};
-    mockAppState.sandboxesInfo = new Promise((resolve) => {
-      resolveSandboxes = resolve;
-    });
-    const { result } = renderHook(() => useVncOpener('session-a'));
-    act(() => {
-      result.current({ key: 'answer-a:tool-a' });
-      result.current({ key: 'answer-a:tool-a' });
-    });
-    await act(async () => resolveSandboxes(readySandboxes));
-    act(() => result.current({ key: 'answer-a:tool-a' }));
-    await flush();
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
-    expect(mockEventEmitter.emit).toHaveBeenCalledWith('beyond-chat-vnc-opened', { sessionId: 'session-a' });
-  });
-
-  it('keeps pending opening and deduplication when only the session ID type changes', async () => {
-    let resolveSandboxes: (value: any) => void = () => {};
-    mockAppState.sandboxesInfo = new Promise((resolve) => {
-      resolveSandboxes = resolve;
-    });
-    const { result, rerender } = renderHook(({ sessionId }) => useVncOpener(sessionId), {
-      initialProps: { sessionId: 11273519 as string | number },
-    });
-    act(() => result.current({ key: 'answer-a:tool-a' }));
-    rerender({ sessionId: '11273519' });
-    await act(async () => resolveSandboxes(readySandboxes));
-
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
-    expect(mockEventEmitter.emit).toHaveBeenCalledWith('beyond-chat-vnc-opened', { sessionId: '11273519' });
-
-    rerender({ sessionId: 11273519 });
-    act(() => result.current({ key: 'answer-a:tool-a' }));
-    await flush();
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
-  });
-
-  it('allows a manual reopen after the desktop was closed', async () => {
-    const { result } = renderHook(() => useVncOpener('session-a'));
-    act(() => result.current());
-    await flush();
-    act(() => result.current());
-    await flush();
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(6);
-    expect(mockEventEmitter.emit.mock.calls.filter(([event]) => event === 'beyond-chat-vnc-opened')).toEqual([
-      ['beyond-chat-vnc-opened', { sessionId: 'session-a' }],
-      ['beyond-chat-vnc-opened', { sessionId: 'session-a' }],
-    ]);
-  });
-
-  it.each(['session-b', 'session-a'])('discards an old request after switching away and to %s', async (target) => {
-    let resolveSandboxes: (value: any) => void = () => {};
-    mockAppState.sandboxesInfo = new Promise((resolve) => {
-      resolveSandboxes = resolve;
-    });
-    const { result, rerender } = renderHook(({ sessionId }) => useVncOpener(sessionId), {
-      initialProps: { sessionId: 'session-a' },
-    });
-    act(() => result.current());
-    rerender({ sessionId: 'session-b' });
-    if (target === 'session-a') rerender({ sessionId: 'session-a' });
-    await act(async () => resolveSandboxes(readySandboxes));
-    expect(mockEventEmitter.emit).not.toHaveBeenCalled();
-  });
-
-  it('discards a click when its latest employee message is no longer relevant', async () => {
-    let resolveSandboxes: (value: any) => void = () => {};
-    let isLatest = true;
-    mockAppState.sandboxesInfo = new Promise((resolve) => {
-      resolveSandboxes = resolve;
-    });
-    const { result } = renderHook(() => useVncOpener('session-a'));
-    act(() => result.current({ isCurrent: () => isLatest }));
-    isLatest = false;
-    await act(async () => resolveSandboxes(readySandboxes));
-    expect(mockEventEmitter.emit).not.toHaveBeenCalled();
-  });
-
-  it('reports only the current session when an earlier session request resolves later', async () => {
-    let resolveOldSandboxes: (value: any) => void = () => {};
-    mockAppState.sandboxesInfo = new Promise((resolve) => {
-      resolveOldSandboxes = resolve;
-    });
-    const { result, rerender } = renderHook(({ sessionId }) => useVncOpener(sessionId), {
-      initialProps: { sessionId: 'session-a' },
-    });
-    act(() => result.current());
-    rerender({ sessionId: 'session-b' });
-    mockAppState.sandboxesInfo = readySandboxes;
-    act(() => result.current());
-    await flush();
-
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
-    expect(mockEventEmitter.emit).toHaveBeenNthCalledWith(3, 'beyond-chat-vnc-opened', { sessionId: 'session-b' });
-
-    await act(async () => resolveOldSandboxes(readySandboxes));
-    expect(mockEventEmitter.emit).toHaveBeenCalledTimes(3);
-    expect(mockEventEmitter.emit).not.toHaveBeenCalledWith('beyond-chat-vnc-opened', { sessionId: 'session-a' });
-  });
-
-  it('cancels delayed retries on unmount', async () => {
-    mockAppState.sandboxesInfo = [];
-    const { result, unmount } = renderHook(() => useVncOpener('session-a'));
-    act(() => result.current());
-    await flush();
-    const callsBeforeUnmount = mockRefreshSandboxes.mock.calls.length;
-    unmount();
-    await act(async () => {
-      await jest.runAllTimersAsync();
-    });
-    expect(mockRefreshSandboxes).toHaveBeenCalledTimes(callsBeforeUnmount);
-    expect(mockEventEmitter.emit).not.toHaveBeenCalled();
-  });
+it('does not cancel another subscriber newer pending request after a non-desktop result', async () => {
+  const stream = renderHook(() => useVncOpener('chat'));
+  const title = renderHook(() => useVncOpener('chat'));
+  mockLookup.mockResolvedValue([{ sandboxId: 'a', instanceEndpoints: { web: 'https://a/' } }]);
+  act(() => stream.result.current({ key: 'web', instanceRefs: [{ sandboxId: 'a', instance: 'web' }] }));
+  await flush();
+  let resolve!: (rows: any[]) => void;
+  mockLookup.mockReturnValue(
+    new Promise((done) => {
+      resolve = done;
+    })
+  );
+  act(() => title.result.current({ key: 'desktop', instanceRefs: [refA] }));
+  stream.unmount();
+  expect(useDesktopWorkspace.getState().pendingOwner).toBe(owner);
+  await act(async () => resolve([row('a')]));
+  expect(mockEmit).toHaveBeenCalledWith('beyond-drawer-view', expect.objectContaining({ action: 'open' }));
 });

@@ -27,6 +27,7 @@ interface ChatTitleProps {
   suffix?: React.ReactNode;
   lastAnswer?: any;
   latestDigitalEmployeeMessage?: IMessage;
+  messages?: IMessage[];
   agentType: IAgentType;
   projectId?: number;
   projectName?: string;
@@ -51,7 +52,7 @@ export default function ChatTitle(props: ChatTitleProps) {
   // const isSimpleSession = currentSession?.sessionType === SessionType.simple;
 
   const titleSession = React.useMemo(() => {
-    if (!sessionId) return undefined;
+    if (!sessionId) return sessionHandler({ sessionId: '', sessionName: 'New Chat' } as ISession);
 
     // 缓存会话已带有列表计算出的头像和主题色，直接复用，避免再次标准化后图标样式与列表不一致。
     if (currentSession) {
@@ -122,11 +123,11 @@ export default function ChatTitle(props: ChatTitleProps) {
                 sessionName={titleSession.sessionName}
               />
               <VNC
-                key={sessionId}
                 sessionId={sessionId}
                 latestDigitalEmployeeMessage={props.latestDigitalEmployeeMessage}
+                messages={props.messages}
               />
-              {isAdminVip(userInfo) && (
+              {!!sessionId && isAdminVip(userInfo) && (
                 <span className={styles.btn} onClick={() => setOpenTemplate(true)} style={{ padding: '0 8px' }}>
                   <AntdIcon type="icon-a-View-grid-listliebiaochakanmoshi" />
                   <span>{intl.formatMessage({ id: 'chatTitle.saveAsTemplate' })}</span>

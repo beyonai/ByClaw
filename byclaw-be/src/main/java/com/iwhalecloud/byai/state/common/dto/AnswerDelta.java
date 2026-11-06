@@ -49,6 +49,29 @@ public class AnswerDelta {
     // 追问元数据
     private String metadata;
 
+    private List<SandboxInstanceRef> instanceRefs;
+
+    public void setInstanceRefs(Object value) {
+
+        java.util.List<SandboxInstanceRef> safe = new java.util.ArrayList<>();
+        if (value instanceof java.util.List<?>) {
+            for (Object item : (java.util.List<?>) value) {
+                if (item instanceof SandboxInstanceRef) safe.add((SandboxInstanceRef) item);
+                else if (item instanceof java.util.Map<?, ?>) {
+                    java.util.Map<?, ?> raw = (java.util.Map<?, ?>) item;
+                    if (!(raw.get("sandboxId") instanceof String) || !(raw.get("instance") instanceof String)
+                        || (raw.containsKey("mappingId") && !(raw.get("mappingId") instanceof String))) continue;
+                    SandboxInstanceRef ref = new SandboxInstanceRef();
+                    ref.setSandboxId((String) raw.get("sandboxId"));
+                    ref.setInstance((String) raw.get("instance"));
+                    ref.setMappingId((String) raw.get("mappingId"));
+                    safe.add(ref);
+                }
+            }
+        }
+        instanceRefs = SandboxInstanceRef.merge(null, safe);
+    }
+
     private String orderId;
 
     private String parentOrderId;

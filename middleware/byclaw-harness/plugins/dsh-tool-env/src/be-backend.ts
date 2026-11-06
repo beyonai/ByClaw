@@ -24,6 +24,7 @@ import { createHash } from 'node:crypto'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ToolEnvIdentity, ToolEnvKeys } from './identity.ts'
+import type { SandboxInstanceContext } from './instance-context.ts'
 import type { SandboxTemplate } from './catalog.ts'
 
 export interface ByClawBeBackendConfig {
@@ -71,8 +72,8 @@ export const PUBLISHED_KEY_PARAMS = { authorized: 'BYCLAW_TOOL_ENV_AUTHORIZED_KE
 interface PrivateParam { paramId?: number; key?: string; hasValue?: boolean; valueLast4?: string }
 
 interface Envelope { code?: number; msg?: string; data?: unknown }
-interface LaunchData { sandboxId?: string; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
-interface InfoEntry { sandboxType?: string; sandboxId?: string; status?: string; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
+interface LaunchData { instanceContext?: SandboxInstanceContext; sandboxId?: string; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
+interface InfoEntry { instanceContext?: SandboxInstanceContext; sandboxType?: string; sandboxId?: string; status?: string; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
 interface ReleaseConfirmation { releaseConfirmed?: boolean; sandboxId?: string; remoteAbsentConfirmed?: boolean }
 
 function confirmExactRelease(value: unknown, expectedSandboxId: string): void {
@@ -147,6 +148,8 @@ export class ByClawBeBackend implements ToolEnvBackend {
   /** Timeout handed to the most recent BE request; tests read it to check the retry budget. */
   lastRequestTimeoutMs = 0
   private currentId: string | undefined
+
+  instanceContext: SandboxInstanceContext | undefined
 
   get sandboxId(): string | undefined { return this.currentId }
   private ownsSandbox = false
@@ -320,6 +323,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
       this.currentId = data.sandboxId
       await this.writeLaunched({ serviceKey, sandboxId: data.sandboxId })
     }
+    this.instanceContext = data?.instanceContext
     let sandboxId = data?.sandboxId
     let endpoint = this.sshEndpoint(data?.instanceEndpoints, data?.endpointHeaders)
     if (endpoint === undefined) {
@@ -327,6 +331,9 @@ export class ByClawBeBackend implements ToolEnvBackend {
       const entries = (await this.call('/sandbox/getSandboxInfo', { userCode, sandboxType }, 'POST', timeoutMs) as InfoEntry[] | undefined) ?? []
       const ofType = entries.filter(entry => entry.sandboxType === sandboxType)
       const entry = sandboxId === undefined ? ofType[0] : ofType.find(candidate => candidate.sandboxId === sandboxId)
+      // A legacy routing fallback may choose an entry for SSH, but it cannot
+      // establish a precise display identity without an exact allocation id.
+      if (sandboxId !== undefined) this.instanceContext ??= entry?.instanceContext
       sandboxId ??= entry?.sandboxId
       if (sandboxId !== undefined && sandboxId !== '') {
         this.ownsSandbox = true

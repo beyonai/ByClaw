@@ -133,6 +133,7 @@ public class SharedSandboxGateway {
             .isShared(data.getIsShared()).mappingId(data.getMappingId()).serviceKey(data.getServiceKey())
             .workerAgentType(data.getWorkerAgentType())
             .sandboxId(data.getSandboxId()).endpoints(data.getEndpoints()).instanceEndpoints(data.getInstanceEndpoints())
+            .instanceContext(data.getInstanceContext()).instanceDescriptors(data.getInstanceDescriptors())
             .gatewayToken(data.getGatewayToken()).servicePort(data.getServicePort())
             .endpointHeaders(data.getEndpointHeaders()).build();
     }

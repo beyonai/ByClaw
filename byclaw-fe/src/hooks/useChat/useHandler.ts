@@ -1,3 +1,4 @@
+import { registerDesktops } from '@/utils/desktopWorkspace';
 import { showNasQuotaError } from '@/utils/nasQuota';
 import { useCallback, useEffect, useRef } from 'react';
 
@@ -560,8 +561,14 @@ function useHandler(props: IProps) {
   const browserHandler = useCallback(
     (onionsProps: IOnionsProps) => {
       const { sseRes, newAnswerMsg } = onionsProps;
-      if (!isSameSessionId(newAnswerMsg?.sessionId, curSessioneRef.current)) return onionsProps;
       const incomingMessage = sseRes?.message;
+      if (newAnswerMsg?.sessionId && incomingMessage?.content?.instanceRefs)
+        registerDesktops(
+          JSON.stringify(['session', String(newAnswerMsg.sessionId)]),
+          incomingMessage.content.instanceRefs,
+          true
+        );
+      if (!isSameSessionId(newAnswerMsg?.sessionId, curSessioneRef.current)) return onionsProps;
       let mergedMessage: IMessageListItem | undefined;
       if (`${incomingMessage?.contentType}` === `${SSEMessageType.toolCall}`) {
         mergedMessage = [...(newAnswerMsg.thinkList || []), ...(newAnswerMsg.messageList || [])].find((item) =>
@@ -569,11 +576,17 @@ function useHandler(props: IProps) {
         );
       }
       // Tool results omit input; the preceding message handler preserves it by orderId.
-      if (!isVncToolMessage(mergedMessage || incomingMessage)) return onionsProps;
+      const toolMessage = mergedMessage || incomingMessage;
+      const hasRefs = toolMessage?.content && Object.prototype.hasOwnProperty.call(toolMessage.content, 'instanceRefs');
+      if (!hasRefs && !isVncToolMessage(toolMessage)) return onionsProps;
+      if (hasRefs && !toolMessage?.content.instanceRefs?.length) return onionsProps;
 
       const answerId = newAnswerMsg.messageId || newAnswerMsg.msgId;
       const toolId = get(sseRes, 'message.content.orderId') || get(sseRes, 'message.uuid') || 'browser';
-      openVnc({ key: `${answerId}:${toolId}` });
+      openVnc({
+        key: `${answerId}:${toolId}`,
+        ...(hasRefs ? { instanceRefs: toolMessage?.content.instanceRefs } : {}),
+      });
 
       return onionsProps;
     },

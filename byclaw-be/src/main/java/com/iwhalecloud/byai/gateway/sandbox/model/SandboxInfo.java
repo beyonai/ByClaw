@@ -42,6 +42,10 @@ public class SandboxInfo {
      */
     private Map<String, String> instanceEndpoints;
 
+    private Map<String, Object> instanceContext;
+
+    private Map<String, Map<String, String>> instanceDescriptors;
+
     private String gatewayToken;
 
     private Integer servicePort;

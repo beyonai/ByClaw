@@ -14,6 +14,33 @@ import com.iwhalecloud.byai.state.common.dto.DeltaDto;
 class MessageContextTest {
 
     @Test
+    void toolInstanceReferencesSurviveMetadataOnlyUpdatesAndHistoryRoundtrip() {
+        MessageContext context = new MessageContext();
+        com.alibaba.fastjson.JSONObject first = JSON.parseObject(answerDelta("{\"input\":\"run\"}", "tool-ref", "3015"));
+        first.put("instanceRefs", JSON.parseArray("[{\"sandboxId\":\"host\",\"mappingId\":\"m1\",\"instance\":\"desk\"}]"));
+        context.recordAnswerStruct(first.toJSONString());
+        com.alibaba.fastjson.JSONObject update = JSON.parseObject(answerDelta("{\"output\":\"ok\"}", "tool-ref", "3015"));
+        update.put("instanceRefs", JSON.parseArray("[{\"sandboxId\":\"host\",\"mappingId\":\"m2\",\"instance\":\"desk\"}]"));
+        context.recordAnswerStruct(update.toJSONString());
+        update.put("instanceRefs", new java.util.ArrayList<>());
+        String stream = context.recordAnswerStruct(update.toJSONString());
+        AnswerDelta saved = JSON.parseObject(JSON.toJSONString(context.getAnswerMessageList().get(0)), AnswerDelta.class);
+        assertThat(saved.getInstanceRefs()).extracting("mappingId").containsExactly("m1", "m2");
+        assertThat(JSON.parseObject(stream).getJSONArray("instanceRefs")).hasSize(2);
+        assertThat(JSON.parseObject(contentAt(context.getAnswerMessageList(), 0))).containsEntry("input", "run").containsEntry("output", "ok");
+        assertThat(JSON.parseObject("{}", AnswerDelta.class).getInstanceRefs()).isNull();
+        assertThat(JSON.parseObject("{\"instanceRefs\":\"malformed\"}", AnswerDelta.class).getInstanceRefs()).isEmpty();
+        assertThat(JSON.parseObject("{\"instanceRefs\":null}", AnswerDelta.class).getInstanceRefs()).isEmpty();
+        for (String invalid : java.util.List.of(
+            "{\"sandboxId\":12,\"instance\":\"desk\"}",
+            "{\"sandboxId\":\"host\",\"instance\":\"desk\",\"mappingId\":null}",
+            "{\"sandboxId\":\"host\",\"instance\":\"desk\",\"mappingId\":\" \"}",
+            "{\"sandboxId\":\" host\",\"instance\":\"desk\"}")) {
+            assertThat(JSON.parseObject("{\"instanceRefs\":[" + invalid + "]}", AnswerDelta.class).getInstanceRefs()).isEmpty();
+        }
+    }
+
+    @Test
     void recordInferLog_mergesSameOrderIdWithoutDroppingFirstFragment() {
         MessageContext context = new MessageContext();
 

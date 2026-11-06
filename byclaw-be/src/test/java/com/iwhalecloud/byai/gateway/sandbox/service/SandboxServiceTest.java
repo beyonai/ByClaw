@@ -337,6 +337,25 @@ class SandboxServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void buildLaunchData_keepsExistingEndpointWhenOptionalSnapshotIsDamaged() {
+        SandboxService service = new SandboxService();
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setSandboxId("sandbox-1");
+        record.setEndpoint("{\"desk\":\"http://existing\"}");
+        record.setInstanceContextSnapshot("{\"version\":1,\"instanceBindings\":{},\"instanceDescriptors\":{\"desk\":false}}");
+
+        SandboxLaunchData reused = ReflectionTestUtils.invokeMethod(service, "buildLaunchData", record);
+        SandboxLaunchData decoded = org.junit.jupiter.api.Assertions.assertDoesNotThrow(() ->
+            new ObjectMapper().convertValue(reused, SandboxLaunchData.class));
+
+        assertThat(decoded.getSandboxId()).isEqualTo("sandbox-1");
+        assertThat(decoded.getEndpoint()).isEqualTo("http://existing");
+        assertThat(decoded.getInstanceEndpoints()).containsEntry("desk", "http://existing");
+        assertThat(decoded.getInstanceContext()).isNull();
+        assertThat(decoded.getInstanceDescriptors()).isNull();
+    }
+
+    @Test
     void buildLaunchData_normalizesEndpointWithPersistedGatewayToken() {
         SandboxService sandboxService = new SandboxService();
         SsSandboxRecord record = new SsSandboxRecord();

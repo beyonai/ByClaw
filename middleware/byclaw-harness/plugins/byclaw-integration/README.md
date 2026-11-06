@@ -106,6 +106,25 @@ Set `DSH_LLM_LOG=info`, or set plugin `llmRequestLogLevel: info`, to write one s
 - ByAI ingress may set `extra_payload.cwd` to an absolute working directory for a new DSH root session; otherwise the plugin `workspace` is used. A configured workspace ending in `/by/projects` supplies the corresponding `/by` root; container deployments continue to use `/by`. DSH's `SessionHeader.cwd` remains the authoritative source workspace, while immutable root identity and template binding live in the plugin-owned `byclaw_sessions` storage domain. No ByClaw-specific event is appended to DSH session logs.
 - The business instruction remains an unchanged `source: user` message. `plugin:byclaw-context` has a session layer and a per-turn layer. The session layer declares the current user, source workspace, `.sessions/<sessionId>` session root, `.shared` root, and default artifact directory. The per-turn layer copies only language, `project_info`, inbound attachment metadata, `resource_list`, and connector availability. `channelExtension`, `groupChat`, multi-agent lane metadata, and authentication tokens are deliberately excluded. Source edits and durable user deliverables (including reports, checklists, and exports) default to the project `cwd`; `.sessions/<sessionId>` is reserved for inbound attachments, generated media, disposable intermediate files, and files explicitly requested for the current session. Durable messages deduplicate the session declaration and each inbound `messageId`; AgentTeams members inherit the namespace while retaining independent DSH session IDs.
 
+### Tool desktop references
+
+Execution adapters send optional `byclaw/tool-instance-refs` Cordis notifications.
+They are stored in the existing `byclaw_sessions.tool_instances` table, never as
+unknown DSH session-log events. The record key includes DSH session ID, its
+creation timestamp, tool call ID, and the captured native/PTC `sourceCallSeq`.
+The table stores only control-plane sandbox/mapping/instance identifiers and
+unions updates in stable order; an empty update cannot clear earlier targets.
+Its additive table keeps the existing domain version and root records readable.
+Optional records are schema-checked when read; an invalid record is unavailable
+until a valid report replaces it. Root records retain strict domain validation.
+
+Live 3015 projections and restored native/PTC tool events read that metadata and
+put `instanceRefs` only on the AnswerDelta root. A missing record remains absent;
+a recorded empty list stays explicit. Late updates use the exact call occurrence
+to preserve terminal state and never attach to another turn reusing its call ID.
+Optional metadata read/write failures do not replace tool results. Worker/session
+shutdown completes before the metadata domain closes.
+
 ### Repairing legacy session logs
 
 Stop DSH before repairing its persistence directory. Preview changes first, then apply them only after reviewing the per-file counts:

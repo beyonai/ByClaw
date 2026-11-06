@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 /** Native ByClaw frontend projections for DSH session activity. */
 
 import { EventType, type GatewayDataEmitter } from '@byclaw/by-framework'
@@ -43,6 +44,7 @@ export interface ByClawProjectionOptions {
 }
 
 export interface ByClawProjection {
+  instanceRefs?: Array<{ sandboxId: string; instance: string; mappingId?: string }>
   content: string
   options: ByClawProjectionOptions
 }
@@ -52,12 +54,27 @@ export interface ByClawProjection {
  * Always carry projection metadata on an object event so DSH scope survives the SDK wire format.
  */
 export async function emitByClawProjection(
-  emitter: Pick<GatewayDataEmitter, 'emitChunk'>,
+  emitter: Pick<GatewayDataEmitter, 'emitChunk'> & Partial<Pick<GatewayDataEmitter, 'emitEvent'>>,
   sessionId: string,
   traceId: string,
   projection: ByClawProjection,
   sourceAgentType: string,
 ): Promise<void> {
+  if (projection.instanceRefs !== undefined && emitter.emitEvent) {
+    const options = projection.options
+    // The current framework's emitChunk intentionally whitelists fields and
+    // drops extensions. Use its public event API for the versioned wire field.
+    await emitter.emitEvent({ sessionId, traceId, eventType: options.eventType,
+      sourceAgentType, messageId: options.messageId, parentMessageId: options.parentMessageId,
+      metadata: options.metadata,
+      data: { id: randomUUID().replaceAll('-', '').toUpperCase(), created: Math.floor(Date.now() / 1000),
+        model: '', object: '', objectType: options.objectType, contentType: options.contentType,
+        status: options.status, orderId: options.messageId, parentOrderId: options.parentMessageId,
+        instanceRefs: projection.instanceRefs,
+        choices: [{ index: 0, finish_reason: '', delta: { role: 'assistant', content: projection.content, function_call: null, tool_calls: null } }] },
+    })
+    return
+  }
   await emitter.emitChunk(sessionId, traceId, {
     content: projection.content,
     metadata: projection.options.metadata,
@@ -215,6 +232,7 @@ export function taskPlanProjection(
 }
 
 export interface DshToolProjection {
+  instanceRefs?: Array<{ sandboxId: string; instance: string; mappingId?: string }>
   phase: 'start' | 'success' | 'error'
   toolCallId: string
   toolName?: string
@@ -234,6 +252,7 @@ function toolStatus(phase: DshToolProjection['phase']): '_START_' | '_DONE_' | '
 export function toolCallProjection(tool: DshToolProjection, context: DshProjectionContext): ByClawProjection {
   const status = toolStatus(tool.phase)
   return {
+    ...(tool.instanceRefs === undefined ? {} : { instanceRefs: tool.instanceRefs }),
     content: JSON.stringify({
       ...(tool.toolName === undefined ? {} : { title: tool.toolName }),
       ...(tool.input === undefined ? {} : { input: tool.input }),

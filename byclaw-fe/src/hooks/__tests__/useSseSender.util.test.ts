@@ -213,3 +213,13 @@ describe('hooks/useSseSender/util', () => {
     expect(parsed?.laneId).toBe('lane-b');
   });
 });
+
+// Optional root references must retain presence through live and historical projection.
+describe('instance reference projection', () => {
+  it('retains empty and malformed markers without activating the legacy protocol', () => {
+    const base = { contentType: SSEMessageType.toolCall, orderId: 'tool', choices: [{ delta: { content: '{}' } }] };
+    expect(answerDeltaHandler({ ...base, instanceRefs: [] }).message?.content?.instanceRefs).toEqual([]);
+    expect(answerDeltaHandler({ ...base, instanceRefs: 'bad' }).message?.content?.instanceRefs).toEqual([]);
+    expect(Object.prototype.hasOwnProperty.call(answerDeltaHandler(base).message?.content, 'instanceRefs')).toBe(false);
+  });
+});

@@ -1045,9 +1045,14 @@ public class SandboxService {
         Date remoteExpiresAt = launchData.getRemoteExpiresAt();
         Date lastRenewAt = remoteExpiresAt != null ? lastAccessTime : null;
         Date nextRenewAt = computeNextRenewAt(remoteExpiresAt);
-        int updated = sandboxRecordMapper.updateLaunchSuccess(record.getId(), launchData.getSandboxId(), storedEndpoint,
-            boundGatewayToken, launchData.getTimeoutSeconds(), remoteExpiresAt, lastRenewAt, nextRenewAt,
-            lastAccessTime, record.getLockVersion());
+        record.setInstanceContextSnapshot(toJsonOrNull(launchData.getInstanceContext()));
+        int updated = launchData.getInstanceContext() == null
+            ? sandboxRecordMapper.updateLaunchSuccess(record.getId(), launchData.getSandboxId(), storedEndpoint,
+                boundGatewayToken, launchData.getTimeoutSeconds(), remoteExpiresAt, lastRenewAt, nextRenewAt,
+                lastAccessTime, record.getLockVersion())
+            : sandboxRecordMapper.updateLaunchSuccessWithContext(record.getId(), launchData.getSandboxId(), storedEndpoint,
+                boundGatewayToken, launchData.getTimeoutSeconds(), remoteExpiresAt, lastRenewAt, nextRenewAt,
+                lastAccessTime, record.getLockVersion(), record.getInstanceContextSnapshot());
 
         record.setStatus(STATUS_RUNNING);
         record.setEndpoint(storedEndpoint);
@@ -1064,6 +1069,8 @@ public class SandboxService {
             return null;
         }
         incrementVersions(record, true);
+        launchData.setInstanceContext(com.iwhalecloud.byai.gateway.sandbox.spec.InstanceContextSupport.restore(record.getInstanceContextSnapshot(), record.getSandboxId(), null, instanceEndpoints.keySet()));
+        launchData.setInstanceDescriptors(com.iwhalecloud.byai.gateway.sandbox.spec.InstanceContextSupport.descriptors(launchData.getInstanceContext()));
         sandboxMetadataCache.put(toSandboxInfo(record));
 
         registerSandboxEndpoint(userCode, routing, storedEndpoint, boundGatewayToken);
@@ -1173,6 +1180,8 @@ public class SandboxService {
         String gatewayToken = resolveRecordGatewayToken(record);
         launchData.setEndpoint(endpoint);
         launchData.setSandboxId(record.getSandboxId());
+        launchData.setInstanceContext(com.iwhalecloud.byai.gateway.sandbox.spec.InstanceContextSupport.restore(record.getInstanceContextSnapshot(), record.getSandboxId(), null, instanceEndpoints.keySet()));
+        launchData.setInstanceDescriptors(com.iwhalecloud.byai.gateway.sandbox.spec.InstanceContextSupport.descriptors(launchData.getInstanceContext()));
         launchData.setGatewayToken(gatewayToken);
         launchData.setTimeoutSeconds(record.getTimeoutSeconds());
         launchData.setRemoteExpiresAt(record.getRemoteExpiresAt());
@@ -3227,7 +3236,11 @@ public class SandboxService {
         Map<String, String> instanceEndpoints = normalizeRecordInstanceEndpoints(record);
         String endpoint = normalizeRecordEndpoint(record);
         List<String> endpoints = StringUtils.isNotBlank(endpoint) ? List.of(endpoint) : List.of();
+        Map<String, Object> instanceContext = com.iwhalecloud.byai.gateway.sandbox.spec.InstanceContextSupport.restore(
+            record.getInstanceContextSnapshot(), record.getSandboxId(), null, instanceEndpoints.keySet());
         return SandboxInfo.builder()
+            .instanceContext(instanceContext)
+            .instanceDescriptors(com.iwhalecloud.byai.gateway.sandbox.spec.InstanceContextSupport.descriptors(instanceContext))
             .sandboxId(record.getSandboxId())
             .userCode(record.getUserCode())
             .sandboxType(record.getSandboxType())

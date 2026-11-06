@@ -38,6 +38,10 @@ public class SandboxLaunchData {
     /** Exposed endpoints keyed by logical instance name in the sandbox image. */
     private Map<String, String> instanceEndpoints;
 
+    private Map<String, Object> instanceContext;
+
+    private Map<String, Map<String, String>> instanceDescriptors;
+
     /** Primary service port from sandbox spec. */
     private Integer servicePort;
 

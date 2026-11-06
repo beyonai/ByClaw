@@ -69,6 +69,7 @@ class ResourcePublicationIntegrationTest {
         Path root = Path.of("").toAbsolutePath(); while (!Files.isDirectory(root.resolve("deploy/migrations"))) root = root.getParent();
         String ddl = Files.readString(root.resolve("deploy/migrations/versions/V0.6.0/V0.6.0__ddl.sql"))
             .split("-- RESOURCE_ORGANIZATION_PUBLICATION")[1]
+            .split("-- END RESOURCE_ORGANIZATION_PUBLICATION")[0]
             .replaceFirst("(?s)CREATE UNIQUE INDEX uq_resource_publication_active\\b.*?;", "");
         try (var connection = ds.getConnection()) { ScriptUtils.executeSqlScript(connection, new ByteArrayResource(ddl.getBytes(java.nio.charset.StandardCharsets.UTF_8))); }
         assertThat(jdbc.queryForObject("SELECT publish_scope_mode FROM ss_resource WHERE resource_id=99", String.class)).isEqualTo("LEGACY");

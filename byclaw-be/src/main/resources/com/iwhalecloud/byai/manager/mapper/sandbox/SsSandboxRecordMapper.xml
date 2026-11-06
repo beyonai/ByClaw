@@ -13,6 +13,7 @@
         <result column="profile_key" jdbcType="VARCHAR" property="profileKey" />
         <result column="resource_requests" jdbcType="VARCHAR" property="resourceRequests" />
         <result column="resource_limits" jdbcType="VARCHAR" property="resourceLimits" />
+        <result column="instance_context_snapshot" jdbcType="VARCHAR" property="instanceContextSnapshot" />
         <result column="endpoint" jdbcType="VARCHAR" property="endpoint" />
         <result column="sandbox_id" jdbcType="VARCHAR" property="sandboxId" />
         <result column="gateway_token" jdbcType="VARCHAR" property="gatewayToken" />
@@ -43,7 +44,7 @@
 
     <sql id="Base_Column_List">
         id, resource_id, owner_scope, enterprise_id, user_code, sandbox_type, service_type, profile_key, resource_requests, resource_limits,
-        endpoint, sandbox_id, gateway_token, chat_id,
+        instance_context_snapshot, endpoint, sandbox_id, gateway_token, chat_id,
         status, auto_release, lease_policy, timeout_seconds, remote_expires_at,
         last_renew_at, next_renew_at, last_access_time, release_time, release_reason,
         resize_status, last_resize_at, last_resize_reason, last_resize_duration_ms, last_resize_success,
@@ -56,7 +57,7 @@
             useGeneratedKeys="true" keyProperty="id" keyColumn="id">
         INSERT INTO ss_sandbox_record (
             resource_id, owner_scope, enterprise_id, user_code, sandbox_type, service_type, profile_key, resource_requests, resource_limits,
-            endpoint, sandbox_id, gateway_token, chat_id,
+            instance_context_snapshot, endpoint, sandbox_id, gateway_token, chat_id,
             status, auto_release, lease_policy, timeout_seconds, remote_expires_at,
             last_renew_at, next_renew_at, last_access_time, release_time, release_reason,
             resize_status, last_resize_at, last_resize_reason, last_resize_duration_ms, last_resize_success,
@@ -72,6 +73,7 @@
             #{profileKey,jdbcType=VARCHAR},
             #{resourceRequests,jdbcType=VARCHAR}::jsonb,
             #{resourceLimits,jdbcType=VARCHAR}::jsonb,
+            #{instanceContextSnapshot,jdbcType=VARCHAR},
             #{endpoint,jdbcType=VARCHAR},
             #{sandboxId,jdbcType=VARCHAR},
             #{gatewayToken,jdbcType=VARCHAR},
@@ -259,9 +261,8 @@
           AND lock_version = #{lockVersion,jdbcType=INTEGER}
     </update>
 
-    <update id="updateLaunchSuccess">
-        UPDATE ss_sandbox_record
-        SET status = 'RUNNING',
+    <sql id="LaunchSuccessUpdate">
+        status = 'RUNNING',
             sandbox_id = #{sandboxId,jdbcType=VARCHAR},
             endpoint = #{endpoint,jdbcType=VARCHAR},
             gateway_token = #{gatewayToken,jdbcType=VARCHAR},
@@ -276,6 +277,17 @@
         WHERE id = #{id,jdbcType=BIGINT}
           AND status = 'STARTING'
           AND lock_version = #{lockVersion,jdbcType=INTEGER}
+    </sql>
+
+    <update id="updateLaunchSuccess">
+        UPDATE ss_sandbox_record
+        SET <include refid="LaunchSuccessUpdate" />
+    </update>
+
+    <update id="updateLaunchSuccessWithContext">
+        UPDATE ss_sandbox_record
+        SET instance_context_snapshot = #{instanceContextSnapshot,jdbcType=VARCHAR},
+            <include refid="LaunchSuccessUpdate" />
     </update>
 
     <update id="updateResizeSuccess">

@@ -12,6 +12,8 @@ public final class ToolSandboxMetadata {
             ObjectMapper json = new ObjectMapper();
             JsonNode spec = json.readTree(source);
             if (spec == null || !spec.isObject()) return "specJson must be a JSON object";
+            String presentationError = validatePresentation(spec);
+            if (presentationError != null) return presentationError;
             JsonNode tool = spec.path("runtimeOptions").path("toolSandbox");
             if (tool.isMissingNode()) return null;
             if (!tool.isObject() || !"byclaw.tool-sandbox/v1".equals(tool.path("contract").asText()))
@@ -48,4 +50,35 @@ public final class ToolSandboxMetadata {
             return "Invalid sandbox configuration JSON";
         }
     }
+    private static String validatePresentation(JsonNode spec) {
+        boolean enabled = spec.has("instanceBindings");
+        for (JsonNode port : spec.path("ports")) enabled |= port.has("presentation");
+        if (!enabled) return null;
+        if (!spec.path("ports").isArray()) return "Instance presentation requires ports";
+        java.util.Set<String> names = new java.util.HashSet<>();
+        for (JsonNode port : spec.path("ports")) {
+            String name = port.path("instance").asText("");
+            int number = port.path("port").asInt(0);
+            if (name.isEmpty() || !names.add(name) || !port.path("port").isIntegralNumber()
+                    || number < 1 || number > 65535) return "Invalid or duplicate instance port";
+            JsonNode presentation = port.get("presentation");
+            if (presentation != null && (!presentation.isObject() || !presentation.path("viewer").isTextual()
+                    || presentation.path("viewer").asText().trim().isEmpty()
+                    || (presentation.has("label") && !presentation.path("label").isTextual())))
+                return "Invalid instance presentation";
+        }
+        JsonNode bindings = spec.get("instanceBindings");
+        if (bindings == null) return null;
+        if (!bindings.isObject()) return "Invalid instance bindings";
+        java.util.Iterator<java.util.Map.Entry<String,JsonNode>> entries = bindings.fields();
+        while (entries.hasNext()) {
+            java.util.Map.Entry<String,JsonNode> entry = entries.next();
+            if (entry.getKey().trim().isEmpty() || !entry.getValue().isArray()) return "Invalid instance binding";
+            for (JsonNode target : entry.getValue()) {
+                if (!target.isTextual() || !names.contains(target.asText())) return "Unknown bound instance";
+            }
+        }
+        return null;
+    }
+
 }

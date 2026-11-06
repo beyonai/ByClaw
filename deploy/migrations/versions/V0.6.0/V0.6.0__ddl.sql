@@ -384,3 +384,8 @@ CREATE TABLE byai.knowledge_provision_task (
     CONSTRAINT uq_knowledge_provision_key UNIQUE(tenant_id,applicant_id,idempotency_key)
 );
 COMMENT ON TABLE byai.knowledge_provision_task IS '外部建库幂等任务，超时结果未知时不自动重复创建';
+-- END RESOURCE_ORGANIZATION_PUBLICATION
+
+-- Sandbox creation-time presentation metadata (independent of resource publication).
+ALTER TABLE ss_sandbox_record ADD COLUMN IF NOT EXISTS instance_context_snapshot TEXT;
+COMMENT ON COLUMN ss_sandbox_record.instance_context_snapshot IS 'Credential-free versioned instance bindings and presentation captured at runtime creation';

@@ -325,6 +325,7 @@ COPY --chmod=0755 middleware/byclaw-harness/scripts/browser-supervisor-verify.py
 COPY --chmod=0755 middleware/byclaw-harness/scripts/browser-download-permissions-verify.py /tmp/browser-download-permissions-verify.py
 COPY --chmod=0755 middleware/byclaw-harness/scripts/docker-entrypoint-fd-verify.py /tmp/docker-entrypoint-fd-verify.py
 COPY middleware/byclaw-harness/browser/novnc-index.html /usr/local/share/byclaw-browser/novnc-index.html
+COPY middleware/builtin/runtime-tools/browser-viewer/connection-bridge.mjs /usr/local/share/byclaw-browser/connection-bridge.js
 
 USER root
 
@@ -390,6 +391,7 @@ RUN set -eux; \
     mkdir -p /opt/byclaw/novnc; \
     cp -a "${novnc_source}/." /opt/byclaw/novnc/; \
     cp /usr/local/share/byclaw-browser/novnc-index.html /opt/byclaw/novnc/index.html; \
+    cp /usr/local/share/byclaw-browser/connection-bridge.js /opt/byclaw/novnc/connection-bridge.js; \
     test -f /opt/byclaw/novnc/core/rfb.js; \
     browser_path="$(node -e "const { chromium } = require('/opt/nvm/current/lib/node_modules/playwright'); process.stdout.write(chromium.executablePath())")"; \
     test -x "${browser_path}"; \

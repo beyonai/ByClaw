@@ -64,6 +64,7 @@ export type TaskPlanSnapshot = {
 
 export type IMessageListItem = {
   content: {
+    instanceRefs?: import('@/utils/desktopInstances').SandboxInstanceRef[];
     substance: unknown;
     text?: string;
     parentOrderId?: string;

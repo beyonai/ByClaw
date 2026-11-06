@@ -66,6 +66,32 @@ public class SandboxServiceSpec {
      */
     private List<PortSpec> ports;
 
+    private Map<String, List<String>> instanceBindings;
+    public void setInstanceBindings(Object value) {
+        instanceBindings = null;
+        if (!(value instanceof Map)) {
+            if (value != null) org.slf4j.LoggerFactory.getLogger(SandboxServiceSpec.class).warn("Invalid optional instance bindings; bindings disabled");
+            return;
+        }
+        Map<String, List<String>> safe = new java.util.LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+            if (!(entry.getKey() instanceof String) || !(entry.getValue() instanceof List)) {
+                org.slf4j.LoggerFactory.getLogger(SandboxServiceSpec.class).warn("Invalid optional instance binding targets; bindings disabled");
+                return;
+            }
+            List<String> names = new java.util.ArrayList<>();
+            for (Object name : (List<?>) entry.getValue()) {
+                if (!(name instanceof String)) {
+                    org.slf4j.LoggerFactory.getLogger(SandboxServiceSpec.class).warn("Invalid optional instance binding identity; bindings disabled");
+                    return;
+                }
+                names.add((String) name);
+            }
+            safe.put((String) entry.getKey(), names);
+        }
+        instanceBindings = safe;
+    }
+
     /**
      * Primary service port exposed by the image.
      */
