@@ -64,6 +64,27 @@ if [[ "${1:-}" == tools ]]; then
     exec "${tool_env_server}"
 fi
 
+# Heap ceiling (MiB) for the shared host: 3/4 of the memory this container may use, the rest left to its ssh,
+# ws-proxy and CodeGraph children. Arguments: cgroup v2 memory.max, cgroup v1 memory.limit_in_bytes, meminfo.
+# "max" or v1's huge "unlimited" value means no limit; physical memory caps either. Fails when nothing is readable.
+multi_host_heap_mb() {
+    local limit='' value='' total=''
+    for file in "$1" "$2"; do
+        [[ -r "${file}" ]] || continue
+        read -r value <"${file}" || true
+        # cgroup v1 reports "no limit" as a page-rounded 2^63 (19 digits); like v2's "max", that is no limit.
+        if [[ "${value}" =~ ^[0-9]{1,18}$ ]]; then limit=${value}; break; fi
+        [[ "${value}" == max || "${value}" =~ ^[0-9]+$ ]] && break
+    done
+    if [[ -r "$3" ]]; then
+        value=$(awk '$1 == "MemTotal:" { print $2; exit }' "$3")
+        [[ "${value}" =~ ^[0-9]+$ ]] && total=$((value * 1024))
+    fi
+    if [[ -n "${total}" ]] && { [[ -z "${limit}" ]] || ((limit > total)); }; then limit=${total}; fi
+    [[ -n "${limit}" ]] && ((limit >= 1048576)) || return 1
+    echo $((limit / 1048576 * 3 / 4))
+}
+
 # Shared DSH host: one process serving many users (scripts/byclaw-multi-host.mjs).
 # It runs as the DSH user; each user context owns its own browser runtime, so
 # the root browser supervisor below is not involved.
@@ -72,8 +93,11 @@ if [[ "${1:-}" == multi-host ]]; then
     launcher=/workspace/scripts/byclaw-multi-host.mjs
     # Every user context shares this one main thread and heap. Node's default heap (~2 GB) runs out near 25 resident
     # contexts; AsyncLocalStorage on async_hooks and a small young generation each cost the busy loop a large share.
+    # The heap ceiling follows the memory this container may actually use, so the host reports a heap failure
+    # instead of being killed by its memory limit first; with nothing readable, Node keeps its own default.
     # A flag already present in NODE_OPTIONS wins.
-    for flag in --max-old-space-size=8192 --experimental-async-context-frame --max-semi-space-size=64; do
+    heap_mb=$(multi_host_heap_mb /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory/memory.limit_in_bytes /proc/meminfo) || heap_mb=''
+    for flag in ${heap_mb:+--max-old-space-size=${heap_mb}} --experimental-async-context-frame --max-semi-space-size=64; do
         [[ " ${NODE_OPTIONS:-} " == *" ${flag%%=*}"[=\ ]* ]] || NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }${flag}"
     done
     export NODE_OPTIONS
