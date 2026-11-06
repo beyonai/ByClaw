@@ -1,7 +1,8 @@
 /**
- * Secrets a shared host keeps in a user's DSH home, kept in the database instead of only on
- * this host's disk: the credential store (`.credentials.yaml`) and the tool environment's SSH
- * identity, published-key record and sandbox records. The files stay where their plugins read and write them; the host
+ * State a shared host keeps in a user's DSH home, kept in the database instead of only on this
+ * host's disk: the credential store (`.credentials.yaml`), the tool environment's SSH identity,
+ * published-key record and sandbox records, and AgentTeams' runtime state (team, inboxes, tasks,
+ * archives) and team instances. The files stay where their plugins read and write them; the host
  * restores them before the user's context boots, writes every change back as it happens, and
  * flushes once more when the context goes away. Values are encrypted (AES-256-GCM) with a key
  * derived from the host's service secret and bound to the user and file name.
@@ -13,8 +14,25 @@ import { watch } from 'node:fs'
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, sep } from 'node:path'
 
-/** Files under the DSH home that must survive the host: credentials, SSH identities, sandbox records. */
-export const DURABLE_FILE = /^(?:\.credentials\.yaml|byclaw-tool-env\/(?:catalog\/(?!\.{1,2}\/)[A-Za-z0-9._-]+\/)?(?:client_ed25519(?:\.pub)?|host_ed25519(?:\.pub)?|known_hosts|published-keys\.json|tool-sandbox\.json|sandbox\.json))$/
+const TOOL_ENV = /^byclaw-tool-env\/(?:catalog\/(?!\.{1,2}\/)[A-Za-z0-9._-]+\/)?(?:client_ed25519(?:\.pub)?|host_ed25519(?:\.pub)?|known_hosts|published-keys\.json|tool-sandbox\.json|sandbox\.json)$/
+/** AgentTeams state directories: every file below them, except the plugins' atomic-write temporaries. */
+export const DURABLE_TREES = ['runtime/byclaw-agent-teams', 'agent-teams/instances']
+/** Larger files are left on this host (and logged): the state above is small, an archive should not be. */
+export const MAX_FILE_BYTES = 16 * 1024 * 1024
+
+/** Whether a DSH-home-relative name is one of the durable files. */
+export function isDurableFile(name) {
+  if (name === '.credentials.yaml' || TOOL_ENV.test(name)) return true
+  const segments = name.split('/')
+  if (segments.some(segment => segment === '' || segment === '.' || segment === '..') || name.endsWith('.tmp')) return false
+  if (name.startsWith('runtime/byclaw-agent-teams/')) return segments.length >= 4 && segments.length <= 8
+  return /^agent-teams\/instances\/[^/]+\.json$/.test(name)
+}
+
+/** Whether a change under this name may have moved or removed durable files (a directory rename or delete). */
+function underDurableTree(name) {
+  return DURABLE_TREES.some(tree => name === tree || name.startsWith(`${tree}/`) || tree.startsWith(`${name}/`))
+}
 
 const KEY_INFO = 'byclaw-host-files/v1'
 const FORMAT = 'v1'
@@ -95,12 +113,12 @@ async function presentFiles(home) {
     for (const entry of entries) {
       const path = join(dir, entry.name)
       const name = relative(home, path).split(sep).join('/')
-      if (entry.isDirectory() && (name === 'byclaw-tool-env' || name.startsWith('byclaw-tool-env/'))) await walk(path)
-      else if (entry.isFile() && DURABLE_FILE.test(name)) found.push(name)
+      if (entry.isDirectory()) await walk(path)
+      else if (entry.isFile() && isDurableFile(name)) found.push(name)
     }
   }
   if (await readIfPresent(join(home, '.credentials.yaml')) !== undefined) found.push('.credentials.yaml')
-  await walk(join(home, 'byclaw-tool-env'))
+  for (const root of ['byclaw-tool-env', ...DURABLE_TREES]) await walk(join(home, root))
   return found
 }
 
@@ -116,13 +134,14 @@ export class DurableFiles {
     this.queue = new Map()
     this.watcher = undefined
     this.closed = false
+    this.rescan = undefined
   }
 
   /** Write the stored files into the home (the store wins), then store local files it lacks. */
   async restore() {
     const rows = await this.store.list(this.user)
     for (const row of rows) {
-      if (!DURABLE_FILE.test(row.name)) continue
+      if (!isDurableFile(row.name)) continue
       const data = openFile(this.key, this.user, row.name, row.value)
       const path = join(this.home, row.name)
       const current = await readIfPresent(path)
@@ -144,7 +163,14 @@ export class DurableFiles {
     this.watcher = watch(this.home, { recursive: true }, (_event, filename) => {
       if (filename === null || filename === undefined) return
       const name = String(filename).split(sep).join('/')
-      if (DURABLE_FILE.test(name)) void this.sync(name).catch(error => this.log(`storing ${name} for ${this.user} failed: ${error.message}`))
+      if (isDurableFile(name)) void this.sync(name).catch(error => this.log(`storing ${name} for ${this.user} failed: ${error.message}`))
+      // A renamed or removed team directory reports only the directory: rescan the trees shortly after.
+      if (underDurableTree(name) && !this.closed) {
+        clearTimeout(this.rescan)
+        this.rescan = setTimeout(() => {
+          void this.flush().catch(error => this.log(`storing durable files for ${this.user} failed: ${error.message}`))
+        }, 200)
+      }
     })
     this.watcher.on('error', error => this.log(`watching durable files of ${this.user} failed: ${error.message}`))
   }
@@ -158,6 +184,10 @@ export class DurableFiles {
         if (!this.stored.has(name)) return
         await this.store.remove(this.user, name)
         this.stored.delete(name)
+        return
+      }
+      if (data.length > MAX_FILE_BYTES) {
+        this.log(`durable file ${name} of ${this.user} is ${data.length} bytes; kept on this host only`)
         return
       }
       const hash = digest(data)
@@ -179,6 +209,7 @@ export class DurableFiles {
   async close() {
     if (this.closed) return
     this.closed = true
+    clearTimeout(this.rescan)
     this.watcher?.close()
     await this.flush()
   }

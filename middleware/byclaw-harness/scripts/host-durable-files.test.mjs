@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { mkdtemp, mkdir, readFile, rm, rename, writeFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { DURABLE_FILE, DurableFiles, deriveFileKey, openFile, sealFile } from './host-durable-files.mjs'
+import { DurableFiles, MAX_FILE_BYTES, deriveFileKey, isDurableFile, openFile, sealFile } from './host-durable-files.mjs'
 
 const key = deriveFileKey('a-service-secret-of-enough-length')
 
@@ -29,11 +29,15 @@ const waitFor = async (check, ms = 3000) => {
   assert.fail('condition not reached')
 }
 
-test('names: credentials, SSH identities and sandbox records, nothing else', () => {
+test('names: credentials, SSH identities, sandbox records and AgentTeams state, nothing else', () => {
+  for (const name of ['runtime/byclaw-agent-teams/abc123/研发专家团-官方认证/team.json', 'runtime/byclaw-agent-teams/abc123/研发专家团-官方认证/inbox/captain.jsonl',
+    'runtime/byclaw-agent-teams/abc123/retired-members.json', 'agent-teams/instances/0a1b.json']) assert.ok(isDurableFile(name), name)
+  for (const name of ['runtime/byclaw-agent-teams/abc123/t/team.json.123.uuid.tmp', 'runtime/byclaw-agent-teams/abc123/../x/team.json', 'runtime/byclaw-agent-teams/x',
+    'runtime/other/a/b', 'agent-teams/templates/t.json', 'agent-teams/instances/sub/x.json']) assert.ok(!isDurableFile(name), name)
   for (const name of ['.credentials.yaml', 'byclaw-tool-env/client_ed25519', 'byclaw-tool-env/host_ed25519.pub', 'byclaw-tool-env/known_hosts',
-    'byclaw-tool-env/tool-sandbox.json', 'byclaw-tool-env/sandbox.json', 'byclaw-tool-env/published-keys.json', 'byclaw-tool-env/catalog/unity-1/client_ed25519']) assert.ok(DURABLE_FILE.test(name), name)
+    'byclaw-tool-env/tool-sandbox.json', 'byclaw-tool-env/sandbox.json', 'byclaw-tool-env/published-keys.json', 'byclaw-tool-env/catalog/unity-1/client_ed25519']) assert.ok(isDurableFile(name), name)
   for (const name of ['storages/workspace.json', 'byclaw-tool-env/ssh_config', 'byclaw-tool-env/endpoint.json', 'byclaw-tool-env/catalog/../client_ed25519',
-    'byclaw-tool-env/catalog/a/b/client_ed25519', 'x/.credentials.yaml']) assert.ok(!DURABLE_FILE.test(name), name)
+    'byclaw-tool-env/catalog/a/b/client_ed25519', 'x/.credentials.yaml']) assert.ok(!isDurableFile(name), name)
 })
 
 test('restore: the store wins, local-only files are stored, and the store holds only ciphertext', async () => {
@@ -90,6 +94,41 @@ test('changes are stored as they happen, including atomic renames; close stores 
     assert.equal(openFile(key, 'u1', '.credentials.yaml', value()).toString(), 'v: 2\n')
     assert.ok(!store.rows.has('u1\0byclaw-tool-env/known_hosts'))
     assert.ok(![...store.rows.keys()].some(k => k.includes('unrelated')))
+  } finally { await cleanup() }
+})
+
+test('a team directory moved or removed as a whole is followed by a rescan', async () => {
+  const store = memoryStore()
+  const { dir, cleanup } = await home()
+  try {
+    const team = join(dir, 'runtime/byclaw-agent-teams/h1/team-a')
+    await mkdir(join(team, 'inbox'), { recursive: true })
+    await writeFile(join(team, 'team.json'), '{"name":"team-a"}')
+    await writeFile(join(team, 'inbox/captain.jsonl'), '{"m":1}\n')
+    const files = new DurableFiles({ store, key, user: 'u1', home: dir })
+    await files.restore()
+    assert.ok(store.rows.has('u1\0runtime/byclaw-agent-teams/h1/team-a/inbox/captain.jsonl'))
+    files.start()
+    await mkdir(join(dir, 'runtime/byclaw-agent-teams/h1/archive'), { recursive: true })
+    await rename(team, join(dir, 'runtime/byclaw-agent-teams/h1/archive/team-a'))
+    await waitFor(() => store.rows.has('u1\0runtime/byclaw-agent-teams/h1/archive/team-a/team.json')
+      && !store.rows.has('u1\0runtime/byclaw-agent-teams/h1/team-a/team.json'))
+    await rm(join(dir, 'runtime/byclaw-agent-teams/h1/archive'), { recursive: true })
+    await waitFor(() => ![...store.rows.keys()].some(k => k.includes('byclaw-agent-teams')))
+    await files.close()
+  } finally { await cleanup() }
+})
+
+test('a file over the size limit stays on this host', async () => {
+  const store = memoryStore()
+  const { dir, cleanup } = await home()
+  try {
+    await mkdir(join(dir, 'agent-teams/instances'), { recursive: true })
+    await writeFile(join(dir, 'agent-teams/instances/big.json'), Buffer.alloc(MAX_FILE_BYTES + 1))
+    const logs = []
+    await new DurableFiles({ store, key, user: 'u1', home: dir, log: m => logs.push(m) }).restore()
+    assert.equal(store.rows.size, 0)
+    assert.match(logs.join('\n'), /kept on this host only/)
   } finally { await cleanup() }
 })
 
