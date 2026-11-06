@@ -18,6 +18,7 @@ import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { SessionInspection, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { installModelSelection, type Agent, type AgentHandle, type AssistantStreamFrame, type ModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, expandAssistantStream, type ContentBlock, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { interruptedChildren, interruptionNotice, turnAlreadyAdmitted } from './interrupted-children.ts'
 import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 import { ordinaryTaskPlan } from './ordinary-task-plan.ts'
@@ -2283,7 +2284,17 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       await turn.teamSnapshots.flush()
       this.assertAccepting()
       ready({ mode: entry.mode, dshSessionId: String(rootAgent.id) })
+      // A host that died while children ran left them unsettled; settle them for the root first.
+      const ownEvents = rootAgent.session.ownEvents()
+      const interrupted = interruptedChildren(ownEvents, childId => this.ctx.agents.get(SessionId(childId)) !== undefined)
+      const redelivered = interrupted.length > 0 && turnAlreadyAdmitted(ownEvents, command.header.messageId)
+      if (interrupted.length > 0) {
+        this.ctx.logger.warn(`[byclaw-dsh] interrupted children of ${String(rootAgent.id)}: ${interrupted.join(', ')}${redelivered ? `; message ${command.header.messageId} was already admitted, not resending it` : ''}`)
+        for (const childId of interrupted) rootAgent.followup(interruptionNotice(childId))
+      }
       const agent = await measureChatStage('harness.input_submit', async () => {
+        // The redelivered command's text is already in the root's history; only the notices are new.
+        if (redelivered) return rootAgent
         if (directTarget === undefined) return this.deliverToSelectedAgent(rootAgent, route, byClawInboundText(text))
         const input = createUserMessage({ content: [{ type: 'text', text: directTarget.text }], source: { kind: 'user' } })
         turn.initiation?.expectInput(String(rootAgent.id), String(input.id))
