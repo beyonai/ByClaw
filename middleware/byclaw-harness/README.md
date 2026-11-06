@@ -252,6 +252,19 @@ The slim image copies the shared launcher, lifecycle module and verifier from
 `profile-builder` into the final `runtime` stage and runs the verifier again
 there; passing the builder check alone does not verify the shipped image.
 
+One host process runs every user's agent steps on one main thread, so per-step
+cost that grows with the number of agents in the process limits how many users
+it carries. All three business images patch two such paths in DSH `0.2.1-rc.2`
+and rebuild those packages (the scripts reject other versions):
+`prepare-dsh-tool-lookup-021.mjs` makes `ToolRegistry.get` resolve one name
+instead of building the scope's whole tool view, and
+`prepare-dsh-delegation-names-021.mjs` makes the tool-subagent prompt section
+look up each delegation tool name once instead of every definition in the
+process. Tests: `node --test scripts/tool-lookup-021-patch.test.mjs
+scripts/delegation-names-021-patch.test.mjs`. The entrypoint's `multi-host` mode
+also adds `--max-old-space-size=8192 --experimental-async-context-frame
+--max-semi-space-size=64` to `NODE_OPTIONS`; a flag already set there wins.
+
 ## Verification and startup
 
 The plugins target DSH `0.2.1-rc.2`, the release `Dockerfile.base` pins (`DSH_REF`); their peer dependencies pin that release. The business images (`Dockerfile`, `Dockerfile.slim`, `Dockerfile.extensions`) therefore need a base built from this `Dockerfile.base`, passed as `--build-arg BASE_IMAGE=`; an older base (DSH 0.1.x, tag `2026.9.8`) fails early in the plugin-builder stage because the 0.2.1 workspace packages (for example `@deepseek-ai/dsh-agent-preset-registry`) are missing. The 0.1.5 module-path source patch (`scripts/prepare-dsh-local-modules.mjs`) is not applied: DSH 0.2.1 canonicalizes module directories itself. The new `prepare-dsh-startup-021.mjs` patch indexes immutable resolver path prefixes in the disposable build workspace; it rejects other DSH versions/source shapes. All three business images rebuild app-boot and copy its source and compiled output together. Model-routing compatibility is likewise applied only in that build workspace. When testing a source checkout, resolve plugin dependencies and launch DSH from that same checkout.
