@@ -1089,6 +1089,18 @@ test('listed users on a byclaw-be tool sandbox keep image attachments in their s
   assert.deepEqual(renewed, [['attachments', 'new'], ['ssh', 'new']])
 })
 
+test('glob/grep run rg from PATH in the tool environment, and the packaged one without it', () => {
+  const env = {}
+  host.applyHostProcessDefaults({ toolEnvBackend: 'byclaw-be' }, env)
+  assert.deepEqual(env, { BYCLAW_DSH_TOOL_ENV: 'opensandbox', BYCLAW_RIPGREP_PATH: 'rg' })
+  const chatOnly = { BYCLAW_DSH_TOOL_ENV: 'none' }
+  host.applyHostProcessDefaults({ toolEnvBackend: 'none' }, chatOnly)
+  assert.equal(chatOnly.BYCLAW_RIPGREP_PATH, undefined)
+  const explicit = { BYCLAW_RIPGREP_PATH: '/opt/rg/bin/rg' }
+  host.applyHostProcessDefaults({ toolEnvBackend: 'opensandbox' }, explicit)
+  assert.equal(explicit.BYCLAW_RIPGREP_PATH, '/opt/rg/bin/rg')
+})
+
 test('the session database password never reaches a launch environment', () => {
   const values = launchEnvironmentValues({ KEEP: '1', BYCLAW_SESSION_DB_URL: 'postgres://u:secret@db' }, {}, 'u1')
   assert.equal(values.KEEP, '1')

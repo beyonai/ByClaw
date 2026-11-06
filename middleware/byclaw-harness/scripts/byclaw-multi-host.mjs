@@ -57,6 +57,7 @@
  *                                  SERVICE_KEY for that context (BE sets it per user); it applies when the context boots.
  *   BYCLAW_TOOL_ENV_IDLE_MS        tool-environment idle time (default 600000).
  *   BYCLAW_DSH_TOOL_ENV            defaults to `opensandbox` for every context of this process.
+ *   BYCLAW_RIPGREP_PATH            ripgrep glob/grep spawn; `rg` (from PATH where they run) unless the backend is `none`.
  *   REDIS_HOST, REDIS_PORT, REDIS_USERNAME, REDIS_PASSWORD, REDIS_DATABASE  Redis for the user claims.
  *
  * Redis claim: while a user is starting or ready this host keeps
@@ -1533,10 +1534,21 @@ export function createManagedClaims(redis, instanceId, { sharedStorage = false }
   }
 }
 
+/**
+ * Process-wide defaults every context shares. glob/grep spawn ripgrep where tools run; in a
+ * tool environment the binary packaged in this installation does not exist, so they use its `rg`.
+ * @param config - host config ({ toolEnvBackend }).
+ * @param env - the process environment, updated in place; values already set win.
+ */
+export function applyHostProcessDefaults(config, env) {
+  env.BYCLAW_DSH_TOOL_ENV ??= 'opensandbox'
+  if (config.toolEnvBackend !== 'none') env.BYCLAW_RIPGREP_PATH ??= 'rg'
+}
+
 async function main() {
   const config = readHostConfig(process.env)
   // Establish host defaults before evaluating any plugin modules.
-  process.env.BYCLAW_DSH_TOOL_ENV ??= 'opensandbox'
+  applyHostProcessDefaults(config, process.env)
   const runtimeStarted = performance.now()
   // Load the shared runtime before advertising readiness, without registering a
   // user, loading employee resources or starting a tool environment.
