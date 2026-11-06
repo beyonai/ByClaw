@@ -387,6 +387,11 @@ export function composeUserOverlays(entries, user, home, spec, tables = {}) {
     overlays.push({ id: 'storage-db', disabled: false, config: { connectionString: spec.sessionDb.url, userCode: user } })
     overlays.push({ id: 'storage-domain', config: { ...(rows.get('storage-domain').config ?? {}), backend: 'db' } })
   }
+  // Spilled tool results are read back with read/grep, which run in the tool environment, so they are written there.
+  if (!chatOnly && rows.has('spill-tool-env') && rows.has('spill-local')) {
+    overlays.push({ id: 'spill-local', disabled: true })
+    overlays.push({ id: 'spill-tool-env', disabled: false })
+  }
   return overlays
 }
 
