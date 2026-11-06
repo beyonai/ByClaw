@@ -48,7 +48,29 @@ public class TenantCommandRecovery {
         return decode(rows.getFirst().get("receipt").toString());
     }
 
+    /** Resume only a provably safe schema step for the already authorized owning service. */
+    public Map<String,Object> safeResume(long id, JsonNode body) {
+        TenantCommandRequest.fields(body, Set.of("requestId", "expectedRevision"));
+        var command = required(id);
+        var request = json.createObjectNode();
+        request.put("requestId", TenantCommandRequest.text(body, "requestId", 36));
+        request.put("expectedRevision", TenantCommandRequest.text(body, "expectedRevision", 19));
+        request.putObject("actor").put("type", "SYSTEM_SERVICE").put("id", command.sourceSystem());
+        request.put("reason", "Progress check requested safe schema continuation");
+        request.put("confirmNoInFlight", false);
+        var outcome = recover(id, request, true);
+        var result = new LinkedHashMap<String,Object>(required(id).view());
+        result.put("decision", outcome.getOrDefault("decision", "WAIT"));
+        result.put("reasonCode", outcome.getOrDefault("reasonCode", "SCHEMA_RESUME_ACCEPTED"));
+        return result;
+    }
+
     public Map<String,Object> recover(long id, JsonNode body) {
+        return recover(id, body, false);
+    }
+
+    /** Share receipt/CAS handling without granting automatic calls administrator recovery powers. */
+    private Map<String,Object> recover(long id, JsonNode body, boolean automatic) {
         TenantCommandRequest.fields(body,Set.of("requestId","expectedRevision","actor","reason","confirmNoInFlight"));
         String request = TenantCommandRequest.text(body,"requestId",36); uuid(request);
         String revision = TenantCommandRequest.text(body,"expectedRevision",19);
@@ -56,7 +78,8 @@ public class TenantCommandRecovery {
         long expected;
         try { expected=Long.parseLong(revision); } catch(NumberFormatException error) { throw new TenantCommandException(400,"INVALID_REQUEST"); }
         TenantCommandRequest.fields(body.get("actor"),Set.of("type","id"));
-        if (!"PLATFORM_ADMIN".equals(TenantCommandRequest.text(body.get("actor"),"type",32))) throw new TenantCommandException(403,"RECOVERY_ADMIN_REQUIRED");
+        String actorType = automatic ? "SYSTEM_SERVICE" : "PLATFORM_ADMIN";
+        if (!actorType.equals(TenantCommandRequest.text(body.get("actor"),"type",32))) throw new TenantCommandException(403,"RECOVERY_ADMIN_REQUIRED");
         String actor = TenantCommandRequest.text(body.get("actor"),"id",128);
         String reason = TenantCommandRequest.text(body,"reason",500);
         if (!body.path("confirmNoInFlight").isBoolean()) throw new TenantCommandException(400,"INVALID_REQUEST");
@@ -67,7 +90,13 @@ public class TenantCommandRecovery {
         if (previous!=null) return previous;
         // Provider inspection happens before the transaction. The revision predicates reject all intervening local work.
         try {
+            if (automatic && !"SCHEMA_INIT".equals(command.stage())) {
+                return Map.of("decision", "WAIT", "reasonCode", "SAFE_RESUME_STAGE_UNSUPPORTED");
+            }
             Inspection inspection=inspectState(id);
+            if (automatic && (!"SCHEMA_INIT".equals(inspection.command().stage()) || !inspection.resumable())) {
+                return inspection.view();
+            }
             if (inspection.command().revision()!=expected) throw new TenantCommandException(409,"RECOVERY_REVISION_CONFLICT");
             if (!inspection.resumable()) throw new TenantCommandException(409,inspection.reason());
             if ("RETRY_AFTER_CONFIRMATION".equals(inspection.decision()) && !confirmed) {
@@ -78,6 +107,7 @@ public class TenantCommandRecovery {
                     UPDATE byai.tenant_task SET status='PENDING',error_code=NULL,revision=revision+1,
                     fencing_token=fencing_token+1,lease_owner=NULL,lease_until=NULL,next_attempt_at=CURRENT_TIMESTAMP,
                     updated_at=CURRENT_TIMESTAMP WHERE id=? AND revision=? AND status='MANUAL_REQUIRED'
+                    AND (lease_until IS NULL OR lease_until<CURRENT_TIMESTAMP)
                     """,id,expected)!=1) throw new TenantCommandException(409,"RECOVERY_REVISION_CONFLICT");
                 if (jdbc.update("""
                     UPDATE byai.tenant_operation_state SET operation_revision=operation_revision+1
@@ -85,14 +115,12 @@ public class TenantCommandRecovery {
                     """,Long.parseLong(command.enterpriseId()),id,inspection.slotRevision())!=1) {
                     throw new TenantCommandException(409,"RECOVERY_OPERATION_SLOT_CHANGED");
                 }
-                if (inspection.resource()!=null && inspection.resource().adopted()!=null) {
-                    var record=inspection.resource().observedRecord();
-                    if (record==null || jdbc.update("UPDATE byai.ss_sandbox_record SET lock_version=lock_version "
-                        + "WHERE id=? AND enterprise_id=? AND owner_scope='TENANT' AND sandbox_id=? "
-                        + "AND status='RUNNING' AND lock_version=? AND endpoint=?",record.getId(),record.getEnterpriseId(),
-                        record.getSandboxId(),record.getLockVersion(),record.getEndpoint())!=1) {
-                        throw new TenantCommandException(409,"RECOVERY_RESOURCE_CHANGED");
-                    }
+                fenceResource(inspection.resource());
+                fenceResource(inspection.nodeResource());
+                // A concurrent audit insertion must not turn a no-dispatch observation into a replay.
+                if ("SCHEMA_NOT_DISPATCHED".equals(inspection.reason())
+                    && !schemas.canRetryBeforeDispatch(Long.parseLong(command.enterpriseId()))) {
+                    throw new TenantCommandException(409,"SCHEMA_AUDIT_RECONCILIATION_REQUIRED");
                 }
                 Step step=inspection.step();
                 if (step!=null) {
@@ -120,8 +148,8 @@ public class TenantCommandRecovery {
                 jdbc.update("""
                     INSERT INTO byai.tenant_task_recovery(source_system,request_id,command_id,enterprise_id,request_hash,
                     expected_revision,actor_type,actor_id,reason,confirm_no_in_flight,decision,step_key,receipt)
-                    VALUES (?,?,?,?,?,?,'PLATFORM_ADMIN',?,?,?,?,?,?)
-                    """,command.sourceSystem(),request,id,Long.parseLong(command.enterpriseId()),hash,expected,actor,reason,
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,command.sourceSystem(),request,id,Long.parseLong(command.enterpriseId()),hash,expected,actorType,actor,reason,
                     confirmed,inspection.decision(),inspection.command().stage(),encode(result));
                 return result;
             });
@@ -177,14 +205,51 @@ public class TenantCommandRecovery {
                     && schemas.verifiedRecoveryAudit(tenant,originalRequest,Long.parseLong(databaseRecord))) {
                     return decision(command,"ADOPT_EXISTING","SCHEMA_VERIFIED_AUDIT",step,slot,null,Boolean.TRUE);
                 }
-            } catch (RuntimeException unavailable) { /* An unreadable audit cannot authorize a new schema attempt. */ }
+                String nodeRecord = tenants.selectConfig(tenant, "NODE_SANDBOX_RECORD_ID");
+                if (step != null && "STARTED".equals(step.status()) && originalRequest != null
+                    && ("internal-" + id).equals(originalRequest) && databaseRecord != null && nodeRecord != null
+                    && schemas.canRetryBeforeDispatch(tenant)) {
+                    var database = sandboxes.inspectRecovery(tenant, "DB_CREATE", "command-" + id + ":DB_CREATE");
+                    var node = sandboxes.inspectRecovery(tenant, "NODE_CREATE", "command-" + id + ":NODE_CREATE");
+                    if (matchesRecord(database, databaseRecord) && matchesRecord(node, nodeRecord)) {
+                        return new Inspection(command, "RETRY_SAFE", "SCHEMA_NOT_DISPATCHED", step, slot,
+                            database, null, node);
+                    }
+                    return decision(command,"MANUAL_REQUIRED","SCHEMA_RESOURCE_IDENTITY_UNVERIFIED",step,slot,null,null);
+                }
+            } catch (RuntimeException unavailable) {
+                org.slf4j.LoggerFactory.getLogger(TenantCommandRecovery.class)
+                    .error("Cannot inspect schema recovery for command {}", id, unavailable);
+            }
             return decision(command,"MANUAL_REQUIRED","SCHEMA_AUDIT_RECONCILIATION_REQUIRED",step,slot,null,null);
         }
         return decision(command,"MANUAL_REQUIRED","RECOVERY_STEP_UNSUPPORTED",step,slot,null,null);
     }
 
+    /** Require the provider observation to match the original persisted resource binding. */
+    private boolean matchesRecord(TenantSandboxService.RecoveryResource resource, String recordId) {
+        return resource != null && "MATCHED".equals(resource.reasonCode()) && resource.adopted() != null
+            && resource.observedRecord() != null && "RUNNING".equals(resource.observedRecord().getStatus())
+            && Long.toString(resource.adopted().recordId()).equals(recordId)
+            && resource.observedRecord().getId().toString().equals(recordId);
+    }
+
+    /** Keep each inspected resource unchanged while accepting the original command. */
+    private void fenceResource(TenantSandboxService.RecoveryResource resource) {
+        if (resource == null || resource.adopted() == null) {
+            return;
+        }
+        var record = resource.observedRecord();
+        if (record == null || jdbc.update("UPDATE byai.ss_sandbox_record SET lock_version=lock_version "
+            + "WHERE id=? AND enterprise_id=? AND owner_scope='TENANT' AND sandbox_id=? "
+            + "AND status='RUNNING' AND lock_version=? AND endpoint=?", record.getId(), record.getEnterpriseId(),
+            record.getSandboxId(), record.getLockVersion(), record.getEndpoint()) != 1) {
+            throw new TenantCommandException(409,"RECOVERY_RESOURCE_CHANGED");
+        }
+    }
+
     private Inspection decision(TenantCommandStore.Command command,String decision,String reason,Step step,long slot,
-        TenantSandboxService.RecoveryResource resource,Object adopted) { return new Inspection(command,decision,reason,step,slot,resource,adopted); }
+        TenantSandboxService.RecoveryResource resource,Object adopted) { return new Inspection(command,decision,reason,step,slot,resource,adopted,null); }
     private TenantCommandStore.Command required(long id) {
         var command=store.find(id);if(command==null) throw new TenantCommandException(404,"COMMAND_NOT_FOUND");return command;
     }
@@ -202,7 +267,7 @@ public class TenantCommandRecovery {
     private Map<String,Object> decode(String value) { try{return json.readValue(value,new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});}catch(Exception error){throw new IllegalStateException("Invalid recovery receipt",error);} }
     private record Step(String status,String providerKey,long revision) { }
     private record Inspection(TenantCommandStore.Command command,String decision,String reason,Step step,long slotRevision,
-        TenantSandboxService.RecoveryResource resource,Object adopted) {
+        TenantSandboxService.RecoveryResource resource,Object adopted,TenantSandboxService.RecoveryResource nodeResource) {
         boolean resumable() {return Set.of("RETRY_SAFE","RETRY_AFTER_CONFIRMATION","ADOPT_EXISTING").contains(decision);}
         Map<String,Object> view() {
             var value=new LinkedHashMap<>(command.view());value.put("decision",decision);value.put("reasonCode",reason);
