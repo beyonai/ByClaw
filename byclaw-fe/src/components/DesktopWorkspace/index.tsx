@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Empty, Select, Space, Spin, Tabs } from 'antd';
+import { DesktopOutlined, FullscreenOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Alert, Button, Dropdown, Empty, Spin, Tabs } from 'antd';
 import IframeRender from '@/components/MessagesComp/Iframe/IframeRender';
 import type { IframeConnectionSnapshot } from '@/components/MessagesComp/Iframe/iframeConnection';
 import useAppStore, { type ISandboxesInfo } from '@/models/common/useAppStore';
@@ -18,6 +19,7 @@ import {
   updateDesktopOwner,
   useDesktopWorkspace,
 } from '@/utils/desktopWorkspace';
+import styles from './index.module.less';
 
 // Tabs incorporates keys into DOM IDs and CSS selectors; keep the canonical tuple in the store.
 const tabKey = (key: string) =>
@@ -36,12 +38,27 @@ export default function DesktopWorkspace({ owner }: { owner: string }) {
   const [connection, setConnection] = useState<IframeConnectionSnapshot>({ state: 'connecting' });
   const container = useRef<HTMLDivElement>(null);
   const value = entry || getDesktopOwner(owner);
+  const visibleRefs = value.refs.filter((ref) => !value.hidden.includes(desktopKey(ref)));
   const selected = value.refs.find(
     (ref) => desktopKey(ref) === value.selected && !value.hidden.includes(desktopKey(ref))
   );
   const target = selected && resolveDesktop(rows, selected);
   const requestKey = JSON.stringify([owner, value.selected, retry]);
   const readyUrl = readyAccess?.key === requestKey ? readyAccess.url : '';
+  useEffect(() => {
+    const element = container.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => {
+      // 预留固定操作区和溢出入口，窄面板仍能完整显示当前页签及关闭按钮。
+      element.style.setProperty(
+        '--desktop-tab-max-width',
+        `${Math.max(100, Math.min(260, entry.contentRect.width - 164))}px`
+      );
+      element.style.setProperty('--desktop-tab-padding', entry.contentRect.width < 400 ? '8px' : '12px');
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -104,73 +121,137 @@ export default function DesktopWorkspace({ owner }: { owner: string }) {
       .filter((choice) => JSON.stringify([choice.row.sandboxId, choice.row.mappingId]) === key)
       .map((choice) => ({ value: desktopKey(choice.ref), label: choice.label })),
   }));
+  const directoryItems = groups.map((group, index) => ({
+    type: 'group' as const,
+    key: `sandbox-${index}`,
+    label: group.label,
+    children: group.options.map((option) => ({
+      key: tabKey(option.value),
+      label: option.label,
+      title: option.label,
+    })),
+  }));
   const status = {
     connecting: '连接中',
     connected: '已连接',
     disconnected: connection.clean === false ? '连接中断' : '已断开',
     unknown: '状态未上报',
   }[connection.state];
+  const connectionStatus = target && readyUrl && (
+    <span className={styles.connectionStatus} role="status" title={status}>
+      <span className={styles.connectionDot} data-state={connection.state} aria-hidden="true" />
+      <span className={styles.srOnly}>{status}</span>
+    </span>
+  );
+  const getPopupContainer = () => (document.fullscreenElement ? container.current || document.body : document.body);
   return (
-    <div ref={container} className="full-width full-height ub ub-ver" style={{ background: '#fff', minHeight: 0 }}>
-      <Space style={{ padding: 12, flexWrap: 'wrap' }}>
-        <Select
-          aria-label="全部桌面"
-          placeholder={loading ? '正在加载全部桌面' : '全部桌面'}
-          loading={loading}
-          style={{ minWidth: 220 }}
-          value={undefined}
-          options={groups}
-          onSelect={(key) => {
-            const item = choices.find((choice) => desktopKey(choice.ref) === key);
-            if (item) selectDesktop(owner, item.ref);
-          }}
-        />
-        <Button onClick={() => setRetry((value) => value + 1)}>重新连接</Button>
-        <Button
-          onClick={() => {
-            if (document.fullscreenElement) void document.exitFullscreen();
-            else void container.current?.requestFullscreen?.();
-          }}
-        >
-          全屏
-        </Button>
-        {target && readyUrl && <span role="status">{status}</span>}
-      </Space>
-      {process.env.UMI_APP_MULTI_DESKTOP_ENABLED !== 'false' && (
-        <Tabs
-          type="editable-card"
-          hideAdd
-          activeKey={value.selected && tabKey(value.selected)}
-          onChange={(key) => {
-            const ref = value.refs.find((item) => tabKey(desktopKey(item)) === key);
-            if (ref) selectDesktop(owner, ref);
-          }}
-          onEdit={(key) => {
-            const ref = value.refs.find((item) => tabKey(desktopKey(item)) === key);
-            if (!ref) return;
-            const hidden = [...value.hidden, desktopKey(ref)];
-            updateDesktopOwner(owner, {
-              hidden,
-              selected:
-                desktopKey(ref) !== value.selected
-                  ? value.selected
-                  : value.refs.find((ref) => !hidden.includes(desktopKey(ref))) &&
-                    desktopKey(value.refs.find((ref) => !hidden.includes(desktopKey(ref)))!),
-            });
-          }}
-          items={value.refs
-            .filter((ref) => !value.hidden.includes(desktopKey(ref)))
-            .map((ref) => ({
-              key: tabKey(desktopKey(ref)),
-              label: `${
-                choices.find((item) => desktopKey(item.ref) === desktopKey(ref))?.label ||
-                `${ref.instance} · ${ref.sandboxId}`
-              }${value.unseen?.includes(desktopKey(ref)) ? ' · 新' : ''}`,
-            }))}
-        />
-      )}
+    <div ref={container} className={styles.workspace}>
+      <div className={styles.workspaceHeader}>
+        {process.env.UMI_APP_MULTI_DESKTOP_ENABLED !== 'false' && visibleRefs.length > 0 ? (
+          <Tabs
+            className={styles.workspaceTabs}
+            type="editable-card"
+            hideAdd
+            getPopupContainer={getPopupContainer}
+            activeKey={value.selected && tabKey(value.selected)}
+            onChange={(key) => {
+              const ref = visibleRefs.find((item) => tabKey(desktopKey(item)) === key);
+              if (ref) selectDesktop(owner, ref);
+            }}
+            onEdit={(key, action) => {
+              if (action !== 'remove') return;
+              const index = visibleRefs.findIndex((item) => tabKey(desktopKey(item)) === key);
+              const ref = visibleRefs[index];
+              if (!ref) return;
+              const closingKey = desktopKey(ref);
+              const remaining = visibleRefs.filter((item) => desktopKey(item) !== closingKey);
+              const neighbor = remaining[Math.min(index, remaining.length - 1)];
+              const nextSelected = closingKey === value.selected ? neighbor && desktopKey(neighbor) : value.selected;
+              updateDesktopOwner(owner, {
+                hidden: [...value.hidden, closingKey],
+                selected: nextSelected,
+                unseen: value.unseen?.filter((item) => item !== nextSelected),
+              });
+            }}
+            items={visibleRefs.map((ref) => {
+              const key = desktopKey(ref);
+              const choice = choices.find((item) => desktopKey(item.ref) === key);
+              const instanceLabel = choice?.row.instanceDescriptors?.[ref.instance]?.label || ref.instance;
+              const hasType = Boolean(choice?.row.sandboxType);
+              const label = `${choice?.label || `${ref.instance} · ${ref.sandboxId}`}${
+                value.unseen?.includes(key) ? ' · 新' : ''
+              }`;
+              return {
+                key: tabKey(key),
+                icon: (
+                  <span className={styles.desktopTabIcon}>
+                    <DesktopOutlined />
+                    {key === value.selected && connectionStatus}
+                  </span>
+                ),
+                label: (
+                  <span className={styles.tabLabel} title={label}>
+                    <span className={styles.tabName}>
+                      {instanceLabel} · {hasType ? choice?.row.sandboxType : ref.sandboxId}
+                    </span>
+                    {hasType && <span className={styles.tabIdentity}>({ref.sandboxId.slice(-8)})</span>}
+                    {value.unseen?.includes(key) && <span className={styles.tabIdentity}>· 新</span>}
+                  </span>
+                ),
+              };
+            })}
+          />
+        ) : (
+          <div className={styles.singleDesktopTitle} title={target?.label}>
+            <DesktopOutlined />
+            <span className={styles.tabName}>
+              {target?.label || (selected ? `${selected.instance} · ${selected.sandboxId}` : '暂无打开的桌面')}
+            </span>
+            {connectionStatus}
+          </div>
+        )}
+        <div className={styles.toolbarActions}>
+          <Dropdown
+            trigger={['click']}
+            placement="bottomRight"
+            getPopupContainer={getPopupContainer}
+            menu={{
+              selectable: true,
+              selectedKeys: value.selected ? [tabKey(value.selected)] : [],
+              className: styles.desktopMenu,
+              items: directoryItems.length
+                ? directoryItems
+                : [{ key: 'empty', label: loading ? '正在加载全部桌面' : '暂无可用桌面', disabled: true }],
+              onClick: ({ key }) => {
+                const item = choices.find((choice) => tabKey(desktopKey(choice.ref)) === key);
+                if (item) selectDesktop(owner, item.ref);
+              },
+            }}
+          >
+            <Button type="text" icon={<PlusOutlined />} aria-label="全部桌面" aria-haspopup="menu" title="添加桌面" />
+          </Dropdown>
+          <Button
+            type="text"
+            icon={<ReloadOutlined />}
+            aria-label="重新连接"
+            title="重新连接"
+            onClick={() => setRetry((value) => value + 1)}
+          />
+          <Button
+            type="text"
+            icon={<FullscreenOutlined />}
+            aria-label="全屏"
+            title="全屏"
+            onClick={() => {
+              if (document.fullscreenElement) void document.exitFullscreen();
+              else void container.current?.requestFullscreen?.();
+            }}
+          />
+        </div>
+      </div>
       {access && (
         <Alert
+          className={styles.notice}
           type="warning"
           message={
             access === 'auth'
@@ -181,12 +262,13 @@ export default function DesktopWorkspace({ owner }: { owner: string }) {
       )}
       {failed && (
         <Alert
+          className={styles.notice}
           type="warning"
           message="无法获取授权桌面清单，请重试"
           action={<Button onClick={() => setRetry((value) => value + 1)}>重试</Button>}
         />
       )}
-      <div className="ub-f1" style={{ minHeight: 0, position: 'relative' }}>
+      <div className={styles.desktopContent}>
         {target && readyUrl ? (
           <IframeRender
             key={`${owner}:${value.selected}:${retry}`}
@@ -195,18 +277,20 @@ export default function DesktopWorkspace({ owner }: { owner: string }) {
             onConnectionStateChange={setConnection}
           />
         ) : loading ? (
-          <div role="status">
+          <div className={styles.emptyState} role="status">
             <Spin />
-            正在准备
+            <span>正在准备</span>
           </div>
         ) : (
-          <Empty
-            description={
-              selected
-                ? '暂时无法获取访问入口；需要请求头鉴权的入口须由服务端提供可导航地址'
-                : '从全部桌面添加当前会话的远程桌面'
-            }
-          />
+          <div className={styles.emptyState}>
+            <Empty
+              description={
+                selected
+                  ? '暂时无法获取访问入口；需要请求头鉴权的入口须由服务端提供可导航地址'
+                  : '从全部桌面添加当前会话的远程桌面'
+              }
+            />
+          </div>
         )}
       </div>
     </div>

@@ -93,7 +93,7 @@ describe('chat VNC reopening', () => {
     mockAppState.sandboxesInfo = [];
     render(<ChatDesktop latestMessage={nextAnswer} />);
     await act(async () => fireEvent.click(screen.getByTitle('远程桌面')));
-    expect(screen.getByRole('combobox', { name: '全部桌面' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '全部桌面' })).toBeInTheDocument();
     expect(screen.getByText('从全部桌面添加当前会话的远程桌面')).toBeInTheDocument();
     expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
   });

@@ -53,9 +53,17 @@ beforeEach(() => {
   setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
 });
 
+function getVisibleButton(label: string) {
+  // 大型管理页含多个弹层，按精确文案缩小范围后仍校验真实按钮可见性。
+  const button = screen.getByText(label).closest('button');
+  expect(button).toBeVisible();
+  if (!button) throw new Error(`Button not found: ${label}`);
+  return button;
+}
+
 const openMarket = async () => {
   render(<SandboxMgr />);
-  fireEvent.click(screen.getByRole('button', { name: /sandboxMgr.config.button/ }));
+  fireEvent.click(getVisibleButton('sandboxMgr.config.button'));
   const request = mockDispatch.mock.calls.find(([action]) => action.type === 'sandboxMgr/listServiceSpec')[0];
   act(() => request.success([toolSpec]));
   fireEvent.click(screen.getByText('sandboxMgr.dimension.TOOL'));
@@ -76,7 +84,7 @@ test('the reachable market saves availability through existing CRUD and rolls ba
 
 test('editing tool metadata preserves ownership, runtime options and the independent login startup value', async () => {
   await openMarket();
-  fireEvent.click(screen.getByRole('button', { name: /sandboxMgr.market.edit/ }));
+  fireEvent.click(getVisibleButton('sandboxMgr.market.edit'));
   const editor = screen.getByRole('dialog', { name: 'spec-editor' });
   expect(within(editor).queryByText('sandboxMgr.config.autoStart')).not.toBeInTheDocument();
   fireEvent.change(within(editor).getByLabelText('sandboxMgr.market.description'), {
@@ -106,7 +114,7 @@ test('editing tool metadata preserves ownership, runtime options and the indepen
 
 test('the manager keeps four ownership tabs reachable and applies login startup only to user specifications', async () => {
   render(<SandboxMgr />);
-  fireEvent.click(screen.getByRole('button', { name: /sandboxMgr.config.button/ }));
+  fireEvent.click(getVisibleButton('sandboxMgr.config.button'));
   const request = mockDispatch.mock.calls.find(([action]) => action.type === 'sandboxMgr/listServiceSpec')[0];
   const records = [
     { serviceKey: 'personal-runtime', ownerScope: 'USER', enabled: 1, specJson: '{}' },
@@ -149,7 +157,7 @@ test('the manager keeps four ownership tabs reachable and applies login startup 
 
 test('profile administration requests all service types including disabled resource profiles', () => {
   render(<SandboxMgr />);
-  fireEvent.click(screen.getByRole('button', { name: /sandboxMgr.config.button/ }));
+  fireEvent.click(getVisibleButton('sandboxMgr.config.button'));
   const request = mockDispatch.mock.calls.find(([action]) => action.type === 'sandboxMgr/listServiceProfiles')[0];
   expect(request.payload).toEqual({ allServiceTypes: true, enabledOnly: false });
 });

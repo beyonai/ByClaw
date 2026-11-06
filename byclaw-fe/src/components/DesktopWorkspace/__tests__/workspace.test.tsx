@@ -55,9 +55,25 @@ it('keeps old-image unknown status usable and parent reconnect obtains a new aut
 it('keeps an empty authorized directory reachable without tool refs', async () => {
   mockLookup.mockResolvedValue([]);
   render(<DesktopWorkspace owner="empty" />);
-  expect(screen.getByRole('combobox', { name: '全部桌面' })).toBeInTheDocument();
   expect(await screen.findByText('从全部桌面添加当前会话的远程桌面')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '全部桌面' }));
+  expect(await screen.findByRole('menu')).toBeInTheDocument();
   expect(document.querySelectorAll('iframe')).toHaveLength(0);
+});
+it('adds and selects a desktop from the authorized directory menu', async () => {
+  registerDesktops('owner', [refs[0]]);
+  render(<DesktopWorkspace owner="owner" />);
+  expect(await screen.findByTitle('desktop')).toHaveAttribute('src', expect.stringContaining('https://a/'));
+  expect(screen.queryByRole('tab', { name: /vnc · b/ })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: '全部桌面' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'vnc · b' }));
+
+  await waitFor(() =>
+    expect(screen.getByTitle('desktop')).toHaveAttribute('src', expect.stringContaining('https://b/'))
+  );
+  expect(screen.getByRole('tab', { name: /vnc · b/ })).toHaveAttribute('aria-selected', 'true');
+  expect(document.querySelectorAll('iframe')).toHaveLength(1);
 });
 it('does not remount the current B desktop when closing background tab A', async () => {
   const third = { sandboxId: 'c', instanceEndpoints: { vnc: 'https://c/vnc.html' } };
@@ -72,6 +88,42 @@ it('does not remount the current B desktop when closing background tab A', async
   fireEvent.click(background.querySelector('button')!);
   expect(screen.getByTitle('desktop')).toBe(frame);
   expect(screen.getByTitle('desktop')).toHaveAttribute('src', expect.stringContaining('https://b/'));
+});
+it('selects the right neighbor when closing the active middle desktop', async () => {
+  const third = { sandboxId: 'c', instanceEndpoints: { vnc: 'https://c/vnc.html' } };
+  mockLookup.mockResolvedValue([...rows, third]);
+  registerDesktops('owner', [...refs, { sandboxId: 'c', instance: 'vnc' }]);
+  const { selectDesktop } = require('@/utils/desktopWorkspace');
+  selectDesktop('owner', refs[1]);
+  render(<DesktopWorkspace owner="owner" />);
+  expect(await screen.findByTitle('desktop')).toHaveAttribute('src', expect.stringContaining('https://b/'));
+
+  const activeTab = screen.getByRole('tab', { name: /vnc · b/ }).closest('.ant-tabs-tab')!;
+  fireEvent.click(activeTab.querySelector('button')!);
+
+  await waitFor(() =>
+    expect(screen.getByTitle('desktop')).toHaveAttribute('src', expect.stringContaining('https://c/'))
+  );
+  expect(screen.getByRole('tab', { name: /vnc · c/ })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.queryByRole('tab', { name: /vnc · b/ })).not.toBeInTheDocument();
+});
+it('reopens the last closed desktop from the authorized directory', async () => {
+  mockLookup.mockResolvedValue([rows[0]]);
+  registerDesktops('owner', [refs[0]]);
+  render(<DesktopWorkspace owner="owner" />);
+  await screen.findByTitle('desktop');
+
+  const lastTab = screen.getByRole('tab', { name: /vnc · a/ }).closest('.ant-tabs-tab')!;
+  fireEvent.click(lastTab.querySelector('button')!);
+
+  expect(await screen.findByText('从全部桌面添加当前会话的远程桌面')).toBeInTheDocument();
+  expect(screen.queryByTitle('desktop')).not.toBeInTheDocument();
+  expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '全部桌面' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'vnc · a' }));
+
+  expect(await screen.findByTitle('desktop')).toHaveAttribute('src', expect.stringContaining('https://a/'));
+  expect(screen.getByRole('tab', { name: /vnc · a/ })).toHaveAttribute('aria-selected', 'true');
 });
 it('never mounts old authorization while a new selected view or reconnect is unresolved', async () => {
   registerDesktops('owner', refs);
