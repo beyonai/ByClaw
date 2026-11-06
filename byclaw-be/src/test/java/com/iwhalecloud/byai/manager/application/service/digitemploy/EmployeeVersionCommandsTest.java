@@ -1,13 +1,22 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.domain.staticdata.service.SystemConfigService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.*;
 import com.iwhalecloud.byai.manager.entity.resource.*;
 import com.iwhalecloud.byai.manager.mapper.resource.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -45,6 +54,53 @@ class EmployeeVersionCommandsTest {
         assertEquals("SAVED", result.status()); verify(store).checkRevision(resource, 2L);
         verify(employees, never()).updateDigitalEmployee(any()); verifyNoInteractions(sync, publications);
     }
+
+    @ParameterizedTest
+    @CsvSource(value = {
+        "true|weather|''", "false|weather|''",
+        "true|weather,calendar|calendar", "false|weather,calendar|calendar",
+        "true|weather|calendar", "false|weather|calendar",
+        "true|''|weather", "false|''|weather"
+    }, delimiter = '|')
+    void savedAndHistoricalVersionsReplaceCurrentSkills(boolean saveAndActivate, String currentCodes, String targetCodes) {
+        config.setOwnerType("personal");
+        config.setRelSkills(skills(currentCodes));
+        config.setSkills(JSON.toJSONString(config.getRelSkills()));
+        var target = JSON.parseObject(JSON.toJSONString(config), DigitalEmployeeDTO.class);
+        target.setRelSkills(skills(targetCodes)); target.setSkills(JSON.toJSONString(target.getRelSkills()));
+        version.setExtInfo(EmployeeVersionSnapshot.encode(target));
+        // 执行真实保存归一化，覆盖 skills 字符串优先于 relSkills 的兼容逻辑。
+        ReflectionTestUtils.setField(employees, "ssResourceService", mock(SsResourceService.class));
+        ReflectionTestUtils.setField(employees, "systemConfigService", mock(SystemConfigService.class));
+        ReflectionTestUtils.setField(employees, "digitalEmployeeGroupApplicationService", mock(DigitalEmployeeGroupApplicationService.class));
+        doCallRealMethod().when(employees).validateVersionConfiguration(any());
+        when(store.append(eq(resource), eq(target), any(), eq("EDIT_ACTIVATE"), any(), eq("request-1"), any()))
+            .thenAnswer(call -> {
+                version.setExtInfo(EmployeeVersionSnapshot.encode(call.getArgument(1)));
+                return version;
+            });
+        var request = request(); request.setActivate(true);
+        request.setEmployee(saveAndActivate ? target : null);
+
+        var result = saveAndActivate ? commands.save(request) : commands.activate(request);
+
+        assertEquals("ACTIVE", result.status());
+        var applied = org.mockito.ArgumentCaptor.forClass(DigitalEmployeeDTO.class);
+        verify(employees).updateDigitalEmployee(applied.capture());
+        var actualSkills = JSON.parseArray(applied.getValue().getSkills());
+        assertEquals(JSON.toJSON(applied.getValue().getRelSkills()), actualSkills);
+        assertEquals(skills(targetCodes), actualSkills.stream()
+            .map(skill -> Map.of("skillCode", ((Map<?, ?>) skill).get("skillCode"))).toList());
+        assertEquals(skills(currentCodes), config.getRelSkills());
+        assertEquals(JSON.toJSONString(skills(currentCodes)), config.getSkills());
+        verify(sync).refresh(10L); verifyNoInteractions(publications);
+    }
+
+    private static List<Object> skills(String codes) {
+        return codes.isEmpty() ? List.of() : Arrays.stream(codes.split(","))
+            .map(code -> (Object) Map.of("skillCode", code)).toList();
+    }
+
     @Test void staleSaveFailsBeforeWritingSnapshot() {
         var request = request(); request.setActivate(false);
         doThrow(new IllegalStateException("conflict")).when(store).checkRevision(resource, 2L);
