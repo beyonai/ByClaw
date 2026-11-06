@@ -26,8 +26,12 @@ done
 
 # Git 会向 hook 导出当前仓库专属的 GIT_DIR、GIT_INDEX_FILE 等变量。
 # 后续测试若在临时目录创建 Git 仓库，继承这些变量会误操作当前 worktree。
-# staged 文件识别完成后清除这些变量，让子进程按各自工作目录发现仓库。
-unset $(git rev-parse --local-env-vars)
+# lint-staged 必须保留这些变量，尤其是 git commit --only 的临时索引。
+# 仅在测试/检查子进程的 subshell 内清除，让临时仓库按各自工作目录发现索引。
+run_without_git_env() (
+  unset $(git rev-parse --local-env-vars)
+  "$@"
+)
 
 EXIT_CODE=0
 
@@ -78,8 +82,9 @@ if [ "$HAS_FE" = true ]; then
     EXIT_CODE=1
   fi
 
-  # 全量前端测试在低内存开发机上限制并发，避免浏览器预览类用例因 worker 争抢而超时。
-  pnpm exec jest --passWithNoTests --maxWorkers=2 2>&1
+  # 本地真实 Ant Design 交互串行执行，避免 worker 争抢导致超时。
+  # 静默普通 console 日志；Jest 仍报告失败断言与测试汇总。
+  run_without_git_env pnpm exec jest --passWithNoTests --runInBand --silent 2>&1
   if [ $? -ne 0 ]; then
     echo "❌ [pre-commit] Frontend tests failed"
     EXIT_CODE=1
@@ -97,7 +102,7 @@ if [ "$HAS_BE" = true ]; then
   echo "🔍 [pre-commit] Running backend checks..."
 
   # 清理旧的 test-classes，避免增量编译运行当前源码中已删除的测试类。
-  mvn -B -f "$REPO_ROOT/byclaw-be/pom.xml" clean test
+  run_without_git_env mvn -B -f "$REPO_ROOT/byclaw-be/pom.xml" clean test
   if [ $? -ne 0 ]; then
     echo "❌ [pre-commit] Backend tests failed"
     EXIT_CODE=1
@@ -114,7 +119,7 @@ if [ "$HAS_EXE" = true ]; then
 
   cd "$REPO_ROOT/byclaw-exe"
   if command -v ruff >/dev/null 2>&1; then
-    ruff check .
+    run_without_git_env ruff check .
     if [ $? -ne 0 ]; then
       echo "❌ [pre-commit] byclaw-exe ruff check failed"
       EXIT_CODE=1
@@ -122,7 +127,7 @@ if [ "$HAS_EXE" = true ]; then
   fi
 
   if command -v pytest >/dev/null 2>&1; then
-    pytest
+    run_without_git_env pytest
     if [ $? -ne 0 ]; then
       echo "❌ [pre-commit] byclaw-exe pytest failed"
       EXIT_CODE=1
@@ -142,7 +147,7 @@ if [ "$HAS_SUPPER" = true ]; then
   echo "🔍 [pre-commit] Running byclaw-supper checks..."
 
   if command -v pre-commit >/dev/null 2>&1; then
-    pre-commit run --config byclaw-supper/.pre-commit-config.yaml
+    run_without_git_env pre-commit run --config byclaw-supper/.pre-commit-config.yaml
     if [ $? -ne 0 ]; then
       echo "❌ [pre-commit] byclaw-supper checks failed"
       EXIT_CODE=1
