@@ -84,6 +84,28 @@ public class TenantNodeSchemaService {
         return count!=null && count==1;
     }
 
+    /**
+     * Prove that no initialization was dispatched before retrying a paused command.
+     * Every Node upload is preceded by a committed audit; any enterprise audit blocks this path.
+     * @param enterpriseId original enterprise
+     * @return whether the current bundle is valid and there is no prior schema attempt
+     */
+    public boolean canRetryBeforeDispatch(long enterpriseId) {
+        try {
+            metadata(readBundle());
+            if (internalToken == null || internalToken.isBlank()) {
+                return false;
+            }
+            Integer attempts = jdbc.queryForObject(
+                "SELECT count(*) FROM byai.tenant_schema_audit WHERE enterprise_id=?", Integer.class, enterpriseId);
+            return attempts != null && attempts == 0;
+        } catch (IOException | RuntimeException error) {
+            org.slf4j.LoggerFactory.getLogger(TenantNodeSchemaService.class)
+                .error("Cannot verify schema prerequisites for enterprise {}", enterpriseId, error);
+            return false;
+        }
+    }
+
     public void initialize(long enterpriseId, long generation, long dbRecordId, TenantSandboxView node,
                            String requestId) throws Exception {
         initialize(enterpriseId, generation, dbRecordId, node, requestId, 1L);
@@ -91,6 +113,16 @@ public class TenantNodeSchemaService {
 
     public void initialize(long enterpriseId, long generation, long dbRecordId, TenantSandboxView node,
                            String requestId, long fencingToken) throws Exception {
+        initialize(enterpriseId, generation, dbRecordId, node, requestId, fencingToken, Runnable::run);
+    }
+
+    /**
+     * Persist dispatch intent under the durable worker's current command fence before sending to Node.
+     * @param auditTransaction short transaction that checks and locks the original command lease
+     */
+    public void initialize(long enterpriseId, long generation, long dbRecordId, TenantSandboxView node,
+                           String requestId, long fencingToken, java.util.function.Consumer<Runnable> auditTransaction)
+            throws Exception {
         if (fencingToken <= 0) throw new IllegalArgumentException("schema fencing token must be positive");
         if (internalToken == null || internalToken.isBlank()) {
             throw new IllegalStateException("tenant schema internal HTTP configuration is missing");
@@ -102,11 +134,11 @@ public class TenantNodeSchemaService {
             + "WHERE enterprise_id=? AND request_id=?", Integer.class, enterpriseId, requestId);
         int attemptNo = (lastAttempt == null ? 0 : lastAttempt) + 1;
         String bundleDigest = sha256(bundle);
-        jdbc.update("INSERT INTO byai.tenant_schema_audit (audit_id,enterprise_id,request_id,operation_type,"
+        auditTransaction.accept(() -> jdbc.update("INSERT INTO byai.tenant_schema_audit (audit_id,enterprise_id,request_id,operation_type,"
                 + "trigger_type,byclaw_release_version,attempt_no,target_version,bundle_digest,"
                 + "db_sandbox_record_id,generation,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             auditId, enterpriseId, requestId, "INIT", "AUTO_PROVISION", metadata.version(), attemptNo,
-            metadata.version(), bundleDigest, dbRecordId, generation, "PENDING");
+            metadata.version(), bundleDigest, dbRecordId, generation, "PENDING"));
         ObjectNode task = objectMapper.createObjectNode();
         task.put("protocolVersion", 1);
         task.put("auditId", auditId);

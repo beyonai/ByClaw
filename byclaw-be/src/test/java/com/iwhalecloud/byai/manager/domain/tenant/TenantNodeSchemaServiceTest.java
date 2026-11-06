@@ -196,4 +196,32 @@ class TenantNodeSchemaServiceTest {
     private TenantNodeSchemaService service(String bundlePath) {
         return new TenantNodeSchemaService(null, new ObjectMapper(), bundlePath, "token", null);
     }
+    @Test
+    void firstDispatchRequiresReadableBundleAndNoEnterpriseAudit(@TempDir Path directory) throws Exception {
+        var jdbc = org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        String sql = "SELECT count(*) FROM byai.tenant_schema_audit WHERE enterprise_id=?";
+        var service = new TenantNodeSchemaService(jdbc,new ObjectMapper(),"","token",null);
+        org.mockito.Mockito.when(jdbc.queryForObject(sql,Integer.class,12L)).thenReturn(0);
+        assertTrue(service.canRetryBeforeDispatch(12L));
+        org.mockito.Mockito.when(jdbc.queryForObject(sql,Integer.class,12L)).thenReturn(1);
+        org.junit.jupiter.api.Assertions.assertFalse(service.canRetryBeforeDispatch(12L));
+        var missing = new TenantNodeSchemaService(jdbc,new ObjectMapper(),directory.resolve("missing.zip").toString(),"token",null);
+        org.junit.jupiter.api.Assertions.assertFalse(missing.canRetryBeforeDispatch(12L));
+        org.mockito.Mockito.when(jdbc.queryForObject(sql,Integer.class,12L)).thenThrow(new IllegalStateException("unavailable"));
+        org.junit.jupiter.api.Assertions.assertFalse(service.canRetryBeforeDispatch(12L));
+    }
+
+    @Test
+    void staleWorkerCannotPersistAuditOrUploadAfterRecovery() {
+        var jdbc = org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var nodeClient = org.mockito.Mockito.mock(TenantNodeClient.class);
+        var service = new TenantNodeSchemaService(jdbc,new ObjectMapper(),"","token",nodeClient);
+        assertThrows(IllegalStateException.class, () -> service.initialize(12L,1L,20L,null,"original",2L,
+            audit -> { throw new IllegalStateException("STALE_COMMAND_LEASE"); }));
+        org.mockito.Mockito.verify(jdbc,org.mockito.Mockito.never()).update(
+            org.mockito.ArgumentMatchers.startsWith("INSERT INTO byai.tenant_schema_audit"),
+            org.mockito.ArgumentMatchers.<Object[]>any());
+        org.mockito.Mockito.verifyNoInteractions(nodeClient);
+    }
+
 }

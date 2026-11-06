@@ -59,6 +59,8 @@ class TenantInternalControllerTest {
         var sandboxes = org.mockito.Mockito.mock(com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService.class);
         var controller=new TenantInternalController(commands, store, policies, enterprises, tenants, sandboxes, new ObjectMapper());
         var recovery=org.mockito.Mockito.mock(TenantCommandRecovery.class);
+        org.mockito.Mockito.when(recovery.safeResume(org.mockito.ArgumentMatchers.eq(10L),org.mockito.ArgumentMatchers.any()))
+            .thenReturn(java.util.Map.of("commandId","10","status","PENDING","revision","2"));
         org.mockito.Mockito.when(recovery.inspect(10)).thenReturn(java.util.Map.of("decision","MANUAL_REQUIRED"));
         org.springframework.test.util.ReflectionTestUtils.setField(controller,"recoveries",recovery);
         mvc = MockMvcBuilders.standaloneSetup(controller, new LegacyConverterProbe())
@@ -72,6 +74,26 @@ class TenantInternalControllerTest {
             return com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil.success(java.util.Map.of("count", 1));
         }
     }
+    @Test void safeResumeRequiresProvisionScopeAndOriginalOwnership() throws Exception {
+        String body = "{\"requestId\":\"11111111-1111-4111-8111-111111111111\",\"expectedRevision\":\"1\"}";
+        mvc.perform(post("/internal/v1/commands/10/safe-resume").contentType("application/json").content(body)
+            .requestAttr(InternalServicePrincipal.ATTRIBUTE,principal)).andExpect(status().isForbidden());
+        var wrongSource = new InternalServicePrincipal("client","OTHER",Set.of("tenant:provision"),Set.of("42"),false);
+        mvc.perform(post("/internal/v1/commands/10/safe-resume").contentType("application/json").content(body)
+            .requestAttr(InternalServicePrincipal.ATTRIBUTE,wrongSource)).andExpect(status().isForbidden());
+        var wrongTenant = new InternalServicePrincipal("client","HACU",Set.of("tenant:provision"),Set.of("43"),false);
+        mvc.perform(post("/internal/v1/commands/10/safe-resume").contentType("application/json").content(body)
+            .requestAttr(InternalServicePrincipal.ATTRIBUTE,wrongTenant)).andExpect(status().isForbidden());
+        var writer = new InternalServicePrincipal("client","HACU",Set.of("tenant:provision"),Set.of("42"),false);
+        mvc.perform(post("/internal/v1/commands/10/safe-resume").contentType("application/json").content(body)
+            .requestAttr(InternalServicePrincipal.ATTRIBUTE,writer)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.status").value("PENDING"));
+        org.junit.jupiter.api.Assertions.assertEquals("tenant:provision",
+            com.iwhalecloud.byai.common.integration.security.InternalServiceRoutes.scope("POST","/internal/v1/commands/10/safe-resume"));
+        org.junit.jupiter.api.Assertions.assertNull(
+            com.iwhalecloud.byai.common.integration.security.InternalServiceRoutes.scope("GET","/internal/v1/commands/10/safe-resume"));
+    }
+
     @Test void deletionLifecycleCannotBeOverwrittenByHistoricalProvisionSuccess() throws Exception {
         command = new TenantCommandStore.Command("10", "HACU", "request-123", "hash", "PROVISION", "42", "SUCCEEDED", "READY", null, 3);
         for (String state : new String[]{"DELETING", "DELETE_FAILED", "DELETED"}) {
