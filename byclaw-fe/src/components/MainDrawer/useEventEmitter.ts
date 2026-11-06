@@ -1,5 +1,6 @@
 import { openDrawerView } from '@/utils/drawerView';
 import { desktopAuthEpoch, selectDesktop, useDesktopWorkspace } from '@/utils/desktopWorkspace';
+import type { SandboxInstanceRef } from '@/utils/desktopInstances';
 import useGlobal from '@/hooks/useGlobal';
 import { isPlainObject, isString } from 'lodash';
 import { useCallback, useEffect, useState, useRef } from 'react';
@@ -60,8 +61,7 @@ function useActionEffect() {
   }, []);
 
   useEffect(() => {
-    const onDesktop = (event: Event) => {
-      const { owner, ref } = (event as CustomEvent).detail || {};
+    const onDesktop = ({ owner, ref }: { owner?: string; ref?: SandboxInstanceRef } = {}) => {
       if (!owner || !ref) return;
       selectDesktop(owner, ref);
       useDesktopWorkspace.setState({ activeOwner: owner, visible: true });
@@ -78,9 +78,9 @@ function useActionEffect() {
         { owner }
       );
     };
-    window.addEventListener('byclaw-desktop-open', onDesktop);
-    return () => window.removeEventListener('byclaw-desktop-open', onDesktop);
-  }, []);
+    EventEmitter.on('byclaw-desktop-open', onDesktop);
+    return () => EventEmitter.off('byclaw-desktop-open', onDesktop);
+  }, [EventEmitter]);
 
   useEffect(() => {
     const onView = (event: any) => {

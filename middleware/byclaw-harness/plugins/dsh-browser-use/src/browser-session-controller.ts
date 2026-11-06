@@ -429,6 +429,7 @@ export class BrowserSessionController {
     if (input.operation === 'goalControl') {
       const session = this.#sessions.get(key)
       if (!this.#goal || !session || !this.#broker.goal) return Promise.reject(new Error('browser-goal-unavailable'))
+      try { onTargetReady?.() } catch { /* Optional display observers cannot change browser execution. */ }
       const control = input.command === 'state' ? { command: 'state' as const, runId: input.runId }
         : { command: input.command, runId: input.runId, generation: input.generation }
       return this.#broker.goal(credentials(session.lease), control, operationSignal)
@@ -591,6 +592,9 @@ export class BrowserSessionController {
     }
 
     const session = this.#sessions.get(key)
+    if (session) {
+      try { onTargetReady?.() } catch { /* Optional display observers cannot change browser execution. */ }
+    }
     if (input.operation === 'status') {
       if (!session) {
         const expired = this.#expired.get(key)
@@ -745,6 +749,7 @@ export class BrowserSessionController {
         // Existing leases cannot silently widen domains or submission permission.
         if ((input.allowSubmit === true && !session.allowSubmit)
           || (input.allowedDomains && JSON.stringify(input.allowedDomains) !== JSON.stringify(session.allowedDomains))) throw new Error('browser-goal-policy-mismatch')
+        try { onTargetReady?.() } catch { /* Optional display observers cannot change browser execution. */ }
       }
       this.#leases.beginActivity(session.lease)
       const lease = credentials(session.lease)

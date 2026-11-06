@@ -25,11 +25,7 @@ it('isolates external late updates and closes after a later chat or file opens',
 it('gives tool-message manual opens an atomic handle that rejects legacy URL updates', () => {
   const { result } = renderHook(() => useActionEffect());
   const owner = JSON.stringify(['session', 'chat']);
-  act(() =>
-    window.dispatchEvent(
-      new CustomEvent('byclaw-desktop-open', { detail: { owner, ref: { sandboxId: 'a', instance: 'vnc' } } })
-    )
-  );
+  act(() => mockEmitter.emit('byclaw-desktop-open', { owner, ref: { sandboxId: 'a', instance: 'vnc' } }));
   expect(result.current.drawerType).toBe('desktop');
   act(() => mockEmitter.emit('beyond-main-driver-message', { url: 'https://late-old-login' }));
   expect(result.current.contentPayload).toEqual({ owner });

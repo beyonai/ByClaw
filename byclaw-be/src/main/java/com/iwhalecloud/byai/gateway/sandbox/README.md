@@ -165,6 +165,8 @@ BE 两种 Docker 镜像的健康检查使用 `/byaiService/actuator/health`，�
 
 A spec may declare `ports[].presentation: {viewer, label}` and `instanceBindings: {capability: [instance]}`. Publishing validates unique instance names, valid ports and existing binding targets. Runtime readers tolerate damaged optional presentation metadata; it must not stop sandbox execution.
 
+Legacy specs that declare neither valid presentation metadata nor instance bindings keep a null creation context, preserving existing tool viewer behavior. Explicit empty bindings (`{}` or a capability with `[]`) and presentation-only specs opt into version 1; an empty target list is not treated as missing metadata.
+
 Newly created runtimes return credential-free `instanceContext` (version 1, normalized sandboxId, optional mappingId, instanceBindings and instanceDescriptors). The launch CAS persists it separately in `ss_sandbox_record.instance_context_snapshot`; apply the authorized V0.6.0 migration before deploying this reader. Directory and allocation responses restore this snapshot and filter it to authorized endpoint keys. Existing NULL records and provider recovery without an actual creation snapshot remain legacy; current templates never reinterpret them. Shared context projection must not expose physical-host-only endpoints.
 
 Restoration also validates nested descriptor types. A damaged optional snapshot disables its presentation context while preserving existing endpoints and runtime reuse; it does not rewrite the saved record.

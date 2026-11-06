@@ -7,6 +7,22 @@ export interface SandboxInstanceContext {
   instanceBindings: Record<string, string[]>
   instanceDescriptors?: Record<string, { viewer?: string; label?: string }>
 }
+
+/** Old allocations still identify their own desktops by the established endpoint names. */
+export function legacyInstanceContext(allocation: {
+  sandboxId?: string; mappingId?: string | null; isShared?: boolean; instanceEndpoints?: Record<string, string>
+} | undefined): SandboxInstanceContext | undefined {
+  const mappingId = allocation?.mappingId ?? undefined
+  if (typeof allocation?.sandboxId !== 'string' || !allocation.sandboxId || allocation.sandboxId !== allocation.sandboxId.trim()
+    || (allocation.isShared && !mappingId)
+    || (mappingId !== undefined && (typeof mappingId !== 'string' || !mappingId || mappingId !== mappingId.trim()))) return undefined
+  const names = ['vnc', 'desktop'].filter(name => typeof allocation.instanceEndpoints?.[name] === 'string' && allocation.instanceEndpoints[name].trim())
+  if (!names.length) return undefined
+  return { version: 1, sandboxId: allocation.sandboxId,
+    ...(mappingId === undefined ? {} : { mappingId }),
+    instanceBindings: { default: names, 'browser.automation': names.filter(name => name === 'vnc') } }
+}
+
 export function instanceRefsFor(raw: unknown, capability?: string): SandboxInstanceRef[] {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
   const context = raw as SandboxInstanceContext

@@ -1,4 +1,5 @@
 import { normalizeInstanceRefs } from '@/utils/desktopInstances';
+import useGlobal from '@/hooks/useGlobal';
 import React, { useEffect, useRef } from 'react';
 import { Button, Dropdown, message, Tooltip } from 'antd';
 import {
@@ -86,6 +87,7 @@ type ToolCallComponent = React.FC<IProps> & {
 
 const ToolCall: ToolCallComponent = (props) => {
   const intl = useIntl();
+  const { EventEmitter } = useGlobal();
 
   const substance = get(props, 'messageListItemContent.substance');
 
@@ -96,11 +98,10 @@ const ToolCall: ToolCallComponent = (props) => {
   const refs = normalizeInstanceRefs(props.messageListItemContent?.instanceRefs);
   const openDesktop = (index: number) => {
     if (!props.message?.sessionId) return;
-    window.dispatchEvent(
-      new CustomEvent('byclaw-desktop-open', {
-        detail: { owner: JSON.stringify(['session', String(props.message.sessionId)]), ref: refs[index] },
-      })
-    );
+    EventEmitter.emit('byclaw-desktop-open', {
+      owner: JSON.stringify(['session', String(props.message.sessionId)]),
+      ref: refs[index],
+    });
   };
   const inputText = formatDetail(input);
   const outputText = formatDetail(output);

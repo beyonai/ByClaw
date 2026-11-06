@@ -312,8 +312,12 @@ The ByClaw BE adapter retains optional `instanceContext` from the actual allocat
 response or an exact-ID directory lookup. The snapshot stays on the execution
 lease and is omitted from model-visible acquisition output. Capability-specific
 bindings take precedence over an explicit `default`; arbitrary shell argv and
-stdout never select a desktop. Missing or invalid context leaves execution usable
-and emits no guessed target.
+stdout never select a desktop. For an allocation without a context, the adapter
+retains the legacy `vnc`/`desktop` endpoint convention using only that allocation's
+exact ID and mapping. The browser binding is only `vnc`; `desktop` alone is not a
+browser target. An exact-ID directory fallback must also match the mapping.
+Explicit empty bindings and malformed contexts never fall back to endpoint names.
+Missing identity leaves execution usable and emits no guessed target.
 
 Supported tool definitions advertise `byclawInstanceRefsVersion: 1` to the host
 presenter. Each invocation emits the Cordis `byclaw/tool-instance-refs` notification,
@@ -329,14 +333,18 @@ Old calls without metadata retain the absent field. The 3015 projection carries
 exact call's success/error without attaching to a later turn that reuses its ID.
 
 Browser adapters only read the explicit `browser.automation` binding; reporting
-never accesses the allocating SSH `ready` getter. They report before execution,
-after a real browser open (including the automatic open inside a first `runGoal`),
-and in `finally`. Display observers cannot block close/control operations or
-replace the controller's actual errors.
+never accesses the allocating SSH `ready` getter. Before execution they report
+only `[]`, so a cached identity cannot attach an old allocation to a new open.
+They report targets after a real browser open (including a first `runGoal`) or
+when the controller confirms an existing browser session. Only those confirmed
+invocations report again in `finally`. Unopened close and failed open never use
+an unrelated cached provider target. Display observers cannot block close/control
+operations or replace the controller's actual errors.
 
 Set `BYCLAW_INSTANCE_REFS_ENABLED=false` on the Harness process to stop new tool
 reference production and definition markers without disabling tool execution.
 The integration reader continues to accept previously persisted references.
 Only a browser configured with `workspaceOnToolEnvironment` uses the SSH
-provider's binding; a local browser reports `[]` even if an unrelated SSH
-provider is available in the same context.
+provider's binding and advertises reference support before cold allocation.
+A local browser leaves references absent, preserving the existing frontend
+viewer lookup, even if an unrelated SSH provider is available in the same context.

@@ -24,7 +24,7 @@ import { createHash } from 'node:crypto'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ToolEnvIdentity, ToolEnvKeys } from './identity.ts'
-import type { SandboxInstanceContext } from './instance-context.ts'
+import { legacyInstanceContext, type SandboxInstanceContext } from './instance-context.ts'
 import type { SandboxTemplate } from './catalog.ts'
 
 export interface ByClawBeBackendConfig {
@@ -72,8 +72,8 @@ export const PUBLISHED_KEY_PARAMS = { authorized: 'BYCLAW_TOOL_ENV_AUTHORIZED_KE
 interface PrivateParam { paramId?: number; key?: string; hasValue?: boolean; valueLast4?: string }
 
 interface Envelope { code?: number; msg?: string; data?: unknown }
-interface LaunchData { instanceContext?: SandboxInstanceContext; sandboxId?: string; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
-interface InfoEntry { instanceContext?: SandboxInstanceContext; sandboxType?: string; sandboxId?: string; status?: string; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
+interface LaunchData { instanceContext?: SandboxInstanceContext | null; sandboxId?: string; mappingId?: string | null; isShared?: boolean; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
+interface InfoEntry { instanceContext?: SandboxInstanceContext | null; sandboxType?: string; sandboxId?: string; mappingId?: string | null; isShared?: boolean; status?: string; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
 interface ReleaseConfirmation { releaseConfirmed?: boolean; sandboxId?: string; remoteAbsentConfirmed?: boolean }
 
 function confirmExactRelease(value: unknown, expectedSandboxId: string): void {
@@ -323,7 +323,8 @@ export class ByClawBeBackend implements ToolEnvBackend {
       this.currentId = data.sandboxId
       await this.writeLaunched({ serviceKey, sandboxId: data.sandboxId })
     }
-    this.instanceContext = data?.instanceContext
+    this.instanceContext = data?.instanceContext ?? undefined
+    let displayAllocation: LaunchData | InfoEntry | undefined = data
     let sandboxId = data?.sandboxId
     let endpoint = this.sshEndpoint(data?.instanceEndpoints, data?.endpointHeaders)
     if (endpoint === undefined) {
@@ -333,7 +334,12 @@ export class ByClawBeBackend implements ToolEnvBackend {
       const entry = sandboxId === undefined ? ofType[0] : ofType.find(candidate => candidate.sandboxId === sandboxId)
       // A legacy routing fallback may choose an entry for SSH, but it cannot
       // establish a precise display identity without an exact allocation id.
-      if (sandboxId !== undefined) this.instanceContext ??= entry?.instanceContext
+      if (sandboxId !== undefined) {
+        const exactEntry = ofType.find(candidate => candidate.sandboxId === sandboxId
+          && (candidate.mappingId ?? null) === (data?.mappingId ?? null))
+        this.instanceContext ??= exactEntry?.instanceContext ?? undefined
+        if (exactEntry) displayAllocation = { ...exactEntry, isShared: data?.isShared === true || exactEntry.isShared === true }
+      }
       sandboxId ??= entry?.sandboxId
       if (sandboxId !== undefined && sandboxId !== '') {
         this.ownsSandbox = true
@@ -350,6 +356,9 @@ export class ByClawBeBackend implements ToolEnvBackend {
       throw new Error(`ByClaw BE returned no "${sshInstance}" endpoint for sandbox type ${sandboxType}; its spec must declare B's sshd port with protocol "tcp" and instance "${sshInstance}", or set a host template`)
     }
     if (this.config.privateOnly && (endpoint.websocket === undefined || !new URL(endpoint.websocket).hostname.endsWith('-vpc.sandbox.aliyuncs.com'))) throw new Error('PRIVATE_SSH_REQUIRED')
+    // An absent contract is legacy; an explicitly empty contract must stay empty.
+    // Never use the legacy SSH routing fallback's arbitrary first record as a display identity.
+    this.instanceContext ??= legacyInstanceContext(displayAllocation)
     this.currentId = sandboxId !== undefined && sandboxId !== '' ? sandboxId : undefined
     this.log(`tool environment ${sandboxId ?? '(unknown id)'} from ByClaw BE: ${describe(endpoint)}`)
     this.ownsSandbox = true

@@ -20,6 +20,8 @@ public final class InstanceContextSupport {
             if (presentation.get("label") != null) safe.put("label", presentation.get("label"));
             descriptors.put(port.getInstance(), safe);
         }
+        // Legacy specs must keep absent reference metadata so existing tool viewer fallbacks still apply.
+        if (spec.getInstanceBindings() == null && descriptors.isEmpty()) return null;
         Map<String, List<String>> bindings = new LinkedHashMap<>();
         if (spec.getInstanceBindings() != null) {
             for (Map.Entry<String, List<String>> entry : spec.getInstanceBindings().entrySet()) {
