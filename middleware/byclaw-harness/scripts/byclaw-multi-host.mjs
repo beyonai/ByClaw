@@ -382,6 +382,11 @@ export function composeUserOverlays(entries, user, home, spec, tables = {}) {
     overlays.push({ id: 'session-persistence-jsonl', disabled: true })
     overlays.push({ id: 'session-persistence-db', disabled: false, config: { connectionString: spec.sessionDb.url, userCode: user } })
   }
+  // Their storage units (workspace, session roots, projection cache, schedules) follow them.
+  if (spec.sessionDb !== undefined && rows.has('storage-db') && rows.has('storage-domain')) {
+    overlays.push({ id: 'storage-db', disabled: false, config: { connectionString: spec.sessionDb.url, userCode: user } })
+    overlays.push({ id: 'storage-domain', config: { ...(rows.get('storage-domain').config ?? {}), backend: 'db' } })
+  }
   return overlays
 }
 

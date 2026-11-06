@@ -1043,6 +1043,22 @@ test('listed users store sessions in the database, everyone else keeps files', (
   assert.deepEqual(host.sessionDbFor({ sessionDbUrl: 'postgres://db', sessionDbUsers: ['*'] }, 'u9'), { url: 'postgres://db' })
 })
 
+test('listed users keep storage units in the database too', () => {
+  const entries = [
+    { id: 'storage-json', name: 'json', config: { root: '/x' } },
+    { id: 'storage-domain', name: 'domain', config: { backend: 'json', routes: { keep: 'json' } } },
+    { id: 'storage-db', name: 'db', disabled: true },
+  ]
+  const config = host.readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_SESSION_DB_URL: 'postgres://db', BYCLAW_SESSION_DB_USERS: 'u1' })
+  const rows = (user, spec = {}) => composeUserOverlays(entries, user, `/home/${user}`, { sessionDb: host.sessionDbFor(config, user), ...spec })
+    .filter(row => /^storage-(db|domain)/.test(row.id))
+  assert.deepEqual(rows('u1'), [
+    { id: 'storage-db', disabled: false, config: { connectionString: 'postgres://db', userCode: 'u1' } },
+    { id: 'storage-domain', config: { backend: 'db', routes: { keep: 'json' } } },
+  ])
+  assert.deepEqual(rows('u2'), [])
+})
+
 test('the session database password never reaches a launch environment', () => {
   const values = launchEnvironmentValues({ KEEP: '1', BYCLAW_SESSION_DB_URL: 'postgres://u:secret@db' }, {}, 'u1')
   assert.equal(values.KEEP, '1')

@@ -7,7 +7,7 @@ BYCLAW_SESSION_DB_URL=postgres://user:password@host:5432/postgres
 BYCLAW_SESSION_DB_USERS=0027012991,0027016840   # or *
 ```
 
-Other users keep files. Only the shared host may use it: in a per-user sandbox model-generated commands run beside the harness and could read the password. The host keeps the URL out of launch environments for the same reason.
+Other users keep files. The same users' storage units (workspace, session roots, projection cache) move with them through `@byclaw/dsh-storage-db`. Only the shared host may use it: in a per-user sandbox model-generated commands run beside the harness and could read the password. The host keeps the URL out of launch environments for the same reason.
 
 The tables (`byai.dsh_session`, `byai.dsh_session_event`) are created on first use.
 
