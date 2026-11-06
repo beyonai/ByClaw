@@ -258,7 +258,8 @@ public class SandboxController {
                     result.put("sandboxType", sandbox.getSandboxType());
                     result.put("sandboxId", sandbox.getSandboxId());
                     result.put("endpoints", sandbox.getEndpoints());
-                    result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
+                    result.put("instanceEndpoints", com.iwhalecloud.byai.gateway.sandbox.service.ingress.desktop.SandboxDesktopAccess
+                        .navigationEndpoints(sandbox, contextPath));
                     result.put("instanceContext", sandbox.getInstanceContext());
                     result.put("instanceDescriptors", sandbox.getInstanceDescriptors());
                     result.put("endpointHeaders", sandbox.getEndpointHeaders());

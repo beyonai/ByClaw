@@ -156,7 +156,7 @@ class TenantCommandRecoveryTest {
         return json.createObjectNode().put("requestId",request).put("expectedRevision","0");
     }
 
-    @Test void progressCheckResumesOriginalSchemaOnceAndAuditsServiceIdentity() {
+    @Test void progressCheckResumesOriginalSchemaOnceAndAuditsServiceIdentity() throws Exception {
         schemaReadyForFirstDispatch();
         var accepted = recovery.safeResume(1,safeBody());
         assertEquals("PENDING",accepted.get("status"));

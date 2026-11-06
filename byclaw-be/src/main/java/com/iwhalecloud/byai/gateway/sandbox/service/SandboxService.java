@@ -1493,24 +1493,45 @@ public class SandboxService {
      * @return 沙箱信息，不存在时返回 null
      */
     public List<SandboxInfo> sandboxInfo(String userCode) {
+        return sandboxInfo(userCode, null);
+    }
+
+    /** Resolve one known identity without preparing unrelated sandbox endpoints. */
+    public List<SandboxInfo> sandboxInfo(String userCode, String sandboxId) {
+        if (sandboxId != null && (StringUtils.isBlank(sandboxId) || !sandboxId.equals(sandboxId.trim()))) {
+            throw new IllegalArgumentException("sandboxId must be a nonblank exact identity");
+        }
         if (platformRemote()) {
+            Map<String, Object> params = platformGateway().params("userCode", userCode);
+            if (sandboxId != null) params.put("sandboxId", sandboxId);
             @SuppressWarnings("unchecked")
-            List<SandboxInfo> remote = (List<SandboxInfo>) platformGateway().convert(platformGateway().service("info",platformGateway().params("userCode",userCode)),new com.fasterxml.jackson.core.type.TypeReference<List<SandboxInfo>>(){}.getType());
-            return withSharedHostContext(userCode, remote);
+            List<SandboxInfo> remote = (List<SandboxInfo>) platformGateway().convert(platformGateway().service("info", params),new com.fasterxml.jackson.core.type.TypeReference<List<SandboxInfo>>(){}.getType());
+            return selectSandboxInfos(withSharedHostContext(userCode, remote), sandboxId);
         }
         if (StringUtils.isBlank(userCode)) {
             return null;
         }
         List<SandboxInfo> cached = sandboxMetadataCache.listByUser(userCode);
         if (cached != null && !cached.isEmpty()) {
-            cached.forEach(this::hydrateGatewayToken);
-            return withSharedHostContext(userCode, cached);
+            List<SandboxInfo> selected = selectSandboxInfos(cached, sandboxId);
+            if (!selected.isEmpty()) {
+                selected.forEach(this::hydrateGatewayToken);
+                return selectSandboxInfos(withSharedHostContext(userCode, selected), sandboxId);
+            }
         }
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
         List<SandboxInfo> result = records == null ? new ArrayList<>()
-            : records.stream().map(this::toSandboxInfo).collect(Collectors.toList());
+            : records.stream().filter(record -> sandboxId == null || sandboxId.equals(record.getSandboxId()))
+                .map(this::toSandboxInfo).collect(Collectors.toList());
         result.forEach(sandboxMetadataCache::put);
-        return withSharedHostContext(userCode, result);
+        return selectSandboxInfos(withSharedHostContext(userCode, result), sandboxId);
+    }
+
+    private List<SandboxInfo> selectSandboxInfos(List<SandboxInfo> infos, String sandboxId) {
+        if (sandboxId == null) return infos;
+        if (infos == null) return new ArrayList<>();
+        return infos.stream().filter(info -> info != null && sandboxId.equals(info.getSandboxId()))
+            .collect(Collectors.toList());
     }
 
     /** The resident host's context for the user is not a record; listings read it from the host. */
