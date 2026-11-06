@@ -23,7 +23,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-/** 冷启动时补齐存量员工组向组员及其关联资源的授权。 */
+/** 冷启动时只补齐存量员工组向组员员工的授权。 */
 @Service
 public class DigitalEmployeeGroupAuthorizationBackfillService {
 
@@ -65,14 +65,14 @@ public class DigitalEmployeeGroupAuthorizationBackfillService {
                 try {
                     repaired += backfillGroup(ext.getResourceId());
                 } catch (Exception e) {
-                    logger.error("补齐数字员工组 {} 关联资源授权失败", ext.getResourceId(), e);
+                    logger.error("补齐数字员工组 {} 组员授权失败", ext.getResourceId(), e);
                 }
             }
             if (groups.size() < BATCH_SIZE) {
                 break;
             }
         }
-        logger.info("数字员工组存量关联授权补齐完成，更新 {} 个资源授权", repaired);
+        logger.info("数字员工组存量组员授权补齐完成，更新 {} 个员工授权", repaired);
     }
 
     int backfillGroup(Long groupId) {

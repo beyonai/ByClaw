@@ -22,6 +22,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -109,7 +111,7 @@ class DigitalEmployeeGroupAuthorizationServiceTest {
 
     @ParameterizedTest
     @ValueSource(strings = {GrantType.ALLOW_MANAGE, GrantType.FORCE_USE})
-    void groupAuthorizationIncludesDirectAndMemberSkills(String grantType) {
+    void groupAuthorizationOnlyChangesMemberEmployeesAndPreservesResourceGrants(String grantType) {
         SsResource group = resource(1L, 10L);
         SsResExtDigEmployee ext = new SsResExtDigEmployee();
         ext.setAgentType("017");
@@ -135,16 +137,26 @@ class DigitalEmployeeGroupAuthorizationServiceTest {
 
         List<AuthRedBlackDTO> result = service.buildMemberAuthorizations(group, input);
 
-        assertThat(result).extracting(AuthRedBlackDTO::getGrantObjId).containsExactly(2L, 7L, 8L);
-        assertThat(result.get(1).getGrantObjType()).isEqualTo("SKILL");
-        assertThat(result.get(1).getRedList()).extracting(AuthDTO::getGrantToObjId)
-            .containsExactly(999L, 201L);
-        assertThat(result.get(2).getGrantObjType()).isEqualTo("SKILL");
-        assertThat(result.get(2).getRedList()).extracting(AuthDTO::getGrantToObjId).containsExactly(201L);
-
+        assertThat(result).extracting(AuthRedBlackDTO::getGrantObjId).containsExactly(2L);
+        assertThat(result.get(0).getRedList()).extracting(AuthDTO::getGrantToObjId).containsExactly(201L);
         input.setRedList(List.of());
+        input.setBlackList(List.of(target("USER", 301L)));
         result = service.buildMemberAuthorizations(group, input);
-        assertThat(result.get(1).getRedList()).extracting(AuthDTO::getGrantToObjId).containsExactly(999L);
+        assertThat(result.get(0).getRedList()).isEmpty();
+        assertThat(result.get(0).getBlackList()).extracting(AuthDTO::getGrantToObjId).containsExactly(301L);
+        verify(resources, never()).selectById(7L);
+        verify(resources, never()).selectById(8L);
+        verify(relations, never()).findByResourceId(any());
+        verify(grants, never()).findPrivilegeGrant(any(), org.mockito.ArgumentMatchers.eq("SKILL"), any(), any());
+    }
+
+    @Test
+    void groupWithoutMembersDoesNotGrantItsDirectResources() {
+        SsResExtDigEmployee ext = new SsResExtDigEmployee(); ext.setAgentType("017");
+        when(employees.findById(1L)).thenReturn(ext);
+        when(relations.findByResourceId(1L)).thenReturn(List.of(relation(7L)));
+        assertThat(service.buildMemberAuthorizations(resource(1L, 10L), authorization(GrantType.FORCE_USE))).isEmpty();
+        verifyNoInteractions(resources, grants);
     }
 
     private static AuthRedBlackDTO authorization(String type) {

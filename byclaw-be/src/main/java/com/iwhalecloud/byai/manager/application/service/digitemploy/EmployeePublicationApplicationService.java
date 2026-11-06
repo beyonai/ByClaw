@@ -611,8 +611,8 @@ public class EmployeePublicationApplicationService {
                     auth.ensureCreatorDefaultPrivileges(official);
                 }
                 grantApprovedAudience(publication, official, false);
-                // 只在审核通过的配置落地时补权限；草稿保存不会提前授权绑定资源。
-                auth.synchronizeDigitalEmployeeResourceUsers(official, snapshot.getRelTools());
+                // 审核通过时校验最终绑定关系，不向关联资源补用户授权。
+                auth.validateDigitalEmployeeResourceBindings(official, snapshot.getRelTools());
                 activatePublishedVersion(publication, official, snapshot, mapped, fresh);
                 runtimeAttempted[0] = true;
                 if (!employees.syncPublicationOpenClawWorkSpace(official.getResourceId(), snapshot)) throw new BaseException("官方员工运行配置同步失败，请重试发布");
@@ -671,7 +671,7 @@ public class EmployeePublicationApplicationService {
             auth.invalidateResourceAuthorizationCachesAfterCommit(skill.getResourceId(), "SKILL");
         }
         scopeService.activate(publication, official.getResourceId());
-        if (scopeOnly) auth.synchronizeDigitalEmployeeResourceUsers(official, null);
+        if (scopeOnly) auth.validateDigitalEmployeeResourceBindings(official, null);
         auth.invalidateResourceAuthorizationCachesAfterCommit(official.getResourceId(), "DIG_EMPLOYEE");
     }
 

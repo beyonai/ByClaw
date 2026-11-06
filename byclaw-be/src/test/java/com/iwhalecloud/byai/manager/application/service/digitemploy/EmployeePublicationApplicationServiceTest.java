@@ -327,12 +327,12 @@ class EmployeePublicationApplicationServiceTest {
         order.verify(extensions).save(any());
         order.verify(auth).ensureCreatorDefaultPrivileges(any());
         order.verify(dependencies).grantAudience(any(), eq(1L));
-        order.verify(auth).synchronizeDigitalEmployeeResourceUsers(any(), any());
+        order.verify(auth).validateDigitalEmployeeResourceBindings(any(), any());
         order.verify(employees).syncPublicationOpenClawWorkSpace(anyLong(), any());
     }
     @Test void publicationResourceAuthorizationFailureRollsBackBeforeRuntime() {
         login("admin", 8L, List.of("PLAT_MAN")); publication.setStatus("PENDING");
-        doThrow(new BaseException("resource grant failed")).when(auth).synchronizeDigitalEmployeeResourceUsers(any(), any());
+        doThrow(new BaseException("resource grant failed")).when(auth).validateDigitalEmployeeResourceBindings(any(), any());
         var result = service.approve(request());
         assertThat(result.publication().getStatus()).isEqualTo("FAILED");
         verify(transactions).rollback(any());
@@ -351,7 +351,7 @@ class EmployeePublicationApplicationServiceTest {
         DigitalEmployeeDTO dto = JSON.parseObject(publication.getSnapshotJson(), DigitalEmployeeDTO.class);
         dto.setResourceName("修改后名称"); request.setEmployee(dto);
         service.save(request);
-        verify(auth, never()).synchronizeDigitalEmployeeResourceUsers(any(), any());
+        verify(auth, never()).validateDigitalEmployeeResourceBindings(any(), any());
         assertThat(publication.getEmployeeName()).isEqualTo("修改后名称(企业)");
         verify(resources, never()).updateById(any(SsResource.class));
         verifyNoInteractions(extensions);

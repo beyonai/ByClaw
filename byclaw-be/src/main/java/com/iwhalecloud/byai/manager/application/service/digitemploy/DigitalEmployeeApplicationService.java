@@ -970,8 +970,8 @@ public class DigitalEmployeeApplicationService {
         authApplicationService.ensureCreatorDefaultPrivileges(ssResource);
 
         if (!isEmployeeGroup) {
-            // 初始化创建者权限后补齐绑定资源使用权限，资源授权失败与员工创建一起回滚。
-            authApplicationService.synchronizeDigitalEmployeeResourceUsers(ssResource, digitalEmployeeDTO.getRelTools());
+            // 初始化员工创建者权限后校验绑定资源，关联资源的用户授权保持原样。
+            authApplicationService.validateDigitalEmployeeResourceBindings(ssResource, digitalEmployeeDTO.getRelTools());
         }
 
         // 绑定资源权限校验成功后再发送上架事件，避免失败创建被提前通知为可用。
@@ -1265,8 +1265,8 @@ public class DigitalEmployeeApplicationService {
             this.reconcileDigitalEmployeeUpdateRelations(ssResource, relIds, resourceRelDetails,
                 digitalEmployeeDTO.getRelResourceInfoList());
             this.rebuildAndSaveDigitalEmployeeRelSkills(resourceId);
-            // 使用保存后的完整关联，既补本次新增资源，也修复现有使用人的历史权限遗漏。
-            authApplicationService.synchronizeDigitalEmployeeResourceUsers(ssResource, digitalEmployeeDTO.getRelTools());
+            // 校验保存后的完整关联，用户授权不随员工配置变更。
+            authApplicationService.validateDigitalEmployeeResourceBindings(ssResource, digitalEmployeeDTO.getRelTools());
         }
         // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存,当前运行时改读 DIG_EMPLOYEE_{resourceId}.
         // this.syncDigEmployeeSkillsToRedisQuietly(resourceId);
@@ -1400,7 +1400,7 @@ public class DigitalEmployeeApplicationService {
             ssResource = this.lockDigitalEmployeeForSkillRelationMutation(digitalEmployeeId);
         } else {
             ssResource = ssResourceService.findById(digitalEmployeeId);
-            // 企业员工的知识/工具安装也会补使用人权限，必须与人员授权共用员工行锁。
+            // 企业员工的知识/工具关联变更与人员授权共用员工行锁。
             if (ssResource != null && OwnerType.ENTERPRISE.equals(ssResource.getOwnerType())) {
                 ssResource = this.lockDigitalEmployeeForSkillRelationMutation(digitalEmployeeId);
             }
@@ -1419,7 +1419,7 @@ public class DigitalEmployeeApplicationService {
         this.compareSsResourceRelDetail(ssResource, new ArrayList<>(mergedRelIds), resourceRelDetails, null);
         this.canonicalizeManualSkillRelations(digitalEmployeeId, installRelResources);
         resourceBindingSourceService.markManual(ssResource, installRelResources);
-        authApplicationService.synchronizeDigitalEmployeeResourceUsers(ssResource, null);
+        authApplicationService.validateDigitalEmployeeResourceBindings(ssResource, null);
         this.refreshRuntimeAfterSnapshotMutation(ssResource);
 
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
@@ -1483,7 +1483,7 @@ public class DigitalEmployeeApplicationService {
         }
 
         if (changed) {
-            authApplicationService.synchronizeDigitalEmployeeResourceUsers(digitalEmployee, null);
+            authApplicationService.validateDigitalEmployeeResourceBindings(digitalEmployee, null);
             this.refreshRuntimeAfterSnapshotMutation(digitalEmployee);
         }
         return result;

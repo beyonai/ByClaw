@@ -692,8 +692,8 @@ public class AuthApplicationService {
         // 3. 构造统一授权对象，并交给 handleAuth 做差异化更新。
         AuthRedBlackDTO authDto = buildResourceMemberAuthDto(ssResource, GrantType.ALLOW_MANAGE, qo);
         applyResourceMemberAuthorization(ssResource, authDto);
-        // 管理授权包含使用能力，新增管理人员也要满足绑定资源的使用权限。
-        synchronizeDigitalEmployeeResourceUsers(ssResource, null);
+        // 管理授权只作用于员工，关联资源仅校验有效性。
+        validateDigitalEmployeeResourceBindings(ssResource, null);
     }
 
     /**
@@ -728,9 +728,9 @@ public class AuthApplicationService {
         //    避免"用户已被直接授权但仍显示在审核列表/我申请中"的脏数据，与 approveUseApply 行为一致。
         autoCancelPendingApplyForGrantedUsers(ssResource, qo);
 
-        // 员工使用授权独立成立；仅为操作人有权授权的关联资源补齐使用权限。
+        // 员工使用授权独立成立，关联资源只校验有效性，不补用户授权。
         if (isEnterpriseDigitalEmployee(ssResource)) {
-            employeeResourceAuthorizationService.synchronizeForDirectUseAuthorization(ssResource);
+            employeeResourceAuthorizationService.validateBindings(ssResource, null);
         }
     }
 
@@ -795,10 +795,10 @@ public class AuthApplicationService {
         return retainedKeys;
     }
 
-    /** 企业员工保存/授权共用入口；个人资源及员工组的现有授权契约保持独立。 */
-    public void synchronizeDigitalEmployeeResourceUsers(SsResource employee, List<String> relToolCodes) {
+    /** 企业员工保存/授权共用的绑定资源校验，不修改关联资源的用户授权。 */
+    public void validateDigitalEmployeeResourceBindings(SsResource employee, List<String> relToolCodes) {
         if (isEnterpriseDigitalEmployee(employee)) {
-            employeeResourceAuthorizationService.synchronize(employee, relToolCodes);
+            employeeResourceAuthorizationService.validateBindings(employee, relToolCodes);
         }
     }
 
@@ -1205,8 +1205,10 @@ public class AuthApplicationService {
             privilegeGrantService.save(privilegeGrant);
         }
 
-        // 审批通过也是新增员工使用人，不能绕过绑定资源校验；失败时连同申请状态一起回滚。
-        synchronizeDigitalEmployeeResourceUsers(ssResource, null);
+        // 审批保留绑定资源校验；只授予员工权限，不补关联资源授权。
+        if (isEnterpriseDigitalEmployee(ssResource)) {
+            employeeResourceAuthorizationService.validateApprovedApplicantBindings(ssResource, qo.getApplyUserId());
+        }
         afterAuthorizationCommit(() -> syncUserAuthToRedis(qo.getApplyUserId()));
     }
 
@@ -1252,7 +1254,7 @@ public class AuthApplicationService {
             || CurrentUserHolder.isPlatformManager() || employeeScopes.canReviewApplicant(resource, applicant);
     }
 
-    private void requireApplicantAuditPermission(SsResource resource, Long applicant) {
+    public void requireApplicantAuditPermission(SsResource resource, Long applicant) {
         if (!canAuditApplicant(resource, applicant)) throw new BaseException("没有该申请的审核权限");
     }
 
@@ -1307,7 +1309,7 @@ public class AuthApplicationService {
             grant.setGrantToObjType(GrantToObjType.USER); grant.setGrantToObjId(qo.getApplyUserId());
             grant.setGrantToType(Color.RED); grant.setStatusCd("A"); privilegeGrantService.save(grant);
         }
-        synchronizeDigitalEmployeeResourceUsers(resource, null);
+        validateDigitalEmployeeResourceBindings(resource, null);
         afterAuthorizationCommit(() -> syncUserAuthToRedis(qo.getApplyUserId()));
     }
 

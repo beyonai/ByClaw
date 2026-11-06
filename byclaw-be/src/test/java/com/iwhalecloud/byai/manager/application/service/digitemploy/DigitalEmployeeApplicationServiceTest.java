@@ -690,7 +690,7 @@ class DigitalEmployeeApplicationServiceTest {
 
         InOrder order = inOrder(authApplicationService, resourceEventService);
         order.verify(authApplicationService).ensureCreatorDefaultPrivileges(savedResource);
-        order.verify(authApplicationService).synchronizeDigitalEmployeeResourceUsers(savedResource, List.of("custom-tool"));
+        order.verify(authApplicationService).validateDigitalEmployeeResourceBindings(savedResource, List.of("custom-tool"));
         order.verify(resourceEventService).sendResourceShelfEvent(savedResource);
     }
 
@@ -700,7 +700,7 @@ class DigitalEmployeeApplicationServiceTest {
         DigitalEmployeeDTO dto = createDto(); dto.setOwnerType(OwnerType.ENTERPRISE); dto.setFrontAccess(true);
         when(sequenceService.nextVal()).thenReturn(100L);
         org.mockito.Mockito.doThrow(new BaseException("resource denied")).when(authApplicationService)
-            .synchronizeDigitalEmployeeResourceUsers(any(), any());
+            .validateDigitalEmployeeResourceBindings(any(), any());
 
         assertThatThrownBy(() -> service.saveDigitalEmployee(dto)).hasMessage("resource denied");
 
@@ -720,7 +720,7 @@ class DigitalEmployeeApplicationServiceTest {
 
         InOrder order = inOrder(updater, authApplicationService, digitalEmployeeRuntimeRefreshService);
         order.verify(updater).rebuildAndSaveDigitalEmployeeRelSkills(100L);
-        order.verify(authApplicationService).synchronizeDigitalEmployeeResourceUsers(employee, List.of());
+        order.verify(authApplicationService).validateDigitalEmployeeResourceBindings(employee, List.of());
         order.verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(100L, dto);
     }
 
@@ -731,7 +731,7 @@ class DigitalEmployeeApplicationServiceTest {
         prepareFullUpdate(employee, List.of(), List.of());
         DigitalEmployeeDTO dto = updateDto(); dto.setOwnerType(OwnerType.ENTERPRISE);
         org.mockito.Mockito.doThrow(new BaseException("resource denied")).when(authApplicationService)
-            .synchronizeDigitalEmployeeResourceUsers(any(), any());
+            .validateDigitalEmployeeResourceBindings(any(), any());
 
         assertThatThrownBy(() -> updater.updateDigitalEmployee(dto)).hasMessage("resource denied");
 
@@ -1225,7 +1225,7 @@ class DigitalEmployeeApplicationServiceTest {
         InOrder order = inOrder(skillGroupMapper, ssResourceRelDetailService, authApplicationService);
         order.verify(skillGroupMapper).selectDigitalEmployeeForUpdate(100L, 201L);
         order.verify(ssResourceRelDetailService).save(any(SsResourceRelDetail.class));
-        order.verify(authApplicationService).synchronizeDigitalEmployeeResourceUsers(employee, null);
+        order.verify(authApplicationService).validateDigitalEmployeeResourceBindings(employee, null);
         verifySnapshotRefresh(installer, employee, 1);
     }
 
@@ -1348,7 +1348,7 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(result.getTotalSkillIds()).containsExactly(302L, 301L);
         assertThat(result.getInstalledSkillIds()).containsExactly(302L, 301L);
         assertThat(result.getExistingSkillIds()).isEmpty();
-        verify(authApplicationService).synchronizeDigitalEmployeeResourceUsers(employee, null);
+        verify(authApplicationService).validateDigitalEmployeeResourceBindings(employee, null);
         ArgumentCaptor<SsResourceRelDetail> inserted = ArgumentCaptor.forClass(SsResourceRelDetail.class);
         verify(skillGroupMapper, times(2)).insertDigitalEmployeeSkillIfAbsent(inserted.capture());
         assertThat(inserted.getAllValues()).extracting(SsResourceRelDetail::getRelResourceId)

@@ -1234,9 +1234,9 @@ class AuthApplicationServiceTest {
         var synchronization = (DigitalEmployeeResourceAuthorizationService) ReflectionTestUtils.getField(service,
             "employeeResourceAuthorizationService");
         if (GrantType.ALLOW_MANAGE.equals(grantType)) {
-            verify(synchronization).synchronize(any(), eq(null));
+            verify(synchronization).validateBindings(any(), eq(null));
         } else {
-            verify(synchronization).synchronizeForDirectUseAuthorization(any());
+            verify(synchronization).validateBindings(any(), any());
         }
     }
 
@@ -2255,13 +2255,13 @@ class AuthApplicationServiceTest {
         when(mapper.selectOne(any())).thenReturn(pending);
         when(mapper.update(any(), any())).thenReturn(1);
         doNothing().when(service).syncUserAuthToRedis(3L);
-        if (fail) org.mockito.Mockito.doThrow(new BaseException("resource denied")).when(synchronization).synchronize(employee, null);
+        if (fail) org.mockito.Mockito.doThrow(new BaseException("resource denied")).when(synchronization).validateApprovedApplicantBindings(employee, 3L);
         ResourceUseApplyApproveQo request = new ResourceUseApplyApproveQo(); request.setResourceId(607L); request.setApplyUserId(3L);
         org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
         try {
             if (fail) assertThatThrownBy(() -> service.approveUseApply(request)).hasMessage("resource denied");
             else service.approveUseApply(request);
-            verify(synchronization).synchronize(employee, null);
+            verify(synchronization).validateApprovedApplicantBindings(employee, 3L);
             verify(service, never()).syncUserAuthToRedis(3L);
             if (!fail) {
                 org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()
@@ -2395,16 +2395,15 @@ class AuthApplicationServiceTest {
         InOrder order = inOrder(boundResources, service);
         order.verify(boundResources).lockForAuthorization(employee);
         order.verify(service).handleAuth(any());
-        order.verify(boundResources).synchronizeForDirectUseAuthorization(employee);
+        order.verify(boundResources).validateBindings(employee, null);
     }
 
-    /** 无权补齐关联资源时员工授权仍提交；真正的写入失败仍回滚整个事务。 */
+    /** 员工授权只写员工名单；个人知识库不阻断组织授权，员工权限和绑定有效性仍受校验。 */
     @ParameterizedTest
-    @ValueSource(strings = {"success", "writeFailure", "missingResourceGrantPermission", "employeePermissionDenied"})
-    void employeeAndBoundResourceGrantsCommitTogetherOrRollBackTogether(String outcome,
+    @ValueSource(strings = {"success", "personalKnowledge", "invalidBinding", "writeFailure", "employeePermissionDenied"})
+    void employeeGrantsCommitWithoutChangingBoundResourceGrants(String outcome,
         @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) {
         boolean fail = "writeFailure".equals(outcome);
-        boolean skipSkill = "missingResourceGrantPermission".equals(outcome);
         String url = "jdbc:sqlite:" + directory.resolve("employee-resource-auth.sqlite");
         var dataSource = new org.apache.ibatis.datasource.unpooled.UnpooledDataSource("org.sqlite.JDBC", url, null, null);
         var jdbc = new org.springframework.jdbc.core.JdbcTemplate(dataSource);
@@ -2427,18 +2426,18 @@ class AuthApplicationServiceTest {
         ReflectionTestUtils.setField(service, "employeeGroupAuthorizationService", mock(DigitalEmployeeGroupAuthorizationService.class));
         ReflectionTestUtils.setField(service, "authRedisSyncService", cache);
         ReflectionTestUtils.setField(synchronization, "auth", service);
-        ReflectionTestUtils.setField(synchronization, "users", mock(com.iwhalecloud.byai.manager.mapper.users.UsersMapper.class));
-        ReflectionTestUtils.setField(synchronization, "authorizationSubjects", mock(com.iwhalecloud.byai.manager.mapper.auth.AuthorizationSubjectMapper.class));
-        ReflectionTestUtils.setField(synchronization, "authorizationGrants", mock(PrivilegeGrantMapper.class));
         ReflectionTestUtils.setField(synchronization, "resources", resources);
         ReflectionTestUtils.setField(synchronization, "skillGroups", locks);
         ReflectionTestUtils.setField(synchronization, "relations", relationService);
         ReflectionTestUtils.setField(synchronization, "employees", employeeService);
-        ReflectionTestUtils.setField(synchronization, "grants", grants);
+        ReflectionTestUtils.setField(synchronization, "config",
+            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class));
         CurrentUserHolder.setLoginInfo(loginInfo(1L)); CurrentUserHolder.getLoginInfo().setEnterpriseId(10L);
         SsResource employee = enterpriseResource(100L, 1L); employee.setResourceBizType("DIG_EMPLOYEE"); employee.setComAcctId(10L);
         SsResource skill = enterpriseResource(200L, 1L); skill.setResourceBizType("SKILL"); skill.setComAcctId(10L);
         SsResource knowledge = enterpriseResource(201L, 1L); knowledge.setResourceBizType("KG_DOC"); knowledge.setComAcctId(10L);
+        if ("personalKnowledge".equals(outcome)) knowledge.setOwnerType("personal");
+        if ("invalidBinding".equals(outcome)) knowledge.setComAcctId(20L);
         when(resources.selectById(100L)).thenReturn(employee);
         when(resources.selectById(200L)).thenReturn(skill);
         when(resources.selectById(201L)).thenReturn(knowledge);
@@ -2446,30 +2445,16 @@ class AuthApplicationServiceTest {
         var first = new com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail(); first.setRelResourceId(200L);
         var second = new com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail(); second.setRelResourceId(201L);
         when(relationService.findByResourceId(100L)).thenReturn(List.of(first, second));
-        when(grants.listActiveRedGrantsForGrantObject(100L, "DIG_EMPLOYEE"))
-            .thenReturn(List.of(useGrant(100L, 3L, "USER", "RED", "A")));
-        doReturn(true).when(service).hasResourceUsePermission(eq(employee), any(Long.class));
-        doReturn(false).when(service).hasResourceUsePermission(eq(skill), any(Long.class));
-        doReturn(false).when(service).hasResourceUsePermission(eq(knowledge), any(Long.class));
-        doReturn(!skipSkill).when(service).hasResourceUseSettingPermission(skill);
         if ("employeePermissionDenied".equals(outcome)) {
             doReturn(false).when(service).hasResourceUseSettingPermission(employee);
             mockI18n();
         }
-        doNothing().when(service).validateDigitalEmployeeResourceUseGrant(any(), any());
         org.mockito.Mockito.doAnswer(call -> {
             AuthRedBlackDTO dto = call.getArgument(0);
             jdbc.update("INSERT INTO grants VALUES (?, ?)", dto.getGrantObjId(), dto.getRedList().get(0).getGrantToObjId());
+            if (fail) throw new BaseException("employee grant failed");
             return null;
         }).when(service).handleAuth(any());
-        org.mockito.Mockito.doAnswer(call -> {
-            List<PrivilegeGrant> batch = call.getArgument(0);
-            for (PrivilegeGrant grant : batch) {
-                if (fail && grant.getGrantObjId().equals(201L)) throw new BaseException("resource grant failed");
-                jdbc.update("INSERT INTO grants VALUES (?, ?)", grant.getGrantObjId(), grant.getGrantToObjId());
-            }
-            return null;
-        }).when(grants).saveBatch(any());
         mockRedisSetWrite();
         var factory = new org.springframework.aop.framework.ProxyFactory(service);
         factory.setProxyTargetClass(true);
@@ -2477,27 +2462,25 @@ class AuthApplicationServiceTest {
             new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource),
             new org.springframework.transaction.annotation.AnnotationTransactionAttributeSource()));
         AuthApplicationService transactional = (AuthApplicationService) factory.getProxy();
-        AuthDTO target = new AuthDTO(); target.setGrantToObjType("USER"); target.setGrantToObjId(3L);
+        AuthDTO target = new AuthDTO(); target.setGrantToObjType("ORG"); target.setGrantToObjId(3L);
         ResourceMemberSettingQo request = new ResourceMemberSettingQo(); request.setResourceId(100L); request.setRedList(List.of(target));
-        if ("employeePermissionDenied".equals(outcome)) {
+        if ("employeePermissionDenied".equals(outcome) || "invalidBinding".equals(outcome)) {
             assertThatThrownBy(() -> transactional.setResourceUsers(request)).isInstanceOf(BaseException.class);
             assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants", Integer.class)).isEqualTo(1);
             verifyNoInteractions(cache);
         } else if (fail) {
-            assertThatThrownBy(() -> transactional.setResourceUsers(request)).hasMessage("resource grant failed");
+            assertThatThrownBy(() -> transactional.setResourceUsers(request)).hasMessage("employee grant failed");
             assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants", Integer.class)).isEqualTo(1);
             verifyNoInteractions(cache);
         } else {
             transactional.setResourceUsers(request);
-            assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants", Integer.class)).isEqualTo(skipSkill ? 4 : 6);
-            assertThat(committed.queryForList("SELECT resource_id FROM grants WHERE user_id=3 ORDER BY resource_id", Long.class))
-                .containsExactlyElementsOf(skipSkill ? List.of(100L, 201L) : List.of(100L, 200L, 201L));
-            verify(cache).asyncSyncAuthChangedUsers(Set.of(1L, 3L), GrantType.FORCE_USE);
-            if (skipSkill) {
-                verify(service, never()).validateDigitalEmployeeResourceUseGrant(eq(skill), any());
-                verify(service, never()).appendDigitalEmployeeResourceUsePrivileges(eq(skill), any());
-            }
+            assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants", Integer.class)).isEqualTo(2);
+            assertThat(committed.queryForList("SELECT resource_id FROM grants WHERE user_id=3", Long.class))
+                .containsExactly(100L);
         }
+        verify(grants, never()).saveBatch(any());
+        verify(grants, never()).listActiveRedGrantsForGrantObject(any(), anyString());
+        verify(service, never()).appendDigitalEmployeeResourceUsePrivileges(any(), any());
         assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants WHERE user_id=999", Integer.class)).isEqualTo(1);
     }
 

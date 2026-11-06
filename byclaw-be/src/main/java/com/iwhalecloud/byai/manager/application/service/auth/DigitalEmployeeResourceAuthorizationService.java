@@ -2,31 +2,22 @@ package com.iwhalecloud.byai.manager.application.service.auth;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
-import com.iwhalecloud.byai.common.constants.auth.GrantType;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGroupApplicationService;
-import com.iwhalecloud.byai.manager.domain.auth.enums.Color;
-import com.iwhalecloud.byai.manager.domain.auth.enums.GrantToObjType;
-import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
-import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceLifecyclePolicy;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
-import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.mapper.resource.DigitalEmployeePublicationMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SkillGroupMapper;
-import com.iwhalecloud.byai.manager.mapper.users.UsersMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
-import java.util.ArrayList;
-import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -37,27 +28,13 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-/** 企业员工配置和人员授权共用的资源使用权限补齐；不撤销资源上的任何既有授权。 */
+/** 企业员工配置和授权的绑定资源校验；不为关联资源增删用户授权。 */
 @Service
 public class DigitalEmployeeResourceAuthorizationService {
-    @org.springframework.beans.factory.annotation.Autowired
-    private com.iwhalecloud.byai.manager.mapper.auth.AuthorizationSubjectMapper authorizationSubjects;
-    @org.springframework.beans.factory.annotation.Autowired
-    private com.iwhalecloud.byai.manager.mapper.auth.PrivilegeGrantMapper authorizationGrants;
-
-
-    private static final Logger logger = LoggerFactory.getLogger(DigitalEmployeeResourceAuthorizationService.class);
-
     private static final Set<String> RESOURCE_TYPES = Set.of("SKILL", "KG_DOC", "KG_DB", "KG_QA", "KG_TERM",
         "TOOL", "TOOLKIT", "MCP", "MCP_TOOL", "AGENT", "OBJECT", "VIEW");
     private static final Set<String> TOOL_TYPES = Set.of("TOOL", "TOOLKIT", "MCP", "MCP_TOOL", "AGENT");
-    private static final Set<String> USE_TYPES = Set.of(GrantType.ALLOW_MANAGE, GrantType.AVAILABLE_USE,
-        GrantType.FORCE_USE);
-
     @Autowired
     @Lazy
     private AuthApplicationService auth;
@@ -69,10 +46,6 @@ public class DigitalEmployeeResourceAuthorizationService {
     private SsResourceRelDetailService relations;
     @Autowired
     private SsResExtDigEmployeeService employees;
-    @Autowired
-    private PrivilegeGrantService grants;
-    @Autowired
-    private UsersMapper users;
     @Autowired
     private DigitalEmployeePublicationMapper publications;
     @Autowired
@@ -94,60 +67,30 @@ public class DigitalEmployeeResourceAuthorizationService {
         return locked;
     }
 
-    /** relToolCodes 非空时使用本次配置；为 null 时读取已生效的运行配置镜像。 */
-    @Transactional(rollbackFor = Exception.class)
-    public void synchronize(SsResource employee, List<String> relToolCodes) {
-        synchronize(employee, relToolCodes, false);
-    }
-
-    /** 直接授予员工使用权时，仅补齐操作人有权授权的关联资源；无权补授权的资源不阻断员工授权。 */
-    @Transactional(rollbackFor = Exception.class)
-    public void synchronizeForDirectUseAuthorization(SsResource employee) {
-        synchronize(employee, null, true);
-    }
-
-    private void synchronize(SsResource employee, List<String> relToolCodes, boolean skipUnmanageableResources) {
-        long started = System.nanoTime();
+    /** 保存和授权只校验关联资源，不读取员工使用人名单，也不生成关联资源授权。 */
+    public void validateBindings(SsResource employee, List<String> relToolCodes) {
         if (!isEnterpriseEmployee(employee)) return;
         if (CurrentUserHolder.getCurrentUserId() == null || CurrentUserHolder.getEnterpriseId() == null
             || !Objects.equals(employee.getComAcctId(), CurrentUserHolder.getEnterpriseId())) {
             throw new BaseException(I18nUtil.get("auth.employee.resources.invalid", employee.getResourceName()));
         }
         SsResExtDigEmployee extension = employees.findById(employee.getResourceId());
-        // 员工组继续使用已有组员/关联资源同步契约，避免把组授权改成个人授权快照。
         if (extension != null && DigitalEmployeeGroupApplicationService.GROUP_AGENT_TYPE.equals(extension.getAgentType())) {
             return;
         }
-        Map<Long, SsResource> boundResources = boundResources(employee, extension, relToolCodes);
-        if (boundResources.isEmpty()) return;
-        long resourcesRead = System.nanoTime();
-        Set<Long> userIds = effectiveUsers(employee);
-        List<SsResource> snapshotResources = new ArrayList<>(boundResources.values());
-        snapshotResources.add(employee);
-        try (AuthorizationPermissionSnapshot snapshot = new AuthorizationPermissionSnapshot(
-            snapshotResources, userIds, authorizationSubjects, authorizationGrants)) {
-        userIds.removeIf(id -> id == null || !auth.hasResourceUsePermission(employee, id));
-        long usersExpanded = System.nanoTime();
-        Map<SsResource, List<Long>> missing = new LinkedHashMap<>();
-        for (SsResource resource : boundResources.values()) {
-            if (Boolean.TRUE.equals(resource.getUseAuthControlled()) || Boolean.TRUE.equals(resource.getViewAuthControlled())) continue;
-            if (skipUnmanageableResources && !auth.hasResourceUseSettingPermission(resource)) continue;
-            for (Long userId : userIds) {
-                if (auth.hasResourceUsePermission(resource, userId)) continue;
-                // 员工管理权限不能替代资源授权维护权限；黑名单也不能被自动授权覆盖。
-                auth.validateDigitalEmployeeResourceUseGrant(resource, userId);
-                missing.computeIfAbsent(resource, ignored -> new ArrayList<>()).add(userId);
-            }
+        boundResources(employee, extension, relToolCodes);
+    }
+
+    /** 审批仍校验审批人、申请人员工使用权及绑定关系，不向关联资源补授权。 */
+    public void validateApprovedApplicantBindings(SsResource employee, Long applicant) {
+        if (!isEnterpriseEmployee(employee)) return;
+        auth.requireApplicantAuditPermission(employee, applicant);
+        if (!auth.hasResourceUsePermission(employee, applicant)) {
+            throw new BaseException(I18nUtil.get("auth.employee.resources.employee.use.required", employee.getResourceName()));
         }
-        // 整批先校验再追加，任一资源失败时由员工保存/人员授权的外层事务回滚。
-        long checked = System.nanoTime();
-        missing.forEach(auth::appendDigitalEmployeeResourceUsePrivileges);
-        logger.info("员工关联资源授权 employeeId={}, resources={}, users={}, missing={}, resourceMs={}, usersMs={}, checkMs={}, appendMs={}",
-            employee.getResourceId(), boundResources.size(), userIds.size(),
-            missing.values().stream().mapToInt(List::size).sum(), (resourcesRead - started) / 1_000_000,
-            (usersExpanded - resourcesRead) / 1_000_000, (checked - usersExpanded) / 1_000_000,
-            (System.nanoTime() - checked) / 1_000_000);
-        }
+        SsResExtDigEmployee extension = employees.findById(employee.getResourceId());
+        if (extension != null && DigitalEmployeeGroupApplicationService.GROUP_AGENT_TYPE.equals(extension.getAgentType())) return;
+        boundResources(employee, extension, null);
     }
 
     private boolean isEnterpriseEmployee(SsResource employee) {
@@ -225,47 +168,4 @@ public class DigitalEmployeeResourceAuthorizationService {
         result.putIfAbsent(resource.getResourceId(), resource);
     }
 
-    private Set<Long> effectiveUsers(SsResource employee) {
-        Set<Long> candidates = new LinkedHashSet<>();
-        if (employee.getCreateBy() != null) candidates.add(employee.getCreateBy());
-        Date now = new Date();
-        Set<Long> organizationIds = new LinkedHashSet<>();
-        Set<Long> positionIds = new LinkedHashSet<>();
-        Set<Long> stationIds = new LinkedHashSet<>();
-        List<PrivilegeGrant> records = grants.listActiveRedGrantsForGrantObject(employee.getResourceId(), "DIG_EMPLOYEE");
-        if (records != null) {
-            for (PrivilegeGrant grant : records) {
-                if (grant == null || !USE_TYPES.contains(StringUtils.defaultString(grant.getGrantType()))
-                    || !isEffective(grant, now)) continue;
-                Long targetId = grant.getGrantToObjId();
-                if (targetId == null) continue;
-                switch (StringUtils.upperCase(StringUtils.trimToEmpty(grant.getGrantToObjType()), java.util.Locale.ROOT)) {
-                    case GrantToObjType.USER -> candidates.add(targetId);
-                    case GrantToObjType.ORG -> organizationIds.add(targetId);
-                    case GrantToObjType.POST -> positionIds.add(targetId);
-                    case GrantToObjType.STATION -> stationIds.add(targetId);
-                    default -> { }
-                }
-            }
-        }
-        expandTargets(organizationIds, users::findUserIdsByOrgIdListIncludingChildren, candidates);
-        expandTargets(positionIds, users::findUserIdsByPostIds, candidates);
-        expandTargets(stationIds, users::findUserIdsByStationIdListIncludingChildren, candidates);
-        // The caller applies the permission snapshot to exclude blacklisted users.
-        return candidates;
-    }
-
-    private void expandTargets(Set<Long> targets, java.util.function.Function<List<Long>, List<Long>> expand, Set<Long> result) {
-        List<Long> ids = new ArrayList<>(targets);
-        for (int start = 0; start < ids.size(); start += 500) {
-            result.addAll(expand.apply(ids.subList(start, Math.min(start + 500, ids.size()))));
-        }
-    }
-
-    private boolean isEffective(PrivilegeGrant grant, Date now) {
-        return "A".equalsIgnoreCase(grant.getStatusCd()) && Color.RED.equalsIgnoreCase(grant.getGrantToType())
-            && OperType.READ.equals(grant.getOperType())
-            && (grant.getEffDate() == null || !grant.getEffDate().after(now))
-            && (grant.getExpDate() == null || grant.getExpDate().after(now));
-    }
 }

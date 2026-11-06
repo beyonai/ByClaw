@@ -38,7 +38,7 @@ class EmployeeManagementApplyTest {
         ReflectionTestUtils.setField(service, "employeeScopes", scopes);
         when(resources.selectById(900L)).thenReturn(employee);
         doReturn(false).when(service).hasResourceUseSettingPermission(employee);
-        doNothing().when(service).synchronizeDigitalEmployeeResourceUsers(any(), any());
+        doNothing().when(service).validateDigitalEmployeeResourceBindings(any(), any());
         doNothing().when(service).syncUserAuthToRedis(anyLong());
     }
 
@@ -67,7 +67,7 @@ class EmployeeManagementApplyTest {
         var request = pending(); when(grants.update(any(), any())).thenReturn(1);
         service.approveUseApply(request);
         verify(writes).save(argThat(p -> "ALLOW_MANAGE".equals(p.getGrantType()) && "A".equals(p.getStatusCd()) && p.getGrantToObjId() == 42L));
-        verify(service).synchronizeDigitalEmployeeResourceUsers(employee, null);
+        verify(service).validateDigitalEmployeeResourceBindings(employee, null);
         verify(service).syncUserAuthToRedis(42L);
     }
 
@@ -75,7 +75,7 @@ class EmployeeManagementApplyTest {
         var request = pending(); when(grants.update(any(), any())).thenReturn(0);
         assertThatThrownBy(() -> service.approveUseApply(request)).hasMessageContaining("已被处理");
         verifyNoInteractions(writes);
-        verify(service, never()).synchronizeDigitalEmployeeResourceUsers(any(), any());
+        verify(service, never()).validateDigitalEmployeeResourceBindings(any(), any());
     }
 
     @Test void anOrganizationAdministratorCannotApproveAcrossThePublishedAudience() {
