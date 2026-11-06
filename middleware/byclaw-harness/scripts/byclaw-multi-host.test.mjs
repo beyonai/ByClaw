@@ -1065,6 +1065,30 @@ test('listed users keep storage units in the database too; spills go to the tool
   assert.deepEqual(rows('u2', { toolEnvBackend: 'none' }), [])
 })
 
+test('listed users on a byclaw-be tool sandbox keep image attachments in their space; renewed tokens reach the store', () => {
+  const entries = [
+    { id: 'attachment-local', name: 'local', config: { maxImageBytes: 9 } },
+    { id: 'attachment-be', name: 'be', disabled: true },
+  ]
+  const config = host.readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_SESSION_DB_URL: 'postgres://db', BYCLAW_SESSION_DB_USERS: 'u1' })
+  const toolEnvBe = { baseUrl: 'http://be/byaiService', systemCode: 'sys' }
+  const rows = (user, spec) => composeUserOverlays(entries, user, `/home/${user}`, { sessionDb: host.sessionDbFor(config, user), env: { BEYOND_TOKEN: 'tok' }, ...spec })
+    .filter(row => row.id.startsWith('attachment-'))
+  assert.deepEqual(rows('u1', { toolEnvBe }), [
+    { id: 'attachment-local', config: { maxImageBytes: 9, dshHome: '/home/u1' } },
+    { id: 'attachment-local', disabled: true },
+    { id: 'attachment-be', disabled: false, config: { maxImageBytes: 9, dshHome: '/home/u1', be: { baseUrl: 'http://be/byaiService', systemCode: 'sys', token: 'tok' } } },
+  ])
+  const localOnly = [{ id: 'attachment-local', config: { maxImageBytes: 9, dshHome: '/home/u2' } }]
+  assert.deepEqual(rows('u2', { toolEnvBe }), localOnly)
+  assert.deepEqual(rows('u1', {}).length, 1)
+
+  const renewed = []
+  const ctx = { get: name => ({ attachments: { renewBeToken: token => renewed.push(['attachments', token]) }, ssh: { renewBeToken: token => renewed.push(['ssh', token]) } })[name] }
+  assert.equal(host.renewUserToken(ctx, { toolEnvBackend: 'byclaw-be' }, { BEYOND_TOKEN: ' new ' }), true)
+  assert.deepEqual(renewed, [['attachments', 'new'], ['ssh', 'new']])
+})
+
 test('the session database password never reaches a launch environment', () => {
   const values = launchEnvironmentValues({ KEEP: '1', BYCLAW_SESSION_DB_URL: 'postgres://u:secret@db' }, {}, 'u1')
   assert.equal(values.KEEP, '1')

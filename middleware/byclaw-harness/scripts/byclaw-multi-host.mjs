@@ -251,6 +251,9 @@ export function renewUserToken(ctx, config, env) {
   if (config.toolEnvBackend !== 'byclaw-be') return false
   const token = env?.BEYOND_TOKEN?.trim()
   if (!token) return false
+  // The attachment store (dsh-attachment-be) calls BE as the user too.
+  const attachments = ctx.get('attachments')
+  if (typeof attachments?.renewBeToken === 'function') attachments.renewBeToken(token)
   const toolEnv = ctx.get('ssh')
   if (typeof toolEnv?.renewBeToken !== 'function') return false
   toolEnv.renewBeToken(token)
@@ -386,6 +389,12 @@ export function composeUserOverlays(entries, user, home, spec, tables = {}) {
   if (spec.sessionDb !== undefined && rows.has('storage-db') && rows.has('storage-domain')) {
     overlays.push({ id: 'storage-db', disabled: false, config: { connectionString: spec.sessionDb.url, userCode: user } })
     overlays.push({ id: 'storage-domain', config: { ...(rows.get('storage-domain').config ?? {}), backend: 'db' } })
+  }
+  // Their image attachments get a copy in their own space through BE, which the byclaw-be backend reaches.
+  if (spec.sessionDb !== undefined && spec.toolEnvBe !== undefined && rows.has('attachment-be') && rows.has('attachment-local')) {
+    const be = { baseUrl: spec.toolEnvBe.baseUrl, systemCode: spec.toolEnvBe.systemCode ?? '', token: toolEnvUserToken(spec.env, user) }
+    overlays.push({ id: 'attachment-local', disabled: true })
+    overlays.push({ id: 'attachment-be', disabled: false, config: { ...(rows.get('attachment-local').config ?? {}), dshHome: home, be } })
   }
   // Spilled tool results are read back with read/grep, which run in the tool environment, so they are written there.
   if (!chatOnly && rows.has('spill-tool-env') && rows.has('spill-local')) {
