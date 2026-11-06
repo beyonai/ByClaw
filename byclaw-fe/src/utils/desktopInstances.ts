@@ -56,12 +56,46 @@ export function listDesktops(rows: ISandboxesInfo[]) {
     })
   );
 }
+function isDesktopProxySegment(value: string) {
+  return (
+    value &&
+    value.length <= 256 &&
+    value === value.trim() &&
+    value !== '.' &&
+    value !== '..' &&
+    // eslint-disable-next-line no-control-regex
+    !/[\\/\u0000-\u001f\u007f-\u009f]/.test(value)
+  );
+}
+
+function isDesktopProxyNavigation(url: URL, ref: SandboxInstanceRef, shared?: boolean) {
+  const prefix = '/byaiService/sandbox/desktop/';
+  if (url.origin !== window.location.origin || !url.pathname.startsWith(prefix)) return false;
+  const segments = url.pathname.slice(prefix.length).split('/').map(decodeURIComponent);
+  const entry = segments.pop()!;
+  const identity = shared
+    ? ['shared', ref.mappingId, ref.sandboxId, ref.instance]
+    : ['exclusive', ref.sandboxId, ref.instance];
+  return (
+    segments.length === identity.length &&
+    segments.every((value, index) => value === identity[index] && isDesktopProxySegment(value)) &&
+    (!entry || (isDesktopProxySegment(entry) && !entry.includes('%') && /\.html$/i.test(entry)))
+  );
+}
+
 export function resolveDesktop(rows: ISandboxesInfo[], ref: SandboxInstanceRef) {
   const target = listDesktops(rows).find((item) => desktopKey(item.ref) === desktopKey(ref));
-  if (!target || (target.row.endpointHeaders && Object.keys(target.row.endpointHeaders).length)) return undefined;
+  if (!target) return undefined;
   try {
     const url = new URL(target.row.instanceEndpoints![ref.instance], window.location.origin);
     if (!['http:', 'https:'].includes(url.protocol)) return undefined;
+    // The authenticated same-origin proxy supplies provider headers for HTTP and WebSocket requests.
+    if (
+      target.row.endpointHeaders &&
+      Object.keys(target.row.endpointHeaders).length &&
+      !isDesktopProxyNavigation(url, ref, target.row.isShared)
+    )
+      return undefined;
     if (/\/proxy\/\d+$/.test(url.pathname)) url.pathname += '/';
     url.searchParams.set('autoconnect', 'true');
     url.searchParams.set('resize', 'scale');
