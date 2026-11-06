@@ -65,6 +65,7 @@ import {
 } from './serviceSpecUtils';
 
 import EndpointLinks from './EndpointLinks';
+import SandboxLifetime from './SandboxLifetime';
 import ServiceSpecCatalog from './ServiceSpecCatalog';
 import ToolSandboxCover from './ToolSandboxCover';
 import RecoveryPanel from './RecoveryPanel';
@@ -307,8 +308,10 @@ const SandboxMgr = () => {
   tenantPermissionRef.current = canViewTenantResources;
   const [pageInfo, setPageInfo] = useState({ pageIndex: 1, pageSize: 20, total: 0, totalPage: 0 });
   const [keyword, setKeyword] = useState('');
-  const [status, setStatus] = useState('');
-  const [providerStatus, setProviderStatus] = useState('');
+  const [status, setStatus] = useState('RUNNING');
+  const [providerStatus, setProviderStatus] = useState('RUNNING');
+  const [sandboxType, setSandboxType] = useState('');
+  const [sandboxTypes, setSandboxTypes] = useState<string[]>([]);
   const [resourceScope, setOwnerScope] = useState<'USER' | 'TENANT'>(canViewTenantResources ? 'TENANT' : 'USER');
   const ownerScope = canViewTenantResources ? resourceScope : 'USER';
   const [enterpriseId, setEnterpriseId] = useState<string | undefined>();
@@ -379,12 +382,18 @@ const SandboxMgr = () => {
     keyword?: string;
     status?: string;
     providerStatus?: string;
+    sandboxType?: string;
     ownerScope?: 'USER' | 'TENANT';
     enterpriseId?: string;
   }>({});
   const watchedProfileKey = Form.useWatch('profileKey', resizeForm);
   const watchedResizeType = Form.useWatch('resizeType', resizeForm) || 'IN_PLACE';
-  const targetProfile = profileList.find((item) => item.profileKey === watchedProfileKey);
+  const resizeServiceType =
+    selectedResizeRecord?.serviceType || selectedResizeRecord?.sandboxType || DEFAULT_SERVICE_TYPE;
+  const targetProfile = profileList.find(
+    (item) => item.serviceType === resizeServiceType && item.profileKey === watchedProfileKey
+  );
+  const watermarkServiceType = Form.useWatch('serviceType', watermarkForm) || DEFAULT_SERVICE_TYPE;
 
   const getResourceInfo = (requests?: string | null, limits?: string | null) => {
     const requestObj = parseJsonObject(requests);
@@ -549,7 +558,8 @@ const SandboxMgr = () => {
       silent?: boolean,
       scope = ownerScope,
       tenantId = enterpriseId,
-      liveStatus = providerStatus
+      liveStatus = providerStatus,
+      type = sandboxType
     ) => {
       const p = {
         pageIndex: myPageInfo.pageIndex,
@@ -557,6 +567,7 @@ const SandboxMgr = () => {
         keyword: kw,
         status: st,
         providerStatus: liveStatus || undefined,
+        sandboxType: type || undefined,
         ownerScope: canViewTenantResources ? scope : 'USER',
         enterpriseId: canViewTenantResources && scope === 'TENANT' ? tenantId : undefined,
       };
@@ -572,6 +583,7 @@ const SandboxMgr = () => {
           if (requestRevision !== getMultiTenancyRevision() || canViewTenantResources !== tenantPermissionRef.current)
             return;
           setList(data?.list || []);
+          setSandboxTypes(data?.sandboxTypes || []);
           setPageInfo((prev) => ({
             ...prev,
             pageIndex: data?.pageIndex || myPageInfo.pageIndex,
@@ -588,7 +600,7 @@ const SandboxMgr = () => {
         },
       });
     },
-    [dispatch, ownerScope, enterpriseId, canViewTenantResources, providerStatus]
+    [dispatch, ownerScope, enterpriseId, canViewTenantResources, providerStatus, sandboxType]
   );
 
   useEffect(() => {
@@ -774,11 +786,11 @@ const SandboxMgr = () => {
   }, [dispatch]);
 
   const loadProfileList = useCallback(
-    (serviceType = DEFAULT_SERVICE_TYPE, enabledOnly = false) => {
+    (serviceType?: string, enabledOnly = false) => {
       setProfileLoading(true);
       dispatch({
         type: 'sandboxMgr/listServiceProfiles',
-        payload: { serviceType, enabledOnly },
+        payload: { ...(serviceType ? { serviceType } : { allServiceTypes: true }), enabledOnly },
         success: (data: ServiceProfileItem[]) => {
           setProfileList(data || []);
           setProfileLoading(false);
@@ -1657,6 +1669,13 @@ const SandboxMgr = () => {
       render: (value: string | number) => formatTimestamp(value),
     },
     {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.lifetime' }),
+      dataIndex: 'lifetime',
+      align: 'center' as const,
+      width: 180,
+      render: (_: unknown, record: SsSandboxRecord) => <SandboxLifetime record={record} />,
+    },
+    {
       title: intl.formatMessage({ id: 'sandboxMgr.table.lastAccessTime' }),
       dataIndex: 'lastAccessTime',
       align: 'center' as const,
@@ -2120,7 +2139,9 @@ const SandboxMgr = () => {
         (PROFILE_ORDER[(a.profileKey || '').toLowerCase()] || a.sortOrder || 999) -
         (PROFILE_ORDER[(b.profileKey || '').toLowerCase()] || b.sortOrder || 999)
     );
-  const enabledProfileList = sortedProfileList.filter((item) => item.enabled !== 0 && item.resizeEnabled !== 0);
+  const enabledProfileList = sortedProfileList.filter(
+    (item) => item.serviceType === resizeServiceType && item.enabled !== 0 && item.resizeEnabled !== 0
+  );
   const tenantColumnKeys = new Set([
     'id',
     'enterpriseId',
@@ -2130,6 +2151,7 @@ const SandboxMgr = () => {
     'status',
     'providerStatus',
     'createTime',
+    'lifetime',
     'releaseTime',
     'releaseReason',
     'action',
@@ -2186,7 +2208,7 @@ const SandboxMgr = () => {
       {scopeTabs}
       <Row gutter={16} align="middle">
         <Col flex="auto">
-          <Space size="middle">
+          <Space size="middle" wrap>
             <Input.Search
               placeholder={
                 ownerScope === 'TENANT'
@@ -2233,6 +2255,31 @@ const SandboxMgr = () => {
                 </Option>
               ))}
             </Select>
+            <Select
+              aria-label={intl.formatMessage({ id: 'sandboxMgr.filter.sandboxType' })}
+              value={sandboxType}
+              showSearch
+              style={{ width: 180 }}
+              onChange={(value: string) => {
+                setSandboxType(value);
+                loadData(
+                  { ...pageInfo, pageIndex: 1 },
+                  keyword,
+                  status,
+                  false,
+                  ownerScope,
+                  enterpriseId,
+                  providerStatus,
+                  value
+                );
+              }}
+              options={[
+                { value: '', label: intl.formatMessage({ id: 'sandboxMgr.filter.allTypes' }) },
+                ...[
+                  ...new Set([...sandboxTypes, ...['openclaw', 'byclaw-dsh', 'byclaw-sandbox', 'tenant-opengauss']]),
+                ].map((value) => ({ value, label: value })),
+              ]}
+            />
             {ownerScope === 'TENANT' && (
               <Select
                 allowClear
@@ -3204,15 +3251,17 @@ const SandboxMgr = () => {
                   placeholder={intl.formatMessage({ id: 'sandboxMgr.health.profileKeyPlaceholder' })}
                   optionLabelProp="label"
                 >
-                  {sortedProfileList.map((item) => (
-                    <Option
-                      key={`${item.serviceType}-${item.profileKey}`}
-                      value={item.profileKey}
-                      label={getProfileLabel(item.profileKey, item.serviceType)}
-                    >
-                      {renderProfileOption(item)}
-                    </Option>
-                  ))}
+                  {sortedProfileList
+                    .filter((item) => item.serviceType === watermarkServiceType)
+                    .map((item) => (
+                      <Option
+                        key={`${item.serviceType}-${item.profileKey}`}
+                        value={item.profileKey}
+                        label={getProfileLabel(item.profileKey, item.serviceType)}
+                      >
+                        {renderProfileOption(item)}
+                      </Option>
+                    ))}
                 </Select>
               </Form.Item>
             </Col>

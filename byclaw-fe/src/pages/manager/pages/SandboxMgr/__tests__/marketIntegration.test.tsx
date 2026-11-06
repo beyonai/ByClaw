@@ -146,3 +146,10 @@ test('the manager keeps four ownership tabs reachable and applies login startup 
   expect(screen.queryByText('tenant-runtime')).not.toBeInTheDocument();
   expect(screen.queryByText('shared-runtime')).not.toBeInTheDocument();
 });
+
+test('profile administration requests all service types including disabled resource profiles', () => {
+  render(<SandboxMgr />);
+  fireEvent.click(screen.getByRole('button', { name: /sandboxMgr.config.button/ }));
+  const request = mockDispatch.mock.calls.find(([action]) => action.type === 'sandboxMgr/listServiceProfiles')[0];
+  expect(request.payload).toEqual({ allServiceTypes: true, enabledOnly: false });
+});

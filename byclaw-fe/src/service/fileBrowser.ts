@@ -3,6 +3,8 @@ import { GET, POST } from '@/service/common/request';
 import { hasAdmittedUpload, uploadResumableFile, type FileTransferProgress } from './resumableFileUpload';
 import { hasDesktopLocalFiles } from '@/service/common/desktopLocal';
 
+const ownerUploadTails = new Map<string, Promise<void>>();
+
 export interface FileBrowserItem {
   name: string;
   path: string;
@@ -107,7 +109,7 @@ export function getChangedFileDiff(sessionId: string, uuid: string) {
   );
 }
 
-export async function uploadFiles(
+async function uploadFilesNow(
   resourceId: string | number,
   path: string,
   files: File[],
@@ -185,6 +187,37 @@ export async function uploadFiles(
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress,
   });
+}
+
+export async function uploadFiles(
+  resourceId: string | number,
+  path: string,
+  files: File[],
+  onUploadProgress?: (e: any) => void,
+  responseCfg?: Record<string, any>,
+  transferOptions?: { ownerKey: string; overwrite?: boolean; checkContext?: () => void }
+) {
+  const ownerKey = transferOptions?.ownerKey;
+  if (!ownerKey) return uploadFilesNow(resourceId, path, files, onUploadProgress, responseCfg, transferOptions);
+  // Storage nodes protect mutations with an owner-wide, non-waiting write claim.
+  // Retain the whole file lane through completion so a batch cannot reject its own chunks.
+  if (ownerUploadTails.has(ownerKey))
+    files.forEach((file) => onUploadProgress?.({ loaded: 0, total: file.size, phase: 'queued', fileName: file.name }));
+  const prior = ownerUploadTails.get(ownerKey) || Promise.resolve();
+  const running = prior.then(() => {
+    transferOptions?.checkContext?.();
+    return uploadFilesNow(resourceId, path, files, onUploadProgress, responseCfg, transferOptions);
+  });
+  const tail = running.then(
+    () => undefined,
+    () => undefined
+  );
+  ownerUploadTails.set(ownerKey, tail);
+  try {
+    return await running;
+  } finally {
+    if (ownerUploadTails.get(ownerKey) === tail) ownerUploadTails.delete(ownerKey);
+  }
 }
 
 export function downloadFile(resourceId: string | number, path: string) {

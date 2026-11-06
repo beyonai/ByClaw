@@ -1,3 +1,4 @@
+import UnfinishedUploads from '@/components/UnfinishedUploads';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Collapse, Input, Modal, Upload, message } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
@@ -792,6 +793,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
             ownerKey: destination.ownerKey,
             overwrite: task.overwrite,
             checkContext: () => {
+              task.checkActive?.();
               if (!isCurrentContext(destination))
                 throw new Error(intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
             },
@@ -1637,6 +1639,12 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   return (
     <div className={styles.miniList}>
+      <UnfinishedUploads
+        onCancelQueued={fileTransfers.cancelQueued}
+        ownerKey={transferContext.ownerKey}
+        resourceId={transferContext.resourceId}
+        disabled={uploadingFiles}
+      />
       <Input
         allowClear
         value={searchValue}

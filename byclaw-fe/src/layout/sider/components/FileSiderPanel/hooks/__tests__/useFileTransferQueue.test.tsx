@@ -140,3 +140,28 @@ it('ignores old context progress and completions when a new context reuses a tas
   });
   expect(result.current.rows[0].status).toBe('success');
 });
+
+it('cancels queued jobs before their storage lane starts without cancelling the active file', async () => {
+  const tasks: any[] = [];
+  const finishes: (() => void)[] = [];
+  const upload = jest.fn((task, report) => {
+    tasks.push(task);
+    if (task.id === 'queued') report({ loaded: 0, total: 1, phase: 'queued', fileName: 'q' });
+    return new Promise<void>((resolve) => finishes.push(resolve));
+  });
+  const { result } = renderHook(() => useFileTransferQueue(upload));
+  let batch: Promise<boolean>;
+  act(() => {
+    batch = result.current.start(
+      ['active', 'queued'].map((id) => ({ id, path: '/by/', file: new File(['x'], id), overwrite: false }))
+    );
+  });
+  act(() => result.current.cancelQueued());
+  expect(() => tasks[0].checkActive()).not.toThrow();
+  expect(() => tasks[1].checkActive()).toThrow();
+  await act(async () => {
+    finishes.forEach((finish) => finish());
+    await batch!;
+  });
+  expect(result.current.rows.map((row) => row.status)).toEqual(['success', 'failed']);
+});

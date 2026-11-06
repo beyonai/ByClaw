@@ -13,6 +13,7 @@ export interface FileTransferTask {
   file: File;
   path: string;
   overwrite: boolean;
+  checkActive?: () => void;
   context?: FileTransferContext;
   knowledge?: { resourceId: string | number; directoryPath: string; processFrontMatter: boolean };
 }
@@ -33,12 +34,14 @@ export default function useFileTransferQueue(upload: Upload, contextKey = '') {
   const generation = useRef(0);
   const mounted = useRef(true);
   const active = useRef(new Set<string>());
+  const cancelled = useRef(new Set<string>());
   const attempts = useRef(new Map<string, number>());
   const uploaders = useRef(new Map<string, Upload>());
   if (scope.current !== contextKey) {
     scope.current = contextKey;
     generation.current += 1;
     rowsRef.current = [];
+    cancelled.current.clear();
     attempts.current.clear();
     uploaders.current.clear();
   }
@@ -63,7 +66,7 @@ export default function useFileTransferQueue(upload: Upload, contextKey = '') {
   const run = useCallback(
     async (row: FileTransferRow, epoch: number) => {
       const key = `${epoch}:${row.id}`;
-      const current = () => mounted.current && epoch === generation.current;
+      const current = () => mounted.current && epoch === generation.current && !cancelled.current.has(key);
       if (!current() || active.current.has(key)) return false;
       active.current.add(key);
       const attempt = (attempts.current.get(key) || 0) + 1;
@@ -71,10 +74,19 @@ export default function useFileTransferQueue(upload: Upload, contextKey = '') {
       update(row.id, { status: 'uploading', error: undefined }, epoch);
       try {
         const invoke = uploaders.current.get(key) || upload;
-        await invoke(row, (progress) => {
-          if (current() && attempts.current.get(key) === attempt && active.current.has(key))
-            update(row.id, { progress }, epoch);
-        });
+        await invoke(
+          {
+            ...row,
+            checkActive: () => {
+              if (!current()) throw new Error('Upload cancelled');
+            },
+          },
+          (progress) => {
+            if (current() && attempts.current.get(key) === attempt && active.current.has(key))
+              update(row.id, { progress }, epoch);
+          }
+        );
+        if (!current()) return false;
         update(
           row.id,
           { status: 'success', progress: { ...row.progress, loaded: row.file.size, phase: 'uploading' } },
@@ -82,6 +94,7 @@ export default function useFileTransferQueue(upload: Upload, contextKey = '') {
         );
         return current();
       } catch (error: any) {
+        if (!current()) return false;
         update(
           row.id,
           { status: 'failed', error: typeof error === 'string' ? error : error?.message || String(error) },
@@ -125,7 +138,9 @@ export default function useFileTransferQueue(upload: Upload, contextKey = '') {
   const retry = useCallback(
     async (id: string) => {
       const row = rowsRef.current.find((item) => item.id === id);
-      return row?.status === 'failed' ? run(row, generation.current) : false;
+      if (row?.status !== 'failed') return false;
+      cancelled.current.delete(`${generation.current}:${id}`);
+      return run(row, generation.current);
     },
     [run]
   );
@@ -134,9 +149,22 @@ export default function useFileTransferQueue(upload: Upload, contextKey = '') {
     generation.current += 1;
     rowsRef.current = [];
     uploaders.current.clear();
+    cancelled.current.clear();
     attempts.current.clear();
     setState({ key: scope.current, rows: [] });
   }, []);
 
-  return { rows: state.key === contextKey ? state.rows : [], start, retry, reset };
+  const cancelQueued = useCallback(
+    (message?: string) => {
+      rowsRef.current.forEach((row) => {
+        if (row.status === 'pending' || (row.status === 'uploading' && row.progress.phase === 'queued')) {
+          cancelled.current.add(`${generation.current}:${row.id}`);
+          update(row.id, { status: 'failed', error: message }, generation.current);
+        }
+      });
+    },
+    [update]
+  );
+
+  return { cancelQueued, rows: state.key === contextKey ? state.rows : [], start, retry, reset };
 }

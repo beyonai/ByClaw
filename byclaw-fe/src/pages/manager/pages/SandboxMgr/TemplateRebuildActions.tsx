@@ -37,7 +37,15 @@ export function useTemplateRebuildSupport(enabled: boolean) {
   return { supported: enabled && supported, error };
 }
 
-export default function TemplateRebuildActions({ serviceKey, supported }: { serviceKey: string; supported: boolean }) {
+export default function TemplateRebuildActions({
+  serviceKey,
+  profileKey,
+  supported,
+}: {
+  serviceKey: string;
+  profileKey?: string;
+  supported: boolean;
+}) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [recordsOpen, setRecordsOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -97,7 +105,7 @@ export default function TemplateRebuildActions({ serviceKey, supported }: { serv
     setSubmitting(true);
     setError('');
     try {
-      const record = await startTemplateRebuild(serviceKey, requestId.current);
+      const record = await startTemplateRebuild(serviceKey, requestId.current, profileKey);
       requestId.current = undefined;
       setConfirmOpen(false);
       setPage({ current: 1, size: 10 });
@@ -143,7 +151,10 @@ export default function TemplateRebuildActions({ serviceKey, supported }: { serv
         onCancel={() => !submitting && setConfirmOpen(false)}
         destroyOnClose
       >
-        <p>确认重建 {serviceKey} 的沙箱模板？</p>
+        <p>
+          确认重建 {serviceKey}
+          {profileKey ? ` / ${profileKey}` : ''} 的沙箱模板？
+        </p>
         <p>
           当前运行实例继续使用原模板。新版本就绪后，后续创建实例自动采用新版本；其他资源档位会在创建时准备对应模板。
         </p>

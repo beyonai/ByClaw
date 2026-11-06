@@ -24,7 +24,7 @@ async function call<T>(operation: string, params: object = {}): Promise<T> {
 }
 
 export const getTemplateRebuildCapabilities = () => call<{ supported: boolean }>('capabilities');
-export const startTemplateRebuild = (serviceKey: string, requestId: string) =>
-  call<TemplateRebuildRecord>('start', { serviceKey, requestId });
+export const startTemplateRebuild = (serviceKey: string, requestId: string, profileKey?: string) =>
+  call<TemplateRebuildRecord>('start', { serviceKey, requestId, ...(profileKey ? { profileKey } : {}) });
 export const listTemplateRebuildRecords = (serviceKey: string, pageNo: number, pageSize: number) =>
   call<{ records: TemplateRebuildRecord[]; total: number }>('records', { serviceKey, pageNo, pageSize });

@@ -8,9 +8,12 @@ import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Switch, Table, message } from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 
+import TemplateRebuildActions, { useTemplateRebuildSupport } from './TemplateRebuildActions';
+
 const errorText = (error: unknown) => (error instanceof Error ? error.message : '共享配置操作失败');
 
 export default function SharedConfigPanel() {
+  const templateRebuild = useTemplateRebuildSupport(true);
   const [rows, setRows] = useState<SharedConfig[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -78,7 +81,7 @@ export default function SharedConfigPanel() {
         type="info"
         showIcon
         message="每个资源档位独立配置用户容量"
-        description="CPU 和内存由服务规格配置管理。人数上限应按实际业务压测结果设置；修改容量仅影响新实例，已有实例继续使用创建时的容量。"
+        description="CPU 和内存由服务规格配置管理。MicroVM 的资源写入不可变模板，调整后请为宿主服务与对应档位重建模板，并查看重建记录；成功后用于新实例。OpenSandbox / ACS 在创建实例时应用资源，无需构建 MicroVM 模板。已有实例保持原规格和容量。"
       />
       <Space>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => edit()}>
@@ -88,6 +91,7 @@ export default function SharedConfigPanel() {
           刷新
         </Button>
       </Space>
+      {templateRebuild.error && <Alert type="warning" showIcon message={templateRebuild.error} />}
       {error && <Alert type="error" showIcon message={error} />}
       <Table<SharedConfig>
         rowKey={(row) => row.id || `${row.serviceKey}:${row.profileKey}`}
@@ -119,6 +123,11 @@ export default function SharedConfigPanel() {
                 <Button type="link" onClick={() => edit(row)}>
                   编辑
                 </Button>
+                <TemplateRebuildActions
+                  serviceKey={row.serviceKey}
+                  profileKey={row.profileKey}
+                  supported={templateRebuild.supported}
+                />
                 <Popconfirm
                   title="删除共享配置？"
                   description="存在使用中的实例时不能删除。"

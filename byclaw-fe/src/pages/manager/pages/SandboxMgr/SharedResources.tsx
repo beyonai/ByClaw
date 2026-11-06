@@ -1,9 +1,10 @@
 import { listSharedRecords, releaseSharedInstance, type SharedRecord } from '@/pages/manager/service/SharedSandbox';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
-import { Alert, Button, Input, Popconfirm, Select, Space, Table, Tag, message } from 'antd';
+import { Alert, Button, Input, Popconfirm, Select, Space, Table, Tag, Tooltip, message } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import SharedLaunch from './SharedLaunch';
+import SandboxLifetime from './SandboxLifetime';
 import SharedMembersDrawer from './SharedMembersDrawer';
 import { formatReleaseReason } from './releaseReasonUtils';
 
@@ -22,19 +23,24 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
   const [records, setRecords] = useState<SharedRecord[]>([]);
   const [page, setPage] = useState({ pageIndex: 1, pageSize: 20, total: 0 });
   const [serviceKey, setServiceKey] = useState('');
+  const [keyword, setKeyword] = useState('');
+  const [summary, setSummary] = useState<{ onlineSandboxes: number; onlineUsers: number }>();
   const [status, setStatus] = useState<string | undefined>('RUNNING');
   const [poolScope, setPoolScope] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<SharedRecord>();
   const [releasing, setReleasing] = useState<string>();
+  const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
   const generation = useRef(0);
 
   const load = useCallback(
-    async (pageIndex = 1, pageSize = 20) => {
+    async (pageIndex = 1, pageSize = 20, silent = false) => {
       const run = ++generation.current;
-      setLoading(true);
-      setError('');
+      if (!silent) {
+        setLoading(true);
+        setError('');
+      }
       try {
         const result = await listSharedRecords({
           pageIndex,
@@ -42,19 +48,22 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
           serviceKey: serviceKey || undefined,
           status,
           poolScope,
+          keyword: keyword || undefined,
         });
         if (run !== generation.current) return;
+        setError('');
         setRecords(result.records);
+        setSummary(result.summary);
         setPage({ pageIndex, pageSize, total: result.total });
       } catch (failure) {
         if (run === generation.current) {
           setError(errorMessage(failure, intl.formatMessage({ id: 'sandboxMgr.shared.loadFailed' })));
         }
       } finally {
-        if (run === generation.current) setLoading(false);
+        if (run === generation.current && !silent) setLoading(false);
       }
     },
-    [serviceKey, status, poolScope, intl]
+    [serviceKey, status, poolScope, keyword, intl]
   );
 
   useEffect(() => {
@@ -64,8 +73,20 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
     };
   }, [load]);
 
-  const currentQuery = useRef({ load, page });
-  currentQuery.current = { load, page };
+  const currentQuery = useRef({ load, page, busy: false });
+  currentQuery.current = {
+    load,
+    page,
+    busy: loading || !!releasing || !!selected || launchOpen || releaseConfirmOpen,
+  };
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const query = currentQuery.current;
+      if (query.busy || document.visibilityState === 'hidden') return;
+      void query.load(query.page.pageIndex, query.page.pageSize, true);
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, []);
   const refresh = () => {
     const query = currentQuery.current;
     return query.load(query.page.pageIndex, query.page.pageSize);
@@ -76,7 +97,7 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
     try {
       await releaseSharedInstance(record.id);
       message.success(intl.formatMessage({ id: 'sandboxMgr.shared.releaseSubmitted' }));
-      await load(page.pageIndex, page.pageSize);
+      await refresh();
     } catch (failure) {
       message.error(errorMessage(failure, intl.formatMessage({ id: 'sandboxMgr.shared.operationFailed' })));
     } finally {
@@ -87,6 +108,12 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
   return (
     <div className="ub ub-ver ub-f1" style={{ width: '100%', minHeight: 0, gap: 16 }}>
       <Space wrap>
+        <Input.Search
+          placeholder={intl.formatMessage({ id: 'sandboxMgr.shared.searchUser' })}
+          allowClear
+          onSearch={(value) => setKeyword(value.trim())}
+          style={{ width: 240 }}
+        />
         <Input.Search
           placeholder={intl.formatMessage({ id: 'sandboxMgr.shared.search' })}
           allowClear
@@ -124,6 +151,16 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
           </Button>
         )}
       </Space>
+      {summary && (
+        <Space wrap aria-live="polite">
+          <Tag color="green">
+            {intl.formatMessage({ id: 'sandboxMgr.shared.onlineSandboxesTotal' }, { total: summary.onlineSandboxes })}
+          </Tag>
+          <Tag color="blue">
+            {intl.formatMessage({ id: 'sandboxMgr.shared.onlineUsersTotal' }, { total: summary.onlineUsers })}
+          </Tag>
+        </Space>
+      )}
       {launchOpen && <SharedLaunch onClose={() => setLaunchOpen(false)} onLaunched={() => void refresh()} />}
       {error && <Alert type="error" message={error} showIcon />}
       <div className="ub-f1 shared-table-scroll" style={{ minHeight: 0, overflow: 'auto' }}>
@@ -178,11 +215,21 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
               render: (value) => intl.formatMessage({ id: `sandboxMgr.shared.launch.${value || 'HEARTBEAT'}` }),
             },
             {
-              title: intl.formatMessage({ id: 'sandboxMgr.shared.launch.releaseAt' }),
-              dataIndex: 'releaseAt',
-              render: time,
+              title: (
+                <Tooltip title={intl.formatMessage({ id: 'sandboxMgr.shared.plannedReleaseHint' })}>
+                  <span>{intl.formatMessage({ id: 'sandboxMgr.shared.launch.releaseAt' })}</span>
+                </Tooltip>
+              ),
+              dataIndex: 'plannedReleaseAt',
+              render: (_, row) => time(row.plannedReleaseAt || row.releaseAt),
             },
             { title: intl.formatMessage({ id: 'sandboxMgr.table.createTime' }), dataIndex: 'createTime', render: time },
+            {
+              title: intl.formatMessage({ id: 'sandboxMgr.table.lifetime' }),
+              dataIndex: 'lifetime',
+              width: 180,
+              render: (_, row) => <SandboxLifetime record={row} />,
+            },
             {
               title: intl.formatMessage({ id: 'sandboxMgr.table.releaseTime' }),
               dataIndex: 'releaseTime',
@@ -203,6 +250,7 @@ export default function SharedResources({ canManage }: { canManage: boolean }) {
                   </Button>
                   {canManage && ['STARTING', 'RUNNING', 'DRAINING'].includes(row.status) && (
                     <Popconfirm
+                      onOpenChange={setReleaseConfirmOpen}
                       title={intl.formatMessage({ id: 'sandboxMgr.shared.releaseConfirm' })}
                       description={intl.formatMessage({ id: 'sandboxMgr.shared.releaseDescription' })}
                       okText={intl.formatMessage({ id: 'sandboxMgr.shared.release' })}

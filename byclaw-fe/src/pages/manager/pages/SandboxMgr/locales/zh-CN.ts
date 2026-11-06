@@ -1,4 +1,12 @@
 export default {
+  'sandboxMgr.table.lifetime': '存活时长',
+  'sandboxMgr.lifetime.days': '{value}天',
+  'sandboxMgr.lifetime.hours': '{value}小时',
+  'sandboxMgr.lifetime.minutes': '{value}分',
+  'sandboxMgr.lifetime.seconds': '{value}秒',
+
+  'sandboxMgr.shared.plannedReleaseHint':
+    '心跳策略的计划时间从实例空置起计算；到期后需等待后台确认并释放。页面每30秒自动刷新，操作期间暂停。',
   'sandboxMgr.dimension.USER': '用户沙箱',
   'sandboxMgr.dimension.TENANT': '租户沙箱',
   'sandboxMgr.dimension.SHARED': '共享沙箱',
@@ -418,4 +426,9 @@ export default {
   'sandboxMgr.tenant.recordRunning': '运行中',
   'sandboxMgr.tenant.providerAbnormal': '沙箱异常',
   'sandboxMgr.tenant.providerUnknown': '状态未核实',
+  'sandboxMgr.filter.sandboxType': '沙箱类型',
+  'sandboxMgr.filter.allTypes': '全部沙箱类型',
+  'sandboxMgr.shared.searchUser': '按工号或姓名定位沙箱',
+  'sandboxMgr.shared.onlineSandboxesTotal': '在线服务沙箱：{total}',
+  'sandboxMgr.shared.onlineUsersTotal': '在线用户：{total}',
 };

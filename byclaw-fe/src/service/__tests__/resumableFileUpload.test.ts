@@ -1,4 +1,4 @@
-import { GET, POST } from '@/service/common/request';
+import { POST } from '@/service/common/request';
 import { uploadResumableFile, fingerprintFile, hasAdmittedUpload } from '@/service/resumableFileUpload';
 
 jest.mock('@/service/common/request', () => ({ GET: jest.fn(), POST: jest.fn() }));
@@ -181,3 +181,130 @@ it('cannot send a later chunk after its create request returns into a different 
   ).rejects.toThrow('context changed');
   expect((POST as jest.Mock).mock.calls.length).toBe(1);
 });
+
+it('only inspects current-owner stored sessions and forgets them after acknowledged abort', async () => {
+  const { listStoredUploads, abortStoredUpload } = await import('@/service/resumableFileUpload');
+  const key = (owner: string) =>
+    `byclaw-upload:${JSON.stringify([owner, '10', '/by/test/', 'old.bin', 8, 'a'.repeat(64), false])}`;
+  localStorage.setItem(key('session-manager-owner'), 'a21a7ce9-2c36-4cc0-9b8c-65aa684710ab');
+  localStorage.setItem(key('another-owner'), 'c21a7ce9-2c36-4cc0-9b8c-65aa684710ab');
+  (POST as jest.Mock).mockResolvedValue({ ...status, totalSize: 8, sha256: 'a'.repeat(64) });
+  const rows = await listStoredUploads('session-manager-owner');
+  expect(rows).toHaveLength(1);
+  expect(rows[0].fileName).toBe('old.bin');
+  (POST as jest.Mock).mockResolvedValue({ state: 'UPLOADING' });
+  await expect(abortStoredUpload('session-manager-owner', rows[0])).rejects.toThrow();
+  expect(localStorage.getItem(key('session-manager-owner'))).not.toBeNull();
+  (POST as jest.Mock).mockResolvedValue({ state: 'EXPIRED' });
+  await abortStoredUpload('session-manager-owner', rows[0]);
+  expect(localStorage.getItem(key('session-manager-owner'))).toBeNull();
+  expect(localStorage.getItem(key('another-owner'))).not.toBeNull();
+  await expect(abortStoredUpload('another-owner', rows[0])).rejects.toThrow();
+});
+
+it('rebuilds cancellation targets from browser storage and rejects unknown server identities', async () => {
+  const { listStoredUploads, abortStoredUpload } = await import('@/service/resumableFileUpload');
+  const owner = 'cancel-identity-owner';
+  const storageKey = `byclaw-upload:${JSON.stringify([
+    owner,
+    '10',
+    '/by/test/',
+    'known.bin',
+    8,
+    'a'.repeat(64),
+    false,
+  ])}`;
+  localStorage.setItem(storageKey, 'a21a7ce9-2c36-4cc0-9b8c-65aa684710ab');
+  (POST as jest.Mock).mockResolvedValue({ ...status, sha256: 'a'.repeat(64) });
+  const [row] = await listStoredUploads(owner);
+  (POST as jest.Mock).mockClear();
+  (POST as jest.Mock).mockResolvedValue({ ...status, sha256: 'b'.repeat(64) });
+  await expect(abortStoredUpload(owner, row)).rejects.toThrow('identity mismatch');
+  expect((POST as jest.Mock).mock.calls.every(([url]) => url.endsWith('/status'))).toBe(true);
+  (POST as jest.Mock).mockClear();
+  (POST as jest.Mock).mockResolvedValue({ state: 'UNKNOWN' });
+  await expect(abortStoredUpload(owner, row)).rejects.toThrow('Invalid stored upload status');
+  expect((POST as jest.Mock).mock.calls).toHaveLength(1);
+  (POST as jest.Mock).mockClear();
+  (POST as jest.Mock).mockImplementation(async (url) =>
+    url.endsWith('/status') ? { ...status, sha256: 'a'.repeat(64) } : { state: 'EXPIRED' }
+  );
+  await abortStoredUpload(owner, { ...row, resourceId: 'other', path: '/unknown/', fileName: 'unknown.bin' });
+  expect((POST as jest.Mock).mock.calls[1][1]).toEqual({
+    resourceId: '10',
+    path: '/by/test/',
+    fileName: 'known.bin',
+    uploadId: row.uploadId,
+  });
+  expect(localStorage.getItem(storageKey)).toBeNull();
+});
+
+it('recovers authorized server-only sessions and verifies status before explicit cancellation', async () => {
+  const { listStoredUploads, abortStoredUpload } = await import('@/service/resumableFileUpload');
+  const item = {
+    uploadId: 'd21a7ce9-2c36-4cc0-9b8c-65aa684710ab',
+    path: '/by/old/',
+    fileName: 'server.bin',
+    totalSize: 12,
+    state: 'UPLOADING',
+  };
+  (POST as jest.Mock).mockImplementation(async (url) => {
+    if (url.endsWith('/list')) return { uploads: [item] };
+    if (url.endsWith('/status')) return { ...item, sha256: 'server-secret-hash' };
+    return { state: 'EXPIRED' };
+  });
+  const [row] = await listStoredUploads('server-only-owner', '42');
+  expect(row.source).toBe('server');
+  expect(row.sha256).toBeUndefined();
+  expect((POST as jest.Mock).mock.calls.some(([url]) => url.endsWith('/abort'))).toBe(false);
+  (POST as jest.Mock).mockClear();
+  (POST as jest.Mock).mockResolvedValue({ ...item, totalSize: 99 });
+  await expect(abortStoredUpload('server-only-owner', row)).rejects.toThrow('identity mismatch');
+  expect((POST as jest.Mock).mock.calls).toHaveLength(1);
+  (POST as jest.Mock).mockImplementation(async (url) => (url.endsWith('/status') ? item : { state: 'EXPIRED' }));
+  await abortStoredUpload('server-only-owner', { ...row, path: '/unknown/' });
+  expect((POST as jest.Mock).mock.calls.slice(-1)[0][1]).toEqual({
+    resourceId: '42',
+    path: '/by/old/',
+    fileName: 'server.bin',
+    uploadId: item.uploadId,
+  });
+  await expect(abortStoredUpload('another-owner', row)).rejects.toThrow();
+});
+
+it.each(['alice:43', 'bob:42'])(
+  'does not abort or forget a saved upload after status returns into %s',
+  async (nextContext) => {
+    const { listStoredUploads, abortStoredUpload } = await import('@/service/resumableFileUpload');
+    const owner = `context-race-${nextContext}`;
+    const storageKey = `byclaw-upload:${JSON.stringify([
+      owner,
+      '42',
+      '/by/test/',
+      'race.bin',
+      8,
+      'a'.repeat(64),
+      false,
+    ])}`;
+    localStorage.setItem(storageKey, 'e21a7ce9-2c36-4cc0-9b8c-65aa684710ab');
+    (POST as jest.Mock).mockResolvedValue({ ...status, sha256: 'a'.repeat(64) });
+    const [row] = await listStoredUploads(owner);
+    let resolveStatus!: (value: object) => void;
+    (POST as jest.Mock).mockClear();
+    (POST as jest.Mock).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStatus = resolve;
+        })
+    );
+    let context = 'alice:42';
+    const cancellation = abortStoredUpload(owner, row, () => {
+      if (context !== 'alice:42') throw new Error('context changed');
+    });
+    context = nextContext;
+    resolveStatus({ ...status, sha256: 'a'.repeat(64) });
+    await expect(cancellation).rejects.toThrow('context changed');
+    expect((POST as jest.Mock).mock.calls).toHaveLength(1);
+    expect(localStorage.getItem(storageKey)).not.toBeNull();
+  }
+);

@@ -1,3 +1,4 @@
+import UnfinishedUploads from '@/components/UnfinishedUploads';
 import { resolvePreviewType } from '@/components/Preview/formats';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Empty, Input, message, Modal, Progress, Tooltip, Upload } from 'antd';
@@ -297,6 +298,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
     async (task: FileTransferTask, report: (event: any) => void) => {
       const destination = task.context!;
       const checkContext = () => {
+        task.checkActive?.();
         if (!isCurrentContext(destination)) throw new Error(t('fileBrowser.upload.failed'));
       };
       const send = () => {
@@ -763,6 +765,12 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
   return (
     <div className={`${styles.fileBrowserPanel} ${isPreviewMode ? styles.previewMode : ''}`}>
       <div className={styles.toolbar}>
+        <UnfinishedUploads
+          onCancelQueued={fileTransfers.cancelQueued}
+          ownerKey={transferContext.ownerKey}
+          resourceId={transferContext.resourceId}
+          disabled={uploading}
+        />
         {!isPreviewMode && (
           <>
             <Upload

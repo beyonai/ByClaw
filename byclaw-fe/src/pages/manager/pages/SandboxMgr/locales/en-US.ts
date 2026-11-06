@@ -1,4 +1,12 @@
 export default {
+  'sandboxMgr.table.lifetime': 'Lifetime',
+  'sandboxMgr.lifetime.days': '{value}d',
+  'sandboxMgr.lifetime.hours': '{value}h',
+  'sandboxMgr.lifetime.minutes': '{value}m',
+  'sandboxMgr.lifetime.seconds': '{value}s',
+
+  'sandboxMgr.shared.plannedReleaseHint':
+    'Heartbeat release is calculated from when the instance becomes empty. After the deadline, release awaits backend confirmation. This page refreshes every 30 seconds and pauses during operations.',
   'sandboxMgr.dimension.USER': 'User sandboxes',
   'sandboxMgr.dimension.TENANT': 'Tenant sandboxes',
   'sandboxMgr.dimension.SHARED': 'Shared sandboxes',
@@ -436,4 +444,9 @@ export default {
   'sandboxMgr.tenant.recordRunning': 'Running',
   'sandboxMgr.tenant.providerAbnormal': 'Sandbox unhealthy',
   'sandboxMgr.tenant.providerUnknown': 'Status unverified',
+  'sandboxMgr.filter.sandboxType': 'Sandbox type',
+  'sandboxMgr.filter.allTypes': 'All sandbox types',
+  'sandboxMgr.shared.searchUser': 'Locate sandbox by user code or name',
+  'sandboxMgr.shared.onlineSandboxesTotal': 'Online serving sandboxes: {total}',
+  'sandboxMgr.shared.onlineUsersTotal': 'Online users: {total}',
 };

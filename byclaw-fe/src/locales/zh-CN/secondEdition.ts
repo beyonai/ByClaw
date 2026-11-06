@@ -1,4 +1,19 @@
 export default {
+  'fileBrowser.upload.queuedCancelled': '已取消排队，可重试',
+  'fileBrowser.upload.cancelQueued': '取消排队上传',
+  'fileBrowser.upload.manageUnfinished': '未完成上传',
+  'fileBrowser.upload.storedSessionHint':
+    '显示本浏览器保存的上传及当前账号私有工作区中的服务端未完成上传。重新选择同一文件可续传；取消并清理只清理上传临时数据，已完成文件保留。',
+  'fileBrowser.upload.refreshSessions': '刷新上传会话',
+  'fileBrowser.upload.noStoredSessions': '本浏览器没有保存的上传会话。',
+  'fileBrowser.upload.abortSession': '取消并清理',
+  'fileBrowser.upload.admissionFull':
+    '未完成上传已占满当前账号的上传名额。请打开“未完成上传”，续传或明确取消已保存的会话后再重试。',
+  'fileBrowser.upload.session.COMMITTING': '提交中',
+  'fileBrowser.upload.session.UPLOADING': '未完成',
+  'fileBrowser.upload.session.COMPLETED': '已完成',
+  'fileBrowser.upload.session.EXPIRED': '已过期',
+  'fileBrowser.upload.session.NOT_FOUND': '尚未创建',
   // QueryInput Chat组件
   'queryInput.onlineSearch': '联网搜索',
   'queryInput.superAgent': '超级助手',

@@ -1,3 +1,4 @@
+import UnfinishedUploads from '@/components/UnfinishedUploads';
 import React, { useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react';
 import {
   Breadcrumb,
@@ -904,6 +905,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     async (task: FileTransferTask, report: (event: any) => void) => {
       const destination = task.context!;
       const checkContext = () => {
+        task.checkActive?.();
         if (!isCurrentContext(destination)) throw new Error(intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
       };
       const onUploadProgress = (event: any) =>
@@ -1269,6 +1271,12 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     };
     return (
       <>
+        <UnfinishedUploads
+          onCancelQueued={fileTransfers.cancelQueued}
+          ownerKey={transferContext.ownerKey}
+          resourceId={transferContext.resourceId}
+          disabled={uploading}
+        />
         {uploadProgress}
         <div className={projectStyles.resourceCardGrid}>
           {visibleProjectItems.length ? (
@@ -1394,6 +1402,12 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         }
         contentBefore={
           <>
+            <UnfinishedUploads
+              onCancelQueued={fileTransfers.cancelQueued}
+              ownerKey={transferContext.ownerKey}
+              resourceId={transferContext.resourceId}
+              disabled={uploading}
+            />
             {uploadProgress}
             {navigationEnabled ? (
               <>

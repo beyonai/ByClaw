@@ -33,7 +33,7 @@ interface UploadSession {
 export interface FileTransferProgress {
   loaded: number;
   total: number;
-  phase: 'hashing' | 'uploading' | 'verifying' | 'processing';
+  phase: 'queued' | 'hashing' | 'uploading' | 'verifying' | 'processing';
   fileName: string;
   resumed?: boolean;
 }
@@ -258,4 +258,164 @@ export async function uploadResumableFile(
     // Completion is already durable on the server.
   }
   report(file.size, 'uploading');
+}
+
+export interface StoredUpload {
+  storageKey: string;
+  ownerKey: string;
+  resourceId: string;
+  path: string;
+  fileName: string;
+  uploadId: string;
+  totalSize: number;
+  sha256?: string;
+  state: string;
+  source?: 'server';
+}
+
+function storedUploads(ownerKey: string): StoredUpload[] {
+  if (!ownerKey) return [];
+  const stored = new Map(activeUploads);
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith('byclaw-upload:')) {
+        const id = localStorage.getItem(key);
+        if (id) stored.set(key, id);
+      }
+    }
+  } catch (error) {
+    // Persistence is optional.
+  }
+  const rows: StoredUpload[] = [];
+  stored.forEach((uploadId, storageKey) => {
+    try {
+      const value = JSON.parse(storageKey.slice('byclaw-upload:'.length));
+      if (
+        !Array.isArray(value) ||
+        value[0] !== ownerKey ||
+        typeof value[1] !== 'string' ||
+        typeof value[2] !== 'string' ||
+        typeof value[3] !== 'string' ||
+        !Number.isSafeInteger(value[4]) ||
+        value[4] < 0 ||
+        !/^[a-f0-9]{64}$/.test(value[5]) ||
+        !/^[a-f0-9-]{36}$/i.test(uploadId)
+      )
+        return;
+      rows.push({
+        storageKey,
+        ownerKey,
+        resourceId: value[1],
+        path: value[2],
+        fileName: value[3],
+        totalSize: value[4],
+        sha256: value[5],
+        uploadId,
+        state: 'UNKNOWN',
+      });
+    } catch (error) {
+      // Ignore unrelated or malformed browser data.
+    }
+  });
+  return rows;
+}
+
+const serverUploads = new Map<string, StoredUpload>();
+
+function storedTarget(row: StoredUpload) {
+  return { resourceId: row.resourceId, path: row.path, fileName: row.fileName, uploadId: row.uploadId };
+}
+
+/** Merge browser identities with the current owner's private-workspace server inventory. */
+export async function listStoredUploads(
+  ownerKey: string,
+  resourceId?: string,
+  checkContext?: () => void
+): Promise<StoredUpload[]> {
+  checkContext?.();
+  const rows = storedUploads(ownerKey);
+  if (ownerKey && resourceId && /^[1-9]\d*$/.test(resourceId) && Number.isSafeInteger(Number(resourceId))) {
+    const result = await postInContext<{
+      uploads: Array<{ uploadId: string; path: string; fileName: string; totalSize: number; state: string }>;
+    }>(checkContext, `${BASE}/list`, { resourceId: Number(resourceId) }, { responseCfg: { hideErrorTips: true } });
+    if (!Array.isArray(result?.uploads)) throw new Error('Invalid upload list');
+    for (const item of result.uploads) {
+      if (
+        !/^[a-f0-9-]{36}$/i.test(item.uploadId) ||
+        typeof item.path !== 'string' ||
+        typeof item.fileName !== 'string' ||
+        !Number.isSafeInteger(item.totalSize) ||
+        item.totalSize < 0 ||
+        !['UPLOADING', 'COMMITTING'].includes(item.state)
+      )
+        throw new Error('Invalid upload list identity');
+      if (rows.some((row) => row.resourceId === resourceId && row.uploadId === item.uploadId)) continue;
+      const storageKey = JSON.stringify([ownerKey, resourceId, item.path, item.fileName, item.uploadId]);
+      const row: StoredUpload = { ...item, storageKey, ownerKey, resourceId, source: 'server' };
+      serverUploads.set(storageKey, { ...row });
+      rows.push(row);
+    }
+  }
+  for (const row of rows) {
+    const status = await postInContext<Omit<UploadSession, 'state'> & { state: string }>(
+      checkContext,
+      `${BASE}/status`,
+      storedTarget(row),
+      {
+        responseCfg: { hideErrorTips: true },
+      }
+    );
+    if (!status || !['UPLOADING', 'COMMITTING', 'COMPLETED', 'EXPIRED', 'NOT_FOUND'].includes(status.state))
+      throw new Error('Invalid stored upload status');
+    if (
+      ['UPLOADING', 'COMMITTING', 'COMPLETED'].includes(status.state) &&
+      (status.totalSize !== row.totalSize ||
+        (row.source === 'server' ? status.uploadId !== row.uploadId : status.sha256 !== row.sha256))
+    )
+      throw new Error('Stored upload identity mismatch');
+    row.state = status.state;
+  }
+  return rows;
+}
+
+export async function abortStoredUpload(ownerKey: string, row: StoredUpload, checkContext?: () => void) {
+  checkContext?.();
+  const saved = [...storedUploads(ownerKey), ...serverUploads.values()].find(
+    (candidate) =>
+      candidate.ownerKey === ownerKey && candidate.storageKey === row.storageKey && candidate.uploadId === row.uploadId
+  );
+  if (!saved) throw new Error('Upload does not belong to the current browser owner');
+  const status = await postInContext<Omit<UploadSession, 'state'> & { state: string }>(
+    checkContext,
+    `${BASE}/status`,
+    storedTarget(saved),
+    {
+      responseCfg: { hideErrorTips: true },
+    }
+  );
+  if (!status || !['UPLOADING', 'COMMITTING', 'COMPLETED', 'EXPIRED', 'NOT_FOUND'].includes(status.state))
+    throw new Error('Invalid stored upload status');
+  if (
+    ['UPLOADING', 'COMMITTING', 'COMPLETED'].includes(status.state) &&
+    (status.totalSize !== saved.totalSize ||
+      (saved.source === 'server' ? status.uploadId !== saved.uploadId : status.sha256 !== saved.sha256))
+  )
+    throw new Error('Stored upload identity mismatch');
+  let response: { state: string } = status;
+  if (status?.state !== 'NOT_FOUND') {
+    response = await postInContext<{ state: string }>(checkContext, `${BASE}/abort`, storedTarget(saved), {
+      responseCfg: { hideErrorTips: true },
+    });
+  }
+  if (!response || !['EXPIRED', 'COMPLETED', 'NOT_FOUND'].includes(response.state))
+    throw new Error('Upload cancellation was not acknowledged');
+  checkContext?.();
+  serverUploads.delete(row.storageKey);
+  activeUploads.delete(row.storageKey);
+  try {
+    localStorage.removeItem(row.storageKey);
+  } catch (error) {
+    // Server cancellation is durable.
+  }
 }
