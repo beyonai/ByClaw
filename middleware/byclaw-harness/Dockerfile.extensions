@@ -319,6 +319,14 @@ COPY --chown=byclaw:byclaw middleware/builtin/skills/ /opt/byclaw/dsh-managed/sk
 COPY --chown=byclaw:byclaw --chmod=0755 middleware/byclaw-harness/docker-entrypoint.sh /usr/local/bin/byclaw-dsh-entrypoint
 COPY --chmod=0755 middleware/byclaw-harness/scripts/dsh-loopback-forward.mjs /usr/local/lib/byclaw/dsh-loopback-forward.mjs
 COPY middleware/byclaw-harness/scripts/startup-module-resolver.cjs /usr/local/lib/byclaw/startup-module-resolver.cjs
+COPY middleware/byclaw-harness/scripts/verify-read-image-runtime.mjs /usr/local/lib/byclaw/verify-read-image-runtime.mjs
+# Build-only, offline materialization (as in Dockerfile.slim): the shared host's
+# profile resolver keeps logical package paths, so Sharp's pnpm-adjacent native
+# dependencies must sit beside attachment-local or read_image fails at first use.
+COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/materialize-image-runtime.mjs /tmp/materialize-image-runtime.mjs
+RUN node /tmp/materialize-image-runtime.mjs /workspace \
+    && rm /tmp/materialize-image-runtime.mjs \
+    && node /usr/local/lib/byclaw/verify-read-image-runtime.mjs /workspace /opt/byclaw/dsh-managed/profiles/web
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-bycli-managed.py /usr/local/bin/byclaw-bycli-managed
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
 COPY --chmod=0755 middleware/byclaw-harness/scripts/browser-supervisor-verify.py /tmp/browser-supervisor-verify.py
