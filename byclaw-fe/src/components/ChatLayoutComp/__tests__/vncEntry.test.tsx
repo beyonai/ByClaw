@@ -128,6 +128,7 @@ describe('chat remote computer entry', () => {
     sessionStorage.clear();
     mockEventEmitter = new EventEmitter$Cls();
     mockGlobal.EventEmitter = mockEventEmitter;
+    mockGlobal.platform = 'pc';
     mockMessages = [];
   });
   it('keeps the entry reachable with zero references and without browser activity', () => {
@@ -135,10 +136,36 @@ describe('chat remote computer entry', () => {
     fireEvent.click(screen.getByTitle('远程桌面'));
     expect(mockOpenVnc).toHaveBeenCalledTimes(1);
   });
-  it('keeps the desktop entry reachable in the centered new-chat composer before an ID exists', () => {
-    render(<ChatLayoutComp sessionId="" isBottom={false} readOnly />);
+  it.each(['', '11273519'])('hides the title and desktop entry in welcome mode with session ID "%s"', (sessionId) => {
+    render(<ChatLayoutComp sessionId={sessionId} isBottom={false} preserveNewSessionView readOnly />);
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
+    expect(mockOpenVnc).not.toHaveBeenCalled();
+  });
+  it('shows the desktop entry when entering a draft chat and hides it when returning to welcome mode', () => {
+    const view = render(<ChatLayoutComp sessionId="" isBottom={false} readOnly />);
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    view.rerender(<ChatLayoutComp sessionId="" isBottom readOnly />);
+    expect(screen.getByText('New Chat')).toBeInTheDocument();
     fireEvent.click(screen.getByTitle('远程桌面'));
     expect(mockOpenVnc).toHaveBeenCalledTimes(1);
+    view.rerender(renderChat());
+    expect(screen.getByText('当前会话')).toBeInTheDocument();
+    expect(screen.getByTitle('远程桌面')).toBeInTheDocument();
+    view.rerender(<ChatLayoutComp sessionId="" isBottom={false} readOnly />);
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
+  });
+  it('preserves explicit title hiding inside a conversation', () => {
+    render(<ChatLayoutComp sessionId="session-1" isBottom hideChatTitle readOnly />);
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
+  });
+  it('preserves the existing mobile header boundary', () => {
+    mockGlobal.platform = 'h5';
+    render(renderChat());
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
   });
   it('restores history without automatically opening the workspace', () => {
     mockMessages = [employeeMessage('answer-1', true)];

@@ -729,7 +729,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
       <div className={classnames(styles.chatLayoutCompBox, 'full-height full-width')}>
         <div className={classnames(styles.chatLayoutComp, 'full-width ub')}>
           <div className="ub ub-f1 ub-ver">
-            {!hideChatTitle && isPC && (
+            {!hideChatTitle && isBottom && isPC && (
               <ChatTitle
                 sessionId={sessionId}
                 lastAnswer={lastAnswer}
