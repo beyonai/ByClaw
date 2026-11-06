@@ -77,6 +77,9 @@ if [[ "${1:-}" == multi-host ]]; then
         [[ " ${NODE_OPTIONS:-} " == *" ${flag%%=*}"[=\ ]* ]] || NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }${flag}"
     done
     export NODE_OPTIONS
+    # Node does not reap orphans; each closed tool-environment connection leaves its ws-proxy behind.
+    pid1=()
+    [[ -x /usr/local/bin/byclaw-pid1 ]] && pid1=(/usr/local/bin/byclaw-pid1)
     if ((EUID == 0)); then
         host_root="${BYCLAW_MULTI_HOST_ROOT-/data/multi-host}"
         python3 - "${host_root}" <<'BYCLAW_SHARED_ROOT'
@@ -142,10 +145,10 @@ if __name__ == '__main__':
     account = pwd.getpwnam('byclaw')
     prepare_host_root(sys.argv[1], account.pw_uid, account.pw_gid)
 BYCLAW_SHARED_ROOT
-        exec setpriv --reuid=byclaw --regid=byclaw --init-groups \
+        exec "${pid1[@]}" setpriv --reuid=byclaw --regid=byclaw --init-groups \
             env HOME=/home/byclaw node "${launcher}" "$@"
     fi
-    exec node "${launcher}" "$@"
+    exec "${pid1[@]}" node "${launcher}" "$@"
 fi
 
 if [[ "${BYCLAW_DSH_PREPARED:-0}" != 1 && "${BYCLAW_DSH_PREPARE_ONLY:-0}" != 1 ]]; then

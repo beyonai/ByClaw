@@ -264,6 +264,10 @@ process. Tests: `node --test scripts/tool-lookup-021-patch.test.mjs
 scripts/delegation-names-021-patch.test.mjs`. The entrypoint's `multi-host` mode
 also adds `--max-old-space-size=8192 --experimental-async-context-frame
 --max-semi-space-size=64` to `NODE_OPTIONS`; a flag already set there wins.
+It starts the host under `byclaw-pid1` (`scripts/byclaw-pid1.py`), a child
+subreaper that forwards signals and reaps orphans: Node does not, and every
+closed SSH-over-WebSocket tool connection leaves its `ws-proxy` process behind.
+Test: `node --test scripts/byclaw-pid1.test.mjs`.
 
 ## Verification and startup
 

@@ -328,6 +328,7 @@ RUN set -eux; \
 COPY --chown=byclaw:byclaw middleware/builtin/ /opt/byclaw/builtin/
 COPY --chown=byclaw:byclaw middleware/builtin/skills/ /opt/byclaw/dsh-managed/skills/
 COPY --chown=byclaw:byclaw --chmod=0755 middleware/byclaw-harness/docker-entrypoint.sh /usr/local/bin/byclaw-dsh-entrypoint
+COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-pid1.py /usr/local/bin/byclaw-pid1
 COPY --chmod=0755 middleware/byclaw-harness/scripts/dsh-loopback-forward.mjs /usr/local/lib/byclaw/dsh-loopback-forward.mjs
 COPY middleware/byclaw-harness/scripts/startup-module-resolver.cjs /usr/local/lib/byclaw/startup-module-resolver.cjs
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-bycli-managed.py /usr/local/bin/byclaw-bycli-managed

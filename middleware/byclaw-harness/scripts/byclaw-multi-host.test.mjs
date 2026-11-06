@@ -37,8 +37,10 @@ test('shared host imports the installed runtime once from its CLI anchor, indepe
 test('shared host entrypoint uses compiled Node runtime without the source alias loader', async () => {
   const source = await readFile(new URL('../docker-entrypoint.sh', import.meta.url), 'utf8')
   const shared = source.slice(source.indexOf('if [[ "${1:-}" == multi-host ]]'), source.indexOf('if [[ "${BYCLAW_DSH_PREPARED'))
-  assert.match(shared, /exec node "\$\{launcher\}"/)
+  assert.match(shared, /exec "\$\{pid1\[@\]\}" node "\$\{launcher\}"/)
   assert.doesNotMatch(shared, /tsx/)
+  // Node as PID 1 does not reap orphans (each closed tool-environment connection leaves its ws-proxy).
+  assert.match(shared, /pid1=\(\/usr\/local\/bin\/byclaw-pid1\)/)
 })
 
 test('module preloading deduplicates active rows without activating plugins or hiding import failures', async () => {
