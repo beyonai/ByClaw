@@ -12,6 +12,49 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class FileBrowserTransferApplicationServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
+    @Test void unfinishedTargetsRoundTripThroughStatusAndAbortWithRealByDirectoryNames() {
+        String[] storedPaths={"by/by/file.bin","by/by/nested/file.bin","by/folder/by/file.bin","/by/by/by/file.bin","by/folder/file.bin"};
+        String[] directories={"/by/by","/by/by/nested","/folder/by","/by/by/by","/folder"};
+        for(int index=0;index<storedPaths.length;index++) {
+            String stored=storedPaths[index];String normalized=stored.startsWith("/")?stored:"/"+stored;
+            when(gateway.call(eq("storage"),eq("uploads/list"),any())).thenReturn(Map.of("uploads",java.util.List.of(
+                Map.of("uploadId",request.uploadId(),"path",stored,"totalSize",42L,"state","UPLOADING"))));
+            doAnswer(call->{
+                Map<?,?> target=call.getArgument(2);assertEquals(normalized,target.get("path"));
+                return Map.of("state","UPLOADING");
+            }).when(gateway).call(eq("storage"),eq("uploads/status"),any());
+            doAnswer(call->{
+                Map<?,?> target=call.getArgument(2);assertEquals(normalized,target.get("path"));
+                return Map.of("state","EXPIRED");
+            }).when(gateway).call(eq("storage"),eq("uploads/abort"),any());
+            Map<?,?> response=(Map<?,?>)service.unfinished("Alice",10L);
+            var entries=(java.util.List<?>)response.get("uploads");assertEquals(1,entries.size());
+            Map<?,?> entry=(Map<?,?>)entries.get(0);assertEquals(directories[index],entry.get("path"));
+            var selected=new FileBrowserTransferApplicationService.UploadRequest(10L,(String)entry.get("path"),
+                (String)entry.get("fileName"),(String)entry.get("uploadId"),null,null,null);
+            service.control("Alice","status",selected);service.control("Alice","abort",selected);
+        }
+    }
+    @Test void unfinishedListDerivesOwnerAndHidesProtectedOrForeignPaths() {
+        when(gateway.call(eq("storage"),eq("uploads/list"),any())).thenAnswer(call->{
+            Map<?,?> target=call.getArgument(2);
+            assertEquals("byclaw-alice",target.get("bucketOrRoot"));
+            assertEquals("workspace:user:Alice",target.get("ownerKey"));assertEquals("/by",target.get("path"));
+            return Map.of("uploads",java.util.List.of(
+                Map.of("uploadId",request.uploadId(),"path","/by/folder/large.bin","totalSize",42L,"state","UPLOADING"),
+                Map.of("uploadId",request.uploadId(),"path","/by/.connector-auth/key","totalSize",42L,"state","UPLOADING"),
+                Map.of("uploadId",request.uploadId(),"path","/outside/file","totalSize",42L,"state","UPLOADING")));
+        });
+        Map<?,?> result=(Map<?,?>)service.unfinished("Alice",10L);
+        var uploads=(java.util.List<?>)result.get("uploads");assertEquals(1,uploads.size());
+        Map<?,?> entry=(Map<?,?>)uploads.get(0);assertEquals("/folder",entry.get("path"));
+        assertEquals("large.bin",entry.get("fileName"));
+    }
+    @Test void unfinishedListRejectsMissingLoginAndInvalidResource() {
+        assertThrows(IllegalArgumentException.class,()->service.unfinished("",10L));
+        assertThrows(IllegalArgumentException.class,()->service.unfinished("Alice",0L));
+        verify(gateway,never()).call(anyString(),anyString(),any());
+    }
     private final PlatformRemoteGateway gateway = mock(PlatformRemoteGateway.class);
     private final GlobalFileUploadValidator validator = mock(GlobalFileUploadValidator.class);
     private final ObjectProvider<PlatformStorageClient> clients = mock(ObjectProvider.class);

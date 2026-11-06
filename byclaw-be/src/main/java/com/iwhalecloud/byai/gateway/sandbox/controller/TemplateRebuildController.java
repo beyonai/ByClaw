@@ -28,6 +28,7 @@ public class TemplateRebuildController {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("serviceKey", request.get("serviceKey"));
         params.put("requestId", request.get("requestId"));
+        params.put("profileKey", request.get("profileKey"));
         params.put("actorCode", CurrentUserHolder.getCurrentUserCode());
         String name = CurrentUserHolder.getCurrentUserName();
         params.put("actorName", name == null || name.isBlank() ? CurrentUserHolder.getCurrentUserCode() : name);

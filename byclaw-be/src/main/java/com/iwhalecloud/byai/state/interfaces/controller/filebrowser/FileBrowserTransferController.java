@@ -30,6 +30,13 @@ public class FileBrowserTransferController {
         return ResponseUtil.successResponse(transfers.control(CurrentUserHolder.getCurrentUserCode(), operation, request));
     }
 
+    public record ListRequest(Long resourceId) {}
+    @PostMapping("/list")
+    public ResponseUtil unfinished(@RequestBody ListRequest request) {
+        return ResponseUtil.successResponse(transfers.unfinished(CurrentUserHolder.getCurrentUserCode(),
+            request==null?null:request.resourceId()));
+    }
+
     @PostMapping("/chunk")
     public ResponseUtil chunk(@RequestParam("resourceId") Long resourceId, @RequestParam("path") String path,
             @RequestParam("fileName") String fileName, @RequestParam("uploadId") String uploadId,

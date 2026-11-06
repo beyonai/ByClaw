@@ -42,6 +42,12 @@ class SsSandboxInventoryQueryTest {
             query.put("sandboxIds", List.of("acs-one", "acs-two")); query.put("ownerScope", "USER");
             assertThat(mapper.countInventory(query)).isEqualTo(2);
             assertThat(mapper.selectInventoryPage(query).get(0).getId()).isEqualTo(4L);
+            jdbc.update("UPDATE ss_sandbox_record SET sandbox_type = CASE WHEN id = 4 THEN 'byclaw-dsh' ELSE 'openclaw' END");
+            assertThat(mapper.selectInventoryTypes(query)).containsExactly("byclaw-dsh", "openclaw");
+            query.put("sandboxType", "openclaw");
+            assertThat(mapper.countInventory(query)).isEqualTo(1);
+            assertThat(mapper.selectInventoryPage(query).get(0).getId()).isEqualTo(2L);
+            query.remove("sandboxType");
             query.put("offset", 1);
             assertThat(mapper.selectInventoryPage(query).get(0).getId()).isEqualTo(2L);
             query.put("keyword", "a"); query.put("offset", 0);

@@ -260,6 +260,8 @@ public interface SsSandboxRecordMapper {
 
     int countInventory(java.util.Map<String, Object> query);
 
+    List<String> selectInventoryTypes(java.util.Map<String, Object> query);
+
     int countEnterpriseUserSandbox(@Param("id") Long id, @Param("enterpriseId") Long enterpriseId);
 
     /**

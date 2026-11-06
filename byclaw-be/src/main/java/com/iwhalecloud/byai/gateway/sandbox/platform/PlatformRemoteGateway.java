@@ -56,13 +56,20 @@ public class PlatformRemoteGateway {
         try {
             return call.get();
         } catch (feign.FeignException failure) {
+            if(failure.status()==429) {
+                try {
+                    JsonNode body=json.readTree(failure.contentUTF8());
+                    if(body!=null && "upload_admission_full".equals(body.path("data").path("errorType").asText()))
+                        throw new com.iwhalecloud.byai.state.common.exception.StorageUploadAdmissionException(retryAfter(failure));
+                } catch(java.io.IOException invalid) { /* Unverified 429 remains an upstream failure. */ }
+            }
             if(failure.status()==423||failure.status()==409) {
                 try {
                     JsonNode error=json.readTree(failure.contentUTF8());
                     String code=error.path("data").path("errorType").asText();
                     if((failure.status()==423&&"file_write_in_progress".equals(code))
                             ||(failure.status()==409&&"file_write_conflict".equals(code)))
-                        throw new com.iwhalecloud.byai.state.common.exception.StorageWriteConflictException(failure.status(),code);
+                        throw new com.iwhalecloud.byai.state.common.exception.StorageWriteConflictException(failure.status(),code,retryAfter(failure));
                 }catch(java.io.IOException invalid){/* Preserve non-conflict error handling. */}
             }
 
@@ -79,6 +86,20 @@ public class PlatformRemoteGateway {
             error.initCause(failure);
             throw error;
         }
+    }
+
+    private static String retryAfter(feign.FeignException failure) {
+        if(failure.responseHeaders()==null)return "1";
+        for (var header : failure.responseHeaders().entrySet()) {
+            if (!"Retry-After".equalsIgnoreCase(header.getKey()) || header.getValue()==null) continue;
+            for (String value : header.getValue()) {
+                if (value!=null && value.matches("[0-9]{1,10}")) {
+                    long seconds=Long.parseLong(value);
+                    if(seconds<=3600)return Long.toString(seconds);
+                }
+            }
+        }
+        return "1";
     }
 
     public Map<String, Object> envelope(String area, String operation, Object params) {

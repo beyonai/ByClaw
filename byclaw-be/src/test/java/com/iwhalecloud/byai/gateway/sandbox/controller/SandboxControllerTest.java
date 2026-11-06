@@ -44,6 +44,18 @@ import ch.qos.logback.core.read.ListAppender;
 class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     @Test
+    void profileAdministrationCanQueryAllTypesWithoutChangingDefaultRuntimeFilter() {
+        com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceProfileEntityMapper profiles =
+            mock(com.iwhalecloud.byai.gateway.sandbox.mapper.SandboxServiceProfileEntityMapper.class);
+        SandboxController controller = controllerWithInventory();
+        ReflectionTestUtils.setField(controller, "sandboxServiceProfileEntityMapper", profiles);
+        controller.listServiceProfiles(Map.of("allServiceTypes", true, "enabledOnly", false));
+        verify(profiles).selectProfiles(null, false);
+        controller.listServiceProfiles(Map.of());
+        verify(profiles).selectProfiles("openclaw", true);
+    }
+
+    @Test
     void launchByUserCode_passesAutoReleaseAndKeepsItOptional() {
         for (Object value : java.util.Arrays.asList(0, 1, "0", "1", null)) {
             SandboxService service = mock(SandboxService.class);
@@ -420,6 +432,22 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
         List<SandboxRecordView> list = (List<SandboxRecordView>) ((Map<?, ?>) response.getData()).get("list");
         assertThat(list).hasSize(1);
         assertThat(list.get(0).getStatus()).isEqualTo("RELEASED");
+    }
+
+    @Test
+    void listRecords_passesSandboxTypeToPageAndCountQueries() {
+        setPlatformManager();
+        SandboxController controller = controllerWithInventory();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        when(mapper.selectInventoryPage(org.mockito.ArgumentMatchers.anyMap())).thenReturn(List.of());
+        when(mapper.selectInventoryTypes(org.mockito.ArgumentMatchers.anyMap())).thenReturn(List.of("custom-tools"));
+        var response = controller.listRecords(Map.of("sandboxType", " byclaw-dsh "));
+        assertThat(((Map<?, ?>) response.getData()).get("sandboxTypes")).isEqualTo(List.of("custom-tools"));
+        verify(mapper).selectInventoryTypes(org.mockito.ArgumentMatchers.argThat(q -> "USER".equals(q.get("ownerScope"))
+            && !q.containsKey("sandboxType") && !q.containsKey("status") && !q.containsKey("sandboxIds")));
+        verify(mapper).selectInventoryPage(org.mockito.ArgumentMatchers.argThat(q -> "byclaw-dsh".equals(q.get("sandboxType"))));
+        verify(mapper).countInventory(org.mockito.ArgumentMatchers.argThat(q -> "byclaw-dsh".equals(q.get("sandboxType"))));
     }
 
     @Test

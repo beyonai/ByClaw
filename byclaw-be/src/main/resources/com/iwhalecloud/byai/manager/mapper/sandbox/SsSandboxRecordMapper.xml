@@ -739,6 +739,9 @@
             <if test="status != null and status != ''">
                 AND status = #{status,jdbcType=VARCHAR}
             </if>
+            <if test="sandboxType != null and sandboxType != ''">
+                AND sandbox_type = #{sandboxType,jdbcType=VARCHAR}
+            </if>
             AND NOT EXISTS (SELECT 1 FROM ss_sandbox_record newer
                 WHERE newer.sandbox_id = ss_sandbox_record.sandbox_id AND newer.id > ss_sandbox_record.id)
             <if test="ownerScope != 'ALL'">
@@ -770,6 +773,12 @@
         SELECT <include refid="Base_Column_List" /> FROM ss_sandbox_record
         <include refid="CurrentInventoryFilter" />
         ORDER BY id DESC LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+    <select id="selectInventoryTypes" resultType="string">
+        SELECT DISTINCT sandbox_type FROM ss_sandbox_record
+        <include refid="CurrentInventoryFilter" />
+        AND sandbox_type IS NOT NULL AND sandbox_type != ''
+        ORDER BY sandbox_type
     </select>
     <select id="countInventory" resultType="int">
         SELECT COUNT(*) FROM ss_sandbox_record

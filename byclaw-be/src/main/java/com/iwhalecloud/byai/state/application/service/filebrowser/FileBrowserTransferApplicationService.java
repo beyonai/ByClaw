@@ -126,6 +126,46 @@ public class FileBrowserTransferApplicationService {
         return gateway.call("storage", "uploads/" + operation, target);
     }
 
+    public Object unfinished(String userCode, Long resourceId) {
+        if(StringUtils.isBlank(userCode)||resourceId==null||resourceId<=0)
+            throw new IllegalArgumentException("Authentication required");
+        if(!enabled())throw new IllegalStateException("Resumable transfers require platform filesystem storage");
+        Map<String,Object> target=new LinkedHashMap<>();
+        target.put("namespace","workspace");target.put("bucketOrRoot",UserBucketNameResolver.buildUserBucketName(userCode));
+        target.put("shareType","private");target.put("path","/by");target.put("ownerKey","workspace:user:"+userCode);
+        Object response=gateway.call("storage","uploads/list",target);
+        if(!(response instanceof Map<?,?> result)||!(result.get("uploads") instanceof java.util.List<?> entries)||entries.size()>1024)
+            throw new IllegalStateException("Invalid unfinished upload response");
+        java.util.List<Map<String,Object>> visible=new java.util.ArrayList<>();
+        for(Object value:entries) {
+            if(!(value instanceof Map<?,?> saved)||!(saved.get("path") instanceof String stored))
+                throw new IllegalStateException("Invalid unfinished upload entry");
+            String normalized=FileBrowserPathPolicy.normalize(stored.startsWith("/")?stored:"/"+stored);
+            if(!normalized.startsWith("/by/"))continue;
+            int slash=normalized.lastIndexOf('/');String filename=normalized.substring(slash+1);
+            String directory=normalized.substring(3,slash);if(directory.isEmpty())directory="/";
+            String uploadId=String.valueOf(saved.get("uploadId"));
+            // Reuse the exact status/abort authorization and protected-path checks before exposing identity.
+            if(!matchesStoredUploadPath(userCode,resourceId,directory,filename,uploadId,normalized)) {
+                // A real first directory named "by" is ambiguous with target's optional workspace prefix.
+                directory=normalized.substring(0,slash);
+                if(!matchesStoredUploadPath(userCode,resourceId,directory,filename,uploadId,normalized))continue;
+            }
+            Map<String,Object> entry=new LinkedHashMap<>();
+            for(String field:java.util.List.of("uploadId","totalSize","state","phase","expiresAt","uploadedChunkCount","totalChunks"))
+                if(saved.containsKey(field))entry.put(field,saved.get(field));
+            entry.put("path",directory);entry.put("fileName",filename);visible.add(entry);
+        }
+        return Map.of("uploads",visible);
+    }
+
+    private boolean matchesStoredUploadPath(String userCode,Long resourceId,String directory,String filename,
+            String uploadId,String storedPath) {
+        try {
+            return storedPath.equals(target(userCode,new UploadRequest(resourceId,directory,filename,uploadId,null,null,null)).get("path"));
+        }catch(IllegalArgumentException inaccessible){return false;}
+    }
+
     public Object chunk(String userCode, UploadRequest request, int index, String sha256, MultipartFile chunk)
             throws IOException {
         Map<String, Object> target = target(userCode, request);

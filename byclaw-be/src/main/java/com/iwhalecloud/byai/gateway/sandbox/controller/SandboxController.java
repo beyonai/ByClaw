@@ -543,6 +543,7 @@ public class SandboxController {
             .map(Map.Entry::getKey).collect(Collectors.toList());
         Map<String, Object> query = new HashMap<>();
         query.put("keyword", keyword);
+        query.put("sandboxType", stringParam(params.get("sandboxType")));
         query.put("ownerScope", ownerScope);
         query.put("enterpriseId", enterpriseId);
         query.put("offset", (pageIndex - 1) * pageSize);
@@ -594,6 +595,10 @@ public class SandboxController {
         result.put("pageSize", pageSize);
         result.put("total", total);
         result.put("totalPage", totalPage);
+        Map<String, Object> typeQuery = new HashMap<>();
+        typeQuery.put("ownerScope", ownerScope);
+        typeQuery.put("enterpriseId", enterpriseId);
+        result.put("sandboxTypes", sandboxRecordMapper.selectInventoryTypes(typeQuery));
 
         return ResponseUtil.successResponse(result);
     }
@@ -849,8 +854,8 @@ public class SandboxController {
     public ResponseUtil listServiceProfiles(@RequestBody Map<String, Object> params) {
         if (platformRemote != null && platformRemote.isRemote())
             return platformRemote.controller("listServiceProfiles", params);
-        String serviceType = StringUtils.defaultIfBlank(stringParam(params.get("serviceType")),
-            SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
+        String serviceType = Boolean.parseBoolean(String.valueOf(params.get("allServiceTypes"))) ? null
+            : StringUtils.defaultIfBlank(stringParam(params.get("serviceType")), SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
         boolean enabledOnly = !"false".equalsIgnoreCase(String.valueOf(params.getOrDefault("enabledOnly", "true")));
         List<SandboxServiceProfileEntity> list =
             sandboxServiceProfileEntityMapper.selectProfiles(serviceType, enabledOnly);

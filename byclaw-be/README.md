@@ -15,6 +15,8 @@ BE 与 Platform 在启动时读取此开关，前端在构建或开发服务启�
 
 ## AgenticFS 文件传输
 
+`POST /fileBrowser/uploads/list` 接收正数 `resourceId` 作为现有界面上下文，沿既有个人文件系统契约从登录身份派生 owner，查询该用户私有 workspace 已登记 binding 下可浏览路径内的未完成会话；`resourceId` 不构成独立的存储或授权边界。返回 uploadId、目录、文件名、大小、状态及进度；不返回内容 hash 或内部状态版本。status/abort 继续校验原目标身份；取消必须由用户明确选择，不自动删除历史会话。经验证的 `423/file_write_in_progress` 与 `429/upload_admission_full` 保留 HTTP 状态、结构化类型及有界重试提示。
+
 远程文件系统传输按当前登录用户的私有 bucket 查询 platform capabilities，分别判断断点上传和 Range 下载能力，不跨用户缓存。上传会话与分块由 platform/storage-node 持久化；明确不支持能力时使用原有接口，网络或协议错误继续报错。
 
 已确认的 `423/file_write_in_progress` 与 `409/file_write_conflict` 返回“文件写入中，请稍后再试”，保留 HTTP 状态、结构化 `errorType` 与 `Retry-After: 1`。普通文件上传、删除、重命名、移动等操作将这类冲突交给全局处理器；权限、配额和网络错误继续按各自类型处理。该提示只覆盖检测到的冲突，不能证明检测到所有 MicroVM/NAS 并发写入。
