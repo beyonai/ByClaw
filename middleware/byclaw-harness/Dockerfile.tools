@@ -16,6 +16,7 @@ ARG HARNESS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0
 # --- Trim A in place; the closure is computed by Node's own resolver, so it matches A's build ---
 FROM ${HARNESS_IMAGE} AS trimmed
 USER root
+COPY middleware/byclaw-harness/tool-sandbox/general.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
 COPY middleware/byclaw-harness/plugins/dsh-tool-env/docker/ /tmp/tool-env-docker/
 COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh /usr/local/bin/byclaw-tool-env-sshd
 COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ws-bridge.py /usr/local/bin/byclaw-tool-env-ws-bridge
@@ -46,6 +47,7 @@ RUN set -eux; \
     su -s /bin/sh byclaw -c "cd ${profile_ssh} && TRACE_OUT=/tmp/tool-env-resolved-user.txt TRACE_HOOK=/tmp/tool-env-docker/trace-hook.mjs node /tmp/tool-env-docker/trace-main.mjs" </dev/null; \
     test -s /tmp/tool-env-resolved-user.txt; \
     test -x /usr/sbin/sshd; \
+    node -e 'const m=require("/etc/byclaw-tool-sandbox/capabilities.json"); if(m.purpose!=="general" || m.contract!=="byclaw.tool-sandbox/v1") process.exit(1)'; \
     python3 -c 'import websockets'; \
     # The browser of the user's own sandbox: supervisor, Chromium, desktop stack,
     # noVNC page, byCLI with its extension, and the bridge A's browser tool runs here.
