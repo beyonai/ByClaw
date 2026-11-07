@@ -174,6 +174,26 @@ describe('real Harness tool registry contract', () => {
     await Promise.resolve(); expect(finished).toHaveLength(2)
     await ctx.fiber.dispose()
   })
+  it('defaults real tool execution to idle return and forwards destruction only when explicitly true', async () => {
+    const ctx = new Context(); const returns: boolean[] = []
+    ctx.provide('systemPrompt', { tools() {} } as never)
+    const tools = new ToolRuntime(ctx)
+    const manager = new ToolSandboxManager([{ templateKey: 'general', serviceKey: 'byclaw-dsh-tools', capabilities: [], enabled: true }], async () => ({
+      handshake: async () => ({ contract: 'byclaw.tool-sandbox/v1', purpose: 'general', operations: { protocol: 'ssh', exposure: 'private' }, capabilities: [] }),
+      execute: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+      releaseLease: async (_session, destroy) => { returns.push(destroy) }, release: async () => {},
+    }))
+    registerCatalogTools(ctx, manager)
+    const ordinary = await manager.acquire('actor', 'general', 'ordinary')
+    const result = await tools.execute({ callId: 'return' as never, name: 'sandbox_release', arguments: { lease_id: ordinary.leaseId }, agent: { id: 'actor' } as never, signal: new AbortController().signal })
+    expect(result.isError).toBe(false); expect(returns).toEqual([false])
+    const explicit = await manager.acquire('actor', 'general', 'explicit')
+    const denied = await tools.execute({ callId: 'invalid' as never, name: 'sandbox_release', arguments: { lease_id: explicit.leaseId, destroy: 'true' }, agent: { id: 'actor' } as never, signal: new AbortController().signal })
+    expect(denied.isError).toBe(true); expect(returns).toEqual([false])
+    const destroyed = await tools.execute({ callId: 'destroy' as never, name: 'sandbox_release', arguments: { lease_id: explicit.leaseId, destroy: true }, agent: { id: 'actor' } as never, signal: new AbortController().signal })
+    expect(destroyed.isError).toBe(false); expect(returns).toEqual([false, true])
+    await manager.dispose(); await ctx.fiber.dispose()
+  })
   it('registers explicit sandbox operations and never exposes bootstrap credentials as model input', () => {
     const ctx = new Context()
     ctx.provide('systemPrompt', { tools() {} } as never)
@@ -189,7 +209,11 @@ describe('real Harness tool registry contract', () => {
     expect(acquire.description).toContain('idle')
     const release = schemas.find(s => s.name === 'sandbox_release')!
     expect(release.description.length).toBeLessThanOrEqual(250)
-    expect(release.description).toContain('user-requested destruction')
+    expect(release.description).toContain('destroy=true')
+    expect(release.description).toContain('default 5 min')
+    expect(release.description).toContain('Failed returns retain ownership for retry')
+    expect(release.parameters.properties?.destroy).toMatchObject({ type: 'boolean', default: false })
+    expect(release.parameters.required).toEqual(['lease_id'])
     expect(Object.keys(acquire.parameters.properties ?? {})).toEqual(['template_key', 'request_id'])
     expect(JSON.stringify(schemas)).not.toContain('hostPrivateKey')
     expect(JSON.stringify(schemas)).not.toContain('authorizedKey')

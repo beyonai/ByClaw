@@ -185,16 +185,16 @@ export class ToolSandboxManager {
     try { return await running }
     finally { executions.delete(running); if (!executions.size) this.executions.delete(actor) }
   }
-  async release(actor: string, leaseId: string, origin: 'tool' | 'task-end' = 'tool'): Promise<{ released: boolean; remainingReferences: number }> {
+  async release(actor: string, leaseId: string, origin: 'tool' | 'task-end' = 'tool', destroy = false): Promise<{ released: boolean; remainingReferences: number }> {
     this.owned(actor, leaseId)
     const previous = this.leaseReleases.get(leaseId)
     if (previous) return previous
-    const pending = this.releaseOnce(actor, leaseId, origin)
+    const pending = this.releaseOnce(actor, leaseId, origin, origin === 'tool' && destroy)
     this.leaseReleases.set(leaseId, pending)
     void pending.finally(() => { if (this.leaseReleases.get(leaseId) === pending) this.leaseReleases.delete(leaseId) }).catch(() => {})
     return pending
   }
-  private async releaseOnce(actor: string, leaseId: string, origin: 'tool' | 'task-end'): Promise<{ released: boolean; remainingReferences: number }> {
+  private async releaseOnce(actor: string, leaseId: string, origin: 'tool' | 'task-end', destroy: boolean): Promise<{ released: boolean; remainingReferences: number }> {
     const lease = this.owned(actor, leaseId)
     const { handle } = lease
     if (lease.inflight > 0) throw new Error('LEASE_BUSY')
@@ -204,8 +204,8 @@ export class ToolSandboxManager {
       handle.closing = (async () => {
         try {
           const runtime = await handle.runtime
-          await runtime.releaseLease?.(`${actor}:${leaseId}`, origin === 'tool')
-          await runtime.release(runtime.releaseLease ? false : origin === 'tool')
+          await runtime.releaseLease?.(`${actor}:${leaseId}`, destroy)
+          await runtime.release(runtime.releaseLease ? false : destroy)
           this.leases.delete(leaseId); handle.references.delete(leaseId)
           if (this.handles.get(handle.template.templateKey) === handle) this.handles.delete(handle.template.templateKey)
           this.event({ phase: 'released', origin, templateKey: handle.template.templateKey, handleId: handle.id })
@@ -218,7 +218,7 @@ export class ToolSandboxManager {
       await handle.closing
       return { released: true, remainingReferences: 0 }
     }
-    await (await handle.runtime).releaseLease?.(`${actor}:${leaseId}`, origin === 'tool')
+    await (await handle.runtime).releaseLease?.(`${actor}:${leaseId}`, destroy)
     this.leases.delete(leaseId); handle.references.delete(leaseId)
     this.event({ phase: 'lease-returned', origin, templateKey: handle.template.templateKey, handleId: handle.id, leaseId })
     return { released: false, remainingReferences: handle.references.size + handle.pendingAcquires }

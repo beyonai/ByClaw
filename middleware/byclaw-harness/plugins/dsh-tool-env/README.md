@@ -109,8 +109,10 @@ The last returned or expired lease starts Platform's idle countdown, default
 plugin configuration (bounded 1..86400 seconds). Platform's lease TTL (90 seconds,
 renew every30 seconds) bounds crashed or killed Harness processes before idle
 reclamation. The plugin's SSH idle timer is not a second physical-retention
-period. `sandbox_release` requests immediate destruction only when no other
-process/session holds a live lease; otherwise it returns the caller's lease.
+period. `sandbox_release` defaults to returning the caller's lease (`destroy:false`),
+so the last lease return starts the configured idle countdown. Only an explicit
+user request to immediately destroy compute allows `destroy:true`; Platform still
+protects leases held by every other process/session.
 Context disposal returns all tokens owned by that context. Platform handles
 shared-context cascade, exact-instance fencing and retrying provider deletion.
 Deploy coordinated BE/Platform endpoints before this plugin; production does

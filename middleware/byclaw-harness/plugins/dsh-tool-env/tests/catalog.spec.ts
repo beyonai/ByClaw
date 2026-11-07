@@ -13,7 +13,7 @@ function fixture() {
   return { factory, runtimes, manager: new ToolSandboxManager(templates, factory) }
 }
 describe('tool sandbox catalog and independent leases', () => {
-  it('detaches automatic task-end/dispose but explicitly destroys on tool release', async () => {
+  it('returns leases to idle by default and destroys only on an explicit request', async () => {
     const f = fixture()
     await f.manager.acquire('actor', 'browser', 'turn1')
     await f.manager.releaseActor('actor')
@@ -24,7 +24,11 @@ describe('tool sandbox catalog and independent leases', () => {
     const manual = fixture()
     const lease = await manual.manager.acquire('actor', 'browser', 'manual')
     await manual.manager.release('actor', lease.leaseId)
-    expect(manual.runtimes[0]!.release).toHaveBeenCalledWith(true)
+    expect(manual.runtimes[0]!.release).toHaveBeenCalledWith(false)
+    const explicit = fixture()
+    const explicitLease = await explicit.manager.acquire('actor', 'browser', 'destroy-request')
+    await explicit.manager.release('actor', explicitLease.leaseId, 'tool', true)
+    expect(explicit.runtimes[0]!.release).toHaveBeenCalledWith(true)
     const rejected = fixture()
     const destroy = vi.fn(async () => {})
     rejected.factory.mockImplementationOnce(async () => ({ handshake: async () => ({ contract: 'wrong' }), execute: async () => ({ exitCode: 0, stdout: '', stderr: '' }), release: destroy }))
@@ -87,6 +91,21 @@ describe('tool sandbox catalog and independent leases', () => {
     const other = await f.manager.acquire('other', 'browser', 'two'); expect(f.factory).toHaveBeenCalledOnce()
     await f.manager.release('actor', a.leaseId); expect(f.runtimes[0]!.release).not.toHaveBeenCalled()
     await f.manager.release('other', other.leaseId); expect(f.runtimes[0]!.release).toHaveBeenCalledOnce()
+  })
+  it('keeps another session usable when an explicit destruction request returns only its own reference', async () => {
+    const f = fixture()
+    const a = await f.manager.acquire('session-a', 'browser', 'task-a')
+    const b = await f.manager.acquire('session-b', 'browser', 'task-b')
+    const remoteReturn = vi.fn(async () => {})
+    Object.assign(f.runtimes[0]!, { releaseLease: remoteReturn })
+    await expect(f.manager.release('session-a', a.leaseId, 'tool', true)).resolves.toEqual({ released: false, remainingReferences: 1 })
+    expect(remoteReturn).toHaveBeenCalledExactlyOnceWith(`session-a:${a.leaseId}`, true)
+    expect(f.runtimes[0]!.release).not.toHaveBeenCalled()
+    await expect(f.manager.execute('session-b', b.leaseId, ['continue-running'])).resolves.toMatchObject({ exitCode: 0 })
+    await f.manager.release('session-b', b.leaseId, 'tool', true)
+    expect(remoteReturn).toHaveBeenLastCalledWith(`session-b:${b.leaseId}`, true)
+    expect(f.runtimes[0]!.release).toHaveBeenCalledWith(false)
+    await f.manager.dispose()
   })
   it('denies cross-actor handles and unknown templates without allocating compute', async () => {
     const f = fixture(); await expect(f.manager.acquire('actor', 'unknown', 'one')).rejects.toThrow('TEMPLATE_UNAVAILABLE')
@@ -219,7 +238,7 @@ describe('remote per-session lease coordination', () => {
     await manager.releaseActor('session-a')
     expect(returned).toEqual([{ session: `session-a:${a.leaseId}`, destroy: false }]); expect(detached).toBe(0)
     await manager.release('session-b', b.leaseId)
-    expect(returned.at(-1)).toEqual({ session: `session-b:${b.leaseId}`, destroy: true }); expect(detached).toBe(1)
+    expect(returned.at(-1)).toEqual({ session: `session-b:${b.leaseId}`, destroy: false }); expect(detached).toBe(1)
     await manager.dispose()
   })
 })
