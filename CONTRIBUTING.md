@@ -20,7 +20,9 @@ Thank you for contributing to Byclaw.
 
 ## Pull request workflow
 
-1. Branch from `main` (or the agreed default branch).
+1. Branch from `develop` (the integration branch). External contributors should
+   open pull requests against `develop`; maintainers sync `develop` into `main`
+   during releases.
 2. A PR should include, where applicable:
    - Code changes;
    - **Tests** (unit / integration / e2e as appropriate);
