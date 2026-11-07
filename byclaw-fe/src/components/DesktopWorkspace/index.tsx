@@ -137,17 +137,19 @@ export default function DesktopWorkspace({ owner }: { owner: string }) {
   const choices = listDesktops(rows);
   const groups = Array.from(
     new Set(choices.map((choice) => JSON.stringify([choice.row.sandboxId, choice.row.mappingId])))
-  ).map((key) => ({
-    label: choices.find((choice) => JSON.stringify([choice.row.sandboxId, choice.row.mappingId]) === key)?.row
-      .sandboxId,
-    options: choices
-      .filter((choice) => JSON.stringify([choice.row.sandboxId, choice.row.mappingId]) === key)
-      .map((choice) => ({ value: desktopKey(choice.ref), label: choice.label })),
-  }));
+  ).map((key) => {
+    const items = choices.filter((choice) => JSON.stringify([choice.row.sandboxId, choice.row.mappingId]) === key);
+    const sandbox = items[0].row;
+    return {
+      sandboxId: sandbox.sandboxId,
+      label: (sandbox.isShared ? sandbox.serviceKey || sandbox.sandboxType : sandbox.sandboxType) || sandbox.sandboxId,
+      options: items.map((choice) => ({ value: desktopKey(choice.ref), label: choice.label })),
+    };
+  });
   const directoryItems = groups.map((group, index) => ({
     type: 'group' as const,
     key: `sandbox-${index}`,
-    label: group.label,
+    label: <span title={group.sandboxId}>{group.label}</span>,
     children: group.options.map((option) => ({
       key: tabKey(option.value),
       label: option.label,

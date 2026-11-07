@@ -75,6 +75,36 @@ it('adds and selects a desktop from the authorized directory menu', async () => 
   expect(screen.getByRole('tab', { name: /vnc · b/ })).toHaveAttribute('aria-selected', 'true');
   expect(document.querySelectorAll('iframe')).toHaveLength(1);
 });
+it.each([
+  { sandboxType: 'byclaw-dsh', expected: 'byclaw-dsh' },
+  { sandboxType: '', expected: 'a' },
+  {
+    sandboxType: 'shared-host',
+    isShared: true,
+    mappingId: 'mapping-a',
+    serviceKey: 'shared-browser',
+    expected: 'shared-browser',
+  },
+])(
+  'shows the sandbox name with its full identity in the directory tooltip: $expected',
+  async ({ expected, ...row }) => {
+    mockLookup.mockResolvedValue([{ ...rows[0], ...row }]);
+    render(<DesktopWorkspace owner="empty" />);
+    await screen.findByText('从全部桌面添加当前会话的远程桌面');
+    fireEvent.click(screen.getByRole('button', { name: '全部桌面' }));
+    expect(await screen.findByTitle('a')).toHaveTextContent(expected);
+  }
+);
+it('keeps same-named sandbox groups distinct when selecting a desktop', async () => {
+  mockLookup.mockResolvedValue(rows.map((row) => ({ ...row, sandboxType: 'byclaw-dsh' })));
+  render(<DesktopWorkspace owner="empty" />);
+  await screen.findByText('从全部桌面添加当前会话的远程桌面');
+  fireEvent.click(screen.getByRole('button', { name: '全部桌面' }));
+  expect(await screen.findByTitle('a')).toHaveTextContent('byclaw-dsh');
+  expect(screen.getByTitle('b')).toHaveTextContent('byclaw-dsh');
+  fireEvent.click(screen.getByRole('menuitem', { name: 'vnc · byclaw-dsh (b)' }));
+  expect(await screen.findByTitle('desktop')).toHaveAttribute('src', expect.stringContaining('https://b/'));
+});
 it('does not remount the current B desktop when closing background tab A', async () => {
   const third = { sandboxId: 'c', instanceEndpoints: { vnc: 'https://c/vnc.html' } };
   mockLookup.mockResolvedValue([...rows, third]);

@@ -29,6 +29,8 @@ sessionStorage。URL、token、headers、channelId 和实时连接状态不进�
 
 页签行右侧固定显示“＋添加桌面”、重新连接和全屏图标，不再单独占用工具栏行。“＋”打开按沙箱分组的授权桌面菜单，当前桌面的连接状态显示在页签图标旁，悬停可查看状态文字。关闭当前页签后选择右侧相邻桌面，没有右侧桌面时选择左侧；关闭后台页签不重新挂载当前桌面。全部关闭后仍可从“＋”重新打开。
 
+授权桌面菜单的分组标题使用与沙箱状态菜单相同的名称字段：独占沙箱显示 `sandboxType`，共享沙箱优先显示 `serviceKey`；名称缺失时回退到完整 `sandboxId`。悬停分组名称可查看完整 ID；同名沙箱仍按 `sandboxId` 和 `mappingId` 分组，选择时保持精确实例身份。
+
 工作区保持只挂载当前选中的一个 iframe。切换页签和重新连接时重新获取授权入口，不复用旧桌面的授权地址。`UMI_APP_MULTI_DESKTOP_ENABLED=false` 时隐藏页签，保留当前桌面名称及同一行内的桌面选择、重连与全屏操作。
 
 验证：`pnpm test -- --runInBand src/components/DesktopWorkspace/__tests__/workspace.test.tsx`。真实沙箱连接、鉴权及全屏行为需要浏览器联调验证。
