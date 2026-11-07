@@ -58,6 +58,8 @@ interface Lease {
 export class ToolEnvConnection extends Service {
   private current: Promise<Lease> | undefined
   private live: Lease | undefined
+  private readonly opening = new Set<Lease>()
+  private connectionEpoch = 0
   private inflight = 0
   private readonly streams = new Set<Socket>()
   private idleTimer: NodeJS.Timeout | undefined
@@ -80,13 +82,24 @@ export class ToolEnvConnection extends Service {
   ) {
     super(ctx, 'ssh')
     this.launchEnv = options.launchEnv ?? {}
-    ctx.effect(() => () => { void this.close() })
+    ctx.effect(() => () => this.close())
+    if (backend.onInvalidated) ctx.effect(() => backend.onInvalidated!(() => {
+      this.connectionEpoch++
+      for (const pending of this.opening) { pending.fiber.dispose(); void pending.connection.dispose().catch(() => {}) }
+      for (const socket of this.streams) socket.destroy()
+      void this.drop()
+    }))
   }
 
   /** Helper identity of the current lease; awaiting it leases the tool environment. */
   get ready(): Promise<Hello> {
-    return this.lease().then(lease => lease.connection.ready)
+    return this.use(lease => lease.connection.ready)
   }
+
+  runInSession<T>(sessionId: string, work: () => Promise<T>): Promise<T> { return this.backend.runInSession?.(sessionId, work) ?? work() }
+  startSession(sessionId: string): void { this.backend.startSession?.(sessionId) }
+  async acquireSession(sessionId: string): Promise<void> { await this.backend.acquireSession?.(sessionId) }
+  async finishSession(sessionId: string, destroy = false): Promise<void> { await this.backend.finishSession?.(sessionId, destroy) }
 
   /**
    * A turn starts B (its instruction-file and Skill reads, then its tools); a
@@ -167,10 +180,13 @@ export class ToolEnvConnection extends Service {
 
   async connectStream(endpoint: SshStreamEndpoint, signal?: AbortSignal): Promise<Socket> {
     this.noteStartReason('stream', endpoint)
-    const socket = await this.use(lease => lease.connection.connectStream(endpoint, signal), signal)
+    const finish = await this.backend.beginUse?.()
+    let socket: Socket
+    try { socket = await this.use(lease => lease.connection.connectStream(endpoint, signal), signal, false) }
+    catch (error) { await finish?.().catch(() => {}); throw error }
     this.streams.add(socket)
     this.touch()
-    socket.once('close', () => { this.streams.delete(socket); this.touch() })
+    socket.once('close', () => { this.streams.delete(socket); this.touch(); void finish?.().catch(() => {}) })
     return socket
   }
 
@@ -200,13 +216,17 @@ export class ToolEnvConnection extends Service {
     return this.pausing
   }
 
-  private async use<T>(operation: (lease: Lease) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  private async use<T>(operation: (lease: Lease) => Promise<T>, signal?: AbortSignal, acquireUse = true): Promise<T> {
+    let finish: (() => Promise<void>) | undefined
     this.inflight++
     this.residualSince = undefined
     this.touch()
     try {
       signal?.throwIfAborted()
+      if (acquireUse) finish = await this.backend.beginUse?.()
+      const epoch = this.connectionEpoch
       const lease = await this.lease()
+      if (epoch !== this.connectionEpoch) throw new Error('TOOL_LEASE_INVALIDATED')
       try { return await operation(lease) } catch (error) {
         if (isBroken(lease.connection)) void this.drop(lease)
         throw error
@@ -214,6 +234,7 @@ export class ToolEnvConnection extends Service {
     } finally {
       this.inflight--
       this.touch()
+      await finish?.()
     }
   }
 
@@ -234,14 +255,21 @@ export class ToolEnvConnection extends Service {
 
   private async open(): Promise<Lease> {
     await this.pausing
+    const epoch = this.connectionEpoch
     this.backendPending = true
     const endpoint = await this.backend.ensure()
+    if (epoch !== this.connectionEpoch) throw new Error('TOOL_LEASE_INVALIDATED')
     await this.identity.writeClientConfig(endpoint)
     const lease = await this.connect()
-    try { await lease.connection.ready } catch (error) {
+    this.opening.add(lease)
+    try {
+      await lease.connection.ready
+      if (epoch !== this.connectionEpoch) throw new Error('TOOL_LEASE_INVALIDATED')
+    } catch (error) {
       lease.fiber.dispose()
+      await lease.connection.dispose().catch(() => {})
       throw error
-    }
+    } finally { this.opening.delete(lease) }
     if (this.closed) { lease.fiber.dispose(); throw new Error('Tool environment connection is closed') }
     this.live = lease
     this.ctx.logger('byclaw-tool-env').info(`tool environment connected: ${endpoint.hostName}:${String(endpoint.port)}`)

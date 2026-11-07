@@ -80,7 +80,16 @@ test('tenant context overlays use real user credentials but private worker queue
   assert.equal(worker.userCode, 'same-user'); assert.deepEqual(worker.agentTypes, ['BYCLAW_DSH_SHARED_tenant-a_1'])
   assert.match(worker.workerId, new RegExp(instanceId)); assert.match(worker.workerId, new RegExp(mappingId))
   assert.equal(rows.find(row => row.id === 'byclaw-credentials').config.userCode, 'same-user')
-  assert.equal(rows.find(row => row.id === 'byclaw-tool-env').config.byclawBe.token, 'tenant-token')
+  const tool = rows.find(row => row.id === 'byclaw-tool-env').config
+  assert.equal(tool.byclawBe.token, 'tenant-token')
+  assert.equal(tool.byclawBe.coordinatedLeases, true)
+  assert.equal(tool.byclawBe.requestScopedKeys, true)
+  assert.equal(tool.byclawBe.parentContextId, mappingId)
+  assert.equal(tool.byclawBe.parentContextGeneration, 1)
+  assert.equal(tool.byclawBe.parentSandboxId, instanceId)
+  const tuned = host.composeUserOverlays(entries, 'tenant-a', '/private/tenant-a', { ...spec, env: { ...spec.env, BYCLAW_TOOL_ENV_IDLE_MS: '600000' } }).find(row => row.id === 'byclaw-tool-env').config
+  assert.equal(tuned.idleMs, 600000)
+  assert.equal(tuned.byclawBe.idleTimeoutSeconds, 600)
   const env = host.launchEnvironmentValues({ BEYOND_TOKEN: 'wrong-user', USER_INFO: 'wrong', BYCLAW_MULTI_HOST_TOKEN: 'admin', REDIS_HOST: 'redis' }, {}, 'same-user', true)
   assert.equal(env.BEYOND_TOKEN, undefined); assert.equal(env.USER_INFO, undefined); assert.equal(env.BYCLAW_MULTI_HOST_TOKEN, undefined)
   assert.equal(env.USER_CODE, 'same-user'); assert.equal(env.REDIS_HOST, 'redis')

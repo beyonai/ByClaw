@@ -11,8 +11,10 @@ export interface SandboxResult { exitCode: number | null; stdout: string; stderr
 /** Every operation, including the manifest handshake, is performed by the SSH runtime. */
 export interface SandboxRuntime {
   handshake(): Promise<unknown>
+  acquireLease?(sessionId: string): Promise<void>
+  releaseLease?(sessionId: string, destroy: boolean): Promise<void>
   identity?(): { sandboxId?: string; workspaceRoot?: string; instanceContext?: SandboxInstanceContext }
-  execute(argv: readonly string[], cwd?: string, signal?: AbortSignal): Promise<SandboxResult>
+  execute(argv: readonly string[], cwd?: string, signal?: AbortSignal, sessionId?: string): Promise<SandboxResult>
   release(destroy?: boolean): Promise<void>
 }
 export interface ExecutionLease {
@@ -54,7 +56,7 @@ export class ToolSandboxManager {
   private readonly leaseReleases = new Map<string, Promise<{ released: boolean; remainingReferences: number }>>()
   constructor(
     private templates: readonly SandboxTemplate[],
-    private readonly create: (template: SandboxTemplate) => Promise<SandboxRuntime>,
+    private readonly create: (template: SandboxTemplate, allocationSessionId: string) => Promise<SandboxRuntime>,
     private readonly event: (value: Record<string, string>) => void = () => {},
     private readonly loadCatalog?: () => Promise<readonly SandboxTemplate[]>,
   ) {
@@ -125,7 +127,7 @@ export class ToolSandboxManager {
       const selected = handle
       this.handles.set(templateKey, selected)
       this.event({ phase: 'creating', templateKey, handleId: id })
-      selected.runtime = Promise.resolve().then(() => this.create(template)).then(async runtime => {
+      selected.runtime = Promise.resolve().then(() => this.create(template, `allocation:${id}`)).then(async runtime => {
         try {
           const raw = await runtime.handshake()
           const manifest = raw as { contract?: string; purpose?: string; operations?: { protocol?: string; exposure?: string }; capabilities?: unknown }
@@ -158,6 +160,7 @@ export class ToolSandboxManager {
     try {
       const runtime = await handle.runtime
       const leaseId = randomUUID()
+      await runtime.acquireLease?.(`${actor}:${leaseId}`)
       const value: ExecutionLease = { leaseId, handleId: handle.id, templateKey, serviceKey: template.serviceKey, workspaceRoot: '/by', ...runtime.identity?.(), operations: { protocol: 'ssh', exposure: 'private' } }
       handle.references.add(leaseId); this.leases.set(leaseId, { actor, handle, public: value, inflight: 0 })
       this.event({ phase: 'leased', templateKey, handleId: handle.id, leaseId })
@@ -174,7 +177,7 @@ export class ToolSandboxManager {
     if (handle.closing || !argv.length || argv.some(v => typeof v !== 'string' || v.includes('\0'))) throw new Error('INVALID_EXECUTION')
     handle.inflight++; lease.inflight++
     const running = (async () => {
-      try { return await (await handle.runtime).execute(argv, cwd, signal) }
+      try { return await (await handle.runtime).execute(argv, cwd, signal, `${actor}:${leaseId}`) }
       finally { handle.inflight--; lease.inflight-- }
     })()
     const executions = this.executions.get(actor) ?? new Set<Promise<SandboxResult>>()
@@ -200,7 +203,9 @@ export class ToolSandboxManager {
       this.event({ phase: 'releasing', origin, templateKey: handle.template.templateKey, handleId: handle.id })
       handle.closing = (async () => {
         try {
-          await (await handle.runtime).release(origin === 'tool')
+          const runtime = await handle.runtime
+          await runtime.releaseLease?.(`${actor}:${leaseId}`, origin === 'tool')
+          await runtime.release(runtime.releaseLease ? false : origin === 'tool')
           this.leases.delete(leaseId); handle.references.delete(leaseId)
           if (this.handles.get(handle.template.templateKey) === handle) this.handles.delete(handle.template.templateKey)
           this.event({ phase: 'released', origin, templateKey: handle.template.templateKey, handleId: handle.id })
@@ -213,6 +218,7 @@ export class ToolSandboxManager {
       await handle.closing
       return { released: true, remainingReferences: 0 }
     }
+    await (await handle.runtime).releaseLease?.(`${actor}:${leaseId}`, origin === 'tool')
     this.leases.delete(leaseId); handle.references.delete(leaseId)
     this.event({ phase: 'lease-returned', origin, templateKey: handle.template.templateKey, handleId: handle.id, leaseId })
     return { released: false, remainingReferences: handle.references.size + handle.pendingAcquires }

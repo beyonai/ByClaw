@@ -3,7 +3,7 @@ import { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
 import { ToolSandboxManager } from '../src/catalog.ts'
-import { ToolEnv } from '../src/index.ts'
+import { ToolEnv, registerSessionLifecycle } from '../src/index.ts'
 import { registerCatalogLifecycle, registerCatalogTools } from '../src/catalog-tools.ts'
 
 describe('real Harness tool registry contract', () => {
@@ -106,7 +106,7 @@ describe('real Harness tool registry contract', () => {
       expect(policy?.text).toContain('browser.automation')
       expect(policy?.text).toContain('media.render')
       expect(policy?.text).toContain('sandbox_acquire')
-      expect(policy?.text).toContain('任务结束自动归还执行租约并保留物理沙箱')
+      expect(policy?.text).toContain('全部会话租约归还或过期后')
       expect(policy?.text).not.toContain('任务完成或失败后 sandbox_release')
       expect(result.sections[0]).toEqual({ name: 'role', text: id })
     }
@@ -159,6 +159,21 @@ describe('real Harness tool registry contract', () => {
     await new Promise(resolve => setImmediate(resolve)); expect(released).toBe(1)
     await ctx.fiber.dispose()
   })
+  it('tracks actual session turns and returns only the finished session, including cancellation', async () => {
+    const ctx = new Context(), started: string[] = [], finished: string[] = []
+    registerSessionLifecycle(ctx, { runInSession: async (_id, work) => work(), startSession: id => { started.push(id) }, finishSession: async id => { finished.push(id) } })
+    expect(started).toEqual([])
+    ctx.emit('agent/status', { agent: { id: 'agent-a', session: { id: 'session-a' } }, status: 'running' } as never)
+    ctx.emit('agent/status', { agent: { id: 'agent-b', session: { id: 'session-b' } }, status: 'running' } as never)
+    expect(started).toEqual(['session-a', 'session-b'])
+    await ctx.serial('agent/turn-stopping', { agent: { id: 'agent-a' } } as never)
+    expect(finished).toEqual(['session-a'])
+    ctx.emit('agent/status', { agent: { id: 'agent-b' }, status: 'idle' } as never)
+    await Promise.resolve(); expect(finished).toEqual(['session-a', 'session-b'])
+    ctx.emit('agent/disposed', { agent: { id: 'agent-b' } } as never)
+    await Promise.resolve(); expect(finished).toHaveLength(2)
+    await ctx.fiber.dispose()
+  })
   it('registers explicit sandbox operations and never exposes bootstrap credentials as model input', () => {
     const ctx = new Context()
     ctx.provide('systemPrompt', { tools() {} } as never)
@@ -171,7 +186,7 @@ describe('real Harness tool registry contract', () => {
     expect(schemas.map(s => s.name)).toEqual(['sandbox_templates', 'sandbox_acquire', 'sandbox_exec', 'sandbox_release'])
     const acquire = schemas.find(s => s.name === 'sandbox_acquire')!
     expect(acquire.description.length).toBeLessThanOrEqual(250)
-    expect(acquire.description).toContain('retains compute')
+    expect(acquire.description).toContain('idle')
     const release = schemas.find(s => s.name === 'sandbox_release')!
     expect(release.description.length).toBeLessThanOrEqual(250)
     expect(release.description).toContain('user-requested destruction')

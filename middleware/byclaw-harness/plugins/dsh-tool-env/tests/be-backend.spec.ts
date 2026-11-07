@@ -24,6 +24,7 @@ class FakeByClawBe {
   /** When set, launch answers with the primary endpoint only, as an older record would. */
   launchWithoutInstanceEndpoints = false
   launchFailure: string | undefined
+  leaseAcquireFailures = 0
   removeFailure: string | undefined
   removeSkipped = false
   releaseConfirmation: Record<string, unknown> | undefined
@@ -77,6 +78,12 @@ class FakeByClawBe {
       if (body['paramId'] === undefined && existing !== undefined) return { code: -1, msg: `参数键已存在: ${key}`, data: null }
       this.privateParams.set(key, { paramId: existing?.paramId ?? 100 + this.privateParams.size, value: String(body['value']) })
       return { code: 0, msg: 'success', data: null }
+    }
+    if (path.startsWith('/byaiService/sandbox/toolLease/')) {
+      const op = path.split('/').at(-1)
+      if (op === 'acquire' && this.leaseAcquireFailures-- > 0) return { code: -1, msg: 'TOOL_LEASE_BUSY' }
+      if (op === 'release') return { code: 0, data: { released: true, destroyed: false } }
+      return { code: 0, data: { sandboxId: 'leased-sandbox', instanceEndpoints: { ...this.nextEndpoints }, leaseId: body['leaseId'] ?? 'lease-1', leaseToken: 'private-lease-token', leaseExpiresAt: Date.now() + 90000, renewAfterMs: 30000 } }
     }
     const user = String(body['userCode'])
     if (path === '/byaiService/sandbox/launchByUserCode') {
@@ -143,6 +150,38 @@ describe('ByClawBeBackend', () => {
     await fake.stop()
     await new Promise<void>(resolve => sshd.close(() => resolve()))
     await rm(dir, { recursive: true, force: true })
+  })
+
+  it('uses coordinated acquisition and exact-token returns without unscoped sandbox removal', async () => {
+    const backend = new ByClawBeBackend({ ...config, coordinatedLeases: true, idleTimeoutSeconds: 300,
+      parentContextId: 'mapping', parentContextGeneration: 7, parentSandboxId: 'shared-host' }, identity, () => {})
+    backend.startSession('actual-session')
+    const finish = await backend.runInSession('actual-session', () => backend.beginUse())
+    await backend.ensure()
+    await finish()
+    expect(fake.calls.filter(c => c.path.endsWith('/toolLease/acquire'))).toHaveLength(1)
+    expect(fake.calls.find(c => c.path.endsWith('/toolLease/acquire'))?.body).toEqual(expect.objectContaining({ userCode: 'u1', serviceKey: 'byclaw-dsh-tools', sessionId: 'actual-session', idleTimeoutSeconds: 300, parentContextId: 'mapping', parentContextGeneration: 7, parentSandboxId: 'shared-host' }))
+    const suppliedKeys = fake.calls.find(c => c.path.endsWith('/toolLease/acquire'))?.body['toolEnvironmentKeys'] as { authorizedKey: string; hostPrivateKeyBase64: string }
+    const keys = await identity.keys()
+    expect(suppliedKeys.authorizedKey).toBe(keys.authorizedKey)
+    expect(Buffer.from(suppliedKeys.hostPrivateKeyBase64, 'base64').toString()).toBe(keys.hostPrivateKey)
+    await backend.finishSession('actual-session')
+    expect(fake.calls.find(c => c.path.endsWith('/toolLease/release'))?.body).toEqual(expect.objectContaining({ leaseId: 'lease-1', leaseToken: 'private-lease-token', destroy: false, parentContextId: 'mapping' }))
+    expect(fake.calls.some(c => c.path.endsWith('/removeSandbox') || c.path.endsWith('/launchByUserCode'))).toBe(false)
+    await backend.dispose()
+  })
+
+  it('retries a busy coordinated acquisition with the same holder and session identity', async () => {
+    fake.leaseAcquireFailures = 1
+    let now = 1000
+    const backend = new ByClawBeBackend({ ...config, coordinatedLeases: true }, identity, () => {}, { now: () => now, sleep: async ms => { now += ms } })
+    backend.startSession('session')
+    const finish = await backend.runInSession('session', () => backend.beginUse())
+    const requests = fake.calls.filter(call => call.path.endsWith('/toolLease/acquire'))
+    expect(requests).toHaveLength(2)
+    expect(requests[0]?.body['holderId']).toBe(requests[1]?.body['holderId'])
+    expect(requests[0]?.body['sessionId']).toBe(requests[1]?.body['sessionId'])
+    await finish(); await backend.dispose()
   })
 
   it.each([false, true])('adapts only the exact legacy allocation and keeps browser on vnc (directory fallback=%s)', async fallback => {

@@ -55,7 +55,7 @@
  *                                  BE_PUBLISH_KEYS, READY_TIMEOUT_MS, BE_REQUEST_TIMEOUT_MS) apply as in the
  *                                  plugin's cordis.patch.yml. A PUT `env` BYCLAW_TOOL_ENV_SERVICE_KEY overrides
  *                                  SERVICE_KEY for that context (BE sets it per user); it applies when the context boots.
- *   BYCLAW_TOOL_ENV_IDLE_MS        tool-environment idle time (default 600000).
+ *   BYCLAW_TOOL_ENV_IDLE_MS        tool-environment idle time (default 300000).
  *   BYCLAW_DSH_TOOL_ENV            defaults to `opensandbox` for every context of this process.
  *   REDIS_HOST, REDIS_PORT, REDIS_USERNAME, REDIS_PASSWORD, REDIS_DATABASE  Redis for the user claims.
  *
@@ -165,13 +165,15 @@ export const USER_ROW_OVERLAYS = {
     stateDir: join(home, 'byclaw-tool-env'),
     alias: `byclaw-tool-env-${spec.managed ? spec.contextKey : user}`,
     workspace: '/by',
-    idleMs: spec.toolEnvIdleMs,
+    idleMs: Number(spec.env?.BYCLAW_TOOL_ENV_IDLE_MS || spec.toolEnvIdleMs || 300000),
     port: 22,
     // What the user's own sandbox would have started with (BE renders it from the harness spec for every PUT).
     launchEnv: toolLaunchEnvironment(spec.env, spec.managed ? spec.userCode : user),
     ...(spec.toolEnvBackend === 'byclaw-be'
       // BE creates B as the user: the token is the one BE handed this context in the PUT.
-      ? { byclawBe: { ...spec.toolEnvBe, userCode: user, token: toolEnvUserToken(spec.env, user), serviceKey: toolEnvServiceKey(spec) } }
+      ? { byclawBe: { ...spec.toolEnvBe, coordinatedLeases: true, requestScopedKeys: true,
+          idleTimeoutSeconds: Math.ceil(Number(spec.env?.BYCLAW_TOOL_ENV_IDLE_MS || spec.toolEnvIdleMs || 300000) / 1000),
+          ...(spec.managed ? { parentContextId: spec.mappingId, parentContextGeneration: spec.generation, parentSandboxId: spec.instanceId } : {}), userCode: user, token: toolEnvUserToken(spec.env, user), serviceKey: toolEnvServiceKey(spec) } }
       : { openSandbox: JSON.parse(spec.toolEnvTemplate.replaceAll('{user}', spec.managed ? spec.contextKey : user)) }),
   }),
 }
@@ -487,7 +489,7 @@ export function readHostConfig(env) {
     toolEnvTemplate,
     toolEnvCatalog: toolEnvCatalog({ env }),
     toolEnvBe,
-    toolEnvIdleMs: Number(env.BYCLAW_TOOL_ENV_IDLE_MS || 600000),
+    toolEnvIdleMs: Number(env.BYCLAW_TOOL_ENV_IDLE_MS || 300000),
   }
 }
 

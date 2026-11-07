@@ -45,6 +45,8 @@ export interface Config {
   templates?: SandboxTemplate[]
   /** Directory in A's private DSH home holding keys, the client config and B's id. */
   stateDir: string
+  /** Stable per-user/service key directory; runtime configs remain in stateDir. */
+  identityDirectory?: string
   /** OpenSSH host alias; unique per user context when one process serves several users. */
   alias: string
   /** Remote default workspace, shared with A through the same host volume. */
@@ -107,9 +109,10 @@ export class ToolEnv extends ToolEnvConnection {
     backend: schema.union(['static', 'opensandbox', 'byclaw-be']).required(),
     templates: schema.array(schema.object({ templateKey: schema.string().required(), serviceKey: schema.string().required(), capabilities: schema.array(schema.string()).required(), enabled: schema.boolean().default(true) })).default([]),
     stateDir: schema.string().required(),
+    identityDirectory: schema.string(),
     alias: schema.string().default('byclaw-tool-env'),
     workspace: schema.string().default('/by'),
-    idleMs: schema.natural().default(600_000),
+    idleMs: schema.natural().default(300_000),
     busyProcessMaxMs: schema.natural().default(6 * 60 * 60 * 1000),
     launchEnv: schema.dict(schema.string()).default({}),
     requestTimeoutMs: schema.natural().default(30_000),
@@ -131,6 +134,11 @@ export class ToolEnv extends ToolEnvConnection {
       volumes: schema.array(volume).default([]),
     }).default({} as Config['openSandbox']),
     byclawBe: schema.object({
+      coordinatedLeases: schema.boolean().default(true),
+      idleTimeoutSeconds: schema.natural().default(300),
+      parentContextId: schema.string(),
+      parentContextGeneration: schema.natural(),
+      parentSandboxId: schema.string(),
       baseUrl: schema.string().default(''),
       userCode: schema.string().default(''),
       token: schema.string().default(''),
@@ -139,7 +147,7 @@ export class ToolEnv extends ToolEnvConnection {
       sshInstance: schema.string().default('ssh'),
       hostTemplate: schema.string().default('sandbox-{id}'),
       publishKeys: schema.boolean().default(false),
-      requestScopedKeys: schema.boolean().default(false),
+      requestScopedKeys: schema.boolean().default(true),
       privateOnly: schema.boolean().default(false),
       readyTimeoutMs: schema.natural().default(180_000),
       // A launch may create B and wait for its endpoints on the BE side.
@@ -148,7 +156,9 @@ export class ToolEnv extends ToolEnvConnection {
   }) as schema<Config>
 
   constructor(ctx: Context, config: Config, registerCatalog = true) {
-    const identity = new ToolEnvIdentity(config.stateDir, config.alias)
+    const keyRoot = config.identityDirectory ?? (config.backend === 'byclaw-be' ? join(config.stateDir, 'identities', createHash('sha256').update(config.byclawBe.serviceKey).digest('hex')) : config.stateDir)
+    const connectionState = config.backend === 'byclaw-be' ? join(config.stateDir, 'connections', createHash('sha256').update(config.alias).digest('hex')) : config.stateDir
+    const identity = new ToolEnvIdentity(connectionState, config.alias, 'byclaw', keyRoot)
     const backend = backendFor(ctx, config, identity)
     const helper = realpathSync(fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-ssh/helper')))
     const bootstrapPath = join(dirname(realpathSync(fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-ptc-runtime-node')))), 'process.js')
@@ -176,31 +186,36 @@ export class ToolEnv extends ToolEnvConnection {
     this.beBackend = backend instanceof ByClawBeBackend ? backend : undefined
     this.catalogLaunchEnv = config.launchEnv
     this.catalogToken = config.byclawBe.token
+    if (registerCatalog && this.beBackend) registerSessionLifecycle(ctx, this)
     if (registerCatalog && (config.templates?.length || config.backend === 'byclaw-be')) this.installCatalog(ctx, config)
   }
 
   private installCatalog(ctx: Context, config: Config): void {
     if (config.backend !== 'byclaw-be') throw new Error('CATALOG_REQUIRES_BYCLAW_BACKEND')
-    const manager = new ToolSandboxManager(config.templates ?? [], async template => {
+    const manager = new ToolSandboxManager(config.templates ?? [], async (template, allocationSessionId) => {
       const started = Promise.withResolvers<{ ssh: ToolEnv; subprocess: SshSubprocessRuntime }>()
       const workspace = '/by' // Purpose images mount this user's authorized AgenticFS root here.
       const innerConfig: Config = { ...config, workspace, idleMs: 0, templates: [], launchEnv: { ...this.catalogLaunchEnv },
-        stateDir: join(config.stateDir, 'catalog', template.templateKey), alias: `${config.alias}-${template.templateKey}`,
-        byclawBe: { ...config.byclawBe, token: this.catalogToken, serviceKey: template.serviceKey, publishKeys: false, requestScopedKeys: true, privateOnly: true, hostTemplate: '' },
+        stateDir: join(config.stateDir, 'catalog', template.templateKey), identityDirectory: join(config.stateDir, 'identities', createHash('sha256').update(template.serviceKey).digest('hex')), alias: `${config.alias}-${template.templateKey}`,
+        byclawBe: { ...config.byclawBe, idleTimeoutSeconds: Math.ceil(config.idleMs / 1000) || config.byclawBe.idleTimeoutSeconds || 300, token: this.catalogToken, serviceKey: template.serviceKey, publishKeys: false, requestScopedKeys: true, privateOnly: true, hostTemplate: '' },
       }
       const fiber = ctx.isolate('ssh').isolate('subprocess').plugin({ name: `tool-catalog-${template.templateKey}`, apply: (inner: Context) => {
         try { started.resolve({ ssh: new ToolEnv(inner, innerConfig, false), subprocess: new SshSubprocessRuntime(inner) }) } catch (error) { started.reject(error) }
       } })
       const runtime = await started.promise.catch(error => { fiber.dispose(); throw error })
+      try { await runtime.ssh.acquireSession(allocationSessionId) }
+      catch (error) { await runtime.ssh.releaseOwned(false).catch(() => {}); await fiber.dispose(); throw error }
       this.catalogRuntimes.add(runtime.ssh)
-      const execute = async (argv: readonly string[], cwd = workspace, signal?: AbortSignal): Promise<SandboxResult> => {
+      const execute = async (argv: readonly string[], cwd = workspace, signal?: AbortSignal, sessionId = allocationSessionId): Promise<SandboxResult> => runtime.ssh.runInSession(sessionId, async () => {
         const root = posix.resolve(workspace), target = posix.resolve(cwd)
         if (target !== root && !target.startsWith(`${root}/`)) throw new Error('WORKSPACE_FORBIDDEN')
         const process = runtime.subprocess.spawn({ argv, cwd: target, stdio: { stdin: 'ignore', stdout: { maxBytes: 1024 * 1024 }, stderr: { maxBytes: 1024 * 1024 } }, graceMs: 5000, signal })
         return executeSandboxProcess(process, signal)
-      }
+      })
       return {
         identity: () => ({ ...(runtime.ssh.instanceContext === undefined ? {} : { instanceContext: runtime.ssh.instanceContext }), workspaceRoot: workspace, ...(runtime.ssh.sandboxId === undefined ? {} : { sandboxId: runtime.ssh.sandboxId }) }),
+        acquireLease: async sessionId => { await runtime.ssh.acquireSession(sessionId); await runtime.ssh.finishSession(allocationSessionId) },
+        releaseLease: (sessionId, destroy) => runtime.ssh.finishSession(sessionId, destroy),
         handshake: async () => { await runtime.ssh.ready; const result = await execute(['cat', '/etc/byclaw-tool-sandbox/capabilities.json']); if (result.exitCode !== 0) throw new Error('CAPABILITY_MANIFEST_UNAVAILABLE'); return JSON.parse(result.stdout) as unknown },
         execute,
         release: async (destroy = true) => { await runtime.ssh.releaseOwned(destroy); this.catalogRuntimes.delete(runtime.ssh); await fiber.dispose() },
@@ -238,6 +253,30 @@ export class ToolEnv extends ToolEnvConnection {
   }
 }
 
+/** Track real turns without allocating compute merely because a context/session exists. */
+export function registerSessionLifecycle(ctx: Context, environment: Pick<ToolEnvConnection, 'startSession' | 'finishSession' | 'runInSession'>): void {
+  const sessions = new Map<string, string>()
+  const finish = async (agentId: string): Promise<void> => {
+    const session = sessions.get(agentId)
+    sessions.delete(agentId)
+    if (session && [...sessions.values()].includes(session)) return
+    if (session) await environment.finishSession(session)
+  }
+  ctx.on('tools/execute', async (execution, next) => {
+    const session = execution.agent?.session?.id
+    return session ? environment.runInSession(session, next) : next()
+  }, { prepend: true })
+  ctx.on('agent/status', ({ agent, status }) => {
+    if (status === 'running') {
+      const session = agent.session?.id ?? String(agent.id)
+      sessions.set(String(agent.id), session)
+      environment.startSession(session)
+    } else if (status === 'idle') void finish(String(agent.id)).catch(() => {})
+  })
+  ctx.on('agent/turn-stopping', async ({ agent }) => { await finish(String(agent.id)) })
+  ctx.on('agent/disposed', ({ agent }) => { void finish(String(agent.id)).catch(() => {}) })
+}
+
 function backendFor(ctx: Context, config: Config, identity: ToolEnvIdentity): ToolEnvBackend {
   if (config.backend === 'static') {
     const endpoint = config.wsUrl === '' ? undefined : parseEndpoint(config.wsUrl, config.port)
@@ -253,7 +292,7 @@ function backendFor(ctx: Context, config: Config, identity: ToolEnvIdentity): To
     }
     // Resolved per call: the host provides the source before the plugins load, but a plain profile has none.
     const source: BeTokenSource = { current: async () => (ctx.get(BE_TOKEN_SOURCE) as BeTokenSource | undefined)?.current() }
-    return new ByClawBeBackend({ ...be, port: config.port }, identity, message => { logger.info(message) }, {}, source)
+    return new ByClawBeBackend({ ...be, idleTimeoutSeconds: Math.ceil(config.idleMs / 1000) || be.idleTimeoutSeconds || 300, port: config.port }, identity, message => { logger.info(message) }, {}, source)
   }
   const settings = config.openSandbox
   for (const key of ['baseUrl', 'apiKey', 'image'] as const) {

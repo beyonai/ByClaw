@@ -197,3 +197,29 @@ describe('tool sandbox catalog and independent leases', () => {
     expect(f.manager.catalog().find(t => t.templateKey === 'media')).toMatchObject({ available: true, verification: 'not-yet-verified' })
   })
 })
+
+
+describe('remote per-session lease coordination', () => {
+  it('returns each actor lease independently before dropping the shared local runtime', async () => {
+    const executed: string[] = []
+    const acquired: string[] = [], returned: Array<{ session: string; destroy: boolean }> = []
+    let detached = 0
+    const manager = new ToolSandboxManager([{ templateKey: 'tools', serviceKey: 'byclaw-dsh-tools', capabilities: [], enabled: true }], async () => ({
+      handshake: async () => ({ contract: 'byclaw.tool-sandbox/v1', purpose: 'tools', operations: { protocol: 'ssh', exposure: 'private' }, capabilities: [] }),
+      execute: async (_argv, _cwd, _signal, sessionId) => { executed.push(sessionId!); return { exitCode: 0, stdout: '', stderr: '' } },
+      acquireLease: async session => { acquired.push(session) },
+      releaseLease: async (session, destroy) => { returned.push({ session, destroy }) },
+      release: async () => { detached++ },
+    }))
+    const a = await manager.acquire('session-a', 'tools', 'task-a')
+    const b = await manager.acquire('session-b', 'tools', 'task-b')
+    expect(acquired).toEqual([`session-a:${a.leaseId}`, `session-b:${b.leaseId}`])
+    await manager.execute('session-b', b.leaseId, ['true'])
+    expect(executed).toEqual([`session-b:${b.leaseId}`])
+    await manager.releaseActor('session-a')
+    expect(returned).toEqual([{ session: `session-a:${a.leaseId}`, destroy: false }]); expect(detached).toBe(0)
+    await manager.release('session-b', b.leaseId)
+    expect(returned.at(-1)).toEqual({ session: `session-b:${b.leaseId}`, destroy: true }); expect(detached).toBe(1)
+    await manager.dispose()
+  })
+})
