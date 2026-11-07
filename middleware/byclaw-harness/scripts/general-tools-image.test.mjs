@@ -13,5 +13,7 @@ test('general tool image publishes the exact market handshake without claiming a
   assert.equal(manifest.display.available, true)
   const dockerfile = await read('../Dockerfile.tools')
   assert.match(dockerfile, /COPY middleware\/byclaw-harness\/tool-sandbox\/general\.capabilities\.json \/etc\/byclaw-tool-sandbox\/capabilities\.json/)
+  assert.match(dockerfile, /test -f \/opt\/byclaw\/bycli-extension\/manifest\.json/)
+  assert.ok(dockerfile.includes("grep -q '^BYCLAW_BROWSER_EXTENSIONS=/opt/byclaw/bycli-extension$'"))
   assert.match(await read('../Dockerfile.tools.dockerignore'), /!middleware\/byclaw-harness\/tool-sandbox\/general\.capabilities\.json/)
 })
