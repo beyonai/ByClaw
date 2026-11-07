@@ -54,7 +54,7 @@ export function registerCatalogTools(ctx: Context, manager: ToolSandboxManager):
 先按业务需要匹配模板能力，调用 sandbox_templates 查看配置，再用 sandbox_acquire 申请。available=true 表示可申请，不代表实例已启动；not-yet-verified 表示冷启动后需要握手验证，不能据此跳过申请或报告不可用。真实申请失败必须如实报告，不得用旧产物冒充成功。
 需要网页真实访问、正文采集、截图时，使用 browser.automation 对应模板；视频制作、FFmpeg 渲染使用 media.render 对应模板。跨能力任务必须分别申请对应模板的独立租约，再通过各自 sandbox_exec 协同执行；不要求用户指定工具名称、模板、命令或 request_id。所需的多个模板应在开始业务执行前申请，执行结果以真实退出码和产物校验为准。
 已配置匹配模板的业务执行，不得用普通 bash/browser/web_fetch 或通用环境替代专用模板。技能中的命令示例应转换为对应租约的 sandbox_exec argv；脚本创建和业务命令也在对应环境执行。各模板共享用户授权工作区，可直接交接产物，路径以租约的 workspaceRoot 为准。read_image/present 可用于检查和交付真实产物，不替代采集或渲染。
-超级助手保持调度角色：把上述按能力使用专用工具沙箱及验收要求传给授权执行员工，不自行绕过权限执行，也不能把派发成功当作完成。执行员工和子代理必须遵守同一协议；返回来源、产物及校验证据后才能汇总完成。任务结束自动归还执行租约；全部会话租约归还或过期后，按闲时超时回收物理沙箱（默认5分钟，可配置）。只有用户明确要求立即释放时调用 sandbox_release；其他会话仍持有租约时只归还本会话租约。`,
+超级助手保持调度角色：把上述按能力使用专用工具沙箱及验收要求传给授权执行员工，不自行绕过权限执行，也不能把派发成功当作完成。执行员工和子代理必须遵守同一协议；返回来源、产物及校验证据后才能汇总完成。任务结束自动归还执行租约；全部会话租约归还或过期后，按闲时超时回收物理沙箱（默认5分钟，可配置）。任务完成也可调用 sandbox_release 归还本会话租约，默认不立即销毁；仅用户明确要求立即销毁时传 destroy:true。其他会话仍持有租约时只归还本会话租约。`,
     }] }
   })
   ctx.tools.register(defineTool({
@@ -87,9 +87,9 @@ export function registerCatalogTools(ctx: Context, manager: ToolSandboxManager):
     },
   })))
   ctx.tools.register(defineTool({
-    name: 'sandbox_release', description: 'For user-requested destruction, return this task\'s lease; the last reference destroys compute. Other tasks retain their environments. Turn end returns leases without destruction. Failed destruction retains ownership for retry.',
-    parameters: { lease_id: { type: 'string', required: true } }, output,
-    execute: async (args, exec) => ({ json: JSON.stringify(await manager.release(String(exec.agent?.id ?? 'interactive'), args.lease_id)) }),
+    name: 'sandbox_release', description: 'Return this lease for idle reclamation (default 5 min). Set destroy=true only for explicit user-requested immediate destruction; other sessions remain protected. Failed returns retain ownership for retry.',
+    parameters: { lease_id: { type: 'string', required: true }, destroy: { type: 'boolean', default: false, description: 'Default false: return the lease for idle reclamation. True requests immediate removal only with explicit user intent and no other active leases.' } }, output,
+    execute: async (args, exec) => ({ json: JSON.stringify(await manager.release(String(exec.agent?.id ?? 'interactive'), args.lease_id, 'tool', args.destroy === true)) }),
   }))
 }
 
