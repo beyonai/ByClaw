@@ -4,13 +4,13 @@
 
 ## 行为准则
 
-请遵守 [行为准则](../CODE_OF_CONDUCT.md)，保持友善和尊重的交流环境。
+请遵守 [行为准则](../../CODE_OF_CONDUCT.md)，保持友善和尊重的交流环境。
 
 ## 如何贡献
 
 ### 报告 Bug
 
-如果您发现了 Bug，请通过 [GitHub Issues](https://github.com/beyondAI/byclaw/issues) 报告：
+如果您发现了 Bug，请通过 [GitHub Issues](https://github.com/beyonai/ByClaw/issues) 报告：
 
 1. 确认该 Bug 尚未被报告
 2. 创建新 Issue，使用 Bug 报告模板
@@ -45,8 +45,8 @@
 ### 克隆仓库
 
 ```bash
-git clone https://github.com/beyondAI/byclaw.git
-cd byclaw
+git clone https://github.com/beyonai/ByClaw.git
+cd ByClaw
 ```
 
 ### 启动开发环境
@@ -236,4 +236,4 @@ Fixes #(issue 编号)
 
 ## 许可证
 
-通过贡献代码，您同意将您的贡献在 [Apache License 2.0](../LICENSE) 下授权。
+通过贡献代码，您同意将您的贡献在 [Apache License 2.0](../../LICENSE) 下授权。
