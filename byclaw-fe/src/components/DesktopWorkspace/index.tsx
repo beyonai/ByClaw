@@ -32,7 +32,7 @@ export default function DesktopWorkspace({ owner }: { owner: string }) {
   const [rows, setRows] = useState<ISandboxesInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [access, setAccess] = useState<'auth' | 'timeout' | ''>('');
+  const [access, setAccess] = useState<'auth' | 'timeout' | 'unavailable' | ''>('');
   const [readyAccess, setReadyAccess] = useState<{ key: string; url: string }>();
   const [retry, setRetry] = useState(0);
   const [connection, setConnection] = useState<IframeConnectionSnapshot>({ state: 'connecting' });
@@ -63,30 +63,50 @@ export default function DesktopWorkspace({ owner }: { owner: string }) {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempts = 0;
+    let missingFromDirectory = false;
+    let receivedDirectory = false;
     const epoch = desktopAuthEpoch();
     const started = Date.now();
+    const remaining = () => 60000 - (Date.now() - started);
+    const finishWaiting = () => {
+      if (selected) setAccess(missingFromDirectory ? 'unavailable' : 'timeout');
+    };
     setRows([]);
     setAccess('');
     setReadyAccess(undefined);
     setConnection({ state: 'connecting' });
     const load = async () => {
       timer = undefined;
+      if (cancelled || epoch !== desktopAuthEpoch()) return;
+      if (remaining() <= 0) {
+        finishWaiting();
+        setLoading(false);
+        return;
+      }
       attempts += 1;
       setLoading(true);
       setFailed(false);
       try {
         const result = await withDesktopTimeout(
           useAppStore.getState().getSandboxesInfoUrl(),
-          Math.min(5000, Math.max(1, 60000 - (Date.now() - started)))
+          Math.min(5000, remaining())
         );
         if (cancelled || epoch !== desktopAuthEpoch()) return;
+        receivedDirectory = true;
         setRows(result);
         const current = getDesktopOwner(owner);
         const refs = current.refs.filter((ref) => !isExplicitNonDesktop(result, ref));
         if (refs.length !== current.refs.length) updateDesktopOwner(owner, { refs });
         const resolved = selected && resolveDesktop(result, selected);
+        missingFromDirectory = Boolean(
+          selected && !listDesktops(result).some((item) => desktopKey(item.ref) === desktopKey(selected))
+        );
         if (resolved) {
-          const result = await probeDesktop(resolved.url, Math.min(5000, Math.max(1, 60000 - (Date.now() - started))));
+          if (remaining() <= 0) {
+            finishWaiting();
+            return;
+          }
+          const result = await probeDesktop(resolved.url, Math.min(5000, remaining()));
           if (cancelled || epoch !== desktopAuthEpoch()) return;
           if (result === 'ready') {
             setReadyAccess({ key: requestKey, url: resolved.url });
@@ -97,10 +117,13 @@ export default function DesktopWorkspace({ owner }: { owner: string }) {
             return;
           }
         }
-        if (selected && attempts < 30 && Date.now() - started < 60000) timer = setTimeout(load, 2000);
-        else if (selected) setAccess('timeout');
-      } catch {
-        if (!cancelled) setFailed(true);
+        if (selected && attempts < 30 && remaining() > 0) timer = setTimeout(load, Math.min(2000, remaining()));
+        else finishWaiting();
+      } catch (error) {
+        if (cancelled || epoch !== desktopAuthEpoch()) return;
+        if (error instanceof Error && error.message === 'TIMEOUT' && remaining() <= 0 && receivedDirectory)
+          finishWaiting();
+        else setFailed(true);
       } finally {
         if (!cancelled && !timer) setLoading(false);
       }
@@ -131,15 +154,20 @@ export default function DesktopWorkspace({ owner }: { owner: string }) {
       title: option.label,
     })),
   }));
-  const status = {
+  const connectionLabel = {
     connecting: '连接中',
     connected: '已连接',
     disconnected: connection.clean === false ? '连接中断' : '已断开',
     unknown: '状态未上报',
   }[connection.state];
-  const connectionStatus = target && readyUrl && (
+  const status = access === 'unavailable' ? '实例不可用' : connectionLabel;
+  const connectionStatus = (access === 'unavailable' || (target && readyUrl)) && (
     <span className={styles.connectionStatus} role="status" title={status}>
-      <span className={styles.connectionDot} data-state={connection.state} aria-hidden="true" />
+      <span
+        className={styles.connectionDot}
+        data-state={access === 'unavailable' ? 'disconnected' : connection.state}
+        aria-hidden="true"
+      />
       <span className={styles.srOnly}>{status}</span>
     </span>
   );
@@ -254,9 +282,11 @@ export default function DesktopWorkspace({ owner }: { owner: string }) {
           className={styles.notice}
           type="warning"
           message={
-            access === 'auth'
-              ? '登录已失效或没有桌面访问权限，请重新登录或联系管理员'
-              : '暂时无法获取访问入口，请重新连接'
+            {
+              auth: '登录已失效或没有桌面访问权限，请重新登录或联系管理员',
+              unavailable: '该桌面实例当前不可用，可能已释放或不再授权；可从“全部桌面”选择其他实例',
+              timeout: '暂时无法获取访问入口，请重新连接',
+            }[access]
           }
         />
       )}

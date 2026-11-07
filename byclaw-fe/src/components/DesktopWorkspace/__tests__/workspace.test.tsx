@@ -147,3 +147,107 @@ it('never mounts old authorization while a new selected view or reconnect is unr
   expect(mockRenderedUrls).not.toEqual(expect.arrayContaining([expect.stringContaining('https://b/')]));
   expect(screen.queryByTitle('desktop')).not.toBeInTheDocument();
 });
+
+it('keeps a missing desktop unavailable at the deadline without misreporting successful directory requests', async () => {
+  jest.useFakeTimers();
+  try {
+    mockLookup.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve([rows[1]]), 100)));
+    registerDesktops('owner', [refs[0]]);
+    const view = render(<DesktopWorkspace owner="owner" />);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(62000);
+    });
+    expect(screen.queryByText('无法获取授权桌面清单，请重试')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('该桌面实例当前不可用，可能已释放或不再授权；可从“全部桌面”选择其他实例')
+    ).toBeInTheDocument();
+    expect(screen.getByText('实例不可用')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /vnc · a/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByTitle('desktop')).not.toBeInTheDocument();
+    const countAtDeadline = mockLookup.mock.calls.length;
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(10000);
+    });
+    expect(mockLookup).toHaveBeenCalledTimes(countAtDeadline);
+    fireEvent.click(screen.getByRole('button', { name: '全部桌面' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'vnc · b' }));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(200);
+    });
+    expect(screen.getByTitle('desktop')).toHaveAttribute('src', expect.stringContaining('https://b/'));
+    expect(screen.getByRole('tab', { name: /vnc · a/ })).toBeInTheDocument();
+    view.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+it('does not start another directory request after the preparation deadline', async () => {
+  jest.useFakeTimers();
+  try {
+    const started = Date.now();
+    const requestTimes: number[] = [];
+    mockLookup.mockImplementation(() => {
+      requestTimes.push(Date.now() - started);
+      return new Promise((resolve) => setTimeout(() => resolve([]), 100));
+    });
+    registerDesktops('owner', [refs[0]]);
+    const view = render(<DesktopWorkspace owner="owner" />);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(62000);
+    });
+    expect(requestTimes.every((time) => time < 60000)).toBe(true);
+    expect(screen.queryByText('无法获取授权桌面清单，请重试')).not.toBeInTheDocument();
+    view.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+it('still reports a real directory failure and allows manual retry to restore the same identity', async () => {
+  mockLookup.mockRejectedValueOnce(new Error('directory unavailable'));
+  registerDesktops('owner', [refs[0]]);
+  render(<DesktopWorkspace owner="owner" />);
+  expect(await screen.findByText('无法获取授权桌面清单，请重试')).toBeInTheDocument();
+  expect(screen.queryByText('实例不可用')).not.toBeInTheDocument();
+  mockLookup.mockResolvedValueOnce([rows[0]]);
+  fireEvent.click(screen.getByRole('button', { name: /重\s*试/ }));
+  expect(await screen.findByTitle('desktop')).toHaveAttribute('src', expect.stringContaining('https://a/'));
+});
+it('keeps waiting for a newly allocated desktop that appears before the deadline', async () => {
+  jest.useFakeTimers();
+  try {
+    mockLookup.mockResolvedValueOnce([]).mockResolvedValue(rows);
+    registerDesktops('owner', [refs[0]]);
+    const view = render(<DesktopWorkspace owner="owner" />);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(2200);
+    });
+    expect(screen.getByTitle('desktop')).toHaveAttribute('src', expect.stringContaining('https://a/'));
+    expect(screen.queryByText('实例不可用')).not.toBeInTheDocument();
+    view.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+it('reports entry timeout when a known desktop stays unready until the directory budget expires', async () => {
+  jest.useFakeTimers();
+  const originalFetch = global.fetch;
+  global.fetch = jest.fn().mockResolvedValue({ status: 503 });
+  try {
+    const directory = [{ ...rows[0], instanceEndpoints: { vnc: '/desktop/vnc.html' } }];
+    mockLookup.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(directory), 2500)));
+    registerDesktops('owner', [refs[0]]);
+    const view = render(<DesktopWorkspace owner="owner" />);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(62000);
+    });
+    expect(screen.queryByText('无法获取授权桌面清单，请重试')).not.toBeInTheDocument();
+    expect(screen.getByText('暂时无法获取访问入口，请重新连接')).toBeInTheDocument();
+    expect(screen.queryByText('实例不可用')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('desktop')).not.toBeInTheDocument();
+    view.unmount();
+  } finally {
+    global.fetch = originalFetch;
+    jest.useRealTimers();
+  }
+});
