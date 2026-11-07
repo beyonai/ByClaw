@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -77,6 +78,84 @@ class SandboxDesktopTrustedViewerTest {
         request.setContextPath("/api"); request.setScheme("http"); request.setServerName("portal.test"); request.setServerPort(18080);
         MockHttpSession session = new MockHttpSession(); session.setAttribute("USER_CODE", "alice"); session.setAttribute("enterpriseId", 10L);
         request.setSession(session); return request;
+    }
+
+    @ParameterizedTest
+    @CsvSource({"desktop.example.com, example.com", "vnc.example.com.cn, example.com.cn",
+        "vnc.example.co.uk, example.co.uk", "alice.github.io, alice.github.io"})
+    void viewerLimitsEmbeddingToItsRegistrableDomainAndSubdomains(String hostname, String domain) {
+        var request = request("index.html"); request.setServerName(hostname);
+        var response = new MockHttpServletResponse(); controller.proxy(request, response);
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(response.getHeader("Content-Security-Policy"))
+            .contains("frame-ancestors 'self' http://" + domain + ":* https://" + domain + ":*")
+            .contains("http://" + hostname + ":*", "https://" + hostname + ":*")
+            .doesNotContain("*.")
+            .contains("base-uri 'none'; object-src 'none'");
+        assertThat(response.getHeader("X-Frame-Options")).isEqualTo("SAMEORIGIN");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"127.0.0.1", "[::1]", "localhost", "co.uk", "github.io"})
+    void hostsWithoutRegistrableDomainsRetainSameOriginEmbedding(String hostname) {
+        var request = request("index.html"); request.setServerName(hostname);
+        var response = new MockHttpServletResponse(); controller.proxy(request, response);
+        assertThat(response.getHeader("Content-Security-Policy"))
+            .isEqualTo("frame-ancestors 'self'; base-uri 'none'; object-src 'none'");
+    }
+
+    @Test
+    void viewerDoesNotLearnFrameParentsFromOriginOrForwardedHeaders() {
+        var request = request("index.html"); request.setServerName("desktop.example.com");
+        request.addHeader("Origin", "https://attacker.invalid");
+        request.addHeader("Forwarded", "host=attacker.invalid");
+        request.addHeader("X-Forwarded-Host", "attacker.invalid");
+        request.addHeader("Referer", "https://attacker.invalid/parent");
+        var response = new MockHttpServletResponse(); controller.proxy(request, response);
+        assertThat(response.getHeader("Content-Security-Policy"))
+            .contains("http://example.com:*").doesNotContain("attacker.invalid");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"desktop.example.com, https://chat.example.com:8443/page, https://chat.example.com:8443",
+        "example.com, http://desktop.example.com:8080/page, http://desktop.example.com:8080",
+        "vnc.example.com.cn, https://chat.example.com.cn/page, https://chat.example.com.cn:443",
+        "vnc.alice.github.io, https://chat.alice.github.io/page, https://chat.alice.github.io:443"})
+    void viewerAllowsTheVerifiedParentOriginFromReferer(String hostname, String referer, String parent) {
+        var request = request("index.html"); request.setServerName(hostname); request.addHeader("Referer", referer);
+        var response = new MockHttpServletResponse(); controller.proxy(request, response);
+        assertThat(response.getHeader("Content-Security-Policy")).contains(parent).doesNotContain("*.");
+    }
+
+    @Test
+    void viewerDoesNotCrossDeeperPrivatePublicSuffixDelegations() {
+        var request = request("index.html"); request.setServerName("console.amazonaws.com");
+        request.addHeader("Referer", "https://bucket.s3.amazonaws.com/parent");
+        var response = new MockHttpServletResponse(); controller.proxy(request, response);
+        assertThat(response.getHeader("Content-Security-Policy"))
+            .contains("https://amazonaws.com:*").doesNotContain("bucket.s3.amazonaws.com", "*.amazonaws.com");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"not-a-url", "https://chat_name.example.com/page", "https://user@chat.example.com/page",
+        "https://chat.example.com:65536/page"})
+    void malformedRefererCannotFailViewerRenderingOrAddAFrameParent(String referer) {
+        var request = request("index.html"); request.setServerName("desktop.example.com"); request.addHeader("Referer", referer);
+        var response = new MockHttpServletResponse();
+        assertThatCode(() -> controller.proxy(request, response)).doesNotThrowAnyException();
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(response.getHeader("Content-Security-Policy"))
+            .doesNotContain("chat_name.example.com", "https://chat.example.com:443", "65536", "user@");
+    }
+
+    @Test
+    void sameDomainConfiguredOriginsSupportHiddenRefererWithoutAddingForeignDomains() {
+        var configured = new SandboxDesktopProxyController(new SandboxDesktopAccess(sandboxes, records,
+            "https://chat.example.com:8443,https://foreign.invalid"), new OpenClawUiHttpProxyService());
+        var request = request("index.html"); request.setServerName("desktop.example.com");
+        var response = new MockHttpServletResponse(); configured.proxy(request, response);
+        assertThat(response.getHeader("Content-Security-Policy"))
+            .contains("https://chat.example.com:8443").doesNotContain("foreign.invalid");
     }
 
     @Test

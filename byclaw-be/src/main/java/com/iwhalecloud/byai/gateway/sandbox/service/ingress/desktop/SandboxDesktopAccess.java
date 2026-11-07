@@ -13,6 +13,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -109,10 +110,10 @@ public class SandboxDesktopAccess {
         String suffix = path.substring(publicPrefix.length() - request.getContextPath().length());
         validateSuffix(suffix);
         if (websocket) {
-            if (!"GET".equals(request.getMethod()) || !"/websockify".equals(suffix) || !sameOrigin(request)) throw denied(HttpStatus.FORBIDDEN);
+            if (!"GET".equals(request.getMethod()) || !"/websockify".equals(suffix) || !allowedOrigin(request)) throw denied(HttpStatus.FORBIDDEN);
         } else if (!List.of("GET", "HEAD").contains(request.getMethod())) {
             if (!"POST".equals(request.getMethod()) || !"/goal".equals(suffix)
-                || !"1".equals(request.getHeader("x-browser-goal-control")) || !sameOrigin(request)) throw denied(HttpStatus.METHOD_NOT_ALLOWED);
+                || !"1".equals(request.getHeader("x-browser-goal-control")) || !allowedOrigin(request)) throw denied(HttpStatus.METHOD_NOT_ALLOWED);
         }
         List<SandboxInfo> directory = sandboxes.sandboxInfo(login.getUserCode(), sandboxId);
         SandboxInfo info = directory == null ? null : directory.stream().filter(row -> row != null
@@ -178,14 +179,45 @@ public class SandboxDesktopAccess {
         catch (IllegalArgumentException invalid) { throw denied(HttpStatus.BAD_REQUEST); }
     }
 
-    private boolean sameOrigin(HttpServletRequest request) {
+    private boolean allowedOrigin(HttpServletRequest request) {
         URI origin = parseOrigin(request.getHeader("Origin"));
         if (origin == null) return false;
-        String site = request.getHeader("Sec-Fetch-Site");
-        // This browser-forbidden header preserves the same-origin decision through a host-rewriting proxy.
-        if (site != null) return "same-origin".equals(site);
-        return (origin.getScheme().equalsIgnoreCase(request.getScheme()) && origin.getHost().equalsIgnoreCase(request.getServerName())
-            && originPort(origin) == request.getServerPort()) || allowedOrigins.contains(originKey(origin));
+        // TODO(security): Restore strict Origin isolation after this temporary shared-domain policy.
+        // Scheme, port and Sec-Fetch-Site deliberately do not isolate applications on the
+        // same registrable domain. All its subdomains are trusted: another application may
+        // reuse a signed-in browser's desktop access; Session cookies are not port-isolated.
+        if (origin.getHost().equalsIgnoreCase(request.getServerName()) || allowedOrigins.contains(originKey(origin))) return true;
+        String domain = registrableDomain(origin.getHost());
+        return domain != null && domain.equals(registrableDomain(request.getServerName()));
+    }
+
+    String frameAncestors(HttpServletRequest request) {
+        String domain = registrableDomain(request.getServerName());
+        if (domain == null) return "'self'";
+        Set<String> ancestors = new LinkedHashSet<>(); ancestors.add("'self'");
+        String hostname = new HttpUrl.Builder().scheme("http").host(request.getServerName()).build().host();
+        for (String host : List.of(domain, hostname)) {
+            ancestors.add("http://" + host + ":*"); ancestors.add("https://" + host + ":*");
+        }
+        // A wildcard could cross a deeper private PSL delegation (e.g. bucket.s3.amazonaws.com).
+        // Select only concrete parent origins whose registrable domain has been verified.
+        HttpUrl referer = HttpUrl.parse(Objects.toString(request.getHeader("Referer"), ""));
+        URI parent = referer == null ? null : referer.uri();
+        if (parent != null && parent.getHost() != null && referer.username().isEmpty() && referer.password().isEmpty()
+            && domain.equals(registrableDomain(parent.getHost()))) ancestors.add(originKey(parent));
+        for (String configured : allowedOrigins) {
+            if (domain.equals(registrableDomain(URI.create(configured).getHost()))) ancestors.add(configured);
+        }
+        return String.join(" ", ancestors);
+    }
+
+    private static String registrableDomain(String hostname) {
+        try {
+            // OkHttp's bundled public suffix list also preserves private hosting boundaries (e.g. github.io).
+            return new HttpUrl.Builder().scheme("http").host(hostname).build().topPrivateDomain();
+        } catch (IllegalArgumentException invalidHostname) {
+            return null;
+        }
     }
 
     private static Set<String> parseAllowedOrigins(String value) {

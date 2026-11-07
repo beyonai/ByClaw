@@ -35,6 +35,7 @@ public class SandboxDesktopProxyController {
         "/sandbox/desktop/shared/{mappingId}/{sandboxId}/{instance}", "/sandbox/desktop/shared/{mappingId}/{sandboxId}/{instance}/**"})
     public void proxy(HttpServletRequest request, HttpServletResponse response) {
         SandboxDesktopAccess.Target target = access.resolve(request, false);
+        // Modern browsers enforce the scoped frame-ancestors policy below; retain a same-origin legacy fallback.
         response.setHeader("X-Frame-Options", "SAMEORIGIN");
         response.setHeader("X-Content-Type-Options", "nosniff");
         response.setHeader("Cache-Control", "private, no-store");
@@ -60,7 +61,8 @@ public class SandboxDesktopProxyController {
         if (body == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         response.setContentType(entry ? "text/html;charset=UTF-8" : "text/javascript;charset=UTF-8");
         response.setHeader("Content-Disposition", "inline");
-        response.setHeader("Content-Security-Policy", "frame-ancestors 'self'; base-uri 'none'; object-src 'none'");
+        response.setHeader("Content-Security-Policy", "frame-ancestors " + access.frameAncestors(request)
+            + "; base-uri 'none'; object-src 'none'");
         response.setContentLength(body.length);
         if (!"HEAD".equals(request.getMethod())) {
             try { response.getOutputStream().write(body); }

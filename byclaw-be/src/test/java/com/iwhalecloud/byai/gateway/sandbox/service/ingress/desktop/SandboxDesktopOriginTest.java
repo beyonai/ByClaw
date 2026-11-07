@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.core.env.MapPropertySource;
@@ -111,18 +112,85 @@ class SandboxDesktopOriginTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"cross-site", "same-site", "none", "", "invalid"})
-    void configuredOriginNeverOverridesAnExplicitFetchMetadataDenial(String site) {
+    void configuredOriginRemainsAnExplicitFallbackRegardlessOfFetchMetadata(String site) {
         try (var context = context("http://public.test:18080")) {
             var access = context.getBean(SandboxDesktopAccess.class);
             for (boolean websocket : List.of(true, false)) {
                 var request = request(websocket, "http://public.test:18080"); request.addHeader("Sec-Fetch-Site", site);
+                assertThatCode(() -> access.resolve(request, websocket)).doesNotThrowAnyException();
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://internal-proxy.test:8080", "https://INTERNAL-PROXY.test", "https://internal-proxy.test:8443"})
+    void exactHostnameAuthorizesWebsocketAndGoalAcrossSchemesAndPorts(String origin) {
+        try (var context = context("")) {
+            var access = context.getBean(SandboxDesktopAccess.class);
+            for (boolean websocket : List.of(true, false)) {
+                assertThat(access.resolve(request(websocket, origin), websocket).url().encodedPath())
+                    .isEqualTo(websocket ? "/websockify" : "/goal");
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"same-origin", "same-site", "cross-site", "none", "", "invalid"})
+    void fetchMetadataCannotOverrideTheDomainDecision(String site) {
+        try (var context = context("")) {
+            var access = context.getBean(SandboxDesktopAccess.class);
+            for (boolean websocket : List.of(true, false)) {
+                var matching = request(websocket, "https://internal-proxy.test:8443");
+                matching.addHeader("Sec-Fetch-Site", site);
+                assertThatCode(() -> access.resolve(matching, websocket)).doesNotThrowAnyException();
+                var otherHost = request(websocket, "https://other.test:8443");
+                otherHost.addHeader("Sec-Fetch-Site", site);
+                assertThatThrownBy(() -> access.resolve(otherHost, websocket)).isInstanceOf(ResponseStatusException.class);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://portal.example.test.attacker.test", "https://evilportal.other.test"})
+    void suffixLookalikesCannotJoinTheRegistrableDomain(String origin) {
+        try (var context = context("")) {
+            var access = context.getBean(SandboxDesktopAccess.class);
+            for (boolean websocket : List.of(true, false)) {
+                var request = request(websocket, origin); request.setServerName("portal.example.test");
                 assertThatThrownBy(() -> access.resolve(request, websocket)).isInstanceOf(ResponseStatusException.class);
             }
         }
     }
 
+    @ParameterizedTest
+    @CsvSource({
+        "portal.example.com, https://example.com, true",
+        "example.com, https://desktop.example.com:8443, true",
+        "vnc.example.com, http://chat.example.com:8080, true",
+        "vnc.example.com.cn, http://chat.example.com.cn, true",
+        "a.example.co.uk, https://b.example.co.uk, true",
+        "a.example.com.cn, https://b.other.com.cn, false",
+        "a.example.co.uk, https://b.other.co.uk, false",
+        "a.github.io, https://b.github.io, false",
+        "console.amazonaws.com, https://bucket.s3.amazonaws.com, false",
+        "example.com, https://example.com.attacker.test, false",
+        "127.0.0.1, http://127.0.0.2, false",
+        "localhost, http://other.localhost, false",
+        "co.uk, https://example.co.uk, false"
+    })
+    void publicSuffixBoundariesControlParentChildAndSiblingAuthorization(String hostname, String origin, boolean allowed) {
+        try (var context = context("")) {
+            var access = context.getBean(SandboxDesktopAccess.class);
+            for (boolean websocket : List.of(true, false)) {
+                var request = request(websocket, origin); request.setServerName(hostname);
+                if (allowed) assertThatCode(() -> access.resolve(request, websocket)).doesNotThrowAnyException();
+                else assertThatThrownBy(() -> access.resolve(request, websocket)).isInstanceOf(ResponseStatusException.class);
+            }
+        }
+    }
+
     @Test
-    void wrongSchemeHostOrPortAndArbitraryForwardedHeadersDoNotGrantAccess() {
+    void configuredFallbackRequiresExactOriginAndNeverTrustsArbitraryForwardedHeaders() {
         try (var context = context("http://public.test:18080")) {
             var access = context.getBean(SandboxDesktopAccess.class);
             for (String origin : List.of("http://public.test:18081", "https://public.test:18080", "http://other.test:18080")) {
@@ -176,7 +244,7 @@ class SandboxDesktopOriginTest {
     }
 
     @Test
-    void emptyConfigurationPreservesStrictServletMatchingAndMissingOriginRejection() {
+    void emptyConfigurationRequiresMatchingHostnameAndStillRejectsMissingOrigin() {
         try (var context = context("  ")) {
             var access = context.getBean(SandboxDesktopAccess.class);
             var local = request(true, "http://internal-proxy.test");

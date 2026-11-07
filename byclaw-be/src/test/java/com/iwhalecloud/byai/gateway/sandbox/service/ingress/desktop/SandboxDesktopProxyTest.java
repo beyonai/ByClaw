@@ -132,22 +132,17 @@ class SandboxDesktopProxyTest {
     }
 
     @Test
-    void websocketRequiresOriginAndRejectsCrossSiteEvenWithMatchingOrigin() {
+    void websocketRequiresOriginAndAllowsMatchingHostnameAfterProxyPortRewriting() {
         MockHttpServletRequest request = request("websockify");
         assertThatThrownBy(() -> access.resolve(request, true)).isInstanceOf(ResponseStatusException.class);
         request.addHeader("Origin", "http://portal.test:18080");
         assertThat(access.resolve(request, true).url().toString()).contains("/websockify");
-        request.addHeader("Sec-Fetch-Site", "cross-site");
-        assertThatThrownBy(() -> access.resolve(request, true)).isInstanceOf(ResponseStatusException.class);
-        request.removeHeader("Sec-Fetch-Site"); request.addHeader("Sec-Fetch-Site", "same-origin");
         request.setServerPort(8080); // A trusted reverse proxy may have removed the public port.
         assertThat(access.resolve(request, true).url().host()).isEqualTo("cloud.test");
-        request.removeHeader("Sec-Fetch-Site");
-        assertThatThrownBy(() -> access.resolve(request, true)).isInstanceOf(ResponseStatusException.class);
     }
 
     @Test
-    void disallowsMutationsExceptSameOriginGoalControlAndRejectsTraversal() {
+    void disallowsMutationsExceptAuthorizedGoalControlAndRejectsTraversal() {
         MockHttpServletRequest request = request("core/rfb.js"); request.setMethod("POST");
         assertThatThrownBy(() -> access.resolve(request, false)).isInstanceOf(ResponseStatusException.class);
         MockHttpServletRequest goal = request("goal"); goal.setMethod("POST");
@@ -177,7 +172,7 @@ class SandboxDesktopProxyTest {
     }
 
     @Test
-    void plainHttpIpWithoutFetchMetadataRequiresOriginalHostPortForBothOriginChecks() throws Exception {
+    void plainHttpIpWithoutFetchMetadataAllowsMatchingHostnameDespiteProxyPortRewriting() throws Exception {
         org.apache.catalina.startup.Tomcat tomcat = new org.apache.catalina.startup.Tomcat();
         java.nio.file.Path base = java.nio.file.Files.createTempDirectory("desktop-origin-container-");
         tomcat.setBaseDir(base.toString()); tomcat.setPort(0); tomcat.getConnector();
@@ -222,8 +217,8 @@ class SandboxDesktopProxyTest {
                     assertThat(status).contains("200");
                     assertThat(body).contains("port=8080;spring=true;desktop=true;metadata=false");
                 } else {
-                    assertThat(status).contains("403");
-                    assertThat(body).contains("port=80;spring=false;desktop=false;metadata=false");
+                    assertThat(status).contains("200");
+                    assertThat(body).contains("port=80;spring=false;desktop=true;metadata=false");
                 }
             }
         } finally {
