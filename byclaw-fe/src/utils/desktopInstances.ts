@@ -99,6 +99,7 @@ export function resolveDesktop(rows: ISandboxesInfo[], ref: SandboxInstanceRef) 
     if (/\/proxy\/\d+$/.test(url.pathname)) url.pathname += '/';
     url.searchParams.set('autoconnect', 'true');
     url.searchParams.set('resize', 'scale');
+    url.searchParams.set('hideHeader', 'true');
     return { ...target, url: url.toString() };
   } catch {
     return undefined;

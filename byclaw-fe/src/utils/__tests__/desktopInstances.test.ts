@@ -19,6 +19,19 @@ it('resolves exact identity independent of order and preserves server routing', 
   expect(resolveDesktop(rows, a)?.url).toContain('https://a/vnc.html?sessionId=server');
   expect(resolveDesktop([...rows].reverse(), a)?.url).toBe(resolveDesktop(rows, a)?.url);
 });
+it.each(['', '&hideHeader=false'])(
+  'hides the embedded viewer header while preserving server parameters: %s',
+  (flag) => {
+    const resolved = resolveDesktop(
+      [{ ...rows[1], instanceEndpoints: { editor: `https://a/vnc.html?token=fixture&sessionId=server${flag}` } }],
+      a
+    );
+    const url = new URL(resolved!.url);
+    expect(url.searchParams.getAll('hideHeader')).toEqual(['true']);
+    expect(url.searchParams.get('token')).toBe('fixture');
+    expect(url.searchParams.get('sessionId')).toBe('server');
+  }
+);
 it('never guesses a shared mapping or header-only navigation', () => {
   const shared = [{ ...rows[1], isShared: true, mappingId: 'm' }];
   expect(resolveDesktop(shared, a)).toBeUndefined();
@@ -33,7 +46,7 @@ it('opens an exact same-origin authorized desktop route without exposing provide
     instanceEndpoints: { editor: endpoint },
     endpointHeaders: { 'e2b-traffic-access-token': 'fixture-private-traffic' },
   };
-  const expected = `${window.location.origin}${endpoint}&autoconnect=true&resize=scale`;
+  const expected = `${window.location.origin}${endpoint}&autoconnect=true&resize=scale&hideHeader=true`;
   expect(resolveDesktop([privateRow], a)?.url).toBe(expected);
   expect(
     resolveDesktop([{ ...privateRow, instanceEndpoints: { editor: `${window.location.origin}${endpoint}` } }], a)?.url
@@ -52,7 +65,7 @@ it('opens only the encoded shared mapping desktop route returned for the exact i
     endpointHeaders: { 'e2b-traffic-access-token': 'fixture-private-traffic' },
   };
   expect(resolveDesktop([sharedRow], ref)?.url).toBe(
-    `${window.location.origin}${endpoint}?autoconnect=true&resize=scale`
+    `${window.location.origin}${endpoint}?autoconnect=true&resize=scale&hideHeader=true`
   );
   expect(
     resolveDesktop(
@@ -84,7 +97,7 @@ it.each(['vnc.html', 'index.html', 'viewer.HTML'])(
       ],
       a
     );
-    expect(resolved?.url).toBe(`${window.location.origin}${endpoint}&autoconnect=true&resize=scale`);
+    expect(resolved?.url).toBe(`${window.location.origin}${endpoint}&autoconnect=true&resize=scale&hideHeader=true`);
   }
 );
 it('matches identifiers decoded from the server path-segment encoding', () => {
@@ -104,7 +117,7 @@ it('matches identifiers decoded from the server path-segment encoding', () => {
       ],
       ref
     )?.url
-  ).toBe(`${window.location.origin}${endpoint}?autoconnect=true&resize=scale`);
+  ).toBe(`${window.location.origin}${endpoint}?autoconnect=true&resize=scale&hideHeader=true`);
 });
 it.each(['sandbox/a', 'sandbox\\a', 'sandbox\u0001a', 'sandbox\u0085a', '.', '..'])(
   'rejects a protected navigation identity that the server cannot authorize: %s',

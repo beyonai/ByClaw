@@ -77,7 +77,7 @@ describe('chat VNC reopening', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Browser tool' })));
     expect(screen.getByTitle('remote desktop')).toHaveAttribute(
       'src',
-      `${window.location.origin}/v1/sandboxes/test/proxy/8081/?autoconnect=true&resize=scale`
+      `${window.location.origin}/v1/sandboxes/test/proxy/8081/?autoconnect=true&resize=scale&hideHeader=true`
     );
 
     view.rerender(<ChatDesktop latestMessage={nextAnswer} />);

@@ -108,7 +108,7 @@ it.each([false, true])(
 
     expect(await screen.findByTitle('remote desktop')).toHaveAttribute(
       'src',
-      'http://localhost/v1/sandboxes/sandbox-a/proxy/8081/?autoconnect=true&resize=scale'
+      'http://localhost/v1/sandboxes/sandbox-a/proxy/8081/?autoconnect=true&resize=scale&hideHeader=true'
     );
   }
 );
