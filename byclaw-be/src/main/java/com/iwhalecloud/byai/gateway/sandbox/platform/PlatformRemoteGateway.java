@@ -185,6 +185,24 @@ public class PlatformRemoteGateway {
         return call("sandbox", "business/" + operation, params);
     }
 
+    /** Tool conversation identity must not be replaced by the browser login session. */
+    public Object toolLease(String operation, Map<String, Object> request) {
+        Map<String, Object> params = new LinkedHashMap<>(request);
+        Object conversation = params.remove("sessionId");
+        if (!params.containsKey("toolSessionId") && conversation != null) params.put("toolSessionId", conversation);
+        params.put("operatorUserCode", CurrentUserHolder.getCurrentUserCode());
+        if (CurrentUserHolder.getLoginInfo() != null) {
+            params.put("userInfo", json.convertValue(CurrentUserHolder.getLoginInfo(), Map.class));
+            params.put("loginSessionId", CurrentUserHolder.getLoginInfo().getSessionId());
+            params.put("enterpriseId", CurrentUserHolder.getLoginInfo().getEnterpriseId());
+        }
+        if (businessEndpoint != null) {
+            try { params.put("businessBaseUrl", businessEndpoint.getBaseUrl()); }
+            catch (IllegalStateException unavailable) { /* Reuse needs no business endpoint. */ }
+        }
+        return call("sandbox", "tool-leases/" + operation, params);
+    }
+
     public Map<String, Object> params(Object... pairs) {
         Map<String, Object> result = new LinkedHashMap<>();
         for (int i = 0; i < pairs.length; i += 2) result.put((String) pairs[i], pairs[i + 1]);
