@@ -174,7 +174,22 @@ DSH 启动器读取启动工作目录下的 `.env`；已导出的进程变量优
 | `BYCLAW_BROWSER_STARTUP` | 可选；Docker Browser Use | 镜像默认 `on-demand`，首次调用再启动浏览器与 byCLI；`eager` 恢复启动前等待 |
 | `BYCLAW_DSH_CLI_ENTRY` | 可选；容器入口 | 默认 `apps/cli/lib/bin.js`，直接运行构建产物；源码回归可设 `apps/cli/src/bin.ts` |
 | `BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX` | Redis 动态模型模式必需 | 解密 ByClaw 模型鉴权；只保存在进程环境中 |
+| `BYCLAW_TOOL_ENV_IDLE_MS` | 可选；ByClaw 托管工具沙箱 | 最后一个会话租约归还或过期后的闲时回收等待时间，单位毫秒；默认 `300000`（5 分钟） |
 | `BYCLAW_LLM_IDLE_TIME` | 可选 | 动态模型连接空闲超时秒数，默认 `600` |
+
+## 工具沙箱租约与闲时回收
+
+`dsh-tool-env` 通过 Platform 支持跨会话、跨 Harness 进程的租约协调。同一用户、同一服务复用工具沙箱，各会话分别持有并归还自己的租约；其他会话仍有活跃租约时，实例继续可用。
+
+最后一个租约归还或过期后，默认闲置 **5 分钟**回收工具沙箱。可通过 Harness 环境变量配置等待时间，单位为毫秒：
+
+```sh
+BYCLAW_TOOL_ENV_IDLE_MS=300000
+```
+
+`sandbox_release` 默认只归还本会话租约，没有剩余租约时开始闲时倒计时。只有显式传入 `destroy:true` 才请求立即销毁，且仍受其他活跃租约保护。实际删除由 Platform 维护扫描和云端响应完成，可能略晚于超时时间。
+
+租约协调和生命周期细节见[工具环境插件 README](./plugins/dsh-tool-env/README.md)。
 
 ## Profile 配置
 

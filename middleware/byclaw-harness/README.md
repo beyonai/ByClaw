@@ -172,7 +172,22 @@ The DSH launcher reads `.env` from its launch working directory. An already expo
 | `BYCLAW_BROWSER_STARTUP` | Optional; Docker Browser Use | Images default to `on-demand`; first use starts Chromium and byCLI. `eager` restores startup gating |
 | `BYCLAW_DSH_CLI_ENTRY` | Optional; container entrypoint | Defaults to compiled `apps/cli/lib/bin.js`; `apps/cli/src/bin.ts` is available for source-path regression comparisons |
 | `BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX` | Required for Redis dynamic-model mode | Decrypts ByClaw model authorization and remains process-only |
+| `BYCLAW_TOOL_ENV_IDLE_MS` | Optional; ByClaw-managed tool sandbox | Idle reclamation delay after the last session lease is returned or expires, in milliseconds; defaults to `300000` (5 minutes) |
 | `BYCLAW_LLM_IDLE_TIME` | Optional | Dynamic-model idle timeout in seconds; defaults to `600` |
+
+## Tool sandbox leases and idle reclamation
+
+`dsh-tool-env` uses Platform to coordinate leases across sessions and Harness processes. Sessions for the same user and service share a tool sandbox, while each session holds and returns its own lease. Other sessions with active leases keep the instance available.
+
+After the last lease is returned or expires, the sandbox is reclaimed after **5 minutes** of idle time by default. Configure the delay in milliseconds through the Harness environment:
+
+```sh
+BYCLAW_TOOL_ENV_IDLE_MS=300000
+```
+
+`sandbox_release` returns the caller's lease by default and starts the idle countdown when no leases remain. Only an explicit `destroy:true` requests immediate destruction, still subject to other active leases. Actual deletion follows Platform's maintenance scan and provider response, so it may complete shortly after the timeout.
+
+See the [tool environment plugin README](./plugins/dsh-tool-env/README.md) for coordination and lifecycle details.
 
 ## Profile configuration
 
