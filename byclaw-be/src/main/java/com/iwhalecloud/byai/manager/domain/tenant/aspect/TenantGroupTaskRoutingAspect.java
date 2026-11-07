@@ -7,6 +7,8 @@ import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskDeliveryService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskDeliveryResponse;
+import java.util.Map;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -87,9 +89,12 @@ public class TenantGroupTaskRoutingAspect {
             case "pending" -> ResponseUtil.successResponse(node.request(context, "GET",
                 path + "/pending-publication", null, new TypeReference<Object>() { }));
             case "deliveryStatus" -> {
-                // deliveryStatus 先让 Node 校验群成员和任务发起人，再读取本地投递状态。
-                node.request(context, "GET", path, null, new TypeReference<Object>() { });
-                yield ResponseUtil.successResponse(delivery.currentAuthorized(taskId));
+                // deliveryStatus 先让 Node 校验群成员和任务发起人，再按任务状态决定是否读取投递状态。
+                Map<String, Object> task = node.request(context, "GET", path, null,
+                    new TypeReference<Map<String, Object>>() { });
+                yield ResponseUtil.successResponse("ACTIVE".equals(task.get("status"))
+                    ? delivery.currentAuthorized(taskId)
+                    : new GroupChatTaskDeliveryResponse(taskId.toString(), false));
             }
             default -> throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "i18n.status.tenant.group.task.operation.is.not.ready");
