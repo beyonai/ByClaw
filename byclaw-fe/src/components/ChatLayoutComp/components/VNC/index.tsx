@@ -5,6 +5,7 @@ import useVncOpener from '@/hooks/useVncOpener';
 import { registerDesktops, useDesktopWorkspace } from '@/utils/desktopWorkspace';
 import type { IMessage } from '@/typescript/message';
 import { normalizeSessionId, type SessionIdInput } from '@/utils/sessionId';
+import styles from './index.module.less';
 
 interface VNCProps {
   sessionId?: SessionIdInput;
@@ -31,9 +32,19 @@ export default function VNC({ sessionId, latestDigitalEmployeeMessage, ownerType
       (ref) => !entry.hidden.includes(JSON.stringify([ref.sandboxId, ref.mappingId ?? null, ref.instance]))
     ).length || 0;
   return (
-    <Button type="text" onClick={() => openVnc()} title="远程桌面">
+    <Button
+      type="text"
+      onClick={() => openVnc()}
+      title="远程桌面"
+      aria-label={`远程桌面${count ? ` ${count}` : ''}${preparing ? ' · 正在准备' : ''}`}
+    >
       <DesktopOutlined />
-      远程桌面{count ? ` ${count}` : ''}
+      <span>远程桌面</span>
+      {count > 0 && (
+        <span className={styles.count} aria-hidden="true">
+          {count > 99 ? '99+' : count}
+        </span>
+      )}
       {preparing ? ' · 正在准备' : ''}
     </Button>
   );

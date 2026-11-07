@@ -31,6 +31,8 @@ sessionStorage。URL、token、headers、channelId 和实时连接状态不进�
 
 授权桌面菜单的分组标题使用与沙箱状态菜单相同的名称字段：独占沙箱显示 `sandboxType`，共享沙箱优先显示 `serviceKey`；名称缺失时回退到完整 `sandboxId`。悬停分组名称可查看完整 ID；同名沙箱仍按 `sandboxId` 和 `mappingId` 分组，选择时保持精确实例身份。
 
+聊天标题的远程桌面入口使用独立的数量徽标，只统计未隐藏实例；零实例隐藏徽标，超过 99 显示 `99+`，按钮的无障碍名称保留实际数量与准备状态。
+
 工作区保持只挂载当前选中的一个 iframe。切换页签和重新连接时重新获取授权入口，不复用旧桌面的授权地址。`UMI_APP_MULTI_DESKTOP_ENABLED=false` 时隐藏页签，保留当前桌面名称及同一行内的桌面选择、重连与全屏操作。
 
 验证：`pnpm test -- --runInBand src/components/DesktopWorkspace/__tests__/workspace.test.tsx`。真实沙箱连接、鉴权及全屏行为需要浏览器联调验证。
