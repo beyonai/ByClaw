@@ -34,6 +34,7 @@ COPY middleware/byclaw-harness/scripts/docker-workspace-prepare.mjs /workspace/s
 COPY middleware/byclaw-harness/scripts/prepare-dsh-model-routing-runtime.mjs /workspace/scripts/prepare-dsh-model-routing-runtime.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-startup-021.mjs /workspace/scripts/prepare-dsh-startup-021.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-skill-names-021.mjs /workspace/scripts/prepare-dsh-skill-names-021.mjs
+COPY middleware/byclaw-harness/scripts/prepare-dsh-ripgrep-path-021.mjs /workspace/scripts/prepare-dsh-ripgrep-path-021.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-lazy-021.mjs /workspace/scripts/prepare-dsh-lazy-021.mjs
 COPY middleware/byclaw-harness/scripts/bundle-dsh-startup-deps.mjs /workspace/scripts/bundle-dsh-startup-deps.mjs
 COPY middleware/byclaw-harness/scripts/verify-startup-bundles.mjs /workspace/scripts/verify-startup-bundles.mjs
@@ -60,6 +61,13 @@ RUN node scripts/prepare-dsh-skill-names-021.mjs /workspace \
     && pnpm exec tsc -b packages/skill/skill/tsconfig.json packages/skill/tool-skill/tsconfig.json \
     && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/skill/skill --filter packages/skill/tool-skill \
     && node --input-type=module -e "const {isSkillName}=await import('./packages/skill/skill/lib/index.js');if(!isSkillName('report_企业')||isSkillName('../report_企业'))throw new Error('DSH Skill name compatibility build is missing')"
+
+# glob/grep find ripgrep where they run: a host's tool environment, or PATH when the packaged binary is unreachable.
+RUN node scripts/prepare-dsh-ripgrep-path-021.mjs /workspace \
+    && pnpm exec tsc -b packages/fs/tool-fs-search/tsconfig.json \
+    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/fs/tool-fs-search \
+    && grep -q byclaw-ripgrep-path-v1 packages/fs/tool-fs-search/src/search-core.ts \
+    && grep -q BYCLAW_RIPGREP_PATH packages/fs/tool-fs-search/lib/index.js
 
 # Apply pinned startup and model-routing changes only in the build workspace.
 # Rebuild affected core packages before consumers; ship source and compiled output together.
@@ -239,10 +247,12 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/skill
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/skill/lib/ /workspace/packages/skill/skill/lib/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/tool-skill/src/ /workspace/packages/skill/tool-skill/src/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/tool-skill/lib/ /workspace/packages/skill/tool-skill/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/fs/tool-fs-search/src/ /workspace/packages/fs/tool-fs-search/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/fs/tool-fs-search/lib/ /workspace/packages/fs/tool-fs-search/lib/
 COPY middleware/byclaw-harness/scripts/verify-by-framework-runtime.mjs /usr/local/lib/byclaw/verify-by-framework-runtime.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/prune-dsh-profile.mjs /tmp/prune-dsh-profile.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/link-dsh-installation-peers.mjs /tmp/link-dsh-installation-peers.mjs
-COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/byclaw-multi-host.mjs middleware/byclaw-harness/scripts/byclaw-managed-host.mjs middleware/byclaw-harness/scripts/verify-shared-runtime.mjs /workspace/scripts/
+COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/byclaw-multi-host.mjs middleware/byclaw-harness/scripts/byclaw-managed-host.mjs middleware/byclaw-harness/scripts/host-durable-files.mjs middleware/byclaw-harness/scripts/verify-shared-runtime.mjs /workspace/scripts/
 # The build decisions the plugin-builder folded together. This stage starts from
 # the pristine base again, whose own workspace never saw the plugins, and the
 # packed plugins carry no pnpm-workspace.yaml of their own — so the merged file
@@ -319,6 +329,14 @@ COPY --chown=byclaw:byclaw middleware/builtin/skills/ /opt/byclaw/dsh-managed/sk
 COPY --chown=byclaw:byclaw --chmod=0755 middleware/byclaw-harness/docker-entrypoint.sh /usr/local/bin/byclaw-dsh-entrypoint
 COPY --chmod=0755 middleware/byclaw-harness/scripts/dsh-loopback-forward.mjs /usr/local/lib/byclaw/dsh-loopback-forward.mjs
 COPY middleware/byclaw-harness/scripts/startup-module-resolver.cjs /usr/local/lib/byclaw/startup-module-resolver.cjs
+COPY middleware/byclaw-harness/scripts/verify-read-image-runtime.mjs /usr/local/lib/byclaw/verify-read-image-runtime.mjs
+# Build-only, offline materialization (as in Dockerfile.slim): the shared host's
+# profile resolver keeps logical package paths, so Sharp's pnpm-adjacent native
+# dependencies must sit beside attachment-local or read_image fails at first use.
+COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/materialize-image-runtime.mjs /tmp/materialize-image-runtime.mjs
+RUN node /tmp/materialize-image-runtime.mjs /workspace \
+    && rm /tmp/materialize-image-runtime.mjs \
+    && node /usr/local/lib/byclaw/verify-read-image-runtime.mjs /workspace /opt/byclaw/dsh-managed/profiles/web
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-bycli-managed.py /usr/local/bin/byclaw-bycli-managed
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
 COPY --chmod=0755 middleware/byclaw-harness/scripts/browser-supervisor-verify.py /tmp/browser-supervisor-verify.py

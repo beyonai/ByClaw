@@ -39,6 +39,8 @@ RUN set -eux; \
     cmp "${profile_ssh}/lib/helper.js" /workspace/packages/ssh/ssh/lib/helper.js; \
     rm -rf "${profile_ssh}"; \
     ln -s /workspace/packages/ssh/ssh "${profile_ssh}"; \
+    # A's glob/grep run here as `rg` from PATH (BYCLAW_RIPGREP_PATH on the shared host).
+    rg --version; \
     # Everything the helper imports must still resolve, from both paths, as the login user.
     cd /workspace/packages/ssh/ssh; \
     TRACE_OUT=/tmp/tool-env-resolved.txt TRACE_HOOK=/tmp/tool-env-docker/trace-hook.mjs node /tmp/tool-env-docker/trace-main.mjs; \
@@ -56,7 +58,8 @@ RUN set -eux; \
     test -f /opt/byclaw/novnc/core/rfb.js; \
     bycli --version; \
     test -f /opt/nvm/current/lib/node_modules/@sovovs/bycli/extension/manifest.json; \
-    grep -q '^BYCLAW_BROWSER_EXTENSIONS=/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension$' /etc/byclaw-tool-env.session-env; \
+    grep -q '^BYCLAW_BROWSER_EXTENSIONS=/opt/byclaw/bycli-extension$' /etc/byclaw-tool-env.session-env; \
+    test -f /opt/byclaw/bycli-extension/manifest.json; \
     grep -q '^BYCLAW_BROWSER_VIEWER=shared-novnc$' /etc/byclaw-tool-env.session-env; \
     browser_lib=/opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-browser-use/lib; \
     test -f "${browser_lib}/browserd.js"; \

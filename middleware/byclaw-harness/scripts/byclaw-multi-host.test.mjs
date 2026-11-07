@@ -1024,3 +1024,102 @@ test('purpose marketplace templates come from the trusted user launch environmen
   assert.deepEqual(row.config.templates, templates)
   assert.throws(() => composeUserOverlays(entries, 'u1', '/r/u1', { ...configured, env: { ...configured.env, BYCLAW_TOOL_ENV_CATALOG: JSON.stringify([templates[0], { ...templates[1], serviceKey: templates[0].serviceKey }]) } }), /CATALOG/)
 })
+
+test('listed users store sessions in the database, everyone else keeps files', () => {
+  const entries = [
+    { id: 'session-persistence-jsonl', name: 'jsonl', config: { root: '/x' } },
+    { id: 'session-persistence-db', name: 'db', disabled: true },
+  ]
+  const config = host.readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_SESSION_DB_URL: 'postgres://db', BYCLAW_SESSION_DB_USERS: 'u1, u2' })
+  const rows = user => composeUserOverlays(entries, user, `/home/${user}`, { sessionDb: host.sessionDbFor(config, user) })
+    .filter(row => row.id.startsWith('session-persistence'))
+  assert.deepEqual(rows('u1'), [
+    { id: 'session-persistence-jsonl', config: { root: join('/home/u1', 'sessions') } },
+    { id: 'session-persistence-jsonl', disabled: true },
+    { id: 'session-persistence-db', disabled: false, config: { connectionString: 'postgres://db', userCode: 'u1' } },
+  ])
+  assert.deepEqual(rows('u3'), [{ id: 'session-persistence-jsonl', config: { root: join('/home/u3', 'sessions') } }])
+  assert.equal(host.sessionDbFor({ sessionDbUrl: undefined, sessionDbUsers: ['*'] }, 'u1'), undefined)
+  assert.deepEqual(host.sessionDbFor({ sessionDbUrl: 'postgres://db', sessionDbUsers: ['*'] }, 'u9'), { url: 'postgres://db' })
+})
+
+test('listed users keep storage units in the database too; spills go to the tool environment', () => {
+  const entries = [
+    { id: 'storage-json', name: 'json', config: { root: '/x' } },
+    { id: 'storage-domain', name: 'domain', config: { backend: 'json', routes: { keep: 'json' } } },
+    { id: 'storage-db', name: 'db', disabled: true },
+    { id: 'spill-local', name: 'spill-local' },
+    { id: 'spill-tool-env', name: 'spill-tool-env', disabled: true },
+  ]
+  const config = host.readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_SESSION_DB_URL: 'postgres://db', BYCLAW_SESSION_DB_USERS: 'u1' })
+  const rows = (user, spec = {}) => composeUserOverlays(entries, user, `/home/${user}`, { sessionDb: host.sessionDbFor(config, user), ...spec })
+    .filter(row => /^(storage-(db|domain)|spill-)/.test(row.id))
+  const spills = [{ id: 'spill-local', disabled: true }, { id: 'spill-tool-env', disabled: false }]
+  assert.deepEqual(rows('u1'), [
+    { id: 'storage-db', disabled: false, config: { connectionString: 'postgres://db', userCode: 'u1' } },
+    { id: 'storage-domain', config: { backend: 'db', routes: { keep: 'json' } } },
+    ...spills,
+  ])
+  assert.deepEqual(rows('u2'), spills)
+  // Without a tool environment read/grep run on this host, so the local spill store stays.
+  assert.deepEqual(rows('u2', { toolEnvBackend: 'none' }), [])
+})
+
+test('listed users on a byclaw-be tool sandbox keep image attachments in their space; renewed tokens reach the store', () => {
+  const entries = [
+    { id: 'attachment-local', name: 'local', config: { maxImageBytes: 9 } },
+    { id: 'attachment-be', name: 'be', disabled: true },
+  ]
+  const config = host.readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_SESSION_DB_URL: 'postgres://db', BYCLAW_SESSION_DB_USERS: 'u1' })
+  const toolEnvBe = { baseUrl: 'http://be/byaiService', systemCode: 'sys' }
+  const rows = (user, spec) => composeUserOverlays(entries, user, `/home/${user}`, { sessionDb: host.sessionDbFor(config, user), env: { BEYOND_TOKEN: 'tok' }, ...spec })
+    .filter(row => row.id.startsWith('attachment-'))
+  assert.deepEqual(rows('u1', { toolEnvBe }), [
+    { id: 'attachment-local', config: { maxImageBytes: 9, dshHome: '/home/u1' } },
+    { id: 'attachment-local', disabled: true },
+    { id: 'attachment-be', disabled: false, config: { maxImageBytes: 9, dshHome: '/home/u1', be: { baseUrl: 'http://be/byaiService', systemCode: 'sys', token: 'tok' } } },
+  ])
+  const localOnly = [{ id: 'attachment-local', config: { maxImageBytes: 9, dshHome: '/home/u2' } }]
+  assert.deepEqual(rows('u2', { toolEnvBe }), localOnly)
+  assert.deepEqual(rows('u1', {}).length, 1)
+
+  const renewed = []
+  const ctx = { get: name => ({ attachments: { renewBeToken: token => renewed.push(['attachments', token]) }, ssh: { renewBeToken: token => renewed.push(['ssh', token]) } })[name] }
+  assert.equal(host.renewUserToken(ctx, { toolEnvBackend: 'byclaw-be' }, { BEYOND_TOKEN: ' new ' }), true)
+  assert.deepEqual(renewed, [['attachments', 'new'], ['ssh', 'new']])
+})
+
+test('glob/grep run rg from PATH in the tool environment, and the packaged one without it', () => {
+  const env = {}
+  host.applyHostProcessDefaults({ toolEnvBackend: 'byclaw-be' }, env)
+  assert.deepEqual(env, { BYCLAW_DSH_TOOL_ENV: 'opensandbox', BYCLAW_RIPGREP_PATH: 'rg' })
+  const chatOnly = { BYCLAW_DSH_TOOL_ENV: 'none' }
+  host.applyHostProcessDefaults({ toolEnvBackend: 'none' }, chatOnly)
+  assert.equal(chatOnly.BYCLAW_RIPGREP_PATH, undefined)
+  const explicit = { BYCLAW_RIPGREP_PATH: '/opt/rg/bin/rg' }
+  host.applyHostProcessDefaults({ toolEnvBackend: 'opensandbox' }, explicit)
+  assert.equal(explicit.BYCLAW_RIPGREP_PATH, '/opt/rg/bin/rg')
+})
+
+test('credential files are stored in the database only with both the secret file and the database', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'host-file-store-'))
+  try {
+    const secretFile = join(dir, 'service-secret')
+    await writeFile(secretFile, 'a-service-secret-of-enough-length\n')
+    const queries = []
+    const pg = { Pool: class { constructor(options) { this.options = options } on() {} async query(text, values) { queries.push([text, values]); return { rows: [], rowCount: 0 } } async end() {} } }
+    assert.equal(await host.openHostFileStore({ sessionDbUrl: undefined }, { BYCLAW_CREDENTIAL_SECRET_FILE: secretFile }, () => pg), undefined)
+    assert.equal(await host.openHostFileStore({ sessionDbUrl: 'postgres://db' }, {}, () => pg), undefined)
+    const opened = await host.openHostFileStore({ sessionDbUrl: 'postgres://db' }, { BYCLAW_CREDENTIAL_SECRET_FILE: secretFile }, () => pg)
+    assert.equal(opened.key.length, 32)
+    assert.deepEqual(await opened.store.list('u1'), [])
+    assert.match(queries.at(-1)[0], /SELECT name, value FROM byai\.dsh_host_file WHERE user_code = \$1/)
+    assert.deepEqual(queries.at(-1)[1], ['u1'])
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('the session database password never reaches a launch environment', () => {
+  const values = launchEnvironmentValues({ KEEP: '1', BYCLAW_SESSION_DB_URL: 'postgres://u:secret@db' }, {}, 'u1')
+  assert.equal(values.KEEP, '1')
+  assert.equal(values.BYCLAW_SESSION_DB_URL, undefined)
+})

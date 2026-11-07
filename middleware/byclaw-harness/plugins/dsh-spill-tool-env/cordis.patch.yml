@@ -1,0 +1,6 @@
+# Off by default: the shared DSH host enables this row, and disables spill-local,
+# for users whose tools run in a tool environment. Only one spill store may load.
+- insert:
+    - id: spill-tool-env
+      name: '@byclaw/dsh-spill-tool-env'
+      disabled: true
