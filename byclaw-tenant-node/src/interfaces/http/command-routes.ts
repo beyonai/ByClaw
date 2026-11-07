@@ -33,6 +33,7 @@ export function commandRoutes(
     ["POST", "/group-chats/:id/welcome", "CLAIM_WELCOME"],
     ["PATCH", "/group-chats/:id/members/me/nickname", "SET_NICKNAME"],
     ["POST", "/group-chats/:id/direct-sessions", "CREATE_DIRECT_SESSION"],
+    ["POST", "/group-chats/:id/direct-tasks", "CREATE_DIRECT_TASK"],
     ["POST", "/group-chats/:id/invitations", "CREATE_INVITATION"],
     ["POST", "/group-chats/:id/tasks/:taskId/cancel", "CANCEL_TASK"],
     ["PATCH", "/group-chats/:id/tasks/:taskId/pending-publication", "CHECKPOINT_PUBLICATION"],

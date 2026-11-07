@@ -302,4 +302,11 @@ public class GroupChatController {
         @Valid @RequestBody DirectSessionCreateRequest request) {
         return ResponseUtil.successResponse(applicationService.createDirectSession(sessionId, request.getAgentId()));
     }
+
+    /** 从群创建私聊任务：与普通单聊会话同源，但以 PRIVATE 状态进入任务列表。 */
+    @PostMapping("/{sessionId}/direct-tasks")
+    public ResponseUtil<ByaiGroupChatTask> directTask(@PathVariable Long sessionId,
+        @Valid @RequestBody DirectSessionCreateRequest request) {
+        return ResponseUtil.successResponse(applicationService.createDirectTask(sessionId, request.getAgentId()));
+    }
 }

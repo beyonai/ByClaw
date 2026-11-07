@@ -298,6 +298,7 @@ BE 公共路径保持不变。带租户上下文的群消息、群管理与任�
 | ------------------ | --------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | 修改群昵称         | `PATCH /group-chats/:id/members/me/nickname`              | `SET_NICKNAME`，`nickname`                                                                   |
 | 从群创建私聊       | `POST /group-chats/:id/direct-sessions`                   | `CREATE_DIRECT_SESSION`，`agentId`；返回 `data` 会话                                         |
+| 从群创建私聊任务   | `POST /group-chats/:id/direct-tasks`                      | `CREATE_DIRECT_TASK`，`agentId`；返回 `data` `status=PRIVATE` 的群任务                       |
 | 创建/续期邀请      | `POST /group-chats/:id/invitations`                       | `CREATE_INVITATION`，BE 生成 8 位 `token`；返回 `data.token/expiresAt`                       |
 | 预览邀请码         | `POST /group-chats/invitations/validate`                  | body `{token}`；仅当前租户成员可访问                                                         |
 | 凭邀请码入群       | `POST /group-chats/:id/join`                              | `JOIN_GROUP`，`token/joinLinkAuthorized/memName`；事务内复查邀请及群状态                     |

@@ -58,6 +58,8 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
@@ -110,6 +112,8 @@ public class GroupChatApplicationService {
     private final GroupChatMentionService mentionService;
     @Autowired
     private WorkgroupTemplateService workgroupTemplateService;
+    @Autowired
+    private ByaiGroupChatTaskMapper groupChatTaskMapper;
 
     @Autowired
     public GroupChatApplicationService(SessionService sessionService, SequenceService sequenceService,
@@ -1095,5 +1099,31 @@ public class GroupChatApplicationService {
         boundary.setExtParamValue(String.valueOf(latest));
         sessionExtService.save(boundary);
         return direct;
+    }
+
+    /** 私聊任务复用单聊会话，只新增群任务记录，不进入群任务执行与发布链路。 */
+    @Transactional
+    public ByaiGroupChatTask createDirectTask(Long groupSessionId, Long agentId) {
+        ByaiSession direct = createDirectSession(groupSessionId, agentId);
+        ByaiSessionMember agent = memberService.findSessionMember(groupSessionId, MemObjType.AGENT.name(), agentId);
+        Long latest = messageMapper.selectBySessionId(groupSessionId).stream()
+            .map(ByaiMessage::getMessageId)
+            .filter(Objects::nonNull)
+            .max(Long::compareTo)
+            .orElse(0L);
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setTaskSessionId(direct.getSessionId());
+        task.setGroupSessionId(groupSessionId);
+        task.setSourceMessageId(latest);
+        task.setDispatchId(sequenceService.nextVal());
+        task.setInitiatorUserId(CurrentUserHolder.getCurrentUserId());
+        task.setTargetAgentId(agentId);
+        task.setTaskName("与" + (agent == null || StringUtils.isBlank(agent.getMemName()) ? "数字员工" : agent.getMemName()) + "的私聊");
+        task.setStatus("PRIVATE");
+        task.setTurnStatus("PRIVATE");
+        task.setCreateTime(new Date());
+        task.setUpdateTime(new Date());
+        groupChatTaskMapper.insert(task);
+        return task;
     }
 }

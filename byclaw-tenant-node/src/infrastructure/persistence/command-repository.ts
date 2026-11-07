@@ -24,7 +24,7 @@ import { updateFeedback, updateMessageStructure } from "./message-update-writer.
 import { acknowledgeMessage } from "./message-ack-writer.js";
 import { ensureExternalChild, saveExternalChild } from "./external-child-writer.js";
 
-import { nickname, directSession } from "./group-management.js";
+import { nickname, directSession, directTask } from "./group-management.js";
 import { createInvitation } from "./group-invitation.js";
 import { cancelTask, checkpointPublication } from "./task-control.js";
 const handlers = {
@@ -32,6 +32,7 @@ const handlers = {
   SAVE_EXTERNAL_CHILD: saveExternalChild,
   SET_NICKNAME: nickname,
   CREATE_DIRECT_SESSION: directSession,
+  CREATE_DIRECT_TASK: directTask,
   CREATE_INVITATION: createInvitation,
   CANCEL_TASK: cancelTask,
   CHECKPOINT_PUBLICATION: checkpointPublication,

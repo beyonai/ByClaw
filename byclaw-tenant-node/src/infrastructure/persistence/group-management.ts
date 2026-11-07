@@ -68,3 +68,64 @@ export async function directSession(context: CommandContext) {
     ),
   };
 }
+
+/** 私聊任务与普通单聊同源，只额外写入群任务表，不进入群任务执行链路。 */
+export async function directTask(context: CommandContext) {
+  const { db, command } = context;
+  const group = await context.session();
+  const agentId = requireId(command.payload.agentId);
+  const agent = await first(
+    db,
+    "SELECT mem_name AS name FROM byai.byai_session_member WHERE session_id=$1 AND mem_obj_type='AGENT' AND mem_obj_id=$2 AND com_acct_id=$3",
+    [command.sessionId, agentId, command.enterpriseId],
+  );
+  if (group?.sessionType !== "hs_as" || !agent) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+  const taskName = `与${agent.name || "数字员工"}的私聊`;
+  const id = await nextId(db, command.enterpriseId);
+  await insert(db, "byai_session", {
+    session_id: id,
+    parent_session_id: command.sessionId,
+    project_id: group.projectId,
+    enterprise_id: command.enterpriseId,
+    creator_id: command.userId,
+    object_id: agentId,
+    session_type: "h_as",
+    session_name: taskName,
+    state: "ACTIVE",
+    last_seq: "0",
+    create_time: new Date(),
+    update_time: new Date(),
+  });
+  const latest = await first(
+    db,
+    "SELECT MAX(message_id)::text AS id FROM byai.byai_message WHERE session_id=$1 AND enterprise_id=$2",
+    [command.sessionId, command.enterpriseId],
+  );
+  for (const [code, value] of [
+    ["group_source_session_id", command.sessionId],
+    ["group_source_boundary_message_id", latest?.id ?? "0"],
+  ])
+    await insert(db, "byai_session_ext", {
+      ext_id: await nextId(db, command.enterpriseId),
+      session_id: id,
+      ext_param_name: code,
+      ext_param_code: code,
+      ext_param_value: value,
+    });
+  await insert(db, "byai_group_chat_task", {
+    task_session_id: id,
+    group_session_id: command.sessionId,
+    source_message_id: latest?.id ?? "0",
+    dispatch_id: await nextId(db, command.enterpriseId),
+    initiator_user_id: command.userId,
+    target_agent_id: agentId,
+    task_name: taskName,
+    status: "PRIVATE",
+    turn_status: "PRIVATE",
+    create_time: new Date(),
+    update_time: new Date(),
+  });
+  return {
+    data: await first(db, "SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1", [id]),
+  };
+}
