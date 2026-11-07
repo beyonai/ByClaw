@@ -34,6 +34,8 @@ COPY middleware/byclaw-harness/scripts/docker-workspace-prepare.mjs /workspace/s
 COPY middleware/byclaw-harness/scripts/prepare-dsh-model-routing-runtime.mjs /workspace/scripts/prepare-dsh-model-routing-runtime.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-startup-021.mjs /workspace/scripts/prepare-dsh-startup-021.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-skill-names-021.mjs /workspace/scripts/prepare-dsh-skill-names-021.mjs
+COPY middleware/byclaw-harness/scripts/prepare-dsh-tool-lookup-021.mjs /workspace/scripts/prepare-dsh-tool-lookup-021.mjs
+COPY middleware/byclaw-harness/scripts/prepare-dsh-delegation-names-021.mjs /workspace/scripts/prepare-dsh-delegation-names-021.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-lazy-021.mjs /workspace/scripts/prepare-dsh-lazy-021.mjs
 COPY middleware/byclaw-harness/scripts/bundle-dsh-startup-deps.mjs /workspace/scripts/bundle-dsh-startup-deps.mjs
 COPY middleware/byclaw-harness/scripts/verify-startup-bundles.mjs /workspace/scripts/verify-startup-bundles.mjs
@@ -60,6 +62,15 @@ RUN node scripts/prepare-dsh-skill-names-021.mjs /workspace \
     && pnpm exec tsc -b packages/skill/skill/tsconfig.json packages/skill/tool-skill/tsconfig.json \
     && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/skill/skill --filter packages/skill/tool-skill \
     && node --input-type=module -e "const {isSkillName}=await import('./packages/skill/skill/lib/index.js');if(!isSkillName('report_企业')||isSkillName('../report_企业'))throw new Error('DSH Skill name compatibility build is missing')"
+
+# Shared-host main-thread hot paths: resolve one tool name without materializing the scope's whole tool view, and
+# look up delegation tools by distinct name instead of walking every user's definitions on each agent step.
+RUN node scripts/prepare-dsh-tool-lookup-021.mjs /workspace \
+    && node scripts/prepare-dsh-delegation-names-021.mjs /workspace \
+    && pnpm exec tsc -b packages/core/tools/tsconfig.json packages/subagent/tool-subagent/tsconfig.json \
+    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/core/tools --filter packages/subagent/tool-subagent \
+    && ! grep -q 'return this.view(scope).visible.get(name)' packages/core/tools/lib/index.js \
+    && grep -q 'delegationToolNames' packages/subagent/tool-subagent/lib/index.js
 
 # Apply pinned startup and model-routing changes only in the build workspace.
 # Rebuild affected core packages before consumers; ship source and compiled output together.
@@ -317,6 +328,7 @@ RUN set -eux; \
 COPY --chown=byclaw:byclaw middleware/builtin/ /opt/byclaw/builtin/
 COPY --chown=byclaw:byclaw middleware/builtin/skills/ /opt/byclaw/dsh-managed/skills/
 COPY --chown=byclaw:byclaw --chmod=0755 middleware/byclaw-harness/docker-entrypoint.sh /usr/local/bin/byclaw-dsh-entrypoint
+COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-pid1.py /usr/local/bin/byclaw-pid1
 COPY --chmod=0755 middleware/byclaw-harness/scripts/dsh-loopback-forward.mjs /usr/local/lib/byclaw/dsh-loopback-forward.mjs
 COPY middleware/byclaw-harness/scripts/startup-module-resolver.cjs /usr/local/lib/byclaw/startup-module-resolver.cjs
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-bycli-managed.py /usr/local/bin/byclaw-bycli-managed
