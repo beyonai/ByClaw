@@ -1243,6 +1243,7 @@ export default {
   'chatResource.closeTab': 'Close',
   'chatResource.closeOtherTabs': 'Close other tabs',
   'chatResource.closeRightTabs': 'Close tabs to the right',
+  'chatResource.closeList': 'Close resource list',
   'chatResource.toggleList': 'Toggle resource list',
   'chatResource.currentSession': 'Conversation',
   'chatResource.currentEmployee': 'Employee',

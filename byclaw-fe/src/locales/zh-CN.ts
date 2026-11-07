@@ -1187,6 +1187,7 @@ export default {
   'chatResource.closeTab': '关闭',
   'chatResource.closeOtherTabs': '关闭其他标签页',
   'chatResource.closeRightTabs': '关闭右侧标签页',
+  'chatResource.closeList': '关闭资源列表',
   'chatResource.toggleList': '打开或关闭资源列表',
   'chatResource.currentSession': '当前会话',
   'chatResource.currentEmployee': '当前员工',
