@@ -215,7 +215,7 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
     }
 
     @Test
-    void getSandboxInfo_projectsOnlyHeaderProtectedDesktopEndpointsWithoutChangingInternalMetadata() {
+    void getSandboxInfo_projectsDesktopEndpointsRegardlessOfHeadersWithoutChangingInternalMetadata() {
         SandboxService service = mock(SandboxService.class);
         SsSandboxRecordMapper records = mock(SsSandboxRecordMapper.class);
         SandboxController controller = controllerWithInventory();
@@ -244,7 +244,9 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
             "ssh", raw.get("ssh"), "vnc", "/configured-api/sandbox/desktop/exclusive/sb-1/vnc/"));
         assertThat((Map<?, ?>) rows.get(1).get("instanceEndpoints")).isEqualTo(Map.of(
             "editor", "/configured-api/sandbox/desktop/shared/mapping-1/host-1/editor/"));
-        assertThat(rows.get(2).get("instanceEndpoints")).isEqualTo(publicDesktop.getInstanceEndpoints());
+        assertThat(rows.get(2).get("instanceEndpoints")).isEqualTo(Map.of(
+            "desktop", "/configured-api/sandbox/desktop/exclusive/public-1/desktop/"));
+        assertThat(publicDesktop.getInstanceEndpoints()).containsEntry("desktop", "https://public.test/");
         assertThat(exclusive.getInstanceEndpoints()).isSameAs(raw);
     }
 

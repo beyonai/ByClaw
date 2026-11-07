@@ -1,11 +1,11 @@
 # Scoped desktop ingress
 
-`getSandboxInfo` projects only header-protected noVNC endpoints into these same-origin paths:
+`getSandboxInfo` projects eligible noVNC endpoints into these same-origin paths, whether provider `endpointHeaders` are missing, empty or populated:
 
 - `/sandbox/desktop/exclusive/{sandboxId}/{instance}/`
 - `/sandbox/desktop/shared/{mappingId}/{sandboxId}/{instance}/`
 
-The configured servlet context path is prepended. SSH and header-free public endpoints keep their existing URLs. The internal `SandboxService` metadata remains raw so runtime SSH callers continue to use provider endpoints.
+The configured servlet context path is prepended. Missing or empty provider headers do not establish that a raw cloud URL permits iframe embedding, so header-free noVNC endpoints use the same authenticated viewer and WebSocket proxy. SSH and other non-noVNC endpoints keep their existing URLs. The internal `SandboxService` metadata remains raw so runtime callers continue to use provider endpoints. Provider headers are injected only when present; browser Session, tenant, owner and instance authorization apply in every case.
 
 Desktop resources use `SandboxService.sandboxInfo(userCode, sandboxId)`. Remote mode passes the optional exact identity through the existing Platform `business/info` operation; local mode filters before endpoint hydration. Shared-context projection still runs before the final ID filter, preserving shared overrides and mapping authorization. A warm selected desktop therefore does not prepare unrelated unknown instances on every asset or `/goal` poll. Calls without the optional ID keep the full-directory behavior.
 

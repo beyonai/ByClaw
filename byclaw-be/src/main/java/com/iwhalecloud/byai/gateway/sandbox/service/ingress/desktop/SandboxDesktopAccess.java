@@ -53,7 +53,7 @@ public class SandboxDesktopAccess {
     /** Projection only: runtime SSH consumers must retain their original endpoint map. */
     public static Map<String, String> navigationEndpoints(SandboxInfo info, String contextPath) {
         Map<String, String> endpoints = info.getInstanceEndpoints();
-        if (endpoints == null || info.getEndpointHeaders() == null || info.getEndpointHeaders().isEmpty()) return endpoints;
+        if (endpoints == null) return null;
         if (!identifier(info.getSandboxId()) || (Boolean.TRUE.equals(info.getIsShared()) && !identifier(info.getMappingId()))) return endpoints;
         Map<String, String> projected = new LinkedHashMap<>(endpoints);
         endpoints.forEach((instance, endpoint) -> {
