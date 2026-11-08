@@ -75,7 +75,7 @@ public class TenantGroupCreationService {
         String id = Long.toString(cn.hutool.core.util.IdUtil.getSnowflakeNextId());
         List<String> asserted = new ArrayList<>(); asserted.add(Long.toString(tenant.userId()));
         users.forEach(user -> asserted.add(user.memObjId()));
-        node.command(tenant, "POST", "/internal/v1/group-chats", id, "CREATE_GROUP", new TenantNodeModels.Fields(Map.of(
+        var created = node.command(tenant, "POST", "/internal/v1/group-chats", id, "CREATE_GROUP", new TenantNodeModels.Fields(Map.of(
             "sessionName", project.getProjectName(), "sessionContent", goal == null ? "" : goal,
             "projectId", project.getProjectId().toString(), "members", initial,
             "coordinatorAgentId", coordinatorAgentId.toString())), java.util.UUID.randomUUID().toString(), asserted);
@@ -85,7 +85,20 @@ public class TenantGroupCreationService {
         }
         JsonNode response = data.read(tenant, "group-chats/" + id);
         // Node 创建、授权和详情读取成功后登记通知；投递等待 BE 当前事务提交。
-        workgroupHooks.created(id, project.getProjectName(), tenant.enterpriseId(), project.getProjectId(), tenant.userId());
+        JsonNode owner = null;
+        if (created != null && created.data() != null && created.data().path("savedMembers").isArray()) {
+            for (JsonNode member : created.data().path("savedMembers")) {
+                if (id.equals(member.path("groupId").asText())
+                    && Long.toString(tenant.enterpriseId()).equals(member.path("enterpriseId").asText())
+                    && Long.toString(tenant.userId()).equals(member.path("userId").asText())) {
+                    owner = member;
+                    break;
+                }
+            }
+        }
+        if (owner == null) throw new IllegalStateException("groupchat.member.id.unconfirmed");
+        workgroupHooks.created(id, project.getProjectName(), tenant.enterpriseId(), project.getProjectId(), tenant.userId(),
+            owner.path("userId").asText(), owner.path("byaiSessionMemberId").asText(null));
         return response;
     }
 }

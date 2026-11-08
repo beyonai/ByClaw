@@ -232,8 +232,13 @@ public class GroupChatApplicationService {
         if (tenantContext != null) {
             eventEnterpriseId = tenantContext.enterpriseId();
         }
+        ByaiSessionMember owner = members.stream()
+            .filter(member -> MemObjType.USER.name().equals(member.getMemObjType())
+                && UserRole.OWNER.name().equals(member.getUserRole()))
+            .findFirst().orElseThrow(() -> new IllegalStateException("groupchat.member.id.unconfirmed"));
         workgroupHooks.created(session.getSessionId().toString(), session.getSessionName(), eventEnterpriseId,
-            session.getProjectId(), operatorId);
+            session.getProjectId(), operatorId, owner.getMemObjId().toString(),
+            owner.getByaiSessionMemberId() == null ? null : owner.getByaiSessionMemberId().toString());
         return response;
     }
 

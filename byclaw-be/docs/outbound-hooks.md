@@ -56,6 +56,10 @@ Hook 默认关闭。普通创建入口接入 `user.registered` v1 和 `workgroup
 | `data.enterpriseId` | string/null | 工作组所属企业 ID；个人工作组允许为空 |
 | `data.projectId` | string | 工作组关联项目 ID |
 | `data.createdBy` | string | 创建者用户 ID |
+| `data.userId` | string | 初始 OWNER 的用户 ID |
+| `data.byaiSessionMemberId` | string | 初始 OWNER 实际保存的成员记录主键 |
+
+OWNER 的两个字段与 `workgroup.member.joined` 命名一致，均以字符串发送。普通路径从已保存的 OWNER 成员取得；租户路径从 Node 建群回执 `data.savedMembers[]` 中按工作组、企业及创建人匹配取得。成员主键缺失或无效时创建调用失败，不发送创建事件；Node 已提交的数据仍受下述跨库事务限制。
 
 不导出工作目标、聊天内容、成员列表或运行凭据。普通路径在项目、会话、初始成员、授权和权限设置完成后登记事件；企业路径在 Node 创建命令、授权及详情读取成功后登记，均等待 BE 创建事务提交后异步投递。创建失败、详情读取失败或 BE 事务回滚不发送。
 
