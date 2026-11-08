@@ -130,7 +130,9 @@ export const USER_ROW_OVERLAYS = {
   'byclaw-idle-reporter': (user, home, spec) => ({ sandboxId: spec.sandboxId }),
   'byclaw-dsh': (user, home, spec) => ({
     userCode: user,
-    workerId: `byclaw-dsh-multi-${createHash('sha256').update(user).digest('hex').slice(0, 12)}-${user}`,
+    // One consumer name per context boot: by-framework reclaims a dead worker's unacknowledged
+    // commands only from a consumer other than its own, so a restarted host must not reuse the name.
+    workerId: `byclaw-dsh-multi-${createHash('sha256').update(user).digest('hex').slice(0, 12)}-${spec.workerInstance ?? ''}${spec.workerInstance ? '-' : ''}${user}`,
     ...(spec.managed ? { workerId: `byclaw-shared-${spec.instanceId}-${spec.mappingId}-${spec.generation}`, agentTypes: [spec.workerAgentType], stateDir: join(home, 'team-state') } : {}),
     dshHome: home,
     agentTemplateDir: join(home, 'agent-templates'),
@@ -1482,6 +1484,7 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
       toolEnvIdleMs: config.toolEnvIdleMs,
       sessionDb: sessionDbFor(config, owner),
       publicUrl: userPublicUrl(config.publicBase, user),
+      workerInstance: randomBytes(4).toString('hex'),
     }
     const { profileContext, patches } = prepareUserProfile({ composeEntries, readProfilePatches }, base, profile, user, spec)
     const environment = createLaunchEnvironmentSnapshot([

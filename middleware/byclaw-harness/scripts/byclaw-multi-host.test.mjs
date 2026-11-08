@@ -174,6 +174,14 @@ test('overlays merge per-user additions into the composed row config', () => {
   assert.equal(byId['byclaw-dsh'], undefined)
 })
 
+test('each context boot consumes commands under its own worker id', () => {
+  const entries = [{ id: 'byclaw-dsh', name: '@byclaw/dsh-integration', config: {} }]
+  const [first] = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...spec, workerInstance: 'a1b2c3d4' })
+  const [second] = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...spec, workerInstance: 'e5f6a7b8' })
+  assert.match(first.config.workerId, /^byclaw-dsh-multi-[0-9a-f]{12}-a1b2c3d4-u1$/)
+  assert.notEqual(first.config.workerId, second.config.workerId)
+})
+
 test('every plugin that reads or writes the user tree does so in the tool environment', () => {
   // The host has no user tree of its own: a plugin left on node:fs here fails (or writes nowhere useful).
   const rows = ['byclaw-dsh', 'byclaw-bash-provider', 'agent-teams', 'better-sidebar', 'iron-rules',
