@@ -1118,6 +1118,19 @@ test('credential files are stored in the database only with both the secret file
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
+test('managed hosts keep users in the database under their user code, not the context key', () => {
+  const config = host.readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_MANAGED: '1', BYCLAW_MULTI_HOST_ID: '0f8c2a6e-1b2c-4d5e-8f90-123456789abc',
+    BYCLAW_MULTI_HOST_CAPACITY: '4', BYCLAW_SESSION_DB_URL: 'postgres://db', BYCLAW_SESSION_DB_USERS: 'u1' })
+  assert.equal(config.managed, true)
+  assert.equal(config.sessionDbUrl, 'postgres://db')
+  const entries = [
+    { id: 'session-persistence-jsonl', name: 'jsonl', config: { root: '/x' } },
+    { id: 'session-persistence-db', name: 'db', disabled: true },
+  ]
+  const rows = composeUserOverlays(entries, 'ctx-7f3a', '/data/contexts/ctx-7f3a/dsh-home', { managed: true, userCode: 'u1', sessionDb: host.sessionDbFor(config, 'u1') })
+  assert.deepEqual(rows.find(row => row.id === 'session-persistence-db'), { id: 'session-persistence-db', disabled: false, config: { connectionString: 'postgres://db', userCode: 'u1' } })
+})
+
 test('the session database password never reaches a launch environment', () => {
   const values = launchEnvironmentValues({ KEEP: '1', BYCLAW_SESSION_DB_URL: 'postgres://u:secret@db' }, {}, 'u1')
   assert.equal(values.KEEP, '1')

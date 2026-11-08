@@ -517,7 +517,7 @@ export function readHostConfig(env) {
     toolEnvCatalog: toolEnvCatalog({ env }),
     toolEnvBe,
     toolEnvIdleMs: Number(env.BYCLAW_TOOL_ENV_IDLE_MS || 600000),
-    sessionDbUrl: managed ? undefined : env.BYCLAW_SESSION_DB_URL?.trim() || undefined,
+    sessionDbUrl: env.BYCLAW_SESSION_DB_URL?.trim() || undefined,
     sessionDbUsers: (env.BYCLAW_SESSION_DB_USERS ?? '').split(',').map(entry => entry.trim()).filter(Boolean),
   }
 }
@@ -1443,9 +1443,11 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
   const { home, workspace, profile: dir, runtimeDir } = userContextPaths(config, user, request)
   await verifyUserStorageHome(config, user, request)
   await mkdir(home, { recursive: true, mode: 0o700 })
+  // A managed context is keyed by contextKey; what is stored for the person behind it is keyed by user code.
+  const owner = request.managed ? request.userCode : user
   // Credentials and SSH identities come back from the database before any plugin reads them.
-  const durable = config.hostFiles !== undefined && sessionDbFor(config, user) !== undefined
-    ? new DurableFiles({ ...config.hostFiles, user, home, log })
+  const durable = config.hostFiles !== undefined && sessionDbFor(config, owner) !== undefined
+    ? new DurableFiles({ ...config.hostFiles, user: owner, home, log })
     : undefined
   if (durable !== undefined) {
     await durable.restore()
@@ -1478,7 +1480,7 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
       toolEnvCatalog: config.toolEnvCatalog,
       toolEnvBe: config.toolEnvBe,
       toolEnvIdleMs: config.toolEnvIdleMs,
-      sessionDb: sessionDbFor(config, user),
+      sessionDb: sessionDbFor(config, owner),
       publicUrl: userPublicUrl(config.publicBase, user),
     }
     const { profileContext, patches } = prepareUserProfile({ composeEntries, readProfilePatches }, base, profile, user, spec)
@@ -1597,7 +1599,8 @@ async function main() {
   const Redis = createRequire(join(config.managedProfile, 'package.json'))('ioredis')
   const redis = createHostRedis(Redis, process.env)
   redis.on('error', error => log('redis:', error.message))
-  const managedClaims = config.managed ? createManagedClaims(redis, config.hostId, { sharedStorage: Boolean(config.userRoot) }) : undefined
+  // State in shared storage or in the database is the context's, not the generation's: one executor at a time.
+  const managedClaims = config.managed ? createManagedClaims(redis, config.hostId, { sharedStorage: Boolean(config.userRoot) || config.sessionDbUrl !== undefined }) : undefined
   const Registry = config.managed ? ManagedUserRegistry : UserRegistry
   const registry = new Registry({
     root: config.root, hostId: config.hostId, capacity: config.capacity, startupConcurrency: config.startupConcurrency, startupQueueCapacity: config.startupQueueCapacity,
