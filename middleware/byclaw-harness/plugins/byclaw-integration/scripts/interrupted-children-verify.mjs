@@ -1,6 +1,6 @@
 /** Children a host restart cut off are found from the parent's durable events alone. */
 import assert from 'node:assert/strict'
-import { interruptedChildren, interruptionNotice, turnAlreadyAdmitted } from '../src/interrupted-children.ts'
+import { interruptedChildren, interruptedTurnNotice, interruptionNotice, turnAlreadyAdmitted } from '../src/interrupted-children.ts'
 
 let seq = 0
 const call = (callId, name = 'byclaw_instantiate_template') => ({ type: 'tool/call', seq: seq++, data: { callId, name, arguments: '{}' } })
@@ -41,5 +41,11 @@ const turnContext = { type: 'user/message', seq: seq++, data: { source: { kind: 
 assert.equal(turnAlreadyAdmitted([...events, turnContext], '11386661'), true)
 assert.equal(turnAlreadyAdmitted([...events, turnContext], '1138666'), false)
 assert.equal(turnAlreadyAdmitted(events, '11386661'), false)
+
+// A redelivered turn is answered from history, not rerun: the root gets runtime context naming the message.
+const turnNotice = interruptedTurnNotice('11386661')
+assert.equal(turnNotice.source.kind, 'plugin:byclaw-context')
+assert.match(turnNotice.content[0].text, /11386661.*interrupted by a host restart/s)
+assert.match(turnNotice.content[0].text, /ask before redoing anything with side effects/)
 
 console.log('interrupted children verified')

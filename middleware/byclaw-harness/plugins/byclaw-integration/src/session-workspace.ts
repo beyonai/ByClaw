@@ -7,6 +7,7 @@ import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { createHash } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
+import { BYCLAW_CONTEXT_SOURCE } from './context-source.ts'
 import { isLegacyProjectWorkspaceTransition } from './session-cwd.ts'
 import {
   byClawInboundTurnContextDeclaration,
@@ -14,7 +15,6 @@ import {
 } from './inbound-context.ts'
 
 /** Source kind of the ByClaw context messages; a 0.1.5 session's `{ kind: 'plugin', plugin: 'byclaw-context' }` loads as this. */
-const BYCLAW_CONTEXT_SOURCE = 'plugin:byclaw-context'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {

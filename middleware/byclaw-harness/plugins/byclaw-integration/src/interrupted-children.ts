@@ -8,6 +8,7 @@
  */
 import { createUserMessage, type ContentBlock, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { BYCLAW_CONTEXT_SOURCE } from './context-source.ts'
 
 const DISPATCHED = /^(?:agent|expert-team) template [^\s]+ instantiated as child ([^\s;]+); parent is waiting for the asynchronous report\.$/mu
 
@@ -59,6 +60,23 @@ export function interruptionNotice(childId: string): UserMessage {
       { type: 'text', text: 'It left no closing message, and its work since the last report is lost. Tell the user which delegated task did not finish and offer to run it again; do not claim it completed.' },
     ],
     source: { kind: 'subagent-settled', form: 'notice', summary, senderSessionId: childId } as never,
+  })
+}
+
+/**
+ * What the root is told instead of the user's text when a host restart cut off its previous
+ * attempt at this message: rerunning the request blind could repeat side effects, and the message
+ * still needs an answer.
+ * @param messageId - the BE message id of the redelivered command.
+ * @returns the runtime-context message to deliver to the root.
+ */
+export function interruptedTurnNotice(messageId: string): UserMessage {
+  return createUserMessage({
+    content: [{
+      type: 'text',
+      text: `Runtime notice: your previous attempt to answer user message ${messageId} was interrupted by a host restart. The user's request is above in this conversation. If you already finished it, restate the outcome briefly. Otherwise tell the user what was interrupted and how far it got, and ask before redoing anything with side effects; do not claim work completed that the history does not show.`,
+    }],
+    source: { kind: BYCLAW_CONTEXT_SOURCE } as never,
   })
 }
 

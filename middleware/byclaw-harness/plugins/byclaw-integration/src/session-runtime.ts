@@ -18,7 +18,7 @@ import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { SessionInspection, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { installModelSelection, type Agent, type AgentHandle, type AssistantStreamFrame, type ModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, expandAssistantStream, type ContentBlock, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import { interruptedChildren, interruptionNotice, turnAlreadyAdmitted } from './interrupted-children.ts'
+import { interruptedChildren, interruptedTurnNotice, interruptionNotice, turnAlreadyAdmitted } from './interrupted-children.ts'
 import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 import { ordinaryTaskPlan } from './ordinary-task-plan.ts'
@@ -2287,10 +2287,16 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       // A host that died while children ran left them unsettled; settle them for the root first.
       const ownEvents = rootAgent.session.ownEvents()
       const interrupted = interruptedChildren(ownEvents, childId => this.ctx.agents.get(SessionId(childId)) !== undefined)
-      const redelivered = interrupted.length > 0 && turnAlreadyAdmitted(ownEvents, command.header.messageId)
+      // The message framework redelivers a command whose worker died; an ask_user recovery reuses the header on purpose.
+      const redelivered = command.extraPayload['byclaw_recovered_interaction_id'] === undefined
+        && turnAlreadyAdmitted(ownEvents, command.header.messageId)
       if (interrupted.length > 0) {
-        this.ctx.logger.warn(`[byclaw-dsh] interrupted children of ${String(rootAgent.id)}: ${interrupted.join(', ')}${redelivered ? `; message ${command.header.messageId} was already admitted, not resending it` : ''}`)
+        this.ctx.logger.warn(`[byclaw-dsh] interrupted children of ${String(rootAgent.id)}: ${interrupted.join(', ')}`)
         for (const childId of interrupted) rootAgent.followup(interruptionNotice(childId))
+      }
+      if (redelivered) {
+        this.ctx.logger.warn(`[byclaw-dsh] message ${command.header.messageId} was already admitted by an earlier process; telling ${String(rootAgent.id)} it was interrupted instead of resending it`)
+        rootAgent.followup(interruptedTurnNotice(command.header.messageId))
       }
       const agent = await measureChatStage('harness.input_submit', async () => {
         // The redelivered command's text is already in the root's history; only the notices are new.
