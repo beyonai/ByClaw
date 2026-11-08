@@ -10,7 +10,7 @@
  * One host serves a user at a time (the Redis claim), so the files have one writer.
  */
 import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto'
-import { watch } from 'node:fs'
+import { mkdirSync, watch } from 'node:fs'
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, sep } from 'node:path'
 
@@ -132,7 +132,7 @@ export class DurableFiles {
     /** name -> digest of what the store holds, so unchanged rewrites are not sent. */
     this.stored = new Map()
     this.queue = new Map()
-    this.watcher = undefined
+    this.watchers = []
     this.closed = false
     this.rescan = undefined
   }
@@ -158,11 +158,15 @@ export class DurableFiles {
     this.log(`durable files for ${this.user}: restored ${rows.length}, stored ${missing.length} new`)
   }
 
-  /** Follow changes under the home until {@link close}. */
+  /**
+   * Follow changes to the durable files until {@link close}. Only their own directories are watched:
+   * Node's recursive watch on Linux stats every file below its root, and the rest of the home holds
+   * plugins' sockets (a `stat` of one before the first context boot breaks DSH's module resolution).
+   */
   start() {
-    this.watcher = watch(this.home, { recursive: true }, (_event, filename) => {
+    const onChange = prefix => (_event, filename) => {
       if (filename === null || filename === undefined) return
-      const name = String(filename).split(sep).join('/')
+      const name = prefix + String(filename).split(sep).join('/')
       if (isDurableFile(name)) void this.sync(name).catch(error => this.log(`storing ${name} for ${this.user} failed: ${error.message}`))
       // A renamed or removed team directory reports only the directory: rescan the trees shortly after.
       if (underDurableTree(name) && !this.closed) {
@@ -171,8 +175,17 @@ export class DurableFiles {
           void this.flush().catch(error => this.log(`storing durable files for ${this.user} failed: ${error.message}`))
         }, 200)
       }
-    })
-    this.watcher.on('error', error => this.log(`watching durable files of ${this.user} failed: ${error.message}`))
+    }
+    const follow = (dir, prefix, recursive) => {
+      const watcher = watch(join(this.home, dir), { recursive }, onChange(prefix))
+      watcher.on('error', error => this.log(`watching durable files of ${this.user} failed: ${error.message}`))
+      this.watchers.push(watcher)
+    }
+    follow('.', '', false)
+    for (const root of ['byclaw-tool-env', ...DURABLE_TREES]) {
+      mkdirSync(join(this.home, root), { recursive: true, mode: 0o700 })
+      follow(root, `${root}/`, true)
+    }
   }
 
   /** Store one file's current content, or forget it when it is gone. Calls for one name run in order. */
@@ -210,7 +223,7 @@ export class DurableFiles {
     if (this.closed) return
     this.closed = true
     clearTimeout(this.rescan)
-    this.watcher?.close()
+    for (const watcher of this.watchers) watcher.close()
     await this.flush()
   }
 }

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { mkdtemp, mkdir, readFile, rm, rename, writeFile, stat } from 'node:fs/promises'
+import fs from 'node:fs'
+import net from 'node:net'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DurableFiles, MAX_FILE_BYTES, deriveFileKey, isDurableFile, openFile, sealFile } from './host-durable-files.mjs'
@@ -117,6 +119,33 @@ test('a team directory moved or removed as a whole is followed by a rescan', asy
     await waitFor(() => ![...store.rows.keys()].some(k => k.includes('byclaw-agent-teams')))
     await files.close()
   } finally { await cleanup() }
+})
+
+test('the rest of the home is not watched: a plugin socket there is never stat-ed', async () => {
+  const store = memoryStore()
+  const { dir, cleanup } = await home()
+  const statSync = fs.statSync
+  const statted = []
+  try {
+    await mkdir(join(dir, 'codegraph'))
+    const socket = join(dir, 'codegraph/mcp-bridge.sock')
+    const server = net.createServer()
+    await new Promise(resolve => server.listen(socket, resolve))
+    const files = new DurableFiles({ store, key, user: 'u1', home: dir })
+    await files.restore()
+    fs.statSync = (path, ...rest) => { statted.push(String(path)); return statSync(path, ...rest) }
+    files.start()
+    fs.statSync = statSync
+    await mkdir(join(dir, 'agent-teams/instances'), { recursive: true })
+    await writeFile(join(dir, 'agent-teams/instances/i1.json'), '{}')
+    await waitFor(() => store.rows.has('u1\0agent-teams/instances/i1.json'))
+    await files.close()
+    await new Promise(resolve => server.close(resolve))
+    assert.ok(!statted.some(path => path.includes('codegraph')), statted.join('\n'))
+  } finally {
+    fs.statSync = statSync
+    await cleanup()
+  }
 })
 
 test('a file over the size limit stays on this host', async () => {
