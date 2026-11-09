@@ -1,7 +1,10 @@
 {
-  "image": "byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness:D0.6.0_easel-codex",
+  "image": "byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness:D0.6.0_easel-codex-20261109-r2",
   "startup": {
-    "entrypoint": ["/usr/local/bin/byclaw-easel-codex-entrypoint", "tools"]
+    "entrypoint": [
+      "/usr/local/bin/byclaw-easel-codex-entrypoint",
+      "tools"
+    ]
   },
   "env": {
     "TZ": "Asia/Shanghai",
@@ -17,11 +20,27 @@
   },
   "servicePort": 8080,
   "ports": [
-    { "port": 8080, "instance": "ssh", "protocol": "http", "exposure": "private" },
-    { "port": 8081, "instance": "vnc", "protocol": "http", "exposure": "public" }
+    {
+      "port": 8080,
+      "instance": "ssh",
+      "protocol": "http",
+      "exposure": "private"
+    },
+    {
+      "port": 8081,
+      "instance": "vnc",
+      "protocol": "http",
+      "exposure": "public"
+    }
   ],
-  "resourceRequests": { "cpu": "2", "memory": "4Gi" },
-  "resourceLimits": { "cpu": "4", "memory": "8Gi" },
+  "resourceRequests": {
+    "cpu": "2",
+    "memory": "4Gi"
+  },
+  "resourceLimits": {
+    "cpu": "4",
+    "memory": "8Gi"
+  },
   "timeout": 1800,
   "volumes": [
     {
@@ -35,13 +54,15 @@
     }
   ],
   "runtimeOptions": {
-    "lifecycle": { "autoStart": "false" },
+    "lifecycle": {
+      "autoStart": "false"
+    },
     "toolSandbox": {
       "contract": "byclaw.tool-sandbox/v1",
       "templateKey": "easel-codex",
       "purpose": "easel-codex",
       "enabled": "true",
-      "imageTag": "D0.6.0_easel-codex",
+      "imageTag": "D0.6.0_easel-codex-20261109-r2",
       "description": "包含 Easel 完整源码、Codex CLI、Python/Node、FFmpeg、Playwright 和 Remotion；用于在 ByClaw 内调试、运行及验收 Easel。",
       "capabilities": "[\"process.exec\",\"filesystem\",\"software.development\",\"media.render\",\"browser.automation\",\"agent.codex\"]",
       "operations": "{\"protocol\":\"ssh\",\"exposure\":\"private\"}",

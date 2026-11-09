@@ -1,9 +1,12 @@
 {
   "contract": "byclaw.tool-sandbox/v1",
-  "runtimeVersion": "D0.6.0_easel-codex",
+  "runtimeVersion": "D0.6.0_easel-codex-20261109-r2",
   "purpose": "easel-codex",
   "os": "linux",
-  "operations": { "protocol": "ssh", "exposure": "private" },
+  "operations": {
+    "protocol": "ssh",
+    "exposure": "private"
+  },
   "capabilities": [
     "process.exec",
     "filesystem",
@@ -12,6 +15,12 @@
     "browser.automation",
     "agent.codex"
   ],
-  "display": { "available": true, "defaultExposure": "public", "auth": "byclaw-session" },
-  "storageModes": ["agenticfs-subpath"]
+  "display": {
+    "available": true,
+    "defaultExposure": "public",
+    "auth": "byclaw-session"
+  },
+  "storageModes": [
+    "agenticfs-subpath"
+  ]
 }
