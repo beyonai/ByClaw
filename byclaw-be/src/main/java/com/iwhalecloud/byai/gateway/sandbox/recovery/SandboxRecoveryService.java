@@ -32,9 +32,9 @@ public class SandboxRecoveryService {
     public record Action(String stream, String group, String id, String action, String reason) {}
     public record Page(List<Map<String, Object>> items, String nextCursor) {}
 
-    /** A chat command left pending by a dead worker while no worker of its user is online. */
+    /** A chat command left pending by a dead worker while no worker of its user is online; traceId names its turn. */
     public record OrphanedCommand(String stream, String group, SandboxRecoveryStore.Message message,
-                                  String sessionId, String userCode, long queuedAt, boolean managed) {}
+                                  String sessionId, String userCode, long queuedAt, boolean managed, String traceId) {}
 
     private static final List<String> USER_TARGET_PREFIXES = List.of("BYCLAW_DSH_", "BYCLAW_EXE_", "BYCLAW_CODE_");
 
@@ -99,7 +99,8 @@ public class SandboxRecoveryService {
                 }
                 String target = (String) info.get("targetAgentType");
                 found.add(new OrphanedCommand(stream, group, message, session, (String) info.get("userCode"),
-                    Long.parseLong(message.id().split("-")[0]), target != null && target.startsWith(MANAGED_TARGET_PREFIX)));
+                    Long.parseLong(message.id().split("-")[0]), target != null && target.startsWith(MANAGED_TARGET_PREFIX),
+                    (String) info.get("traceId")));
             }
             cursor = page.nextCursor();
         } while (cursor != null);
@@ -145,6 +146,7 @@ public class SandboxRecoveryService {
             user = target.replaceFirst("^BYCLAW_(DSH|EXE|CODE)_", "");
         String session = first(payload.getString("session_id"), header.getString("session_id"));
         String commandId = first(payload.getString("message_id"), header.getString("message_id"));
+        String traceId = first(payload.getString("trace_id"), header.getString("trace_id"));
         boolean validTarget = target != null && user != null && user.matches("[A-Za-z0-9_.@-]{1,100}")
             && (managedTarget || List.of("BYCLAW_DSH_" + user, "BYCLAW_EXE_" + user, "BYCLAW_CODE_" + user).contains(target));
         boolean online = false;
@@ -172,7 +174,7 @@ public class SandboxRecoveryService {
         view.put("userCode", user); view.put("userName", safe(header.getString("user_name"), 200));
         view.put("resourceId", first(metadata.getString("resourceId"), metadata.getString("agentId")));
         view.put("resourceName", safe(metadata.getString("resourceName"), 200));
-        view.put("sessionId", session); view.put("commandId", commandId); view.put("targetAgentType", target);
+        view.put("sessionId", session); view.put("commandId", commandId); view.put("traceId", traceId); view.put("targetAgentType", target);
         view.put("consumer", message.consumer()); view.put("workerOnline", online); view.put("consumerOnline", consumerOnline);
         view.put("executionStatus", executionStatus); view.put("deliveries", message.deliveries());
         view.put("idleMs", pending ? message.idleMs() : null);

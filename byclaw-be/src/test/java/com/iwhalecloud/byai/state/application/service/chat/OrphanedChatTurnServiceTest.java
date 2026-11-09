@@ -38,7 +38,7 @@ class OrphanedChatTurnServiceTest {
 
     final OrphanedCommand command = new OrphanedCommand("stream", "group",
         new SandboxRecoveryStore.Message(queuedAt + "-0", "old-worker", 120_000, 1, "PENDING", Map.of()),
-        "101", "test-user", queuedAt, false);
+        "101", "test-user", queuedAt, false, null);
 
     @BeforeEach
     void setup() {
@@ -88,6 +88,41 @@ class OrphanedChatTurnServiceTest {
     }
 
     @Test
+    void aTurnStartedMinutesAfterAnOldCommandIsNotStoppedForIt() {
+        OrphanedCommand older = new OrphanedCommand("stream", "group",
+            new SandboxRecoveryStore.Message(queuedAt + "-0", "old-worker", 300_000, 1, "PENDING", Map.of()),
+            "101", "test-user", queuedAt, false, "trace-old");
+        when(recovery.orphanedCommands("test-user", "101", OrphanedChatTurnService.ADMISSION_IDLE_MS))
+            .thenReturn(List.of(older));
+        for (long minutes = 1; minutes <= 9; minutes++) {
+            RunningChatInfo newer = runningSince(queuedAt + minutes * 60_000L);
+            newer.setTraceId("trace-new");
+            when(running.getRunning(101L)).thenReturn(newer);
+
+            assertThat(service.releaseIfOrphaned("test-user", 101L)).as("%d minutes", minutes).isFalse();
+        }
+        verify(recovery, never()).dismissOrphaned(any(), anyString());
+        verify(chats, never()).stopOrphanedChat(anyLong());
+    }
+
+    @Test
+    void aRecoveredTurnIsStoppedForItsOwnCommandWhateverItsStartTime() {
+        OrphanedCommand own = new OrphanedCommand("stream", "group",
+            new SandboxRecoveryStore.Message(queuedAt + "-0", "old-worker", 120_000, 1, "PENDING", Map.of()),
+            "101", "test-user", queuedAt, false, "trace-1");
+        when(recovery.orphanedCommands("test-user", "101", OrphanedChatTurnService.ADMISSION_IDLE_MS))
+            .thenReturn(List.of(own));
+        // A BE instance that took the turn over re-marked its start.
+        RunningChatInfo recovered = runningSince(queuedAt + 20 * 60_000L);
+        recovered.setTraceId("trace-1");
+        when(running.getRunning(101L)).thenReturn(recovered);
+        when(recovery.dismissOrphaned(own, OrphanedChatTurnService.REASON)).thenReturn(true);
+
+        assertThat(service.releaseIfOrphaned("test-user", 101L)).isTrue();
+        verify(chats).stopOrphanedChat(101L);
+    }
+
+    @Test
     void aCommandReclaimedMeanwhileKeepsTheTurn() {
         when(recovery.orphanedCommands("test-user", "101", OrphanedChatTurnService.ADMISSION_IDLE_MS))
             .thenReturn(List.of(command));
@@ -101,10 +136,10 @@ class OrphanedChatTurnServiceTest {
     @Test
     void theSweepStopsOrphanedTurnsAsTheirUserAndOnlyDismissesTheRest() {
         OrphanedCommand idle = new OrphanedCommand("stream", "group",
-            new SandboxRecoveryStore.Message("1-0", "old-worker", 900_000, 1, "PENDING", Map.of()), "202", "other-user", 1L, false);
+            new SandboxRecoveryStore.Message("1-0", "old-worker", 900_000, 1, "PENDING", Map.of()), "202", "other-user", 1L, false, null);
         OrphanedCommand old = new OrphanedCommand("stream", "group",
             new SandboxRecoveryStore.Message(queuedAt + "-0", "old-worker", 700_000, 1, "PENDING", Map.of()),
-            "101", "test-user", queuedAt, false);
+            "101", "test-user", queuedAt, false, null);
         when(recovery.orphanedCommands(120_000L)).thenReturn(List.of(old, idle));
         when(recovery.dismissOrphaned(any(), eq(OrphanedChatTurnService.REASON))).thenReturn(true);
         when(running.getRunning(101L)).thenReturn(runningSince(queuedAt));
@@ -120,9 +155,9 @@ class OrphanedChatTurnServiceTest {
     @Test
     void theSweepEndsAManagedPlacementsTurnAfterTwoMinutesAndOthersAfterTen() {
         OrphanedCommand managed = new OrphanedCommand("managed", "group",
-            new SandboxRecoveryStore.Message("2-0", "old-worker", 150_000, 1, "PENDING", Map.of()), "303", "test-user", queuedAt, true);
+            new SandboxRecoveryStore.Message("2-0", "old-worker", 150_000, 1, "PENDING", Map.of()), "303", "test-user", queuedAt, true, null);
         OrphanedCommand recent = new OrphanedCommand("stream", "group",
-            new SandboxRecoveryStore.Message("3-0", "old-worker", 150_000, 1, "PENDING", Map.of()), "404", "test-user", queuedAt, false);
+            new SandboxRecoveryStore.Message("3-0", "old-worker", 150_000, 1, "PENDING", Map.of()), "404", "test-user", queuedAt, false, null);
         when(recovery.orphanedCommands(120_000L)).thenReturn(List.of(managed, recent));
         when(recovery.dismissOrphaned(any(), eq(OrphanedChatTurnService.REASON))).thenReturn(true);
         when(running.getRunning(303L)).thenReturn(runningSince(queuedAt));

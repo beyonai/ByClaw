@@ -31,6 +31,9 @@ public class OrphanedChatTurnService {
     /** A command and the running turn it belongs to are queued and marked within this window. */
     static final long SAME_TURN_WINDOW_MS = 10 * 60_000L;
 
+    /** Queue times come from Redis, turn start times from BE: allow for their clocks differing this much. */
+    static final long CLOCK_SKEW_MS = 5_000L;
+
     static final String REASON = "执行宿主已离线，本轮已中断";
 
     private final SandboxRecoveryService recovery;
@@ -122,12 +125,18 @@ public class OrphanedChatTurnService {
         }
     }
 
-    /** Whether the session's running turn is the one these commands carry, not a newer one. */
+    /**
+     * Whether the session's running turn is the one these commands carry, not a newer one. A command with
+     * the running turn's trace is its own (BE re-marks a recovered turn's start, so time alone can miss it).
+     * Otherwise, as for a multi-agent lane's command, which carries the lane's trace, the command must have
+     * been queued after the turn started: an older turn's command left in the queue never matches.
+     */
     static boolean sameTurn(RunningChatInfo info, List<OrphanedCommand> commands) {
         if (info == null || !Boolean.TRUE.equals(info.getRunning()) || info.getStartedAt() == null) {
             return false;
         }
         long startedAt = info.getStartedAt();
-        return commands.stream().anyMatch(command -> Math.abs(command.queuedAt() - startedAt) <= SAME_TURN_WINDOW_MS);
+        return commands.stream().anyMatch(command -> command.traceId() != null && command.traceId().equals(info.getTraceId())
+            || command.queuedAt() >= startedAt - CLOCK_SKEW_MS && command.queuedAt() - startedAt <= SAME_TURN_WINDOW_MS);
     }
 }
