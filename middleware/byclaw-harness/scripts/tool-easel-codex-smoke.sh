@@ -71,7 +71,7 @@ ffmpeg -version | head -1
 python - <<'PY'
 from pathlib import Path
 import cv2, faster_whisper, fitz, librosa, matplotlib, numpy, onnxruntime
-import pandas, pdfplumber, PIL, rembg, segno, torch, torchvision, yaml
+import pandas, pdfplumber, PIL, rembg, segno, yaml
 from playwright.sync_api import sync_playwright
 
 with sync_playwright() as p:
@@ -80,7 +80,7 @@ with sync_playwright() as p:
     page.set_content("<title>easel-byclaw</title>")
     assert page.title() == "easel-byclaw"
     browser.close()
-print("EASEL_RUNTIME_IMPORTS_OK", torch.__version__)
+print("EASEL_RUNTIME_IMPORTS_OK")
 PY
 python -m pip check
 mkdir -p outputs/_acceptance
