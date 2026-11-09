@@ -56,3 +56,22 @@ it('bounds a permanently pending request and allows a fresh manual retry', async
     jest.useRealTimers();
   }
 });
+
+it('keeps the resolved directory visible during a shared refresh and removes stopped desktops after it', async () => {
+  const running = [{ sandboxId: 'sandbox', status: 'RUNNING' }];
+  mockDirectory.mockResolvedValueOnce(running);
+  const store = useAppStore.getState();
+  await store.getSandboxesInfoUrl();
+  let finish!: (rows: unknown[]) => void;
+  mockDirectory.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    })
+  );
+  const pending = store.getSandboxesInfoUrl();
+  expect(store.getSandboxesInfoUrl()).toBe(pending);
+  expect(useAppStore.getState().sandboxesInfo).toEqual(running);
+  finish([]);
+  await pending;
+  expect(useAppStore.getState().sandboxesInfo).toEqual([]);
+});

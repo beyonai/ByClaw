@@ -3,6 +3,7 @@ import GlobalContext from '@/layout/components/provider/global';
 import ToolCall from '@/components/MessagesComp/ToolCall';
 import { EventEmitter$Cls } from '@/utils/eventEmitter';
 import { useDesktopWorkspace } from '@/utils/desktopWorkspace';
+import useAppStore from '@/models/common/useAppStore';
 import MainDrawer from '../index';
 
 jest.mock('@umijs/max', () => ({
@@ -13,6 +14,13 @@ jest.mock('@/components/DesktopWorkspace', () => ({
   __esModule: true,
   default: ({ owner }: { owner: string }) => <div data-testid="desktop-workspace">{owner}</div>,
 }));
+jest.mock('@/models/common/useAppStore', () => {
+  const store = jest.requireActual('zustand').create(() => ({
+    sandboxesInfo: [],
+    getSandboxesInfoUrl: jest.fn().mockResolvedValue([]),
+  }));
+  return { __esModule: true, default: store };
+});
 
 it('opens a tool desktop inside its application without replacing the enclosing drawer', () => {
   sessionStorage.clear();
@@ -26,7 +34,10 @@ it('opens a tool desktop inside its application without replacing the enclosing 
           message={{ sessionId: 'application-chat' }}
           messageListItemContent={{
             substance: { title: 'browser', status: '_DONE_' },
-            instanceRefs: [{ sandboxId: 'application-sandbox', instance: 'vnc' }],
+            instanceRefs: [
+              { sandboxId: 'application-sandbox', instance: 'vnc' },
+              { sandboxId: 'unavailable-sandbox', instance: 'vnc' },
+            ],
           }}
         />
         <MainDrawer />
@@ -40,6 +51,19 @@ it('opens a tool desktop inside its application without replacing the enclosing 
   );
   act(() => outerEmitter.emit('beyond-main-driver-open-type', { drawerType: application, title: 'Application' }));
   expect(screen.getByRole('region', { name: 'embedded application' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '查看桌面' })).not.toBeInTheDocument();
+  const desktop = {
+    userCode: 'user',
+    sandboxType: 'tools',
+    sandboxId: 'application-sandbox',
+    status: 'RUNNING',
+    instanceEndpoints: { vnc: '/proxy/8081' },
+  };
+  act(() => useAppStore.setState({ sandboxesInfo: [{ ...desktop, status: 'STOPPED' }] }));
+  expect(screen.queryByRole('button', { name: '查看桌面' })).not.toBeInTheDocument();
+  act(() => useAppStore.setState({ sandboxesInfo: [{ ...desktop, instanceEndpoints: {} }] }));
+  expect(screen.queryByRole('button', { name: '查看桌面' })).not.toBeInTheDocument();
+  act(() => useAppStore.setState({ sandboxesInfo: [desktop] }));
 
   fireEvent.click(screen.getByRole('button', { name: '查看桌面' }));
 
