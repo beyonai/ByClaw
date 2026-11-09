@@ -347,8 +347,10 @@ describe('MsgRendererV2 final answer presentation', () => {
             connectorError(1, 'image-generation-model'),
             connectorError(2, 'image-generation-model'),
             connectorError(3, 'speech-generation-model'),
+            connectorError(4, 'volcengine-digital-human'),
+            connectorError(5, 'volcengine-digital-human'),
           ],
-          messageList: [item(4, '最后一条对话内容')],
+          messageList: [item(6, '最后一条对话内容')],
         })}
         updateMessage={(value) => value}
       />
@@ -356,12 +358,15 @@ describe('MsgRendererV2 final answer presentation', () => {
 
     expect(screen.getAllByRole('button', { name: '配置文生图模型连接器' })).toHaveLength(1);
     expect(screen.getAllByRole('button', { name: '配置语音模型连接器' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: '需要配置火山数字人视频连接器' })).toHaveLength(1);
     const conversation = screen.getByText('最后一条对话内容');
     const actions = screen.getByRole('group', { name: '需要配置的连接器' });
     expect(conversation.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '配置文生图模型连接器' }));
     expect((listener.mock.calls[0][0] as CustomEvent).detail).toEqual({ connectorCode: 'image-generation-model' });
+    fireEvent.click(screen.getByRole('button', { name: '需要配置火山数字人视频连接器' }));
+    expect((listener.mock.calls[1][0] as CustomEvent).detail).toEqual({ connectorCode: 'volcengine-digital-human' });
     window.removeEventListener(CONNECTOR_AUTHORIZATION_REQUEST_EVENT, listener);
   });
 

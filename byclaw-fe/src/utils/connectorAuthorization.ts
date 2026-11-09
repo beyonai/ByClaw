@@ -5,6 +5,7 @@ export const CONNECTOR_AUTHORIZATION_REQUEST_EVENT = 'byclaw-open-connector-auth
 const MEDIA_CONNECTOR_ACTIONS = {
   'image-generation-model': 'connector.configureImage',
   'speech-generation-model': 'connector.configureSpeech',
+  'volcengine-digital-human': 'connector.configureDigitalHuman',
 } as const;
 
 export type MediaConnectorCode = keyof typeof MEDIA_CONNECTOR_ACTIONS;

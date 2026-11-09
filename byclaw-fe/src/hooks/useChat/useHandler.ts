@@ -9,7 +9,7 @@ import { assign, get, isPlainObject, isString, last, set, isNil, pick } from 'lo
 import { IMessageState, SSEEventStatus, SSEMessageType } from '@/constants/message';
 
 import { initAnswerMessage, initQueryMessage } from '@/utils/messgae';
-import { isVncToolMessage } from '@/utils/chatVnc';
+import { isDesktopOpeningToolMessage, isVncToolMessage } from '@/utils/chatVnc';
 import { isSameSessionId } from '@/utils/sessionId';
 import { isTextContentType } from '@/utils/messgae';
 
@@ -578,15 +578,19 @@ function useHandler(props: IProps) {
     }
     // Tool results omit input; the preceding message handler preserves it by orderId.
     const toolMessage = mergedMessage || incomingMessage;
-    const hasRefs = toolMessage?.content && Object.prototype.hasOwnProperty.call(toolMessage.content, 'instanceRefs');
-    if (!hasRefs && !isVncToolMessage(toolMessage)) return onionsProps;
-    if (hasRefs && !toolMessage?.content.instanceRefs?.length) return onionsProps;
+    // The legacy renderer can preserve input without merging the latest instance refs.
+    const instanceRefs = incomingMessage?.content?.instanceRefs ?? toolMessage?.content?.instanceRefs;
+    if (instanceRefs !== undefined) {
+      if (!instanceRefs.length || !isDesktopOpeningToolMessage(toolMessage)) return onionsProps;
+    } else if (!isVncToolMessage(toolMessage)) {
+      return onionsProps;
+    }
 
     const answerId = newAnswerMsg.messageId || newAnswerMsg.msgId;
     const toolId = get(sseRes, 'message.content.orderId') || get(sseRes, 'message.uuid') || 'browser';
     openVnc({
       key: `${answerId}:${toolId}`,
-      ...(hasRefs ? { instanceRefs: toolMessage?.content.instanceRefs } : {}),
+      ...(instanceRefs !== undefined ? { instanceRefs } : {}),
     });
 
     return onionsProps;

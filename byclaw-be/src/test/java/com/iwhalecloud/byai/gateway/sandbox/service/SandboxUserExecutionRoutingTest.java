@@ -356,6 +356,7 @@ class SandboxUserExecutionRoutingTest {
             .thenReturn("{\"defaultMode\":\"shared\",\"excludedUsers\":[]}");
         SharedSandboxGateway shared = mock(SharedSandboxGateway.class);
         when(shared.enabled()).thenReturn(true);
+        when(shared.executionAccess(any(), any(), any())).thenAnswer(call -> call.getArgument(2));
         ReflectionTestUtils.setField(service, "sharedSandboxGateway", shared);
         return shared;
     }

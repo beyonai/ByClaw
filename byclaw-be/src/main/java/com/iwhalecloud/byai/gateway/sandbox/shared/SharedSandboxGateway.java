@@ -75,6 +75,25 @@ public class SharedSandboxGateway {
         }
     }
 
+    /** Only the server-side connector execution path may request provider ingress credentials. */
+    public SandboxLaunchData executionAccess(String user, String service, SandboxLaunchData context) {
+        if (!policy.eligible(user) || context == null || context.getMappingId() == null
+            || context.getGeneration() == null) {
+            throw new IllegalStateException("Shared execution context is unavailable");
+        }
+        Map<String, Object> request = identity(user, service);
+        request.put("mappingId", context.getMappingId());
+        request.put("generation", context.getGeneration());
+        SandboxLaunchData access = json.convertValue(call("executionAccess", request), SandboxLaunchData.class);
+        if (access == null || !Objects.equals(context.getMappingId(), access.getMappingId())
+            || !Objects.equals(context.getGeneration(), access.getGeneration())
+            || !Objects.equals(context.getSandboxId(), access.getSandboxId())
+            || !Objects.equals(context.getEndpoint(), access.getEndpoint())) {
+            throw new IllegalStateException("Shared execution context changed");
+        }
+        return access;
+    }
+
     /** Return only user-facing preparation state; never expose NAS bindings or other users. */
     public Map<String, Object> userStorageStatus(String user) {
         if (!policy.userNasEnabled(user, DSH_SERVICE)) return Map.of("enabled", false, "ready", true, "state", "LOGICAL");

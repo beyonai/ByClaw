@@ -71,11 +71,11 @@ const runtime = new ByClawDshSessionRuntime({
     sessions: { get(id) { return id === session.id ? session : id === child.id ? child : undefined } },
   },
   agents: { get(id) { return id === agent.id ? agent : undefined } },
-  logger: { warn(message) { warnings.push(message) } },
+  logger: { info() {}, warn(message) { warnings.push(message) } },
 }, {
   byRoot: workspace, stateDir: join(workspace, 'teams'), agentTemplateDir: workspace,
   sourceAgentType: 'BYCLAW_DSH', workspaceRegistry: new ByClawSessionWorkspaceRegistry(),
-  sessionMetadata: { get() { return { binding: { kind: 'main' } } } },
+  sessionMetadata: { get() { return { binding: { kind: 'main' }, identity: { cwd: workspace } } } },
   resolveModel: async () => ({ provider: 'test', model: 'test' }),
   emitter: { async emitChunk(...args) { output.push(args) } },
 })
@@ -100,7 +100,9 @@ try {
   await assert.rejects(runtime.ask(command('failed-answer'), context), /model failed mid-turn/)
   assert.ok(output.some(([, , event, options]) => options.status === '_ERROR_' && event.content
     && event.metadata.error_domain === 'MODEL' && event.metadata.error_code === 'AUTH'))
-  assert.deepEqual(warnings, [])
+  assert.equal(warnings.length, 3)
+  assert.ok(warnings.every(message => message.startsWith('DSH request has no project_id;')),
+    'private-session fixtures use the session workspace and must not emit other warnings')
 } finally {
   await runtime.close()
   await rm(workspace, { recursive: true, force: true })

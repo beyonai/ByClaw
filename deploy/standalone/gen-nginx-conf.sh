@@ -6,6 +6,8 @@
 # Supports per-env override: if nginx-standalone.conf.tpl exists alongside
 # the .env file, it takes precedence over the default template.
 #
+set -e
+
 cd "$(dirname "$0")"
 
 ENV_FILE="../../.env"
@@ -29,8 +31,35 @@ fi
 if [ ! -f "$ENV_FILE" ]; then
     echo "Warning: $ENV_FILE not found, using defaults."
 else
+    # .env 的 ENC(...) 不是 Shell 赋值语法，先复用部署解密器再加载。
+    # 使用本轮私有文件，避免覆盖或清理 Compose 正在使用的 .env.runtime。
+    NGINX_ENV_LOAD="$ENV_FILE"
+    NGINX_ENV_RUNTIME=""
+    cleanup_nginx_env() {
+        if [ -n "$NGINX_ENV_RUNTIME" ]; then
+            rm -f "$NGINX_ENV_RUNTIME"
+        fi
+    }
+    trap cleanup_nginx_env 0
+    trap 'exit 130' 2
+    trap 'exit 143' 15
+    if grep -q 'ENC(' "$ENV_FILE"; then
+        NGINX_ENV_RUNTIME="$(mktemp "${TMPDIR:-/tmp}/byclaw-nginx-env.XXXXXX")"
+        chmod 600 "$NGINX_ENV_RUNTIME"
+        if ! (
+            # 被 source 的解密器优先读取位置参数，不能继承生成器自己的参数。
+            set --
+            _ENV_DECRYPT_SRC="$ENV_FILE"
+            _ENV_DECRYPT_DST="$NGINX_ENV_RUNTIME"
+            . ../env-decrypt.sh
+        ); then
+            echo "Error: Nginx environment decryption failed; existing config retained." >&2
+            exit 1
+        fi
+        NGINX_ENV_LOAD="$NGINX_ENV_RUNTIME"
+    fi
     set -a
-    . "$ENV_FILE"
+    . "$NGINX_ENV_LOAD"
     set +a
 fi
 
