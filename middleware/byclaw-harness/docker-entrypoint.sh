@@ -65,16 +65,34 @@ if [[ "${1:-}" == tools ]]; then
 fi
 
 # Heap ceiling (MiB) for the shared host: 3/4 of the memory this container may use, the rest left to its ssh,
-# ws-proxy and CodeGraph children. Arguments: cgroup v2 memory.max, cgroup v1 memory.limit_in_bytes, meminfo.
-# "max" or v1's huge "unlimited" value means no limit; physical memory caps either. Fails when nothing is readable.
+# ws-proxy and CodeGraph children. Arguments: cgroup mount root, the process's cgroup file, meminfo.
+# The limit is the lowest one from the process's own cgroup (per the cgroup file; "/" when it is unreadable) up to
+# the mount root, cgroup v2 first, else the v1 memory controller; a level that does not exist under the mount root
+# (v1 without a cgroup namespace) is skipped. "max" or v1's huge "unlimited" value means no limit at that level;
+# physical memory caps the result. Fails when nothing is readable.
 multi_host_heap_mb() {
-    local limit='' value='' total=''
-    for file in "$1" "$2"; do
-        [[ -r "${file}" ]] || continue
-        read -r value <"${file}" || true
-        # cgroup v1 reports "no limit" as a page-rounded 2^63 (19 digits); like v2's "max", that is no limit.
-        if [[ "${value}" =~ ^[0-9]{1,18}$ ]]; then limit=${value}; break; fi
-        [[ "${value}" == max || "${value}" =~ ^[0-9]+$ ]] && break
+    local limit='' value='' total='' base='' name='' dir='' found=''
+    for hierarchy in v2 v1; do
+        if [[ "${hierarchy}" == v2 ]]; then
+            base=$1 name=memory.max dir=/
+            [[ -r "$2" ]] && dir=$(awk -F: '$1 == "0" && $2 == "" { print $3; exit }' "$2")
+        else
+            base=$1/memory name=memory.limit_in_bytes dir=/
+            [[ -r "$2" ]] && dir=$(awk -F: '$2 ~ /(^|,)memory(,|$)/ { print $3; exit }' "$2")
+        fi
+        [[ "${dir}" == /* ]] || continue
+        dir=${dir%/}
+        while :; do
+            if [[ -r "${base}${dir}/${name}" ]]; then
+                found=1
+                read -r value <"${base}${dir}/${name}" || true
+                # cgroup v1 reports "no limit" as a page-rounded 2^63 (19 digits); like v2's "max", that is no limit.
+                if [[ "${value}" =~ ^[0-9]{1,18}$ ]] && { [[ -z "${limit}" ]] || ((value < limit)); }; then limit=${value}; fi
+            fi
+            [[ -n "${dir}" ]] || break
+            dir=${dir%/*}
+        done
+        [[ -n "${found}" ]] && break
     done
     if [[ -r "$3" ]]; then
         value=$(awk '$1 == "MemTotal:" { print $2; exit }' "$3")
@@ -97,7 +115,7 @@ if [[ "${1:-}" == multi-host ]]; then
     # instead of being killed by its memory limit first; with nothing readable, Node keeps its own default.
     # A flag already present in NODE_OPTIONS wins. The flags go on the host's own command line, not into
     # NODE_OPTIONS: the host's Node children (ws-proxy and others) must not inherit its heap size.
-    heap_mb=$(multi_host_heap_mb /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory/memory.limit_in_bytes /proc/meminfo) || heap_mb=''
+    heap_mb=$(multi_host_heap_mb /sys/fs/cgroup /proc/self/cgroup /proc/meminfo) || heap_mb=''
     host_node_flags=()
     for flag in ${heap_mb:+--max-old-space-size=${heap_mb}} --experimental-async-context-frame --max-semi-space-size=64; do
         [[ " ${NODE_OPTIONS:-} " == *" ${flag%%=*}"[=\ ]* ]] || host_node_flags+=("${flag}")

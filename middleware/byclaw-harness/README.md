@@ -263,8 +263,8 @@ look up each delegation tool name once instead of every definition in the
 process. Tests: `node --test scripts/tool-lookup-021-patch.test.mjs
 scripts/delegation-names-021-patch.test.mjs`. The entrypoint's `multi-host` mode
 also adds `--experimental-async-context-frame --max-semi-space-size=64` and a
-heap ceiling of 3/4 of the memory the container may use (cgroup limit, capped by
-physical memory; no flag when neither is readable) to `NODE_OPTIONS`; a flag
+heap ceiling of 3/4 of the memory the container may use (the lowest cgroup limit
+from its own cgroup up, capped by physical memory; no flag when neither is readable) to `NODE_OPTIONS`; a flag
 already set there wins. Test: `node --test scripts/multi-host-heap.test.mjs`.
 It starts the host under `byclaw-pid1` (`scripts/byclaw-pid1.py`), a child
 subreaper that forwards signals and reaps orphans: Node does not, and every

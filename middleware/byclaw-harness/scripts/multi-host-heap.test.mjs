@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
@@ -18,12 +18,22 @@ async function fixture(t) {
   return dir
 }
 
-async function heap(t, { v2, v1, memKb }) {
+// `files` maps paths under a fixture cgroup mount root to limits; `cgroup` is the process's cgroup file
+// (default: root of both hierarchies, as inside a cgroup namespace; null: unreadable).
+async function heap(t, { v2, v1, memKb, files = {}, cgroup = '0::/\n5:memory:/\n' }) {
   assert.ok(fn, 'entrypoint must define multi_host_heap_mb')
   const dir = await fixture(t)
-  const paths = [join(dir, 'memory.max'), join(dir, 'memory.limit_in_bytes'), join(dir, 'meminfo')]
-  if (v2 !== undefined) await writeFile(paths[0], `${v2}\n`)
-  if (v1 !== undefined) await writeFile(paths[1], `${v1}\n`)
+  const root = join(dir, 'cgroup')
+  const paths = [root, join(dir, 'self-cgroup'), join(dir, 'meminfo')]
+  const limits = { ...files }
+  if (v2 !== undefined) limits['memory.max'] = v2
+  if (v1 !== undefined) limits['memory/memory.limit_in_bytes'] = v1
+  await mkdir(root)
+  for (const [file, value] of Object.entries(limits)) {
+    await mkdir(dirname(join(root, file)), { recursive: true })
+    await writeFile(join(root, file), `${value}\n`)
+  }
+  if (cgroup !== null) await writeFile(paths[1], cgroup)
   if (memKb !== undefined) await writeFile(paths[2], `MemTotal:       ${memKb} kB\nMemFree:        1 kB\n`)
   const r = spawnSync('bash', ['-c', `set -Eeuo pipefail\n${fn}\nmulti_host_heap_mb "$@"`, 'heap', ...paths], { encoding: 'utf8' })
   return { status: r.status, out: r.stdout.trim(), err: r.stderr }
@@ -52,6 +62,27 @@ test('a limit above physical memory is capped by it', async (t) => {
   assert.equal((await heap(t, { v2: 64 * GiB, memKb: kb(8 * GiB) })).out, '6144')
 })
 
+test('the process\'s own cgroup and every level above it count, not only the mount root', async (t) => {
+  const memKb = kb(16 * GiB)
+  // A child cgroup with its own limit inside the namespace.
+  assert.equal((await heap(t, { memKb, cgroup: '0::/host\n', files: { 'host/memory.max': 2 * GiB } })).out, '1536')
+  // An ancestor's limit binds a child without one.
+  assert.equal((await heap(t, { memKb, cgroup: '0::/a/b\n', files: { 'a/memory.max': GiB, 'a/b/memory.max': 'max' } })).out, '768')
+  assert.equal((await heap(t, { memKb, cgroup: '0::/a/b\n', v2: GiB, files: { 'a/b/memory.max': 4 * GiB } })).out, '768')
+  // No cgroup namespace: the mount shows the whole tree, and its root has no memory.max.
+  const scope = 'system.slice/docker-0123.scope'
+  assert.equal((await heap(t, { memKb, cgroup: `0::/${scope}\n`, files: { 'system.slice/memory.max': 'max', [`${scope}/memory.max`]: 4 * GiB } })).out, '3072')
+})
+
+test('cgroup v1 without a namespace: levels missing under the mount root are skipped', async (t) => {
+  assert.equal((await heap(t, { v1: 2 * GiB, memKb: kb(16 * GiB), cgroup: '9:memory:/docker/0123\n' })).out, '1536')
+  assert.equal((await heap(t, { v1: 2 * GiB, memKb: kb(16 * GiB), cgroup: '9:cpu,memory:/docker/0123\n0::/\n' })).out, '1536', 'hybrid: v2 without memory.max falls through to v1')
+})
+
+test('an unreadable cgroup file reads the mount root', async (t) => {
+  assert.equal((await heap(t, { v2: 4 * GiB, memKb: kb(16 * GiB), cgroup: null })).out, '3072')
+})
+
 test('nothing readable or a nonsense limit gives no value (Node keeps its default)', async (t) => {
   assert.deepEqual(await heap(t, {}), { status: 1, out: '', err: '' })
   assert.equal((await heap(t, { v2: 'garbage' })).status, 1)
@@ -70,7 +101,7 @@ async function entrypointOptions(t, env) {
 }
 
 test('the multi-host entrypoint passes the detected heap and keeps an explicit one', { skip: process.getuid?.() === 0 && 'root takes the privilege-dropping path' }, async (t) => {
-  const detected = spawnSync('bash', ['-c', `set -Eeuo pipefail\n${fn}\nmulti_host_heap_mb /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory/memory.limit_in_bytes /proc/meminfo`], { encoding: 'utf8' }).stdout.trim()
+  const detected = spawnSync('bash', ['-c', `set -Eeuo pipefail\n${fn}\nmulti_host_heap_mb /sys/fs/cgroup /proc/self/cgroup /proc/meminfo`], { encoding: 'utf8' }).stdout.trim()
   const { flags: options, inherited } = await entrypointOptions(t, {})
   assert.match(options, /--experimental-async-context-frame/)
   assert.match(options, /--max-semi-space-size=64/)
