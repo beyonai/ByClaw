@@ -1,0 +1,147 @@
+# Build from the ByClaw repository root. The browser parent supplies the tested
+# SSH, VNC, Chromium and byCLI transport required by byclaw.tool-sandbox/v1.
+ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
+FROM ${BROWSER_IMAGE} AS tools-easel-codex
+USER root
+ARG TARGETARCH
+ARG UV_VERSION=0.13.7
+ARG CODEX_VERSION=0.167.0
+ARG REDBOOK_VERSION=0.8.1
+ARG WECHATSYNC_VERSION=1.1.0
+RUN test "${TARGETARCH}" = amd64 \
+    && . /etc/os-release && test "$ID" = debian && test "$VERSION_ID" = 13
+
+# Every package and model download uses a domestic mirror. Playwright keeps its
+# native path under /ms-playwright so the base browser runtime remains usable.
+ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    npm_config_registry=https://registry.npmmirror.com \
+    npm_config_replace_registry_host=always \
+    COREPACK_NPM_REGISTRY=https://registry.npmmirror.com \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple PIP_EXTRA_INDEX_URL= \
+    UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple UV_EXTRA_INDEX_URL= \
+    UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy \
+    npm_config_disturl=https://npmmirror.com/mirrors/node \
+    npm_package_config_node_gyp_dist_url=https://npmmirror.com/mirrors/node \
+    PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright \
+    PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    NEXT_TELEMETRY_DISABLED=1 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+    PATH=/opt/easel-venv/bin:/opt/nvm/current/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    PYTHONPATH=/by/Easel \
+    EASEL_AGENT_RUNTIME=codex \
+    CODEX_HOME=/by/.codex \
+    BYCLAW_EASEL_SOURCE_COMMIT=5c12e42e9019d276368130b52385b770749ffa6f
+
+COPY middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh /tmp/configure-cn-sources.sh
+RUN set -eux; \
+    bash /tmp/configure-cn-sources.sh; \
+    apt-get -o APT::Update::Error-Mode=any update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential pkg-config python3-dev python3-pip python3-venv \
+        ffmpeg fd-find ghostscript imagemagick jq libgl1 libgomp1 libsm6 \
+        libxext6 libxrender1 pandoc poppler-utils ripgrep sqlite3; \
+    ln -sf /usr/bin/fdfind /usr/local/bin/fd; \
+    rm -rf /var/lib/apt/lists/* /root/.npm /root/.cache /tmp/configure-cn-sources.sh
+
+COPY middleware/byclaw-harness/tool-sandbox/assets/easel-source-5c12e42.tar.gz* /tmp/
+RUN set -eux; \
+    cd /tmp; \
+    sha256sum -c easel-source-5c12e42.tar.gz.sha256; \
+    install -d -o root -g root /opt/easel-source; \
+    tar -xzf easel-source-5c12e42.tar.gz -C /opt/easel-source; \
+    test -f /opt/easel-source/pyproject.toml; \
+    test -f /opt/easel-source/easel/cli.py; \
+    test -d /opt/easel-source/skills/builtin; \
+    rm -f /tmp/easel-source-5c12e42.tar.gz*
+
+# Install Easel into an owned venv. CPU PyTorch is taken from Aliyun's PyTorch
+# mirror; its ordinary Python dependencies continue to resolve from Tsinghua.
+RUN set -eux; \
+    python3 -m venv /opt/easel-venv; \
+    . /opt/easel-venv/bin/activate; \
+    python -m pip install --upgrade pip setuptools wheel; \
+    python -m pip install --prefer-binary -e /opt/easel-source; \
+    python -m pip install \
+        "pdfplumber==0.11.10" \
+        "PyYAML==6.0.3" \
+        "qrcode[pil]==8.2" \
+        "CairoSVG==2.9.1" \
+        "openpyxl==3.1.5" \
+        "pytest==9.2.0" \
+        "ruff==0.17.4" \
+        "uv==${UV_VERSION}"; \
+    python -m pip install --no-deps \
+        --index-url https://mirrors.aliyun.com/pytorch-wheels/cpu/ \
+        "torch==2.9.1+cpu" "torchvision==0.24.1+cpu"; \
+    python -m pip install "sympy>=1.13.3" jinja2 filelock; \
+    python -m pip check; \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0 \
+        python -m playwright install chromium; \
+    python - <<'PY'
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True, args=['--no-sandbox'])
+    page = browser.new_page()
+    page.set_content('<title>easel</title>')
+    assert page.title() == 'easel'
+    assert Path(p.chromium.executable_path).is_file()
+    browser.close()
+PY
+
+# Install Codex and publishing CLIs from npmmirror.
+RUN set -eux; \
+    npm install -g --registry=https://registry.npmmirror.com "@openai/codex@${CODEX_VERSION}"; \
+    npm install -g --registry=https://registry.npmmirror.com --ignore-scripts \
+        "@lucasygu/redbook@${REDBOOK_VERSION}"; \
+    npm install -g --registry=https://registry.npmmirror.com "@wechatsync/cli@${WECHATSYNC_VERSION}"; \
+    codex --version; \
+    redbook --version; \
+    wechatsync --version; \
+    npm cache clean --force
+
+# Install the Web production bundle and the exact-locked Remotion dependency set.
+# Remotion uses the Chromium already supplied by the ByClaw browser parent rather
+# than downloading an unpinned browser from an overseas CDN.
+RUN set -eux; \
+    cd /opt/easel-source/web/frontend; \
+    npm ci --ignore-scripts --registry=https://registry.npmmirror.com \
+        --replace-registry-host=always --no-audit --no-fund; \
+    npm run build; \
+    rm -rf node_modules; \
+    cd /opt/easel-source/skills/builtin/video-production/vendor/video-pipeline-sdk/deps/remotion; \
+    npm ci --ignore-scripts --registry=https://registry.npmmirror.com \
+        --replace-registry-host=always --no-audit --no-fund; \
+    printf '%s\n' \
+        "import {Config} from '@remotion/cli/config';" \
+        "Config.setBrowserExecutable(process.env.REMOTION_BROWSER_EXECUTABLE || '/usr/local/bin/byclaw-playwright-chromium');" \
+        > remotion.config.ts; \
+    npx --no-install remotion versions; \
+    npm cache clean --force
+
+COPY --chmod=0755 middleware/byclaw-harness/scripts/easel-codex-entrypoint.py /usr/local/bin/byclaw-easel-codex-entrypoint
+COPY middleware/byclaw-harness/tool-sandbox/easel-codex.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
+COPY middleware/byclaw-harness/tool-sandbox/easel-codex.source.json /etc/byclaw-tool-sandbox/easel-codex.source.json
+
+RUN set -eux; \
+    ln -sfn /usr/local/bin/byclaw-easel-codex-entrypoint /usr/local/bin/byclaw-dsh-entrypoint; \
+    python3 -m py_compile /usr/local/bin/byclaw-easel-codex-entrypoint; \
+    su -s /bin/sh byclaw -c 'node --version && npm --version && codex --version'; \
+    /opt/easel-venv/bin/python -c \
+        'import easel, fastapi, cv2, fitz, librosa, matplotlib, numpy, onnxruntime, pandas, pdfplumber, PIL, playwright, rembg, segno, torch, torchvision, yaml; print(easel.__version__, torch.__version__)'; \
+    node -e 'const m=require("/etc/byclaw-tool-sandbox/capabilities.json"); if(m.purpose!=="easel-codex")process.exit(1)'; \
+    env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_|BYCLAW_TOOL_ENV_HOST_KEY|BYCLAW_TOOL_ENV_AUTHORIZED_KEY)=' \
+        >/etc/byclaw-tool-env.session-env; \
+    grep -qx 'EASEL_AGENT_RUNTIME=codex' /etc/byclaw-tool-env.session-env; \
+    grep -qx 'CODEX_HOME=/by/.codex' /etc/byclaw-tool-env.session-env; \
+    chmod 0644 /etc/byclaw-tool-env.session-env
+
+WORKDIR /by
+EXPOSE 22 8022 8081 19825
+LABEL io.byclaw.tool-sandbox.contract="byclaw.tool-sandbox/v1" \
+      io.byclaw.tool-sandbox.purpose="easel-codex" \
+      io.byclaw.tool-sandbox.easel.source.commit="5c12e42e9019d276368130b52385b770749ffa6f"
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/byclaw-easel-codex-entrypoint"]
+CMD ["tools"]
