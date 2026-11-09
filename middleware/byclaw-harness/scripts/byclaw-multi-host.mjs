@@ -362,6 +362,9 @@ export function disabledRule(row, lists = [DISABLED_BY_DESIGN, DISABLED_UNTIL_MU
  * @param tables - override tables (tests).
  */
 export function composeUserOverlays(entries, user, home, spec, tables = {}) {
+  // What the database keeps is the context's own: a managed context is one person in one
+  // enterprise (contextKey), and the same user code may have one in another enterprise.
+  const owner = user
   if (spec.managed) user = spec.userCode
   const chatOnly = spec.toolEnvBackend === 'none'
   const rowOverlays = tables.rowOverlays ?? USER_ROW_OVERLAYS
@@ -391,11 +394,11 @@ export function composeUserOverlays(entries, user, home, spec, tables = {}) {
   // Session logs move to the database for listed users; their old files stay on disk, unread.
   if (spec.sessionDb !== undefined && rows.has('session-persistence-db') && rows.has('session-persistence-jsonl')) {
     overlays.push({ id: 'session-persistence-jsonl', disabled: true })
-    overlays.push({ id: 'session-persistence-db', disabled: false, config: { connectionString: spec.sessionDb.url, userCode: user } })
+    overlays.push({ id: 'session-persistence-db', disabled: false, config: { connectionString: spec.sessionDb.url, userCode: owner } })
   }
   // Their storage units (workspace, session roots, projection cache, schedules) follow them.
   if (spec.sessionDb !== undefined && rows.has('storage-db') && rows.has('storage-domain')) {
-    overlays.push({ id: 'storage-db', disabled: false, config: { connectionString: spec.sessionDb.url, userCode: user } })
+    overlays.push({ id: 'storage-db', disabled: false, config: { connectionString: spec.sessionDb.url, userCode: owner } })
     overlays.push({ id: 'storage-domain', config: { ...(rows.get('storage-domain').config ?? {}), backend: 'db' } })
   }
   // Their image attachments get a copy in their own space through BE, which the byclaw-be backend reaches.
@@ -1448,11 +1451,12 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
   const { home, workspace, profile: dir, runtimeDir } = userContextPaths(config, user, request)
   await verifyUserStorageHome(config, user, request)
   await mkdir(home, { recursive: true, mode: 0o700 })
-  // A managed context is keyed by contextKey; what is stored for the person behind it is keyed by user code.
-  const owner = request.managed ? request.userCode : user
+  // BYCLAW_SESSION_DB_USERS lists user codes; the rows are keyed by the context (`user`), which
+  // for a managed host is one person in one enterprise, like its home and its tool sandbox.
+  const listed = request.managed ? request.userCode : user
   // Credentials and SSH identities come back from the database before any plugin reads them.
-  const durable = config.hostFiles !== undefined && sessionDbFor(config, owner) !== undefined
-    ? new DurableFiles({ ...config.hostFiles, user: owner, home, log })
+  const durable = config.hostFiles !== undefined && sessionDbFor(config, listed) !== undefined
+    ? new DurableFiles({ ...config.hostFiles, user, home, log })
     : undefined
   if (durable !== undefined) {
     await durable.restore()
@@ -1485,7 +1489,7 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
       toolEnvCatalog: config.toolEnvCatalog,
       toolEnvBe: config.toolEnvBe,
       toolEnvIdleMs: config.toolEnvIdleMs,
-      sessionDb: sessionDbFor(config, owner),
+      sessionDb: sessionDbFor(config, listed),
       publicUrl: userPublicUrl(config.publicBase, user),
       workerInstance: randomBytes(4).toString('hex'),
     }

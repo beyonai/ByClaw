@@ -1142,7 +1142,7 @@ test('the service secret as a value never reaches a launch environment', () => {
   assert.equal(values.PATH, '/bin')
 })
 
-test('managed hosts keep users in the database under their user code, not the context key', () => {
+test('managed hosts list users by user code and keep each context apart in the database', () => {
   const config = host.readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_MANAGED: '1', BYCLAW_MULTI_HOST_ID: '0f8c2a6e-1b2c-4d5e-8f90-123456789abc',
     BYCLAW_MULTI_HOST_CAPACITY: '4', BYCLAW_SESSION_DB_URL: 'postgres://db', BYCLAW_SESSION_DB_USERS: 'u1' })
   assert.equal(config.managed, true)
@@ -1150,9 +1150,17 @@ test('managed hosts keep users in the database under their user code, not the co
   const entries = [
     { id: 'session-persistence-jsonl', name: 'jsonl', config: { root: '/x' } },
     { id: 'session-persistence-db', name: 'db', disabled: true },
+    { id: 'storage-domain', name: 'domain', config: {} },
+    { id: 'storage-db', name: 'storage', disabled: true },
   ]
-  const rows = composeUserOverlays(entries, 'ctx-7f3a', '/data/contexts/ctx-7f3a/dsh-home', { managed: true, userCode: 'u1', sessionDb: host.sessionDbFor(config, 'u1') })
-  assert.deepEqual(rows.find(row => row.id === 'session-persistence-db'), { id: 'session-persistence-db', disabled: false, config: { connectionString: 'postgres://db', userCode: 'u1' } })
+  // The same person in two enterprises: two contexts, one user code on the list.
+  for (const context of ['ctx-7f3a', 'ctx-91bc']) {
+    const rows = composeUserOverlays(entries, context, `/data/contexts/${context}/dsh-home`, { managed: true, userCode: 'u1', sessionDb: host.sessionDbFor(config, 'u1') })
+    for (const id of ['session-persistence-db', 'storage-db']) {
+      assert.deepEqual(rows.find(row => row.id === id), { id, disabled: false, config: { connectionString: 'postgres://db', userCode: context } })
+    }
+  }
+  assert.equal(host.sessionDbFor(config, 'ctx-7f3a'), undefined)
 })
 
 test('the session database password never reaches a launch environment', () => {
