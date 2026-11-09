@@ -50,11 +50,10 @@ class EaselCodexSandboxContractTest(unittest.TestCase):
         self.assertIn('test "${TARGETARCH}" = amd64', dockerfile)
         self.assertIn('registry.npmmirror.com', dockerfile)
         self.assertIn('pypi.tuna.tsinghua.edu.cn', dockerfile)
-        self.assertIn('mirrors.aliyun.com/pytorch-wheels/cpu', dockerfile)
         self.assertIn('npmmirror.com/mirrors/playwright', dockerfile)
         self.assertIn('sha256sum -c easel-source-5c12e42.tar.gz.sha256', dockerfile)
         self.assertNotIn('git clone', dockerfile)
-        self.assertNotIn('download.pytorch.org', dockerfile)
+        self.assertNotIn('torch', dockerfile.lower())
         self.assertNotIn('registry.npmjs.org', dockerfile)
         self.assertNotIn('openclaw', dockerfile.lower())
 

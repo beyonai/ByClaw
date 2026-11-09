@@ -55,8 +55,7 @@ RUN set -eux; \
     test -d /opt/easel-source/skills/builtin; \
     rm -f /tmp/easel-source-5c12e42.tar.gz*
 
-# Install Easel into an owned venv. CPU PyTorch is taken from Aliyun's PyTorch
-# mirror; its ordinary Python dependencies continue to resolve from Tsinghua.
+# Install Easel and its required Python dependencies into an owned venv.
 RUN set -eux; \
     python3 -m venv /opt/easel-venv; \
     . /opt/easel-venv/bin/activate; \
@@ -71,10 +70,6 @@ RUN set -eux; \
         "pytest==9.2.0" \
         "ruff==0.17.4" \
         "uv==${UV_VERSION}"; \
-    python -m pip install --no-deps \
-        --index-url https://mirrors.aliyun.com/pytorch-wheels/cpu/ \
-        "torch==2.9.1+cpu" "torchvision==0.24.1+cpu"; \
-    python -m pip install "sympy>=1.13.3" jinja2 filelock; \
     python -m pip check; \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0 \
         python -m playwright install chromium; \
@@ -129,7 +124,7 @@ RUN set -eux; \
     python3 -m py_compile /usr/local/bin/byclaw-easel-codex-entrypoint; \
     su -s /bin/sh byclaw -c 'node --version && npm --version && codex --version'; \
     /opt/easel-venv/bin/python -c \
-        'import easel, fastapi, cv2, fitz, librosa, matplotlib, numpy, onnxruntime, pandas, pdfplumber, PIL, playwright, rembg, segno, torch, torchvision, yaml; print(easel.__version__, torch.__version__)'; \
+        'import easel, fastapi, cv2, fitz, librosa, matplotlib, numpy, onnxruntime, pandas, pdfplumber, PIL, playwright, rembg, segno, yaml; print(easel.__version__)'; \
     node -e 'const m=require("/etc/byclaw-tool-sandbox/capabilities.json"); if(m.purpose!=="easel-codex")process.exit(1)'; \
     env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_|BYCLAW_TOOL_ENV_HOST_KEY|BYCLAW_TOOL_ENV_AUTHORIZED_KEY)=' \
         >/etc/byclaw-tool-env.session-env; \
