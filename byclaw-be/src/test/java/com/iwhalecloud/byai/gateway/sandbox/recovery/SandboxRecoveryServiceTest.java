@@ -119,4 +119,48 @@ class SandboxRecoveryServiceTest {
         assertThat(audit.getValue()).containsEntry("outcome", "FAILED");
         assertThat(audit.getValue().get("error")).doesNotContain("private", "redis://");
     }
+
+    void pendingInQueue(SandboxRecoveryStore.Message pending) {
+        when(store.queuesForStream(stream)).thenReturn(List.of(new SandboxRecoveryStore.Queue(stream, group, "COMMAND", 1, null)));
+        when(store.messages(stream, group, "PENDING", null)).thenReturn(new SandboxRecoveryStore.MessagePage(List.of(pending), null));
+    }
+    @Test void findsTheCommandsOfASessionLeftByADeadWorker() {
+        pendingInQueue(message(120000, payload()));
+        var found = service.orphanedCommands("test-user", "101", 60000);
+        assertThat(found).singleElement().satisfies(command -> {
+            assertThat(command.sessionId()).isEqualTo("101");
+            assertThat(command.userCode()).isEqualTo("test-user");
+            assertThat(command.queuedAt()).isEqualTo(1792367536149L);
+        });
+        assertThat(service.orphanedCommands("test-user", "999", 60000)).isEmpty();
+    }
+    @Test void aCommandThatMayStillRunKeepsTheSessionRunning() {
+        pendingInQueue(message(120000, payload()));
+        when(store.workerOnline("old-worker")).thenReturn(true);
+        assertThat(service.orphanedCommands("test-user", "101", 60000)).isEmpty();
+        when(store.workerOnline("old-worker")).thenReturn(false);
+        // Pending for less than the caller's wait: a returning worker may still reclaim it.
+        assertThat(service.orphanedCommands("test-user", "101", 600000)).isEmpty();
+    }
+    @Test void theSweepLooksOnlyAtUsersSharedCommandQueues() {
+        String other = Constants.QueueNames.ctrlStream("SOME_SERVICE");
+        when(store.queues("0")).thenReturn(new SandboxRecoveryStore.QueuePage(List.of(
+            new SandboxRecoveryStore.Queue(stream, group, "COMMAND", 1, null),
+            new SandboxRecoveryStore.Queue(other, group, "COMMAND", 1, null)), "0"));
+        when(store.messages(stream, group, "PENDING", null))
+            .thenReturn(new SandboxRecoveryStore.MessagePage(List.of(message(120000, payload())), null));
+        assertThat(service.orphanedCommands(60000)).singleElement()
+            .satisfies(command -> assertThat(command.stream()).isEqualTo(stream));
+        verify(store, never()).messages(eq(other), any(), any(), any());
+    }
+    @Test void anOrphanedCommandIsDismissedWithAnAudit() {
+        pendingInQueue(message(120000, payload()));
+        var command = service.orphanedCommands("test-user", "101", 60000).getFirst();
+        when(store.acknowledge(stream, group, command.message())).thenReturn(true);
+        assertThat(service.dismissOrphaned(command, "执行宿主已离线")).isTrue();
+        verify(store).audit(eq(stream), eq(group), eq(id), argThat(a -> "system".equals(a.get("operator"))
+            && "AUTO_DISMISS".equals(a.get("action")) && "DISMISSED".equals(a.get("outcome"))));
+        when(store.acknowledge(stream, group, command.message())).thenReturn(false);
+        assertThat(service.dismissOrphaned(command, "执行宿主已离线")).isFalse();
+    }
 }

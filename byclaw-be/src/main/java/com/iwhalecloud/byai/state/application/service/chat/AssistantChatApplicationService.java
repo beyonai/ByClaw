@@ -372,13 +372,45 @@ public class AssistantChatApplicationService {
         stopChat(stopChatDto, true);
     }
 
+    /**
+     * 停止执行者已离线的一轮（执行它的 Worker 已死亡、该用户也没有在线 Worker）：按用户停止的方式收尾，
+     * 计划注明原因；不会再有终态事件回来，所以随后直接释放运行态，会话可以接收新消息。
+     *
+     * @param sessionId 会话 ID
+     */
+    public void stopOrphanedChat(Long sessionId) {
+        if (sessionId == null) {
+            return;
+        }
+        RunningChatInfo runningInfo = runningOutputStreamRegistry.getRunning(sessionId);
+        Long answerId = runningInfo == null ? null : runningInfo.getModelAnswerMessageId();
+        String traceId = runningInfo == null ? null : runningInfo.getTraceId();
+        StopChatDto stopChatDto = new StopChatDto();
+        stopChatDto.setSessionId(sessionId);
+        stopChat(stopChatDto, false, "WORKER_LOST", "执行宿主已离线，本轮已中断");
+        // 终态事件不会再来：在此结束该轮的会话监听上下文，否则下一轮完成时仍把它当作同会话的运行中轮次，
+        // 既不停止监听也不释放运行态。
+        ChatProcessContext orphaned = traceId == null || outputStreamManager == null ? null
+            : outputStreamManager.getContext(String.valueOf(sessionId), traceId);
+        if (orphaned != null && sessionStreamManager != null) {
+            sessionStreamManager.completeSessionTurn(orphaned);
+        }
+        Long messageId = answerId != null ? answerId : stopChatDto.getMessageId();
+        runningOutputStreamRegistry.release(sessionId, messageId);
+        runningChatSnapshotService.delete(sessionId, messageId);
+    }
+
     private void stopChat(StopChatDto stopChatDto, boolean propagateFailure) {
+        stopChat(stopChatDto, propagateFailure, "USER_STOPPED", "用户已停止执行");
+    }
+
+    private void stopChat(StopChatDto stopChatDto, boolean propagateFailure, String reasonCode, String reasonText) {
         if (stopChatDto == null || stopChatDto.getSessionId() == null) {
             return;
         }
         // STOP_CHAT 到达 BE 后，第一件事就是把仍为 ACTIVE 的计划直接落为 CANCELLED。
         List<TaskPlanSnapshot> cancelledPlans = taskPlanApplicationService.cancel(stopChatDto,
-            "USER_STOPPED", "用户已停止执行");
+            reasonCode, reasonText);
         if (cancelledPlans != null) {
             cancelledPlans.forEach(plan -> taskPlanWebSocketPublisher.broadcast(
                 CurrentUserHolder.getCurrentUserId(), plan, stopChatDto.getClientRequestId()));

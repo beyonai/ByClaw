@@ -32,6 +32,84 @@ public class SandboxRecoveryService {
     public record Action(String stream, String group, String id, String action, String reason) {}
     public record Page(List<Map<String, Object>> items, String nextCursor) {}
 
+    /** A chat command left pending by a dead worker while no worker of its user is online. */
+    public record OrphanedCommand(String stream, String group, SandboxRecoveryStore.Message message,
+                                  String sessionId, String userCode, long queuedAt) {}
+
+    private static final List<String> USER_TARGET_PREFIXES = List.of("BYCLAW_DSH_", "BYCLAW_EXE_", "BYCLAW_CODE_");
+
+    /**
+     * The commands of one session that an administrator could dismiss here, pending at least minIdleMs.
+     * Empty when the session has none, or when any of its commands may still be running or recovered.
+     */
+    public List<OrphanedCommand> orphanedCommands(String userCode, String sessionId, long minIdleMs) {
+        if (userCode == null || sessionId == null) return List.of();
+        List<OrphanedCommand> found = new ArrayList<>();
+        for (String prefix : USER_TARGET_PREFIXES) {
+            String stream = Constants.QueueNames.ctrlStream(prefix + userCode);
+            for (var queue : store.queuesForStream(stream)) {
+                if (!collect(stream, queue.group(), sessionId, minIdleMs, found)) return List.of();
+            }
+        }
+        return found;
+    }
+
+    /** Every command, across the users' shared command queues, that orphanedCommands would return. */
+    public List<OrphanedCommand> orphanedCommands(long minIdleMs) {
+        List<OrphanedCommand> found = new ArrayList<>();
+        String cursor = "0";
+        do {
+            var page = store.queues(cursor);
+            for (var queue : page.items()) {
+                if (!"COMMAND".equals(queue.kind()) || queue.pending() == 0) continue;
+                if (USER_TARGET_PREFIXES.stream().noneMatch(prefix -> queue.stream().startsWith(
+                    Constants.QueueNames.ctrlStream(prefix)))) continue;
+                collect(queue.stream(), queue.group(), null, minIdleMs, found);
+            }
+            cursor = page.nextCursor();
+        } while (cursor != null && !"0".equals(cursor));
+        return found;
+    }
+
+    /** Adds the dismissable commands of a queue; false when a command of the session may still be alive. */
+    private boolean collect(String stream, String group, String sessionId, long minIdleMs, List<OrphanedCommand> found) {
+        String cursor = null;
+        do {
+            var page = store.messages(stream, group, "PENDING", cursor);
+            for (var message : page.items()) {
+                Map<String, Object> info = view(stream, group, message);
+                String session = (String) info.get("sessionId");
+                if (session == null || (sessionId != null && !sessionId.equals(session))) continue;
+                if (!Boolean.TRUE.equals(info.get("canDismiss")) || message.idleMs() < minIdleMs) {
+                    if (sessionId != null) return false;
+                    continue;
+                }
+                found.add(new OrphanedCommand(stream, group, message, session, (String) info.get("userCode"),
+                    Long.parseLong(message.id().split("-")[0])));
+            }
+            cursor = page.nextCursor();
+        } while (cursor != null);
+        return true;
+    }
+
+    /**
+     * Acknowledges an orphaned command, audited like an administrator's dismissal. False when it was
+     * reclaimed or handled meanwhile; the original message stays in the stream.
+     */
+    public boolean dismissOrphaned(OrphanedCommand command, String reason) {
+        Map<String, String> audit = new LinkedHashMap<>();
+        audit.put("operator", "system"); audit.put("action", "AUTO_DISMISS");
+        audit.put("reason", safe(reason, 500)); audit.put("time", Long.toString(System.currentTimeMillis()));
+        audit.put("userCode", Objects.toString(command.userCode(), ""));
+        audit.put("sessionId", command.sessionId());
+        boolean acknowledged = store.acknowledge(command.stream(), command.group(), command.message());
+        audit.put("outcome", acknowledged ? "DISMISSED" : "SKIPPED");
+        store.audit(command.stream(), command.group(), command.message().id(), audit);
+        LOG.info("Orphaned command dismissal: id={}, session={}, outcome={}", command.message().id(),
+            command.sessionId(), audit.get("outcome"));
+        return acknowledged;
+    }
+
     public Page messages(String stream, String group, String state, String cursor) {
         var page = store.messages(stream, group, state, cursor);
         return new Page(page.items().stream().map(m -> view(stream, group, m)).toList(), page.nextCursor());

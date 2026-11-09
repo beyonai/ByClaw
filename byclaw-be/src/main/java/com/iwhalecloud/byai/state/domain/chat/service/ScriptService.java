@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import com.iwhalecloud.byai.gateway.route.RouteService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.state.application.service.chat.OrphanedChatTurnService;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatInitializationDto;
 import com.iwhalecloud.byai.state.domain.session.dto.SessionMembersDto;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
@@ -92,6 +93,9 @@ public class ScriptService extends AbstractChatProcess {
 
     @Autowired
     private ObjectProvider<GroupChatTaskChatGuard> groupChatTaskGuardProvider;
+
+    @Autowired
+    private ObjectProvider<OrphanedChatTurnService> orphanedChatTurnProvider;
 
     private static final Logger logger = LoggerFactory.getLogger(ScriptService.class);
 
@@ -382,6 +386,13 @@ public class ScriptService extends AbstractChatProcess {
             return;
         }
         if (StringUtils.isBlank(requestTraceId) || !requestTraceId.equals(runningTraceId)) {
+            // A turn whose worker died never ends on its own: stop it as the user would and take this message.
+            OrphanedChatTurnService orphanedTurns = orphanedChatTurnProvider == null ? null
+                : orphanedChatTurnProvider.getIfAvailable();
+            if (orphanedTurns != null && orphanedTurns.releaseIfOrphaned(CurrentUserHolder.getCurrentUserCode(),
+                ctx.sessionId)) {
+                return;
+            }
             throw new BdpRuntimeException(I18nUtil.get("chat.session.running"));
         }
 
