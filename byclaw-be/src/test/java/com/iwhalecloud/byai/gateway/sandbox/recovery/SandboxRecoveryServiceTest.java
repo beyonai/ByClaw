@@ -163,4 +163,33 @@ class SandboxRecoveryServiceTest {
         when(store.acknowledge(stream, group, command.message())).thenReturn(false);
         assertThat(service.dismissOrphaned(command, "执行宿主已离线")).isFalse();
     }
+
+    String managedPayload(String target) {
+        return """
+            {"action_type":"ASK_AGENT","header":{"user_code":"test-user","session_id":"101","message_id":"102",
+            "target_agent_type":"%s"},"body":{"content":"x"}}
+            """.formatted(target);
+    }
+    @Test void aManagedPlacementsCommandCanBeDismissedButNotWoken() {
+        String target = "BYCLAW_DSH_SHARED_ctx_abc_7";
+        String managed = Constants.QueueNames.ctrlStream(target);
+        var view = service.view(managed, group, new SandboxRecoveryStore.Message(id, "old-worker", 120000, 1, "PENDING",
+            Map.of("data", managedPayload(target))));
+        assertThat(view).containsEntry("userCode", "test-user").containsEntry("canDismiss", true).containsEntry("canWake", false);
+        // Without a declared user the placement cannot be attributed to anyone.
+        var anonymous = service.view(managed, group, new SandboxRecoveryStore.Message(id, "old-worker", 120000, 1, "PENDING",
+            Map.of("data", managedPayload(target).replace("\"user_code\":\"test-user\",", ""))));
+        assertThat(anonymous).containsEntry("canDismiss", false);
+    }
+    @Test void aSessionsManagedPlacementQueueIsFoundThroughItsExecutions() {
+        String target = "BYCLAW_DSH_SHARED_ctx_abc_7";
+        String managed = Constants.QueueNames.ctrlStream(target);
+        Map<String, Map<String, Object>> executions = Map.of("e1", Map.of("target_agent_type", target, "status", "RUNNING"));
+        when(workers.getAllSessionExecutions("101")).thenReturn(executions);
+        when(store.queuesForStream(managed)).thenReturn(List.of(new SandboxRecoveryStore.Queue(managed, group, "COMMAND", 1, null)));
+        when(store.messages(managed, group, "PENDING", null)).thenReturn(new SandboxRecoveryStore.MessagePage(List.of(
+            new SandboxRecoveryStore.Message(id, "old-worker", 120000, 1, "PENDING", Map.of("data", managedPayload(target)))), null));
+        assertThat(service.orphanedCommands("test-user", "101", 60000)).singleElement()
+            .satisfies(command -> assertThat(command.managed()).isTrue());
+    }
 }

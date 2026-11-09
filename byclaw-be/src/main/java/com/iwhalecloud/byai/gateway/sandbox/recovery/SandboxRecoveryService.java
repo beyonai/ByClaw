@@ -34,9 +34,15 @@ public class SandboxRecoveryService {
 
     /** A chat command left pending by a dead worker while no worker of its user is online. */
     public record OrphanedCommand(String stream, String group, SandboxRecoveryStore.Message message,
-                                  String sessionId, String userCode, long queuedAt) {}
+                                  String sessionId, String userCode, long queuedAt, boolean managed) {}
 
     private static final List<String> USER_TARGET_PREFIXES = List.of("BYCLAW_DSH_", "BYCLAW_EXE_", "BYCLAW_CODE_");
+
+    /**
+     * A platform-managed shared host's placement: its queue is the placement generation's, so once the
+     * user is moved nothing will consume it again.
+     */
+    static final String MANAGED_TARGET_PREFIX = "BYCLAW_DSH_SHARED_";
 
     /**
      * The commands of one session that an administrator could dismiss here, pending at least minIdleMs.
@@ -44,9 +50,16 @@ public class SandboxRecoveryService {
      */
     public List<OrphanedCommand> orphanedCommands(String userCode, String sessionId, long minIdleMs) {
         if (userCode == null || sessionId == null) return List.of();
+        Set<String> streams = new LinkedHashSet<>();
+        for (String prefix : USER_TARGET_PREFIXES) streams.add(Constants.QueueNames.ctrlStream(prefix + userCode));
+        // A managed placement's queue is named after the placement, not the user: the session's executions say which.
+        var executions = workers.getAllSessionExecutions(sessionId);
+        if (executions != null) for (var execution : executions.values()) {
+            String target = execution == null ? null : Objects.toString(execution.get("target_agent_type"), null);
+            if (target != null && target.startsWith(MANAGED_TARGET_PREFIX)) streams.add(Constants.QueueNames.ctrlStream(target));
+        }
         List<OrphanedCommand> found = new ArrayList<>();
-        for (String prefix : USER_TARGET_PREFIXES) {
-            String stream = Constants.QueueNames.ctrlStream(prefix + userCode);
+        for (String stream : streams) {
             for (var queue : store.queuesForStream(stream)) {
                 if (!collect(stream, queue.group(), sessionId, minIdleMs, found)) return List.of();
             }
@@ -84,8 +97,9 @@ public class SandboxRecoveryService {
                     if (sessionId != null) return false;
                     continue;
                 }
+                String target = (String) info.get("targetAgentType");
                 found.add(new OrphanedCommand(stream, group, message, session, (String) info.get("userCode"),
-                    Long.parseLong(message.id().split("-")[0])));
+                    Long.parseLong(message.id().split("-")[0]), target != null && target.startsWith(MANAGED_TARGET_PREFIX)));
             }
             cursor = page.nextCursor();
         } while (cursor != null);
@@ -125,12 +139,14 @@ public class SandboxRecoveryService {
         JSONObject body = object(command, "body");
         String target = first(payload.getString("target_agent_type"), header.getString("target_agent_type"));
         String user = first(payload.getString("user_code"), header.getString("user_code"));
-        if (user == null && target != null && target.matches("BYCLAW_(DSH|EXE|CODE)_.+"))
+        // A managed target names the placement, not the user: only a declared user code identifies it.
+        boolean managedTarget = user != null && target != null && target.startsWith(MANAGED_TARGET_PREFIX);
+        if (user == null && target != null && !target.startsWith(MANAGED_TARGET_PREFIX) && target.matches("BYCLAW_(DSH|EXE|CODE)_.+"))
             user = target.replaceFirst("^BYCLAW_(DSH|EXE|CODE)_", "");
         String session = first(payload.getString("session_id"), header.getString("session_id"));
         String commandId = first(payload.getString("message_id"), header.getString("message_id"));
         boolean validTarget = target != null && user != null && user.matches("[A-Za-z0-9_.@-]{1,100}")
-            && List.of("BYCLAW_DSH_" + user, "BYCLAW_EXE_" + user, "BYCLAW_CODE_" + user).contains(target);
+            && (managedTarget || List.of("BYCLAW_DSH_" + user, "BYCLAW_EXE_" + user, "BYCLAW_CODE_" + user).contains(target));
         boolean online = false;
         if (validTarget) {
             var status = workers.hasOnlineAgentType(target, true);
@@ -166,7 +182,8 @@ public class SandboxRecoveryService {
         view.put("content", safe(body.getString("content"), 12000));
         view.put("error", safe(first(payload.getString("error"), payload.getString("reason")), 2000));
         view.put("payloadMissing", message.fields().isEmpty());
-        view.put("canWake", actionable && !terminal && (wakeup || sharedQueue));
+        // Waking restarts the user's own sandbox; a managed placement's queue is not read by it.
+        view.put("canWake", actionable && !terminal && !managedTarget && (wakeup || sharedQueue));
         view.put("canDismiss", actionable && "COMMAND".equals(kind));
         view.put("canConfirmWake", pending && wakeup && validTarget && supportedWakeup && online
             && message.idleMs() >= 60000);
@@ -176,6 +193,7 @@ public class SandboxRecoveryService {
             : message.idleMs() < 60000 ? "领取不足一分钟，请稍后刷新"
             : !validTarget ? "无法确定用户与沙箱目标，禁止操作"
             : terminal ? "执行记录已结束；可核对结果后移出待确认"
+            : managedTarget ? "托管共享宿主的旧分配不会被接回；可核对后移出待确认"
             : !wakeup && !sharedQueue ? "旧 Worker 专属队列不能由新 Worker 自动接回，请人工核对"
             : "可唤醒沙箱，等待原 Worker 恢复机制接回任务");
         view.put("lastOperation", store.audit(stream, group, message.id()));

@@ -19,7 +19,8 @@ import org.springframework.stereotype.Service;
  * pending in the user's queue, the worker that took it is offline and no worker of the user is online
  * (the same rule under which an administrator may dismiss it on the recovery page). A worker that
  * comes back reclaims such commands itself, so this waits a minute when the user sends a new message
- * and ten minutes in the background sweep.
+ * and ten minutes in the background sweep; a platform-managed placement's command, which no worker
+ * reclaims once its user is moved, two minutes.
  */
 @Slf4j
 @Service
@@ -45,6 +46,10 @@ public class OrphanedChatTurnService {
 
     @Value("${byclaw.chat.orphaned-turn.sweep-idle-ms:600000}")
     private long sweepIdleMs = 600_000L;
+
+    /** A managed placement's command is never reclaimed once its user is moved, so its turn ends sooner. */
+    @Value("${byclaw.chat.orphaned-turn.managed-idle-ms:120000}")
+    private long managedIdleMs = 120_000L;
 
     public OrphanedChatTurnService(SandboxRecoveryService recovery, RunningOutputStreamRegistry running,
         SandboxUserContextRunner users, @Lazy AssistantChatApplicationService chats) {
@@ -90,13 +95,16 @@ public class OrphanedChatTurnService {
         }
         List<OrphanedCommand> commands;
         try {
-            commands = recovery.orphanedCommands(sweepIdleMs);
+            commands = recovery.orphanedCommands(Math.min(sweepIdleMs, managedIdleMs));
         }
         catch (RuntimeException e) {
             log.warn("扫描执行者已离线的会话失败", e);
             return;
         }
         for (OrphanedCommand command : commands) {
+            if (command.message().idleMs() < (command.managed() ? managedIdleMs : sweepIdleMs)) {
+                continue;
+            }
             try {
                 // Acknowledge first: on several BE instances only the one that wins stops the turn.
                 if (!recovery.dismissOrphaned(command, REASON)) {

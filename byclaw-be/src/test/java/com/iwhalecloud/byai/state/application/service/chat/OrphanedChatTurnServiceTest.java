@@ -38,7 +38,7 @@ class OrphanedChatTurnServiceTest {
 
     final OrphanedCommand command = new OrphanedCommand("stream", "group",
         new SandboxRecoveryStore.Message(queuedAt + "-0", "old-worker", 120_000, 1, "PENDING", Map.of()),
-        "101", "test-user", queuedAt);
+        "101", "test-user", queuedAt, false);
 
     @BeforeEach
     void setup() {
@@ -101,8 +101,11 @@ class OrphanedChatTurnServiceTest {
     @Test
     void theSweepStopsOrphanedTurnsAsTheirUserAndOnlyDismissesTheRest() {
         OrphanedCommand idle = new OrphanedCommand("stream", "group",
-            new SandboxRecoveryStore.Message("1-0", "old-worker", 900_000, 1, "PENDING", Map.of()), "202", "other-user", 1L);
-        when(recovery.orphanedCommands(600_000L)).thenReturn(List.of(command, idle));
+            new SandboxRecoveryStore.Message("1-0", "old-worker", 900_000, 1, "PENDING", Map.of()), "202", "other-user", 1L, false);
+        OrphanedCommand old = new OrphanedCommand("stream", "group",
+            new SandboxRecoveryStore.Message(queuedAt + "-0", "old-worker", 700_000, 1, "PENDING", Map.of()),
+            "101", "test-user", queuedAt, false);
+        when(recovery.orphanedCommands(120_000L)).thenReturn(List.of(old, idle));
         when(recovery.dismissOrphaned(any(), eq(OrphanedChatTurnService.REASON))).thenReturn(true);
         when(running.getRunning(101L)).thenReturn(runningSince(queuedAt));
         when(running.getRunning(202L)).thenReturn(new RunningChatInfo());
@@ -114,4 +117,21 @@ class OrphanedChatTurnServiceTest {
         verify(recovery).dismissOrphaned(idle, OrphanedChatTurnService.REASON);
         verify(chats, never()).stopOrphanedChat(202L);
     }
+    @Test
+    void theSweepEndsAManagedPlacementsTurnAfterTwoMinutesAndOthersAfterTen() {
+        OrphanedCommand managed = new OrphanedCommand("managed", "group",
+            new SandboxRecoveryStore.Message("2-0", "old-worker", 150_000, 1, "PENDING", Map.of()), "303", "test-user", queuedAt, true);
+        OrphanedCommand recent = new OrphanedCommand("stream", "group",
+            new SandboxRecoveryStore.Message("3-0", "old-worker", 150_000, 1, "PENDING", Map.of()), "404", "test-user", queuedAt, false);
+        when(recovery.orphanedCommands(120_000L)).thenReturn(List.of(managed, recent));
+        when(recovery.dismissOrphaned(any(), eq(OrphanedChatTurnService.REASON))).thenReturn(true);
+        when(running.getRunning(303L)).thenReturn(runningSince(queuedAt));
+
+        service.sweep();
+
+        verify(chats).stopOrphanedChat(303L);
+        // The other kind may still be reclaimed by a returning worker: it waits the full ten minutes.
+        verify(recovery, never()).dismissOrphaned(recent, OrphanedChatTurnService.REASON);
+    }
+
 }
