@@ -31,6 +31,11 @@ ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     PYTHONPATH=/by/Easel \
     EASEL_AGENT_RUNTIME=codex \
     CODEX_HOME=/by/.codex \
+    XDG_CACHE_HOME=/var/cache/easel \
+    npm_config_cache=/var/cache/easel/npm \
+    UV_CACHE_DIR=/var/cache/easel/uv \
+    PIP_CACHE_DIR=/var/cache/easel/pip \
+    MPLCONFIGDIR=/var/cache/easel/matplotlib \
     BYCLAW_EASEL_SOURCE_COMMIT=5c12e42e9019d276368130b52385b770749ffa6f
 
 COPY middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh /tmp/configure-cn-sources.sh
@@ -111,10 +116,18 @@ RUN set -eux; \
     printf '%s\n' \
         "import {Config} from '@remotion/cli/config';" \
         "Config.setBrowserExecutable(process.env.REMOTION_BROWSER_EXECUTABLE || '/usr/local/bin/byclaw-playwright-chromium');" \
+        'Config.setCachingEnabled(false);' \
         > remotion.config.ts; \
     test -f node_modules/remotion/package.json; \
     test -f node_modules/@remotion/cli/package.json; \
     test -x node_modules/.bin/remotion; \
+    install -d /opt/easel-runtime/remotion; \
+    cp package.json package-lock.json /opt/easel-runtime/remotion/; \
+    mv node_modules /opt/easel-runtime/remotion/node_modules; \
+    rm -rf /opt/easel-runtime/remotion/node_modules/.cache; \
+    ln -s /var/cache/easel/remotion /opt/easel-runtime/remotion/node_modules/.cache; \
+    ln -s /opt/easel-runtime/remotion/node_modules node_modules; \
+    chmod -R a-w /opt/easel-runtime/remotion; \
     npm cache clean --force
 
 COPY --chmod=0755 middleware/byclaw-harness/scripts/easel-codex-entrypoint.py /usr/local/bin/byclaw-easel-codex-entrypoint
@@ -124,9 +137,12 @@ COPY middleware/byclaw-harness/tool-sandbox/easel-codex.source.json /etc/byclaw-
 RUN set -eux; \
     ln -sfn /usr/local/bin/byclaw-easel-codex-entrypoint /usr/local/bin/byclaw-dsh-entrypoint; \
     python3 -m py_compile /usr/local/bin/byclaw-easel-codex-entrypoint; \
+    rm -rf /var/cache/easel; \
+    install -d -o byclaw -g byclaw -m 0700 /var/cache/easel /var/cache/easel/remotion; \
     su -s /bin/sh byclaw -c 'node --version && npm --version && codex --version'; \
     /opt/easel-venv/bin/python -c \
         'import easel, fastapi, cv2, fitz, librosa, matplotlib, numpy, onnxruntime, pandas, pdfplumber, PIL, playwright, rembg, segno, yaml; print(easel.__version__)'; \
+    chown -R byclaw:byclaw /var/cache/easel; \
     node -e 'const m=require("/etc/byclaw-tool-sandbox/capabilities.json"); if(m.purpose!=="easel-codex")process.exit(1)'; \
     env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_|BYCLAW_TOOL_ENV_HOST_KEY|BYCLAW_TOOL_ENV_AUTHORIZED_KEY)=' \
         >/etc/byclaw-tool-env.session-env; \

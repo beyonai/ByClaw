@@ -65,6 +65,16 @@ class EaselCodexSandboxContractTest(unittest.TestCase):
         self.assertIn('!middleware/byclaw-harness/scripts/easel-codex-entrypoint.py', ignore)
         self.assertIn('!middleware/byclaw-harness/tool-sandbox/assets/easel-source-5c12e42.tar.gz', ignore)
 
+    def test_preinstalled_dependencies_and_caches_stay_outside_personal_storage(self) -> None:
+        dockerfile = (HARNESS / 'Dockerfile.tools.easel-codex').read_text()
+        self.assertIn('mv node_modules /opt/easel-runtime/remotion/node_modules', dockerfile)
+        self.assertIn('chmod -R a-w /opt/easel-runtime/remotion', dockerfile)
+        self.assertIn('Config.setCachingEnabled(false)', dockerfile)
+        for value in ('XDG_CACHE_HOME=/var/cache/easel',
+                      'npm_config_cache=/var/cache/easel/npm',
+                      'UV_CACHE_DIR=/var/cache/easel/uv'):
+            self.assertIn(value, dockerfile)
+
 
 if __name__ == '__main__':
     unittest.main()
