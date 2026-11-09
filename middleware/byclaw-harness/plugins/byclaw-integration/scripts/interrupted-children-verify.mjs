@@ -1,6 +1,6 @@
 /** Children a host restart cut off are found from the parent's durable events alone. */
 import assert from 'node:assert/strict'
-import { interruptedChildren, interruptedTurnNotice, interruptionNotice, turnAlreadyAdmitted } from '../src/interrupted-children.ts'
+import { interruptedChildren, interruptedTurnNotice, interruptionNotice, redeliveredCommand, turnAlreadyAdmitted } from '../src/interrupted-children.ts'
 
 let seq = 0
 const call = (callId, name = 'byclaw_instantiate_template') => ({ type: 'tool/call', seq: seq++, data: { callId, name, arguments: '{}' } })
@@ -41,6 +41,13 @@ const turnContext = { type: 'user/message', seq: seq++, data: { source: { kind: 
 assert.equal(turnAlreadyAdmitted([...events, turnContext], '11386661'), true)
 assert.equal(turnAlreadyAdmitted([...events, turnContext], '1138666'), false)
 assert.equal(turnAlreadyAdmitted(events, '11386661'), false)
+
+// A command routed to a child is judged by the child's session, where its turn context went.
+assert.equal(redeliveredCommand('11386661', [...events, turnContext]), true)
+assert.equal(redeliveredCommand('11386661', events, [turnContext]), true)
+assert.equal(redeliveredCommand('11386661', events, []), false)
+// The root may hold the same turn context from a step of its own during that turn: it does not count for the child.
+assert.equal(redeliveredCommand('11386661', [...events, turnContext], []), false)
 
 // A redelivered turn is answered from history, not rerun: the root gets runtime context naming the message.
 const turnNotice = interruptedTurnNotice('11386661')

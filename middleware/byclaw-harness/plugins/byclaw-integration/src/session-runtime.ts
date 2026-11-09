@@ -17,8 +17,8 @@ import { sanitizeByClawOperationalLog } from './operational-log.ts'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { SessionInspection, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { installModelSelection, type Agent, type AgentHandle, type AssistantStreamFrame, type ModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
-import { createUserMessage, expandAssistantStream, type ContentBlock, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import { interruptedChildren, interruptedTurnNotice, interruptionNotice, turnAlreadyAdmitted } from './interrupted-children.ts'
+import { createUserMessage, expandAssistantStream, type ContentBlock, type StreamChunk, type UserMessage } from '@deepseek-ai/dsh-llm'
+import { interruptedChildren, interruptedTurnNotice, interruptionNotice, redeliveredCommand } from './interrupted-children.ts'
 import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 import { ordinaryTaskPlan } from './ordinary-task-plan.ts'
@@ -2296,20 +2296,23 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       const ownEvents = rootAgent.session.ownEvents()
       const interrupted = interruptedChildren(ownEvents, childId => this.ctx.agents.get(SessionId(childId)) !== undefined)
       // The message framework redelivers a command whose worker died; an ask_user recovery reuses the header on purpose.
+      const targetId = route.targetDshSessionId !== undefined && route.targetDshSessionId !== String(rootAgent.id) ? route.targetDshSessionId : undefined
       const redelivered = command.extraPayload['byclaw_recovered_interaction_id'] === undefined
-        && turnAlreadyAdmitted(ownEvents, command.header.messageId)
+        && redeliveredCommand(command.header.messageId, ownEvents, targetId === undefined ? undefined : await this.storedEvents(targetId))
       if (interrupted.length > 0) {
         this.ctx.logger.warn(`[byclaw-dsh] interrupted children of ${String(rootAgent.id)}: ${interrupted.join(', ')}`)
         for (const childId of interrupted) rootAgent.followup(interruptionNotice(childId))
       }
       if (redelivered) {
-        this.ctx.logger.warn(`[byclaw-dsh] message ${command.header.messageId} was already admitted by an earlier process; telling ${String(rootAgent.id)} it was interrupted instead of resending it`)
-        rootAgent.followup(interruptedTurnNotice(command.header.messageId))
+        this.ctx.logger.warn(`[byclaw-dsh] message ${command.header.messageId} was already admitted by an earlier process; telling ${targetId ?? String(rootAgent.id)} it was interrupted instead of resending it`)
+        if (targetId === undefined) rootAgent.followup(interruptedTurnNotice(command.header.messageId))
       }
       const agent = await measureChatStage('harness.input_submit', async () => {
-        // The redelivered command's text is already in the root's history; only the notices are new.
-        if (redelivered) return rootAgent
-        if (directTarget === undefined) return this.deliverToSelectedAgent(rootAgent, route, byClawInboundText(text))
+        // The redelivered command's text is already in its session's history; only the notices are new.
+        if (redelivered && targetId === undefined) return rootAgent
+        if (directTarget === undefined) {
+          return this.deliverToSelectedAgent(rootAgent, route, redelivered ? interruptedTurnNotice(command.header.messageId) : byClawInboundText(text))
+        }
         const input = createUserMessage({ content: [{ type: 'text', text: directTarget.text }], source: { kind: 'user' } })
         turn.initiation?.expectInput(String(rootAgent.id), String(input.id))
         rootAgent.followup(input)
@@ -2375,15 +2378,34 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }
   }
 
+  /**
+   * A session's own events, from memory when it is live, else read from storage, where a child a
+   * host restart cut off still is. Empty when it has none or they cannot be read.
+   */
+  private async storedEvents(sessionId: string): Promise<readonly SessionEvent[]> {
+    const live = this.ctx.root.sessions.get(SessionId(sessionId))
+    if (live !== undefined) return live.ownEvents()
+    try {
+      return (await loadPersistedSessionById(this.ctx.sessionPersistence, SessionId(sessionId)))?.events ?? []
+    } catch (error) {
+      this.ctx.logger.warn(`[byclaw-dsh] reading session ${sessionId} failed: ${sanitizeByClawOperationalLog(error)}`)
+      return []
+    }
+  }
+
+  /**
+   * Deliver one inbound message to the route's target, or to the root.
+   * @param message - the user's text, or a runtime notice delivered in its place.
+   */
   private async deliverToSelectedAgent(
     rootAgent: Agent,
     route: ByClawCommandSessionRoute,
-    text: string,
+    message: string | UserMessage,
   ): Promise<Agent> {
     this.assertAccepting()
     const targetSessionId = route.targetDshSessionId
     if (targetSessionId === undefined || targetSessionId === String(rootAgent.id)) {
-      const input = createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
+      const input = typeof message === 'string' ? createUserMessage({ content: [{ type: 'text', text: message }], source: { kind: 'user' } }) : message
       chatChain()?.expectInput(String(rootAgent.id), String(input.id))
       rootAgent.followup(input)
       return rootAgent
@@ -2421,8 +2443,8 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       this.ctx.subagents,
       parent,
       SessionId(targetSessionId),
-      [{ type: 'text', text }],
-      { kind: 'user' },
+      typeof message === 'string' ? [{ type: 'text', text: message }] : [...message.content],
+      typeof message === 'string' ? { kind: 'user' } : message.source,
       this.sessionOpeningController.signal,
     )
     chatChain()?.expectInput(targetSessionId, String(inputMessageId))

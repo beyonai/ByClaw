@@ -90,3 +90,15 @@ export function turnAlreadyAdmitted(events: readonly SessionEvent[], messageId: 
   const marker = `<!-- byclaw-context:turn:${messageId} -->`
   return events.some(event => event.type === 'user/message' && event.data.content.some(block => block.type === 'text' && block.text.includes(marker)))
 }
+
+/**
+ * Whether a command was already admitted in an earlier process, judged by the session it was
+ * delivered to: a command routed to a child left its turn context in the child's session. The
+ * root's events do not count for it, since the root may have stepped during that turn on its own.
+ * @param messageId - the BE message id of the command being handled.
+ * @param rootEvents - the root's own session events.
+ * @param target - the events of the child the command is routed to, when it is routed to one.
+ */
+export function redeliveredCommand(messageId: string, rootEvents: readonly SessionEvent[], target?: readonly SessionEvent[]): boolean {
+  return turnAlreadyAdmitted(target ?? rootEvents, messageId)
+}
