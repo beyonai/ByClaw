@@ -80,6 +80,36 @@ class ConnectorConnectionStateServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void digitalHumanCredentialsAreEncryptedAndPublishSaveDisableAndRevokeEvents() {
+        ConnectorInfo connector = connector();
+        connector.setConnectorCode("volcengine-digital-human");
+        connector.setProviderCode("volcengine-digital-human");
+        connector.setAuthMode("AK_SK");
+        connector.setStatusCd("00A");
+        var provider = new com.iwhalecloud.byai.manager.domain.connector.provider.media.VolcengineDigitalHumanCredentialFormProvider();
+        var verification = provider.verify(USER_ID, connector,
+            Map.of("accessKeyId", "test-ak", "secretAccessKey", "test-sk"));
+        when(sequenceService.nextVal()).thenReturn(8001L);
+
+        ConnectorAuth saved = service.saveEnabledCredentialAuthorization(
+            USER_ID, connector, verification.status(), "digital-human-authorization", Map.of());
+
+        assertThat(saved.getAuthCredential()).doesNotContain("test-ak", "test-sk");
+        var metadata = com.alibaba.fastjson.JSON.parseObject(Sm4Util.decrypt(saved.getAuthCredential()));
+        assertThat(metadata.getJSONObject("digitalHumanConfig").getString("secretAccessKey")).isEqualTo("test-sk");
+        verify(manifestService).upsertAndEnable(1001L, connector, Map.of());
+        verify(eventPublisher).publishEvent(new ConnectorCredentialProjectionEvent(
+            1001L, CONNECTOR_ID, ConnectorCredentialProjectionEvent.Action.SYNC));
+
+        when(connectorInfoMapper.selectById(CONNECTOR_ID)).thenReturn(connector);
+        when(connectorAuthMapper.selectOne(any())).thenReturn(saved);
+        service.updateEnableFlag(USER_ID, CONNECTOR_ID, false);
+        service.revokeAuthorization(USER_ID, CONNECTOR_ID);
+        verify(eventPublisher, times(2)).publishEvent(new ConnectorCredentialProjectionEvent(
+            1001L, CONNECTOR_ID, ConnectorCredentialProjectionEvent.Action.DELETE));
+    }
+
+    @Test
     void verificationOnlySyncRetainsPartialPermissionsButFreshCompleteReplacesThem() {
         ConnectorInfo connector = connector();
         ConnectorAuth existing = activeAuth();

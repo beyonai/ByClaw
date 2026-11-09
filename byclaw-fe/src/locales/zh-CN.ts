@@ -349,6 +349,7 @@ export default {
   'connector.credentials.smtp': 'SMTP 发信服务器',
   'connector.configureImage': '配置文生图模型连接器',
   'connector.configureSpeech': '配置语音模型连接器',
+  'connector.configureDigitalHuman': '需要配置火山数字人视频连接器',
   'modelMgr.modal.audioUploadMissing': '上传未返回音频文件',
   'modelMgr.modal.audioUploadFailed': '音频上传失败',
   'modelMgr.modal.uploadMp3': '上传 MP3',

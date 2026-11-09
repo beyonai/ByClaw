@@ -1266,3 +1266,54 @@ Whale 等来源通过 `/tool/addToolFromThird` 同步 `KG_DOC`、`KG_DB`、`KG_Q
 快照只保存员工配置与资源绑定，排除授权、组织范围、用户私有记忆、机器人/连接凭证及运行镜像。依赖使用 CURRENT 策略，不随员工回退而恢复技能源码或知识内容。`resource_d_verid` 指向最近保存，`resource_r_verid` 指向数据库当前生效配置；运行态同步通过独立生效记录追踪，失败返回 SYNC_FAILED 并可重试当前生效版本，不能把已提交的配置误报为回滚。现有运行端的会话热更新行为沿用，不保证正在执行的会话切换至历史版本。外部系统同步员工仍由来源系统维护，不开放本地版本覆盖。
 
 企业副本回退/切换先建立不可编辑的固定版本审核草稿，需全部已发布组织通过后统一生效。版本内容、资源归属和审核目标版本不得由客户端改变。若审批落地需要将个人技能复制为企业技能，系统另存实际企业绑定版本，并以所审核版本为 base_version_id；原快照不覆盖。绑定不变时，切换或回退直接使用所选历史版本。固定版本存在不可发布的依赖时拒绝生效，要求保存修正后的新版本，不静默丢弃依赖。
+
+## 火山数字人连接器
+
+`V0.6.0` 提供 `volcengine-digital-human` 连接器模板，复用通用凭据表单，只填写
+`accessKeyId` 和 `secretAccessKey`。两个字段均使用密码输入框，保存到加密授权元数据中，
+不注入 Runtime Manifest 或环境变量、不回传前端。保存仅校验字段格式，未验证火山账号权限、
+真实模型调用或视频生成能力。
+
+授权启用后，后端在事务提交后将下列内容投影到用户私有 Sandbox 的
+`/by/.connector-auth/.model/video.json`，复用私有工作区和原子文件写入机制（本地文件权限 `0600`）。
+
+```json
+{
+  "schemaVersion": 1,
+  "connectorCode": "volcengine-digital-human",
+  "enabled": true,
+  "accessKeyId": "<access-key-id>",
+  "secretAccessKey": "<secret-access-key>"
+}
+```
+
+重新保存会更新投影，禁用或断开连接会删除该文件；启用授权有定时补偿同步。
+投影由独立的 `DigitalHumanConfigProjectionService` 管理，不使用图片/语音的模型 Endpoint 配置格式。
+此处的 `video.json` 专用于火山数字人 AK/SK，不表示通用文生视频模型已接入。
+
+前端沿用媒体连接器错误标记。当工具结果中包含
+`MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=volcengine-digital-human;` 时，
+本轮聊天结束后显示“需要配置火山数字人视频连接器”按钮，点击打开该连接器的配置界面；重复错误合并为一个按钮。
+本次不修改 DSH 插件，因此缺失配置的检测及上述错误标记须由调用方返回；前端不会主动读取私有凭据文件。
+
+
+## 本地启动与加密环境变量
+
+`ByaiServerApplication` 的 `.env` 加载器只读取键值，不会自动解密 `ENC(...)`。
+部署的 `compose-detect.sh` 会先调用 `deploy/env-decrypt.sh`；IDE 直接启动 Java 不经过该步骤。
+若 `JWT_TOKEN_EXPIRED_HOUR` 仍为密文，会在 `JwtService` 注入整数配置时启动失败。
+
+本地可从仓库根目录执行以下命令，将环境文件解密后再重启后端：
+
+```bash
+bash deploy/env-encrypt.sh --decrypt byclaw-be/.env
+```
+
+该命令原地写入明文，并备份原始密文到 `byclaw-be/.env.encrypted.bak`；两份文件均不得提交。
+密钥使用现有部署脚本的解析顺序（`BYCLAW_SM4_KEY`、`BYCLAW_SM4_KEY_FILE`、
+系统/用户密钥文件、兼容默认密钥），须与加密时一致，不要替换 JWT 或凭据业务密钥来绕过启动错误。
+解密入口使用单行 Base64 模式，支持 JWT 私钥和 JSON 等长配置。
+也可用 `env-decrypt.sh` 生成私有临时环境文件，再通过 JVM 参数 `-Denv.file=<临时文件绝对路径>`
+指定它；使用后删除临时明文文件，保留原始加密 `.env`。
+
+回归检查：`python3 deploy/tests/env-decrypt.test.py`。

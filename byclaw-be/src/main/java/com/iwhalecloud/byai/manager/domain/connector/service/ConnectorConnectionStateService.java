@@ -33,7 +33,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCred
 public class ConnectorConnectionStateService {
 
     private static final java.util.Set<String> MEDIA_MODEL_CONNECTOR_CODES = java.util.Set.of(
-        "image-generation-model", "speech-generation-model");
+        "image-generation-model", "speech-generation-model", "volcengine-digital-human");
 
     private final ConnectorAuthMapper connectorAuthMapper;
     private final ConnectorInfoMapper connectorInfoMapper;

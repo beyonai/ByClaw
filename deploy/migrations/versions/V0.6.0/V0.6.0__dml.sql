@@ -275,3 +275,35 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
   "defaultMode": "shared",
   "excludedUsers": ["zte"]
 }', '用户共享沙箱策略模式配置，默认模式为defaultMode=shared为共享模式，defaultMode=exclusive为单独起沙箱模式，excludedUsers为配置例的用户');
+
+-- 火山数字人连接器：仅配置 AK/SK，并由后端投影 video.json；不注册 DSH 生成工具。
+INSERT INTO byai.byai_connector_info (
+    connector_id, connector_code, connector_name, description, connector_type,
+    provider_code, skill_code, auth_mode, auth_config, request_config,
+    runtime_manifest, sort, status_cd
+)
+SELECT nextval('byai.seq_any_table'), 'volcengine-digital-human', '火山数字人口播视频',
+    '配置火山数字人 Access Key ID 和 Secret Access Key，启用后投影到个人私有 Sandbox。',
+    'SYSTEM', 'volcengine-digital-human', NULL, 'AK_SK',
+    '{"credentialForm":{"helpUrl":"https://www.volcengine.com/docs/","helpLinkText":"查看火山引擎接入说明","helpText":"填写火山引擎 Access Key ID 和 Secret Access Key。凭据加密保存，不会回传前端；保存仅校验填写格式，不验证火山账号权限或视频生成能力。","fields":[{"key":"accessKeyId","label":"Access Key ID","inputType":"password","maxLength":512},{"key":"secretAccessKey","label":"Secret Access Key","inputType":"password","maxLength":2048}]}}', '{}',
+    '{"schemaVersion":"1.0","id":"volcengine-digital-human","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","environment":{}},"digitalHumanProjection":{"schemaVersion":1,"path":"/by/.connector-auth/.model/video.json"},"skill":{"code":"media-generation","source":"system-builtin","installScope":"user","grantScope":"agent"}}', 62, '00A'
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.byai_connector_info WHERE connector_code = 'volcengine-digital-human'
+);
+
+
+-- 已存在时同步模板配置；保留 connector_id 和用户授权凭据。
+UPDATE byai.byai_connector_info
+SET connector_name = '火山数字人口播视频',
+    description = '配置火山数字人 Access Key ID 和 Secret Access Key，启用后投影到个人私有 Sandbox。',
+    connector_type = 'SYSTEM',
+    provider_code = 'volcengine-digital-human',
+    skill_code = NULL,
+    auth_mode = 'AK_SK',
+    auth_config = '{"credentialForm":{"helpUrl":"https://www.volcengine.com/docs/","helpLinkText":"查看火山引擎接入说明","helpText":"填写火山引擎 Access Key ID 和 Secret Access Key。凭据加密保存，不会回传前端；保存仅校验填写格式，不验证火山账号权限或视频生成能力。","fields":[{"key":"accessKeyId","label":"Access Key ID","inputType":"password","maxLength":512},{"key":"secretAccessKey","label":"Secret Access Key","inputType":"password","maxLength":2048}]}}',
+    request_config = '{}',
+    runtime_manifest = '{"schemaVersion":"1.0","id":"volcengine-digital-human","version":"1.0.0","runtime":{"type":"oauth2","authorizeIn":"be-auth-job"},"authStorage":{"mode":"credential-reference","owner":"be-auth-job","runtimeMutation":"provider-refresh-only","environment":{}},"digitalHumanProjection":{"schemaVersion":1,"path":"/by/.connector-auth/.model/video.json"},"skill":{"code":"media-generation","source":"system-builtin","installScope":"user","grantScope":"agent"}}',
+    sort = 62,
+    status_cd = '00A',
+    update_time = CURRENT_TIMESTAMP
+WHERE connector_code = 'volcengine-digital-human';

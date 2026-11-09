@@ -360,6 +360,7 @@ export default {
   'connector.credentials.smtp': 'SMTP outgoing server',
   'connector.configureImage': 'Configure image generation model connector',
   'connector.configureSpeech': 'Configure speech model connector',
+  'connector.configureDigitalHuman': 'Configure Volcengine digital human video connector',
   'modelMgr.modal.audioUploadMissing': 'Upload returned no audio file',
   'modelMgr.modal.audioUploadFailed': 'Audio upload failed',
   'modelMgr.modal.uploadMp3': 'Upload MP3',
