@@ -11,6 +11,42 @@ import org.springframework.beans.factory.ObjectProvider;
 
 class SharedSandboxGatewayTest {
     @Test
+    void serverExecutionAccessRetainsProviderHeadersWithoutMutatingPublicContext() {
+        var gateway = gateway();
+        when(policy.eligible("alice")).thenReturn(true);
+        var context = new com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData();
+        context.setMappingId("m1");
+        context.setGeneration(2L);
+        context.setSandboxId("pool1");
+        context.setEndpoint("https://example.test/u/context/");
+        Map<String, Object> response = new HashMap<>(Map.of("mappingId", "m1", "generation", 2L,
+            "sandboxId", "pool1", "endpoint", context.getEndpoint(),
+            "endpointHeaders", Map.of("e2b-traffic-access-token", "fixture-ingress")));
+        when(client.call(eq("executionAccess"), anyMap())).thenReturn(Map.of("code", 0, "data", response));
+
+        var access = gateway.executionAccess("alice", "byclaw-dsh", context);
+
+        assertThat(access.getEndpointHeaders()).containsEntry("e2b-traffic-access-token", "fixture-ingress");
+        assertThat(context.getEndpointHeaders()).isNull();
+        verify(client).call(eq("executionAccess"), argThat(p -> "m1".equals(p.get("mappingId"))
+            && Long.valueOf(2).equals(p.get("generation")) && Long.valueOf(1).equals(p.get("userId"))
+            && Long.valueOf(10).equals(p.get("enterpriseId"))));
+
+        response.put("mappingId", "other-mapping");
+        assertThatThrownBy(() -> gateway.executionAccess("alice", "byclaw-dsh", context))
+            .hasMessage("Shared execution context changed");
+        response.put("mappingId", "m1");
+        response.put("generation", 3L);
+        assertThatThrownBy(() -> gateway.executionAccess("alice", "byclaw-dsh", context))
+            .hasMessage("Shared execution context changed");
+        when(policy.eligible("alice")).thenReturn(false);
+        clearInvocations(client);
+        assertThatThrownBy(() -> gateway.executionAccess("alice", "byclaw-dsh", context))
+            .hasMessage("Shared execution context is unavailable");
+        verifyNoInteractions(client);
+    }
+
+    @Test
     void cleanupFailureIsIgnoredOnlyInDevelopment() {
         String previous = System.getProperty("BE_ENV");
         var gateway = gateway();
@@ -50,6 +86,8 @@ class SharedSandboxGatewayTest {
         var launch = gateway.tryAcquire("alice", "byclaw-dsh");
         assertThat(launch.getSandboxId()).isEqualTo("pool1");
         assertThat(launch.getIsShared()).isTrue();
+        assertThat(launch.getEndpointHeaders()).isNull();
+        verify(client, never()).call(eq("executionAccess"), anyMap());
         var order = inOrder(policy, client);
         order.verify(policy).eligible("alice");
         order.verify(client).call(eq("lookup"), anyMap());

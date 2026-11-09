@@ -28,6 +28,7 @@ public class SandboxLaunchData {
     private String requestedServiceKey;
     private Boolean isShared;
     private String mappingId;
+    private Long generation;
 
     /** Gateway token bound to the sandbox instance. */
     private String gatewayToken;

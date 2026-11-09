@@ -380,6 +380,9 @@ public class SandboxService {
                         throw new IllegalStateException("User execution tool sandbox is disabled");
                     }
                     SandboxLaunchData context = managedSharedLaunch(user, sharedSandboxType);
+                    if (context != null) {
+                        context = sharedSandboxGateway.executionAccess(user, sharedSandboxType, context);
+                    }
                     if (context == null && sharedHostRoutes(user, sharedSandboxType)) {
                         context = sharedDshHostContexts.ensure(user);
                     }
