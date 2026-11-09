@@ -1001,6 +1001,26 @@ class AuthApplicationServiceTest {
     /**
      * 个人助理管理授权也要后端兜底禁止，不能只依赖前端隐藏按钮。
      */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void taskMaintenanceRequiresCurrentResourceTenantAndOperationPermission(boolean manage) {
+        AuthApplicationService service = spy(new AuthApplicationService());
+        var resources = mock(SsResourceMapper.class);
+        ReflectionTestUtils.setField(service, "ssResourceMapper", resources);
+        LoginInfo login = new LoginInfo(); login.setUserId(7L); login.setUserCode("adminvip"); login.setEnterpriseId(1L);
+        CurrentUserHolder.setLoginInfo(login);
+        SsResource resource = enterpriseResource(900L, 7L); resource.setComAcctId(2L);
+        when(resources.selectById(900L)).thenReturn(resource);
+        assertThatThrownBy(() -> service.validateAuthorizationTaskMaintenance(900L, manage))
+            .hasMessage("授权任务不存在或无权查看");
+        verify(service, never()).validateAuthorizationTask(any(), org.mockito.ArgumentMatchers.anyBoolean());
+        resource.setComAcctId(1L);
+        org.mockito.Mockito.doThrow(new BaseException("maintenance denied"))
+            .when(service).validateAuthorizationTask(any(), eq(manage));
+        assertThatThrownBy(() -> service.validateAuthorizationTaskMaintenance(900L, manage)).hasMessage("maintenance denied");
+        verify(service).validateAuthorizationTask(argThat(qo -> qo.getResourceId().equals(900L)), eq(manage));
+    }
+
     @Test
     void setResourceManagers_rejectsPersonalAssistantResource() {
         mockI18n();

@@ -105,10 +105,129 @@ class AuthorizationTaskServiceTest {
     @Test void taskOwnershipIsBoundToBothTenantAndOperator() {
         String id = service.submit(request("request_0001")).getTaskId();
         actor.setUserId(43L);
+        doThrow(new BaseException("no maintenance permission")).when(auth).validateAuthorizationTaskMaintenance(anyLong(), anyBoolean());
         assertThatThrownBy(() -> service.get(id)).isInstanceOf(BaseException.class);
         assertThat(service.latest(13L)).isEmpty();
         actor.setUserId(42L); actor.setEnterpriseId(2L);
         assertThatThrownBy(() -> service.retry(id)).isInstanceOf(BaseException.class);
+    }
+
+    @Test void exactRequestLookupIsBoundToActorTenantAndResourceAndIgnoresHistoryPagination() {
+        String firstId = null;
+        for (int index = 0; index < 12; index++) {
+            String id = service.submit(request("lookup_" + index)).getTaskId();
+            if (index == 0) firstId = id;
+            jdbc.update("UPDATE byai_authorization_task SET status='SUCCEEDED', active_resource=NULL, created_at=? WHERE task_id=?", (long) index, id);
+        }
+        final String oldestId = firstId;
+        assertThat(service.latest(13L)).hasSize(10).noneMatch(task -> oldestId.equals(task.getTaskId()));
+        AuthorizationTask found = service.findRequest(13L, "lookup_0");
+        assertThat(found.getTaskId()).isEqualTo(firstId);
+        assertThat(found.getBlocksResource()).isFalse();
+        assertThat(service.findRequest(14L, "lookup_0")).isNull();
+        assertThat(service.findRequest(13L, "missing_request")).isNull();
+        actor.setUserId(43L);
+        assertThat(service.findRequest(13L, "lookup_0")).isNull();
+        actor.setUserId(42L); actor.setEnterpriseId(2L);
+        assertThat(service.findRequest(13L, "lookup_0")).isNull();
+        CurrentUserHolder.clearLoginInfo();
+        assertThatThrownBy(() -> service.findRequest(13L, "lookup_0")).isInstanceOf(BaseException.class);
+    }
+
+    @Test void historicalFailedTaskDoesNotClaimAResourceAfterItsReservationWasReleased() {
+        String id = service.submit(request("request_0001")).getTaskId();
+        jdbc.update("UPDATE byai_authorization_task SET status='FAILED' WHERE task_id=?", id);
+        assertThat(service.get(id).getBlocksResource()).isTrue();
+        jdbc.update("UPDATE byai_authorization_task SET active_resource=NULL WHERE task_id=?", id);
+        assertThat(service.get(id).getBlocksResource()).isFalse();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"USE", "MANAGE"})
+    void authorizedMaintainerCanReleaseAnotherOperatorsUnsavedFailureWithoutReplayingIt(String operation) {
+        var request = request("request_0001"); request.setOperation(operation);
+        String id = service.submit(request).getTaskId();
+        jdbc.update("UPDATE byai_authorization_task SET status='FAILED', phase='SAVING', message='old failure' WHERE task_id=?", id);
+        assertThat(service.get(id).getCanRetry()).isTrue();
+
+        actor.setUserId(43L);
+        clearInvocations(auth);
+        var visible = service.latest(13L);
+        assertThat(visible).hasSize(1);
+        assertThat(visible.getFirst().getTaskId()).isEqualTo(id);
+        assertThat(visible.getFirst().getSubmittedByCurrentUser()).isFalse();
+        assertThat(visible.getFirst().getCanRetry()).isFalse();
+        assertThat(visible.getFirst().getCanCancel()).isTrue();
+        verify(auth).validateAuthorizationTaskMaintenance(13L, "MANAGE".equals(operation));
+        assertThatThrownBy(() -> service.submit(request("request_0002"))).hasMessageContaining("未完成的授权任务");
+        assertThatThrownBy(() -> service.retry(id)).hasMessageContaining("不能代替其他提交人");
+
+        assertThat(service.cancel(id).getStatus()).isEqualTo("CANCELLED");
+        assertThat(tasks.selectById(id).getActiveResource()).isNull();
+        assertThat(tasks.selectById(id).getOperatorId()).isEqualTo(42L);
+        assertThat(service.latest(13L)).isEmpty(); // 不暴露他人的历史任务。
+        assertThat(service.submit(request("request_0002")).getOperatorId()).isEqualTo(43L);
+        verify(auth, never()).setResourceManagers(any());
+        verify(auth, never()).setResourceUsers(any());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM test_grants", Integer.class)).isZero();
+    }
+
+    @Test void taskRecoveryRechecksMaintenancePermissionAndTenantOnEveryRequest() {
+        String id = service.submit(request("request_0001")).getTaskId();
+        jdbc.update("UPDATE byai_authorization_task SET status='FAILED' WHERE task_id=?", id);
+        actor.setUserId(43L);
+        assertThat(service.get(id).getCanCancel()).isTrue();
+        doThrow(new BaseException("permission revoked")).when(auth).validateAuthorizationTaskMaintenance(anyLong(), anyBoolean());
+        assertThatThrownBy(() -> service.cancel(id)).hasMessage("permission revoked");
+        assertThatThrownBy(() -> service.retry(id)).hasMessage("permission revoked");
+        assertThat(service.latest(13L)).isEmpty();
+        doNothing().when(auth).validateAuthorizationTaskMaintenance(anyLong(), anyBoolean());
+        actor.setEnterpriseId(2L);
+        assertThat(service.latest(13L)).isEmpty();
+        assertThatThrownBy(() -> service.get(id)).isInstanceOf(BaseException.class);
+        assertThatThrownBy(() -> service.cancel(id)).isInstanceOf(BaseException.class);
+        assertThatThrownBy(() -> service.retry(id)).isInstanceOf(BaseException.class);
+        assertThat(tasks.selectById(id).getActiveResource()).isEqualTo("1:13");
+        assertThat(tasks.selectById(id).getStatus()).isEqualTo("FAILED");
+    }
+
+    @Test void anotherMaintainerCanWatchRunningTaskThroughCompletionButCannotCancelIt() throws Exception {
+        String id = service.submit(request("request_0001")).getTaskId();
+        actor.setUserId(43L);
+        var task = service.get(id);
+        assertThat(task.getCanRetry()).isFalse();
+        assertThat(task.getCanCancel()).isFalse();
+        assertThatThrownBy(() -> service.cancel(id)).isInstanceOf(BaseException.class);
+        String jackson = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(task);
+        String fastjson = com.alibaba.fastjson.JSON.toJSONString(task);
+        for (String json : List.of(jackson, fastjson)) {
+            assertThat(json).contains("submittedByCurrentUser", "canRetry", "canCancel")
+                .doesNotContain("operatorId", "enterpriseId", "payload", "leaseToken", "cachePlan", "requestHash");
+        }
+        jdbc.update("UPDATE byai_authorization_task SET status='SUCCEEDED', active_resource=NULL WHERE task_id=?", id);
+        assertThat(service.get(id).getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(service.latest(13L)).isEmpty();
+    }
+
+    @Test void anotherMaintainerCanRetryCommittedCacheFailureWithoutReplayingAuthorization() {
+        String id = service.submit(request("request_0001")).getTaskId();
+        doThrow(new IllegalStateException("cache unavailable")).when(cache).syncUserNow(anyLong());
+        try (var redis = mockStatic(RedisUtil.class)) {
+            service.runNext();
+            jdbc.update("UPDATE byai_authorization_task SET status='FAILED' WHERE task_id=?", id);
+            actor.setUserId(43L);
+            assertThat(service.get(id).getCanRetry()).isTrue();
+            assertThat(service.get(id).getCanCancel()).isFalse();
+            assertThatThrownBy(() -> service.cancel(id)).isInstanceOf(BaseException.class);
+            doNothing().when(cache).syncUserNow(anyLong());
+            service.retry(id);
+            service.runNext();
+            assertThat(service.get(id).getStatus()).isEqualTo("SUCCEEDED");
+            assertThat(service.latest(13L)).isEmpty();
+            assertThat(tasks.selectById(id).getOperatorId()).isEqualTo(42L);
+            verify(auth, times(1)).setResourceUsers(any());
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM test_grants", Integer.class)).isEqualTo(1);
+        }
     }
 
     @Test void committedOutboxRetriesAfterRestartWithoutReapplyingData() {

@@ -95,7 +95,7 @@ public class AuthorizationTaskService {
             if (previous != null) return sameRequest(previous, hash);
             throw new BaseException("该资源已有未完成的授权任务，请先查看进度或处理失败任务");
         }
-        return task;
+        return describe(task);
     }
 
     private void validateTargets(ResourceMemberSettingQo setting) {
@@ -118,7 +118,7 @@ public class AuthorizationTaskService {
 
     private AuthorizationTask sameRequest(AuthorizationTask task, String hash) {
         if (!Objects.equals(task.getRequestHash(), hash)) throw new BaseException("请求标识已被其他授权内容使用，请重新提交");
-        return task;
+        return describe(task);
     }
 
     private void requireActor() {
@@ -136,25 +136,77 @@ public class AuthorizationTaskService {
         return tasks.selectOne(own().eq(AuthorizationTask::getRequestId, requestId));
     }
 
+    /** 精确核对本人提交结果，不受历史列表条数、其他操作者或授权类型影响。 */
+    public AuthorizationTask findRequest(Long resourceId, String requestId) {
+        if (resourceId == null || requestId == null || requestId.isBlank()) throw new BaseException("资源和请求标识不能为空");
+        AuthorizationTask task = tasks.selectOne(own().eq(AuthorizationTask::getResourceId, resourceId)
+            .eq(AuthorizationTask::getRequestId, requestId));
+        return task == null ? null : describe(task);
+    }
+
     public AuthorizationTask get(String id) {
-        AuthorizationTask task = tasks.selectOne(own().eq(AuthorizationTask::getTaskId, id));
+        requireActor();
+        AuthorizationTask task = tasks.selectOne(new LambdaQueryWrapper<AuthorizationTask>()
+            .eq(AuthorizationTask::getEnterpriseId, CurrentUserHolder.getEnterpriseId())
+            .eq(AuthorizationTask::getTaskId, id));
         if (task == null) throw new BaseException("授权任务不存在或无权查看");
-        return task;
+        if (!isSubmitter(task)) validateTaskMaintenance(task);
+        return describe(task);
     }
 
     public List<AuthorizationTask> latest(Long resourceId) {
+        requireActor();
+        List<AuthorizationTask> result = new ArrayList<>();
+        // 资源占用是跨操作者的；可维护该授权的人必须能看到占用任务，历史仍仅返回本人的。
+        AuthorizationTask blocking = tasks.selectOne(new LambdaQueryWrapper<AuthorizationTask>()
+            .eq(AuthorizationTask::getEnterpriseId, CurrentUserHolder.getEnterpriseId())
+            .eq(AuthorizationTask::getResourceId, resourceId)
+            .eq(AuthorizationTask::getActiveResource, CurrentUserHolder.getEnterpriseId() + ":" + resourceId));
+        if (blocking != null) {
+            try {
+                if (!isSubmitter(blocking)) validateTaskMaintenance(blocking);
+                result.add(describe(blocking));
+            } catch (BaseException denied) {
+                // 无维护权限时不泄露他人的任务状态和失败原因。
+            }
+        }
         try {
             PageHelper.startPage(1, 10, false);
-            return tasks.selectList(own().eq(AuthorizationTask::getResourceId, resourceId)
-                .orderByDesc(AuthorizationTask::getCreatedAt));
+            for (AuthorizationTask task : tasks.selectList(own().eq(AuthorizationTask::getResourceId, resourceId)
+                .orderByDesc(AuthorizationTask::getCreatedAt))) {
+                if (result.stream().noneMatch(item -> item.getTaskId().equals(task.getTaskId()))) result.add(describe(task));
+            }
+            return result;
         } finally { PageHelper.clearPage(); }
+    }
+
+    private boolean isSubmitter(AuthorizationTask task) {
+        return Objects.equals(task.getOperatorId(), CurrentUserHolder.getCurrentUserId());
+    }
+
+    private void validateTaskMaintenance(AuthorizationTask task) {
+        auth.validateAuthorizationTaskMaintenance(task.getResourceId(), "MANAGE".equals(task.getOperation()));
+    }
+
+    private AuthorizationTask describe(AuthorizationTask task) {
+        boolean owner = isSubmitter(task);
+        boolean failed = "FAILED".equals(task.getStatus());
+        task.setSubmittedByCurrentUser(owner);
+        task.setBlocksResource(task.getActiveResource() != null);
+        // 他人只能重试已提交的缓存同步，不能以原提交人身份重放尚未保存的名单。
+        task.setCanRetry(failed && (owner || Integer.valueOf(1).equals(task.getDataApplied())));
+        task.setCanCancel(failed && Integer.valueOf(0).equals(task.getDataApplied()));
+        return task;
     }
 
     public AuthorizationTask retry(String id) {
         AuthorizationTask task = get(id);
         if (!"FAILED".equals(task.getStatus())) return task;
+        if (!Boolean.TRUE.equals(task.getCanRetry())) throw new BaseException("不能代替其他提交人重试未保存的授权，请放弃失败任务后重新提交");
         if (task.getDataApplied() == 0) auth.validateAuthorizationTask(JSON.parseObject(task.getPayload(), ResourceMemberSettingQo.class), "MANAGE".equals(task.getOperation()));
         tasks.update(null, new LambdaUpdateWrapper<AuthorizationTask>().eq(AuthorizationTask::getTaskId, id)
+            .eq(AuthorizationTask::getEnterpriseId, CurrentUserHolder.getEnterpriseId())
+            .eq(AuthorizationTask::getDataApplied, task.getDataApplied())
             .eq(AuthorizationTask::getStatus, "FAILED").set(AuthorizationTask::getStatus, "QUEUED")
             .set(AuthorizationTask::getAttempts, 0).set(AuthorizationTask::getRetryAt, System.currentTimeMillis())
             .set(AuthorizationTask::getMessage, "正在等待重试").set(AuthorizationTask::getUpdatedAt, System.currentTimeMillis()));
@@ -165,6 +217,7 @@ public class AuthorizationTaskService {
         AuthorizationTask task = get(id);
         if (!"FAILED".equals(task.getStatus()) || task.getDataApplied() != 0) throw new BaseException("仅未保存授权数据的失败任务可以放弃；已保存的任务请重试生效同步");
         tasks.update(null, new LambdaUpdateWrapper<AuthorizationTask>().eq(AuthorizationTask::getTaskId, id)
+            .eq(AuthorizationTask::getEnterpriseId, CurrentUserHolder.getEnterpriseId())
             .eq(AuthorizationTask::getStatus, "FAILED").eq(AuthorizationTask::getDataApplied, 0)
             .set(AuthorizationTask::getStatus, "CANCELLED").set(AuthorizationTask::getActiveResource, null)
             .set(AuthorizationTask::getMessage, "已放弃，授权数据未修改").set(AuthorizationTask::getUpdatedAt, System.currentTimeMillis()));

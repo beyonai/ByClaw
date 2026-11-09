@@ -79,6 +79,7 @@ function useAuth({
       '/byaiService/auth/privilegeGrant/setResourceManagers',
     ].includes(authApiPath),
     resourceId: grantObjId,
+    operation: authType === 'mgrAuth' ? 'MANAGE' : 'USE',
     onCompleted: getDetail,
   });
   const usesBackground = [

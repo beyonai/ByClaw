@@ -23,6 +23,10 @@ public class AuthorizationTaskController {
     @GetMapping public ResponseUtil<List<AuthorizationTask>> latest(@RequestParam Long resourceId) {
         return ResponseUtil.successResponse(tasks.latest(resourceId));
     }
+    @GetMapping("/by-request") public ResponseUtil<AuthorizationTask> findRequest(
+        @RequestParam Long resourceId, @RequestParam String requestId) {
+        return ResponseUtil.successResponse(tasks.findRequest(resourceId, requestId));
+    }
     @PostMapping("/{id}/retry") public ResponseUtil<AuthorizationTask> retry(@PathVariable String id) {
         return ResponseUtil.successResponse(tasks.retry(id));
     }

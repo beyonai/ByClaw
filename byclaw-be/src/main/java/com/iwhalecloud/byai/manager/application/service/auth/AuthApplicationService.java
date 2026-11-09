@@ -669,6 +669,18 @@ public class AuthApplicationService {
         } else validateResourceUseSettingPermission(resource);
     }
 
+    /** 处理他人的任务需同时校验资源当前归属和相应授权维护权限。 */
+    public void validateAuthorizationTaskMaintenance(Long resourceId, boolean manage) {
+        SsResource resource = getRequiredResource(resourceId);
+        if (CurrentUserHolder.getEnterpriseId() == null
+            || !Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) {
+            throw new BaseException("授权任务不存在或无权查看");
+        }
+        ResourceMemberSettingQo setting = new ResourceMemberSettingQo();
+        setting.setResourceId(resourceId);
+        validateAuthorizationTask(setting, manage);
+    }
+
     /**
      * 设置资源管理人员。 这里不直接操作 au_privilege_grant，而是统一复用 handleAuth(...)， 这样红黑名单比较、增删改、缓存同步都仍然走现有稳定链路。
      *

@@ -2,6 +2,7 @@ jest.mock('@/pages/manager/service/authorizationTasks', () => ({
   submitAuthorizationTask: jest.fn(),
   listAuthorizationTasks: jest.fn(),
   getAuthorizationTask: jest.fn(),
+  findAuthorizationTaskRequest: jest.fn(),
   retryAuthorizationTask: jest.fn(),
   cancelAuthorizationTask: jest.fn(),
 }));

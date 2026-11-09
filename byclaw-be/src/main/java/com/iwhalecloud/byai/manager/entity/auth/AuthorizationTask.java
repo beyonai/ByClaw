@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.entity.auth;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
@@ -27,6 +28,10 @@ public class AuthorizationTask {
     private Integer attempts;
     private Long createdAt;
     private Long updatedAt;
+    @TableField(exist = false) private Boolean submittedByCurrentUser;
+    @TableField(exist = false) private Boolean canRetry;
+    @TableField(exist = false) private Boolean canCancel;
+    @TableField(exist = false) private Boolean blocksResource;
     @JsonIgnore @com.alibaba.fastjson.annotation.JSONField(serialize = false) private Long retryAt;
     @JsonIgnore @com.alibaba.fastjson.annotation.JSONField(serialize = false) private Long leaseUntil;
     @JsonIgnore @com.alibaba.fastjson.annotation.JSONField(serialize = false) private String leaseToken;

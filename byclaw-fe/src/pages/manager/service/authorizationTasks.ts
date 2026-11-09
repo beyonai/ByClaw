@@ -14,6 +14,10 @@ export type AuthorizationTask = {
   totalUsers: number;
   dataApplied: number;
   message: string;
+  submittedByCurrentUser?: boolean;
+  canRetry?: boolean;
+  canCancel?: boolean;
+  blocksResource?: boolean;
 };
 type Result<T> = { code: number; data: T; msg?: string };
 
@@ -21,6 +25,8 @@ export const submitAuthorizationTask = (data: any) => POST<Result<AuthorizationT
 export const listAuthorizationTasks = (resourceId: string) =>
   GET<Result<AuthorizationTask[]>>(base, { resourceId }, config);
 export const getAuthorizationTask = (id: string) => GET<Result<AuthorizationTask>>(`${base}/${id}`, {}, config);
+export const findAuthorizationTaskRequest = (resourceId: string, requestId: string) =>
+  GET<Result<AuthorizationTask | null>>(`${base}/by-request`, { resourceId, requestId }, config);
 export const retryAuthorizationTask = (id: string) =>
   POST<Result<AuthorizationTask>>(`${base}/${id}/retry`, {}, config);
 export const cancelAuthorizationTask = (id: string) =>
