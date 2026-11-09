@@ -37,8 +37,19 @@ def main(argv: list[str]) -> int:
         except OSError as error:
             print(f'byclaw-pid1: cannot run {argv[0]}: {error.strerror}', file=sys.stderr)
             os._exit(127)
+    running = True
+
+    def forward(received, _frame):
+        # Once the command is reaped its pid may be reused, and a signal racing its exit finds no process.
+        if not running:
+            return
+        try:
+            os.kill(child, received)
+        except ProcessLookupError:
+            pass
+
     for number in FORWARDED:
-        signal.signal(number, lambda received, _frame: os.kill(child, received))
+        signal.signal(number, forward)
     signal.pthread_sigmask(signal.SIG_UNBLOCK, FORWARDED)
     while True:
         try:
@@ -48,6 +59,9 @@ def main(argv: list[str]) -> int:
         except InterruptedError:
             continue
         if pid == child:
+            running = False
+            # Exiting restores default handlers; a forwarded signal arriving then must not replace our status.
+            signal.pthread_sigmask(signal.SIG_BLOCK, FORWARDED)
             # Collect whatever is already dead, then leave the rest to the container's end.
             while True:
                 try:

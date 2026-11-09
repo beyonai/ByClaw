@@ -60,23 +60,27 @@ test('nothing readable or a nonsense limit gives no value (Node keeps its defaul
 
 async function entrypointOptions(t, env) {
   const dir = await fixture(t)
-  // A fake `node` that reports the options the entrypoint hands to the shared host.
-  await writeFile(join(dir, 'node'), '#!/bin/sh\nprintf "%s" "$NODE_OPTIONS"\n')
+  // A fake `node` that reports its own options and the NODE_OPTIONS its children would inherit.
+  await writeFile(join(dir, 'node'), '#!/bin/sh\nfor a in "$@"; do case "$a" in --*) printf "%s " "$a";; esac; done\nprintf "|%s" "$NODE_OPTIONS"\n')
   await chmod(join(dir, 'node'), 0o755)
   const r = spawnSync('bash', [ENTRYPOINT, 'multi-host'], { encoding: 'utf8', env: { PATH: `${dir}:${process.env.PATH}`, ...env } })
   assert.equal(r.status, 0, r.stderr)
-  return r.stdout
+  const [flags, inherited] = r.stdout.split('|')
+  return { flags: flags.trim(), inherited }
 }
 
 test('the multi-host entrypoint passes the detected heap and keeps an explicit one', { skip: process.getuid?.() === 0 && 'root takes the privilege-dropping path' }, async (t) => {
   const detected = spawnSync('bash', ['-c', `set -Eeuo pipefail\n${fn}\nmulti_host_heap_mb /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory/memory.limit_in_bytes /proc/meminfo`], { encoding: 'utf8' }).stdout.trim()
-  const options = await entrypointOptions(t, {})
+  const { flags: options, inherited } = await entrypointOptions(t, {})
   assert.match(options, /--experimental-async-context-frame/)
   assert.match(options, /--max-semi-space-size=64/)
   if (detected) assert.match(options, new RegExp(`--max-old-space-size=${detected}( |$)`))
   else assert.doesNotMatch(options, /--max-old-space-size/)
   assert.doesNotMatch(options, /--max-old-space-size=8192/)
+  // The host's children do not inherit its flags.
+  assert.equal(inherited, '')
   const explicit = await entrypointOptions(t, { NODE_OPTIONS: '--max-old-space-size=1234' })
-  assert.equal(explicit.match(/--max-old-space-size=/g).length, 1)
-  assert.match(explicit, /^--max-old-space-size=1234 /)
+  assert.doesNotMatch(explicit.flags, /--max-old-space-size/)
+  assert.match(explicit.flags, /--max-semi-space-size=64/)
+  assert.equal(explicit.inherited, '--max-old-space-size=1234')
 })

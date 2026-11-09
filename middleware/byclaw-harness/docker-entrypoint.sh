@@ -95,12 +95,13 @@ if [[ "${1:-}" == multi-host ]]; then
     # contexts; AsyncLocalStorage on async_hooks and a small young generation each cost the busy loop a large share.
     # The heap ceiling follows the memory this container may actually use, so the host reports a heap failure
     # instead of being killed by its memory limit first; with nothing readable, Node keeps its own default.
-    # A flag already present in NODE_OPTIONS wins.
+    # A flag already present in NODE_OPTIONS wins. The flags go on the host's own command line, not into
+    # NODE_OPTIONS: the host's Node children (ws-proxy and others) must not inherit its heap size.
     heap_mb=$(multi_host_heap_mb /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory/memory.limit_in_bytes /proc/meminfo) || heap_mb=''
+    host_node_flags=()
     for flag in ${heap_mb:+--max-old-space-size=${heap_mb}} --experimental-async-context-frame --max-semi-space-size=64; do
-        [[ " ${NODE_OPTIONS:-} " == *" ${flag%%=*}"[=\ ]* ]] || NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }${flag}"
+        [[ " ${NODE_OPTIONS:-} " == *" ${flag%%=*}"[=\ ]* ]] || host_node_flags+=("${flag}")
     done
-    export NODE_OPTIONS
     # Node does not reap orphans; each closed tool-environment connection leaves its ws-proxy behind.
     pid1=()
     [[ -x /usr/local/bin/byclaw-pid1 ]] && pid1=(/usr/local/bin/byclaw-pid1)
@@ -170,9 +171,9 @@ if __name__ == '__main__':
     prepare_host_root(sys.argv[1], account.pw_uid, account.pw_gid)
 BYCLAW_SHARED_ROOT
         exec "${pid1[@]}" setpriv --reuid=byclaw --regid=byclaw --init-groups \
-            env HOME=/home/byclaw node "${launcher}" "$@"
+            env HOME=/home/byclaw node "${host_node_flags[@]}" "${launcher}" "$@"
     fi
-    exec "${pid1[@]}" node "${launcher}" "$@"
+    exec "${pid1[@]}" node "${host_node_flags[@]}" "${launcher}" "$@"
 fi
 
 if [[ "${BYCLAW_DSH_PREPARED:-0}" != 1 && "${BYCLAW_DSH_PREPARE_ONLY:-0}" != 1 ]]; then

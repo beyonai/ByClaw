@@ -44,3 +44,20 @@ test('SIGTERM is forwarded to the command', async () => {
   child.kill('SIGTERM')
   assert.equal((await done).code, 42)
 })
+
+test('signals that race the command exit neither crash the wrapper nor change its status', async () => {
+  // The command ignores TERM and exits on its own; TERM keeps arriving around and after that exit.
+  const { child, done } = run(['sh', '-c', 'trap "" TERM; sleep 0.4; exit 5'])
+  let stderr = ''
+  child.stderr.on('data', chunk => { stderr += chunk })
+  let finished = false
+  void done.then(() => { finished = true })
+  // The wrapper installs its handlers right after starting the command: wait for the command to exist.
+  while (!finished && childrenOf(child.pid, false).length === 0) await sleep(10)
+  while (!finished) {
+    try { child.kill('SIGTERM') } catch {}
+    await sleep(5)
+  }
+  assert.equal((await done).code, 5)
+  assert.doesNotMatch(stderr, /Traceback|ProcessLookupError/u)
+})
