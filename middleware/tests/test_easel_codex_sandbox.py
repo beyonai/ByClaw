@@ -58,6 +58,13 @@ class EaselCodexSandboxContractTest(unittest.TestCase):
         self.assertNotIn('openclaw', dockerfile.lower())
         self.assertNotIn('remotion versions', dockerfile)
 
+    def test_transport_and_browser_resolve_after_venv_install(self) -> None:
+        dockerfile = (HARNESS / 'Dockerfile.tools.easel-codex').read_text()
+        self.assertIn('"websockets==15.0.1"', dockerfile)
+        self.assertIn('runpy.run_path("/usr/local/bin/byclaw-tool-env-ws-bridge"', dockerfile)
+        self.assertIn('p.chromium.executable_path', dockerfile)
+        self.assertIn('ln -sfn "$chromium_path" /usr/local/bin/byclaw-playwright-chromium', dockerfile)
+
     def test_docker_context_excludes_unrelated_repository(self) -> None:
         ignore = (HARNESS / 'Dockerfile.tools.easel-codex.dockerignore').read_text()
         self.assertTrue(ignore.startswith('**\n'))

@@ -134,7 +134,16 @@ COPY --chmod=0755 middleware/byclaw-harness/scripts/easel-codex-entrypoint.py /u
 COPY middleware/byclaw-harness/tool-sandbox/easel-codex.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
 COPY middleware/byclaw-harness/tool-sandbox/easel-codex.source.json /etc/byclaw-tool-sandbox/easel-codex.source.json
 
+# The SSH WebSocket bridge resolves python3 through this image's venv PATH.
+# Installing Playwright may remove the parent's Chromium revision; refresh links.
 RUN set -eux; \
+    /opt/easel-venv/bin/python -m pip install "websockets==15.0.1"; \
+    /opt/easel-venv/bin/python -c 'import runpy; runpy.run_path("/usr/local/bin/byclaw-tool-env-ws-bridge", run_name="bridge_import_check")'; \
+    chromium_path=$(/opt/easel-venv/bin/python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()'); \
+    test -x "$chromium_path"; \
+    ln -sfn "$chromium_path" /usr/local/bin/byclaw-playwright-chromium; \
+    ln -sfn "$chromium_path" /usr/local/bin/chromium; \
+    /usr/local/bin/byclaw-playwright-chromium --version; \
     ln -sfn /usr/local/bin/byclaw-easel-codex-entrypoint /usr/local/bin/byclaw-dsh-entrypoint; \
     python3 -m py_compile /usr/local/bin/byclaw-easel-codex-entrypoint; \
     rm -rf /var/cache/easel; \
