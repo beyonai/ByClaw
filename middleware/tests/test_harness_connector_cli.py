@@ -8,7 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 HARNESS = ROOT / 'middleware/byclaw-harness'
-DOCKERFILES = ('Dockerfile',)
+DOCKERFILES = ('Dockerfile', 'Dockerfile.slim')
 VERSION_ARGS = ('WECOM_CLI_VERSION', 'LARKSUITE_CLI_VERSION')
 
 NPM_STUB = r"""#!/bin/sh
@@ -82,6 +82,8 @@ class HarnessConnectorCliTest(unittest.TestCase):
         self.assertIn('--ignore-scripts', install)
         self.assertIn('node /tmp/lark-mirror-first.mjs', install)
         self.assertIn('node "$(npm root -g)/@larksuite/cli/scripts/install.js"', install)
+        if name == 'Dockerfile.slim':
+            self.assertIn('scripts/install.js" --mirror-only', install)
         for scope, binary in (('@wecom', 'cli/bin/wecom.js'), ('@larksuite', 'cli/scripts/run.js')):
             self.assertIn(
                 f'COPY --from=connector-tools /opt/nvm/current/lib/node_modules/{scope}/ '
@@ -131,7 +133,10 @@ class HarnessConnectorCliTest(unittest.TestCase):
                 self.assertIn('wecom-cli --version user=byclaw', log)
                 self.assertNotIn('wecom-cli --help', log)
                 self.assertIn('lark-cli --help user=byclaw', log)
-                self.assertIn('node /tmp/lark-mirror-first.mjs /mock/node_modules/@larksuite/cli/scripts/install.js', log)
+                patch_installer = 'node /tmp/lark-mirror-first.mjs /mock/node_modules/@larksuite/cli/scripts/install.js'
+                if name == 'Dockerfile.slim':
+                    patch_installer += ' --mirror-only'
+                self.assertIn(f'{patch_installer}\n', log)
                 self.assertIn('node /mock/node_modules/@larksuite/cli/scripts/install.js', log)
                 self.assertIn('npm cache clean --force', log)
 

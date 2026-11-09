@@ -255,6 +255,26 @@ RUN set -eux; \
 # the patched DSH packages. No build toolchain or installer store crosses this boundary.
 RUN find /opt/byclaw/dsh-managed -type f -name '*.tsbuildinfo' -delete
 
+# Fixed connector tools have an independent cache, unaffected by plugin edits.
+FROM ${BASE_IMAGE} AS connector-tools
+USER root
+ARG NPM_REGISTRY
+ENV npm_config_registry=${NPM_REGISTRY}
+ARG WECOM_CLI_VERSION=1.3.4
+ARG LARKSUITE_CLI_VERSION=1.0.85
+COPY middleware/byclaw-harness/scripts/lark-mirror-first.mjs /tmp/lark-mirror-first.mjs
+# Keep versions aligned with OpenClaw and restrict Lark downloads to mirrors.
+RUN set -eu; \
+    npm install --global --ignore-scripts --no-audit --no-fund --update-notifier=false "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}"; \
+    node /tmp/lark-mirror-first.mjs "$(npm root -g)/@larksuite/cli/scripts/install.js" --mirror-only; \
+    node "$(npm root -g)/@larksuite/cli/scripts/install.js"; \
+    wecom_version="$(wecom-cli --version)"; \
+    printf '%s\n' "${wecom_version}" | awk -v expected="${WECOM_CLI_VERSION}" 'NR != 1 || $1 != "wecom-cli" || $2 != expected || (NF != 2 && $0 !~ /^wecom-cli [^ ]+ \(wecom [^()]+\)$/) { exit 1 }'; \
+    lark_version="$(lark-cli --version)"; \
+    test "${lark_version}" = "lark-cli version ${LARKSUITE_CLI_VERSION}"; \
+    su -s /bin/sh byclaw -c 'wecom-cli --version >/dev/null && lark-cli --help >/dev/null'; \
+    npm cache clean --force
+
 FROM ${BASE_IMAGE} AS runtime
 ARG NPM_REGISTRY
 ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY} npm_config_registry=${NPM_REGISTRY} pnpm_config_registry=${NPM_REGISTRY} \
@@ -264,6 +284,11 @@ ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY} npm_config_registry=${NPM_REGISTRY} pnpm
     BYCLAW_BROWSER_ON_TOOL_ENV=1 BYCLAW_TOOL_BROWSER_VIEWER=shared-novnc \
     BYCLAW_TOOL_BROWSER_VIEWER_PORT=8082 \
     PATH=/opt/nvm/current/bin:/opt/byclaw/builtin/cli:/usr/local/bin:$PATH
+USER root
+COPY --from=connector-tools /opt/nvm/current/lib/node_modules/@wecom/ /opt/nvm/current/lib/node_modules/@wecom/
+COPY --from=connector-tools /opt/nvm/current/lib/node_modules/@larksuite/ /opt/nvm/current/lib/node_modules/@larksuite/
+RUN ln -sf ../lib/node_modules/@wecom/cli/bin/wecom.js /opt/nvm/current/bin/wecom-cli \
+    && ln -sf ../lib/node_modules/@larksuite/cli/scripts/run.js /opt/nvm/current/bin/lark-cli
 USER byclaw
 WORKDIR /workspace
 COPY --from=profile-builder --chown=byclaw:byclaw /opt/byclaw/dsh-managed/ /opt/byclaw/dsh-managed/
@@ -303,6 +328,8 @@ COPY middleware/byclaw-harness/scripts/verify-read-image-runtime.mjs /usr/local/
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/materialize-image-runtime.mjs /tmp/materialize-image-runtime.mjs
 RUN node /tmp/materialize-image-runtime.mjs /workspace \
     && rm /tmp/materialize-image-runtime.mjs \
+    && wecom-cli --version >/dev/null \
+    && lark-cli --help >/dev/null \
     && node /usr/local/lib/byclaw/verify-lean-harness.mjs \
     && node /usr/local/lib/byclaw/verify-read-image-runtime.mjs /workspace /opt/byclaw/dsh-managed/profiles/web \
     && node /workspace/scripts/verify-shared-runtime.mjs /workspace /opt/byclaw/dsh-managed/profiles/web \
