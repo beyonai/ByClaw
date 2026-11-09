@@ -1,5 +1,5 @@
 {
-  "image": "byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness:D0.6.0_coding-r1",
+  "image": "byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness:D0.6.0_coding-r2",
   "startup": {
     "entrypoint": ["/usr/local/bin/byclaw-tool-slim-entrypoint", "tools"]
   },
@@ -11,7 +11,7 @@
     "BYCLAW_TOOL_ENV_HOST_KEY": "${envVars.BYCLAW_TOOL_ENV_HOST_KEY}",
     "BYCLAW_TOOL_ENV_AUTHORIZED_KEY": "${envVars.BYCLAW_TOOL_ENV_AUTHORIZED_KEY}",
     "BYCLAW_BROWSER_STARTUP": "eager",
-    "CODEX_API_KEY": "${envVars.CODEX_API_KEY}"
+    "CODEX_AUTH": "${envVars.CODEX_AUTH}"
   },
   "servicePort": 8080,
   "ports": [

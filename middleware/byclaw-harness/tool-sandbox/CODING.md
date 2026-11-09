@@ -27,10 +27,10 @@ git diff --check
 ```bash
 docker build --platform linux/amd64 \
   -f middleware/byclaw-harness/Dockerfile.tools.coding \
-  -t byclaw-coding:D0.6.0_coding-r1 .
+  -t byclaw-coding:D0.6.0_coding-r2 .
 ```
 
-按《工具沙箱全流程教程》步骤 02—10：提交并推送分支 → 平台“拉取 ByClaw” → “构建 Harness 镜像”选择本 Dockerfile → Tag `D0.6.0_coding-r1` → 推送北京 ACR。若下拉框没有本文件，需给构建平台补选项。记录提交号、镜像 digest、CLI 版本。
+按《工具沙箱全流程教程》步骤 02—10：提交并推送分支 → 平台“拉取 ByClaw” → “构建 Harness 镜像”选择本 Dockerfile → Tag `D0.6.0_coding-r2` → 推送北京 ACR。若下拉框没有本文件，需给构建平台补选项。记录提交号、镜像 digest、CLI 版本。
 
 两个 Codex 包由国内镜像下载并校验锁定的 SHA-512，安装目录 `/opt/byclaw/codex`。失败即中止，不回退其他来源。固定版本不等于已通过业务兼容验收；首次发布需完成后面的真实请求测试。
 
@@ -42,9 +42,11 @@ docker build --platform linux/amd64 \
 
 | 变量 | 含义 |
 |---|---|
-| `CODEX_API_KEY` | 网关密钥 |
+| `CODEX_AUTH` | 网关密钥 |
 
-后端创建沙箱时从 Redis 读取当前用户的个人参数，再按 Spec 中的 `${envVars.CODEX_API_KEY}` 注入环境。只会注入 Spec 声明的变量。真实凭证不写进 Git、Dockerfile 或构建参数。
+`CODEX_AUTH` 是本项目配置的认证变量名，避开平台禁用的命名片段；Codex 通过配置文件中的 `env_key` 读取它。
+
+后端创建沙箱时从 Redis 读取当前用户的个人参数，再按 Spec 中的 `${envVars.CODEX_AUTH}` 注入环境。只会注入 Spec 声明的变量。真实凭证不写进 Git、Dockerfile 或构建参数。
 
 保留有效 browser Spec 的 SSH 身份、网络、持久卷和资源配置。8080 是私有 SSH-over-WebSocket，8081 是平台认证浏览器。保存后重建云模板，用新实例验证；旧实例不会自动更新。共享主环境场景继续按教程步骤 22—24 检查宿主映射和目标用户准入。
 
@@ -52,11 +54,11 @@ Spec 使用原工具入口 `/usr/local/bin/byclaw-tool-slim-entrypoint tools`。
 
 ```text
 构建镜像：复制 codex.config.toml → /home/byclaw/.codex/config.toml
-启动沙箱：平台注入 CODEX_API_KEY → 原工具入口启动 SSH、浏览器
+启动沙箱：平台注入 CODEX_AUTH → 原工具入口启动 SSH、浏览器
 执行任务：sandbox_exec 调用 codex → 读取配置文件和密钥环境变量
 ```
 
-`CODEX_HOME` 默认 `/home/byclaw/.codex`，随现有环境传递机制进入 SSH 会话；配置目录及文件归 byclaw 所有，权限分别为 0700、0600。默认模型为 `gpt-6.1-sol`，网关为 `https://api.ikuncode.ai/v1`，协议为 Responses API。文件通过 `env_key="CODEX_API_KEY"` 指定密钥变量名，不保存真实 Key。缺少密钥时工具服务仍可启动，调用 Codex 时会认证失败。
+`CODEX_HOME` 默认 `/home/byclaw/.codex`，随现有环境传递机制进入 SSH 会话；配置目录及文件归 byclaw 所有，权限分别为 0700、0600。默认模型为 `gpt-6.1-sol`，网关为 `https://api.ikuncode.ai/v1`，协议为 Responses API。文件通过 `env_key="CODEX_AUTH"` 指定密钥变量名，不保存真实 Key。缺少密钥时工具服务仍可启动，调用 Codex 时会认证失败。
 
 直接执行使用文件中的默认值；命令行参数优先，未传的字段沿用文件配置。例如：
 
@@ -72,6 +74,10 @@ codex exec --skip-git-repo-check --model '其他模型ID' \
 原生会话保存在 `CODEX_HOME`，当前示例未持久化该目录，重建实例后会话可能丢失。当前 `/by` 卷保存工作文件；若另行挂载 `CODEX_HOME`，需预置 `config.toml`，因为空卷会遮盖镜像内置配置。
 
 这是独立工具镜像：不要直接替换当前 `none + web` 的 Harness 镜像。`CODEX_AGENT_IDS` 属于后续 Harness 路由配置，不配置到本工具镜像来实现自动分流。
+
+### 从 r1 更新到 r2
+
+旧镜像内置配置仍引用原认证变量名，仅修改个人参数不会更新镜像。发布本次代码后，使用 `D0.6.0_coding-r2` 重新构建并推送镜像；个人参数新增并启用 `CODEX_AUTH`，值填写原网关密钥。后台用本示例更新 image 和 env 占位符，保存后重建云模板，使用新实例验收。不要把旧实例仍可运行当作新配置已生效。
 
 ## 4. 同一租约内验收
 

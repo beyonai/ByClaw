@@ -6,5 +6,5 @@ model_provider = "byclaw"
 name = "ikuncode"
 base_url = "https://api.ikuncode.ai/v1"
 wire_api = "responses"
-env_key = "CODEX_API_KEY"
+env_key = "CODEX_AUTH"
 requires_openai_auth = false
