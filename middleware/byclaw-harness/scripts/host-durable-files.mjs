@@ -7,11 +7,15 @@
  * flushes once more when the context goes away. Values are encrypted (AES-256-GCM) with a key
  * derived from the host's service secret and bound to the user and file name.
  *
+ * A deleted file leaves a {@link DELETED} row, so a host still holding an old copy deletes it
+ * instead of storing it again. A file over {@link MAX_FILE_BYTES} leaves a {@link LOCAL_ONLY} row:
+ * the host that wrote it keeps it, and no older copy overwrites it or is stored in its place.
+ *
  * One host serves a user at a time (the Redis claim), so the files have one writer.
  */
 import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto'
 import { mkdirSync, watch } from 'node:fs'
-import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, sep } from 'node:path'
 
 const TOOL_ENV = /^byclaw-tool-env\/(?:catalog\/(?!\.{1,2}\/)[A-Za-z0-9._-]+\/)?(?:client_ed25519(?:\.pub)?|host_ed25519(?:\.pub)?|known_hosts|published-keys\.json|tool-sandbox\.json|sandbox\.json)$/
@@ -19,6 +23,10 @@ const TOOL_ENV = /^byclaw-tool-env\/(?:catalog\/(?!\.{1,2}\/)[A-Za-z0-9._-]+\/)?
 export const DURABLE_TREES = ['runtime/byclaw-agent-teams', 'agent-teams/instances']
 /** Larger files are left on this host (and logged): the state above is small, an archive should not be. */
 export const MAX_FILE_BYTES = 16 * 1024 * 1024
+/** Stored value of a file that was deleted. Not ciphertext: sealed values start with `v1:`. */
+export const DELETED = 'deleted'
+/** Stored value of a file too large to store, kept by the host that wrote it. */
+export const LOCAL_ONLY = 'local-only'
 
 /** Whether a DSH-home-relative name is one of the durable files. */
 export function isDurableFile(name) {
@@ -91,10 +99,6 @@ export function sqlFileStore(pool, schema = 'byai') {
         await pool.query(`UPDATE ${table} SET value = $1, updated_at = $2 WHERE user_code = $3 AND name = $4`, [value, now, user, name])
       }
     },
-    async remove(user, name) {
-      await ensure()
-      await pool.query(`DELETE FROM ${table} WHERE user_code = $1 AND name = $2`, [user, name])
-    },
   }
 }
 
@@ -102,6 +106,11 @@ const digest = data => createHash('sha256').update(data).digest('hex')
 
 async function readIfPresent(path) {
   try { return await readFile(path) } catch (error) { if (error.code === 'ENOENT') return undefined; throw error }
+}
+
+/** @returns whether there was a file to remove. */
+async function removeIfPresent(path) {
+  try { await rm(path); return true } catch (error) { if (error.code === 'ENOENT') return false; throw error }
 }
 
 /** Every durable file present under `home`, by name relative to it. */
@@ -129,7 +138,7 @@ async function presentFiles(home) {
 export class DurableFiles {
   constructor({ store, key, user, home, log = () => {} }) {
     Object.assign(this, { store, key, user, home, log })
-    /** name -> digest of what the store holds, so unchanged rewrites are not sent. */
+    /** name -> what the store holds: the content's digest, {@link DELETED} or {@link LOCAL_ONLY}. Unchanged rewrites are not sent. */
     this.stored = new Map()
     this.queue = new Map()
     this.watchers = []
@@ -137,25 +146,40 @@ export class DurableFiles {
     this.rescan = undefined
   }
 
-  /** Write the stored files into the home (the store wins), then store local files it lacks. */
+  /**
+   * Bring the home in line with the store (the store wins): write stored files, delete deleted
+   * ones, and leave files kept on their host alone. Then store local files the store never had.
+   */
   async restore() {
     const rows = await this.store.list(this.user)
+    let restored = 0, deleted = 0
     for (const row of rows) {
       if (!isDurableFile(row.name)) continue
-      const data = openFile(this.key, this.user, row.name, row.value)
       const path = join(this.home, row.name)
+      if (row.value === LOCAL_ONLY || row.value === DELETED) {
+        this.stored.set(row.name, row.value)
+        if (row.value === DELETED && await removeIfPresent(path)) deleted += 1
+        continue
+      }
+      const data = openFile(this.key, this.user, row.name, row.value)
+      this.stored.set(row.name, digest(data))
       const current = await readIfPresent(path)
+      // Only this host can have grown it past the limit, after it was last stored: the local file is newer.
+      if (current !== undefined && current.length > MAX_FILE_BYTES) {
+        await this.sync(row.name)
+        continue
+      }
       if (current === undefined || !current.equals(data)) {
         await mkdir(dirname(path), { recursive: true, mode: 0o700 })
         const staged = `${path}.${randomBytes(6).toString('hex')}.restore`
         await writeFile(staged, data, { mode: 0o600 })
         await rename(staged, path)
+        restored += 1
       }
-      this.stored.set(row.name, digest(data))
     }
     const missing = (await presentFiles(this.home)).filter(name => !this.stored.has(name))
     for (const name of missing) await this.sync(name)
-    this.log(`durable files for ${this.user}: restored ${rows.length}, stored ${missing.length} new`)
+    this.log(`durable files for ${this.user}: ${rows.length} stored, ${restored} restored, ${deleted} deleted, ${missing.length} stored new`)
   }
 
   /**
@@ -194,13 +218,16 @@ export class DurableFiles {
     const next = previous.catch(() => {}).then(async () => {
       const data = await readIfPresent(join(this.home, name))
       if (data === undefined) {
-        if (!this.stored.has(name)) return
-        await this.store.remove(this.user, name)
-        this.stored.delete(name)
+        if (!this.stored.has(name) || this.stored.get(name) === DELETED) return
+        await this.store.put(this.user, name, DELETED)
+        this.stored.set(name, DELETED)
         return
       }
       if (data.length > MAX_FILE_BYTES) {
+        if (this.stored.get(name) === LOCAL_ONLY) return
         this.log(`durable file ${name} of ${this.user} is ${data.length} bytes; kept on this host only`)
+        await this.store.put(this.user, name, LOCAL_ONLY)
+        this.stored.set(name, LOCAL_ONLY)
         return
       }
       const hash = digest(data)

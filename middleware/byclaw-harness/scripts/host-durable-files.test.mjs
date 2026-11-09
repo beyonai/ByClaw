@@ -3,9 +3,9 @@ import { test } from 'node:test'
 import { mkdtemp, mkdir, readFile, rm, rename, writeFile, stat } from 'node:fs/promises'
 import fs from 'node:fs'
 import net from 'node:net'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { DurableFiles, MAX_FILE_BYTES, deriveFileKey, isDurableFile, openFile, sealFile } from './host-durable-files.mjs'
+import { DELETED, DurableFiles, LOCAL_ONLY, MAX_FILE_BYTES, deriveFileKey, isDurableFile, openFile, sealFile } from './host-durable-files.mjs'
 
 const key = deriveFileKey('a-service-secret-of-enough-length')
 
@@ -16,7 +16,6 @@ function memoryStore() {
     rows,
     async list(user) { return [...rows].filter(([k]) => k.startsWith(`${user}\0`)).map(([k, value]) => ({ name: k.split('\0')[1], value })) },
     async put(user, name, value) { rows.set(id(user, name), value) },
-    async remove(user, name) { rows.delete(id(user, name)) },
   }
 }
 
@@ -75,7 +74,7 @@ test('a fresh home on another host gets the files back', async () => {
   } finally { await first.cleanup(); await second.cleanup() }
 })
 
-test('changes are stored as they happen, including atomic renames; close stores the rest and forgets deleted files', async () => {
+test('changes are stored as they happen, including atomic renames; close stores the rest and marks deleted files', async () => {
   const store = memoryStore()
   const { dir, cleanup } = await home()
   try {
@@ -94,7 +93,7 @@ test('changes are stored as they happen, including atomic renames; close stores 
     await writeFile(join(dir, '.credentials.yaml'), 'v: 2\n')
     await files.close()
     assert.equal(openFile(key, 'u1', '.credentials.yaml', value()).toString(), 'v: 2\n')
-    assert.ok(!store.rows.has('u1\0byclaw-tool-env/known_hosts'))
+    assert.equal(store.rows.get('u1\0byclaw-tool-env/known_hosts'), DELETED)
     assert.ok(![...store.rows.keys()].some(k => k.includes('unrelated')))
   } finally { await cleanup() }
 })
@@ -102,23 +101,24 @@ test('changes are stored as they happen, including atomic renames; close stores 
 test('a team directory moved or removed as a whole is followed by a rescan', async () => {
   const store = memoryStore()
   const { dir, cleanup } = await home()
+  let files
   try {
     const team = join(dir, 'runtime/byclaw-agent-teams/h1/team-a')
     await mkdir(join(team, 'inbox'), { recursive: true })
     await writeFile(join(team, 'team.json'), '{"name":"team-a"}')
     await writeFile(join(team, 'inbox/captain.jsonl'), '{"m":1}\n')
-    const files = new DurableFiles({ store, key, user: 'u1', home: dir })
+    files = new DurableFiles({ store, key, user: 'u1', home: dir })
     await files.restore()
     assert.ok(store.rows.has('u1\0runtime/byclaw-agent-teams/h1/team-a/inbox/captain.jsonl'))
     files.start()
     await mkdir(join(dir, 'runtime/byclaw-agent-teams/h1/archive'), { recursive: true })
     await rename(team, join(dir, 'runtime/byclaw-agent-teams/h1/archive/team-a'))
-    await waitFor(() => store.rows.has('u1\0runtime/byclaw-agent-teams/h1/archive/team-a/team.json')
-      && !store.rows.has('u1\0runtime/byclaw-agent-teams/h1/team-a/team.json'))
+    const live = row => store.rows.has(row) && store.rows.get(row) !== DELETED
+    await waitFor(() => live('u1\0runtime/byclaw-agent-teams/h1/archive/team-a/team.json')
+      && store.rows.get('u1\0runtime/byclaw-agent-teams/h1/team-a/team.json') === DELETED)
     await rm(join(dir, 'runtime/byclaw-agent-teams/h1/archive'), { recursive: true })
-    await waitFor(() => ![...store.rows.keys()].some(k => k.includes('byclaw-agent-teams')))
-    await files.close()
-  } finally { await cleanup() }
+    await waitFor(() => ![...store.rows.keys()].some(row => row.includes('byclaw-agent-teams') && live(row)))
+  } finally { await files?.close(); await cleanup() }
 })
 
 test('the rest of the home is not watched: a plugin socket there is never stat-ed', async () => {
@@ -156,9 +156,76 @@ test('a file over the size limit stays on this host', async () => {
     await writeFile(join(dir, 'agent-teams/instances/big.json'), Buffer.alloc(MAX_FILE_BYTES + 1))
     const logs = []
     await new DurableFiles({ store, key, user: 'u1', home: dir, log: m => logs.push(m) }).restore()
-    assert.equal(store.rows.size, 0)
+    assert.deepEqual([...store.rows], [['u1\0agent-teams/instances/big.json', LOCAL_ONLY]])
     assert.match(logs.join('\n'), /kept on this host only/)
   } finally { await cleanup() }
+})
+
+test('a file that grew past the limit is not overwritten by its last stored copy, here or elsewhere', async () => {
+  const store = memoryStore()
+  const writer = await home(), other = await home()
+  const name = 'runtime/byclaw-agent-teams/abc123/t/inbox/captain.jsonl'
+  try {
+    await mkdir(join(writer.dir, dirname(name)), { recursive: true })
+    await writeFile(join(writer.dir, name), 'small')
+    const files = new DurableFiles({ store, key, user: 'u1', home: writer.dir })
+    await files.restore()
+    await new DurableFiles({ store, key, user: 'u1', home: other.dir }).restore()
+    assert.equal(await readFile(join(other.dir, name), 'utf8'), 'small')
+
+    // It grows past the limit while the host is down, or between two flushes.
+    const big = Buffer.alloc(MAX_FILE_BYTES + 1, 7)
+    await writeFile(join(writer.dir, name), big)
+    await new DurableFiles({ store, key, user: 'u1', home: writer.dir }).restore()
+    assert.ok((await readFile(join(writer.dir, name))).equals(big))
+    assert.equal(store.rows.get(`u1\0${name}`), LOCAL_ONLY)
+    await new DurableFiles({ store, key, user: 'u1', home: writer.dir }).restore()
+    assert.ok((await readFile(join(writer.dir, name))).equals(big))
+
+    // Another host keeps its older copy, and does not store it in place of the newer one.
+    await new DurableFiles({ store, key, user: 'u1', home: other.dir }).restore()
+    assert.equal(await readFile(join(other.dir, name), 'utf8'), 'small')
+    assert.equal(store.rows.get(`u1\0${name}`), LOCAL_ONLY)
+
+    // Once it is small again, it is stored again.
+    const again = new DurableFiles({ store, key, user: 'u1', home: writer.dir })
+    await again.restore()
+    await writeFile(join(writer.dir, name), 'compacted')
+    await again.sync(name)
+    assert.equal(openFile(key, 'u1', name, store.rows.get(`u1\0${name}`)).toString(), 'compacted')
+  } finally { await writer.cleanup(); await other.cleanup() }
+})
+
+test('a file deleted on one host is deleted from another host that kept a copy, not stored again', async () => {
+  const store = memoryStore()
+  const a = await home(), b = await home()
+  const name = 'byclaw-tool-env/tool-sandbox.json'
+  try {
+    await mkdir(join(a.dir, 'byclaw-tool-env'), { recursive: true })
+    await writeFile(join(a.dir, name), '{"sandboxId":"b-1"}')
+    await new DurableFiles({ store, key, user: 'u1', home: a.dir }).restore()
+
+    // The user moves to host B, whose sandbox is released there: the record is deleted.
+    const onB = new DurableFiles({ store, key, user: 'u1', home: b.dir })
+    await onB.restore()
+    await rm(join(b.dir, name))
+    await onB.sync(name)
+    assert.equal(store.rows.get(`u1\0${name}`), DELETED)
+
+    // Back on host A, which still has the old record on its disk.
+    const logs = []
+    await new DurableFiles({ store, key, user: 'u1', home: a.dir, log: m => logs.push(m) }).restore()
+    await assert.rejects(stat(join(a.dir, name)), { code: 'ENOENT' })
+    assert.equal(store.rows.get(`u1\0${name}`), DELETED)
+    assert.match(logs.join('\n'), /1 deleted, 0 stored new/)
+
+    // A new record is stored as usual.
+    const again = new DurableFiles({ store, key, user: 'u1', home: a.dir })
+    await again.restore()
+    await writeFile(join(a.dir, name), '{"sandboxId":"b-2"}')
+    await again.sync(name)
+    assert.equal(openFile(key, 'u1', name, store.rows.get(`u1\0${name}`)).toString(), '{"sandboxId":"b-2"}')
+  } finally { await a.cleanup(); await b.cleanup() }
 })
 
 test('a row only opens for its own user and name, and only with the right key', () => {
