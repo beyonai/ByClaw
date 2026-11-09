@@ -392,7 +392,8 @@ export class ByClawBeBackend implements ToolEnvBackend {
    */
   private async publishKeys(keys: ToolEnvKeys): Promise<void> {
     const wanted: Record<string, string> = {
-      [PUBLISHED_KEY_PARAMS.authorized]: keys.authorizedKey,
+      // Without the fixed comment, so the last four characters BE shows come from the key itself.
+      [PUBLISHED_KEY_PARAMS.authorized]: keys.authorizedKey.split(/\s+/u).slice(0, 2).join(' '),
       [PUBLISHED_KEY_PARAMS.host]: Buffer.from(keys.hostPrivateKey).toString('base64'),
     }
     // Next to the keys: every environment of the user publishes the same pair, so one record serves all.
@@ -402,9 +403,16 @@ export class ByClawBeBackend implements ToolEnvBackend {
     try { published = (JSON.parse(await readFile(marker, 'utf8')) as { fingerprint?: string }).fingerprint ?? '' } catch { /* never published from this state */ }
     const listed = await this.call('/userPrivateParam/list?keyword=BYCLAW_TOOL_ENV_&pageSize=50', undefined, 'GET') as { list?: PrivateParam[] } | undefined
     const existing = new Map((listed?.list ?? []).filter(item => typeof item.key === 'string').map(item => [item.key as string, item]))
+    // BE shows only the last four characters, and every base64 OpenSSH private key ends alike, so the
+    // pair is checked as one: another runtime of the user that published its own pair since this state
+    // did shows in the public key, and then both values are written again.
+    const upToDate = published === fingerprint && Object.entries(wanted).every(([key, value]) => {
+      const current = existing.get(key)
+      return current?.hasValue === true && current.valueLast4 === value.slice(-4)
+    })
+    if (upToDate) return
     for (const [key, value] of Object.entries(wanted)) {
       const current = existing.get(key)
-      if (published === fingerprint && current?.hasValue === true && current.valueLast4 === value.slice(-4)) continue
       await this.call('/userPrivateParam/save', {
         ...(current?.paramId === undefined ? {} : { paramId: current.paramId }),
         key, value, enabled: true, description: 'ByClaw tool environment key (managed by the DSH runtime)',
