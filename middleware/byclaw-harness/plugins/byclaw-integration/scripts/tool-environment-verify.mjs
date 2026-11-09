@@ -305,7 +305,7 @@ try {
         yield { type: 'finish', reason: { kind: 'stop' } }
       } },
     }
-    const disposition = installGroupChatDisposition(dispositionCtx, { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 5, environment: {}, files, historyFiles: files })
+    const disposition = installGroupChatDisposition(dispositionCtx, { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 5, environment: {}, resolveModel: async () => ({ provider: 'p', model: 'm' }), files, historyFiles: files })
     await mkdir(b.toHost(join(byRoot, 'groups', 'g1')), { recursive: true })
     await writeFile(b.toHost(join(byRoot, 'groups', 'g1', 'history.md')), 'older lines\nlatest: 新闻')
     const opening = id => ({
@@ -317,32 +317,53 @@ try {
     await disposition.whenIdle()
     const state = join(byRoot, '.sessions', '901', '.byclaw')
     check(JSON.parse(await readFile(b.toHost(join(state, 'group-chat-disposition.json')), 'utf8')).taskName === '采集新闻', 'the disposition is published on B')
-    check(JSON.parse(await readFile(b.toHost(join(state, 'session-opened.json')), 'utf8')).schemaVersion === '1', 'the opening marker is published on B')
+    check((await files.listDir(join(state, 'group-chat-disposition-requests'))).length === 1, 'a request receipt is published on B')
     const history = JSON.parse(inputs[0]).groupHistory
     check(history.available && history.truncated && history.content === '闻' && history.path === '/by/groups/g1/history.md',
       'the history tail is read from B, cut at a character boundary')
-    // A session opening while B is down (any first turn, group chat or not) must not start B:
-    // the opening marker waits for B like every other write of the context.
+    // Ordinary requests must not queue classification writes or activate the tool environment.
     {
       const deferred = new Map()
       const environment = { connected: false, async whenConnected(key, operation) { if (this.connected) { await operation(); return } deferred.set(key, operation) } }
       const queued = lazyToolEnvironmentFiles(environment, files)
       const before = b.calls.fs.length + b.calls.subprocess.length
-      const quiet = installGroupChatDisposition(dispositionCtx, { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 5, environment: {}, files: queued, historyFiles: files })
+      const quiet = installGroupChatDisposition(dispositionCtx, { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 5, environment: {}, resolveModel: async () => ({ provider: 'p', model: 'm' }), files: queued, historyFiles: files })
       hook({ ...opening('902'), command: { header: { sessionId: '902' }, content: '你好', extraPayload: {} } })
       await quiet.whenIdle()
       check(b.calls.fs.length + b.calls.subprocess.length === before, 'an opening without group history does not reach B')
-      check([...deferred.keys()].some(key => key.endsWith(join('902', '.byclaw', 'session-opened.json'))), 'the opening marker is queued for B')
+      check(deferred.size === 0, 'an ordinary conversation does not queue a disposition write')
       await quiet.close()
     }
 
-    // A second worker opening the same session finds the published state instead of classifying again.
+    // A cold host cache cannot establish that remote TASK or a completed request is absent.
     await disposition.close()
-    const again = installGroupChatDisposition(dispositionCtx, { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 12, environment: {}, files, historyFiles: files })
-    hook(opening('901'))
+    const disconnected = { connected: false, async whenConnected() { throw new Error('classification must not queue blind replacement writes') } }
+    const coldFiles = lazyToolEnvironmentFiles(disconnected, files)
+    await assert.rejects(coldFiles.readText(join(state, 'group-chat-disposition.json')), { code: 'ENOENT' }); checks += 1
+    const again = installGroupChatDisposition(dispositionCtx, { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 12, environment: {}, resolveModel: async () => ({ provider: 'p', model: 'm' }), files, historyFiles: files })
+    const continued = opening('901')
+    continued.command.extraPayload.groupChat.executionId = 123
+    hook(continued)
     await again.whenIdle()
-    check(inputs.length === 1, 'a published opening on B is not classified again')
+    check(inputs.length === 1, 'authoritative reads preserve remote TASK despite a cold host cache')
+    check(JSON.parse(await files.readText(join(state, 'group-chat-disposition.json'))).dispatchId === 'dispatch-b', 'TASK retains its promotion result')
     await again.close()
+
+    let chatHook, chatCalls = 0
+    const chatCtx = { ...dispositionCtx,
+      on(_event, listener) { chatHook = listener; return () => {} },
+      llm: { async *stream() { chatCalls++; yield { type: 'text-delta', text: '{"kind":"CHAT"}' } } },
+    }
+    const chatOptions = { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 12, environment: {},
+      resolveModel: async () => ({ provider: 'p', model: 'm' }), files, historyFiles: files }
+    const chat = installGroupChatDisposition(chatCtx, chatOptions)
+    try { chatHook(opening('903')); await chat.whenIdle() } finally { await chat.close() }
+    await assert.rejects(coldFiles.readText(join(byRoot, '.sessions/903/.byclaw/group-chat-disposition.json')), { code: 'ENOENT' }); checks += 1
+    const replay = installGroupChatDisposition(chatCtx, chatOptions)
+    try {
+      chatHook(opening('903')); await replay.whenIdle()
+      check(chatCalls === 1, 'a cold host reads the remote request receipt rather than classifying a completed CHAT again')
+    } finally { await replay.close() }
   }
 
   check(b.calls.fs.every(([, path]) => typeof path !== 'string' || !path.startsWith(b.host)), 'the tool environment only ever saw its own paths')
