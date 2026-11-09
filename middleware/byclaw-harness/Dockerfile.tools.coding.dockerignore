@@ -1,0 +1,11 @@
+# Only image inputs; never credentials, local dependencies or user workspaces.
+**
+!middleware/
+!middleware/byclaw-harness/
+!middleware/byclaw-harness/tool-sandbox/
+!middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh
+!middleware/byclaw-harness/tool-sandbox/codex.release.json
+!middleware/byclaw-harness/tool-sandbox/codex.config.toml
+!middleware/byclaw-harness/tool-sandbox/coding.capabilities.json
+!middleware/byclaw-harness/scripts/
+!middleware/byclaw-harness/scripts/install-codex.py

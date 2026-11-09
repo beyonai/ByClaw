@@ -1,0 +1,45 @@
+{
+  "image": "byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness:D0.6.0_coding-r1",
+  "startup": {
+    "entrypoint": ["/usr/local/bin/byclaw-tool-slim-entrypoint", "tools"]
+  },
+  "env": {
+    "TZ": "Asia/Shanghai",
+    "USER_CODE": "${USER_CODE}",
+    "BYCLAW_TOOL_ENV_PORT": "2222",
+    "BYCLAW_TOOL_ENV_WS_PORT": "8080",
+    "BYCLAW_TOOL_ENV_HOST_KEY": "${envVars.BYCLAW_TOOL_ENV_HOST_KEY}",
+    "BYCLAW_TOOL_ENV_AUTHORIZED_KEY": "${envVars.BYCLAW_TOOL_ENV_AUTHORIZED_KEY}",
+    "BYCLAW_BROWSER_STARTUP": "eager",
+    "CODEX_API_KEY": "${envVars.CODEX_API_KEY}"
+  },
+  "servicePort": 8080,
+  "ports": [
+    { "port": 8080, "instance": "ssh", "protocol": "http", "exposure": "private" },
+    { "port": 8081, "instance": "vnc", "protocol": "http", "exposure": "public" }
+  ],
+  "resourceRequests": { "cpu": "2", "memory": "4Gi" },
+  "resourceLimits": { "cpu": "4", "memory": "8Gi" },
+  "timeout": 1800,
+  "network": { "allowPublicTraffic": true },
+  "volumes": [
+    {
+      "key": "base",
+      "type": "persistent",
+      "scope": "PRIVATE",
+      "subPath": "byclaw-${user_code}/by",
+      "mountPath": "/by",
+      "volumeRef": "workspace",
+      "readOnly": false
+    }
+  ],
+  "runtimeOptions": {
+    "lifecycle": { "autoStart": "false" },
+    "toolSandbox": {
+      "contract": "byclaw.tool-sandbox/v1",
+      "purpose": "coding",
+      "enabled": "true",
+      "capabilities": "[\"process.exec\",\"filesystem\",\"browser.automation\"]"
+    }
+  }
+}
