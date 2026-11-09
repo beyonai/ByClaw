@@ -56,6 +56,7 @@ class EaselCodexSandboxContractTest(unittest.TestCase):
         self.assertNotIn('torch', dockerfile.lower())
         self.assertNotIn('registry.npmjs.org', dockerfile)
         self.assertNotIn('openclaw', dockerfile.lower())
+        self.assertNotIn('remotion versions', dockerfile)
 
     def test_docker_context_excludes_unrelated_repository(self) -> None:
         ignore = (HARNESS / 'Dockerfile.tools.easel-codex.dockerignore').read_text()
