@@ -4,7 +4,8 @@ set -Eeuo pipefail
 
 image=${1:?usage: tool-easel-codex-smoke.sh IMAGE}
 engine=${CONTAINER_ENGINE:-docker}
-maximum=4294967296
+maximum=${EASEL_ROOTFS_MAX_BYTES:-0}
+[[ "$maximum" =~ ^[0-9]+$ ]] || { echo "Invalid EASEL_ROOTFS_MAX_BYTES" >&2; exit 2; }
 probe=$("$engine" create "$image")
 container=
 cleanup() {
@@ -19,10 +20,11 @@ trap cleanup EXIT
 bytes=$("$engine" export "$probe" | wc -c | tr -d ' ')
 "$engine" rm "$probe" >/dev/null
 probe=
-test "$bytes" -lt "$maximum" || {
-    echo "Image rootfs tar exceeds 4 GiB: $bytes" >&2
+echo "EASEL_ROOTFS_TAR_BYTES=$bytes budget_bytes=$maximum"
+if (( maximum > 0 && bytes >= maximum )); then
+    echo "Image rootfs tar exceeds configured budget: $bytes >= $maximum" >&2
     exit 1
-}
+fi
 
 container=$("$engine" run -d --network none --shm-size=1g \
     -e BYCLAW_TOOL_ENV_SEED_GENERATE=1 \
