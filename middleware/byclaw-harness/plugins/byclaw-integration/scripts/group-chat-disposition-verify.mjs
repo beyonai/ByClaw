@@ -6,14 +6,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { installGroupChatDisposition as installDisposition } from '../src/group-chat-disposition.ts'
 
-const installGroupChatDisposition = (ctx, options) => installDisposition(ctx, { environment: {}, ...options })
+const installGroupChatDisposition = (ctx, options) => installDisposition(ctx, { environment: {}, resolveModel: async () => ({ provider: 'provider-a', model: 'model-a' }), ...options })
 
 const root = await mkdtemp(join(tmpdir(), 'disposition-test-'))
 let hook, calls = 0, output, generateError, hold, finish = 'stop'
 const requests = [], warnings = []
 const ctx = {
   logger: { warn: message => warnings.push(message) },
-  on(event, listener) { assert.equal(event, 'byclaw/session-opening'); hook = listener; return () => { hook = undefined } },
+  on(event, listener) { assert.equal(event, 'byclaw/session-setup'); hook = listener; return () => { hook = undefined } },
   llm: { async *stream(request) {
     calls++; requests.push(request)
     if (hold) await hold(request.signal)
@@ -53,7 +53,7 @@ try {
       assert.equal(calls - before, enabled ? 1 : 0, 'only zero disables auxiliary classification')
       if (!enabled) {
         await assert.rejects(readFile(path(id)), { code: 'ENOENT' })
-        assert.deepEqual(JSON.parse(await readFile(join(path(id), '..', 'session-opened.json'), 'utf8')), { schemaVersion: '1' })
+        await assert.rejects(readFile(join(path(id), '..', 'session-opened.json')), { code: 'ENOENT' })
       }
     } finally { await switched.close() }
   }
@@ -74,7 +74,7 @@ try {
     configuredHook(opening('configured-reused', undefined, false))
     configuredHook(opening('configured-no-execution', { groupChat: {} }))
     await overridden.whenIdle()
-    assert.equal(configuredCalls, 1, 'a model override must still require a first session and executionId')
+    assert.equal(configuredCalls, 2, 'a model override also classifies existing sessions, but still requires executionId')
     assert.equal(requests.at(-1).provider, 'classifier-route'); assert.equal(requests.at(-1).model, 'classifier-model')
     assert.ok(!JSON.stringify(requests.at(-1)).includes('classifier-private-key'))
     assert.equal(JSON.parse(await readFile(path('configured-model'), 'utf8')).kind, 'CHAT')
@@ -197,10 +197,11 @@ try {
   assert.equal(requests[0].tools, undefined); assert.equal(requests[0].maxTokens, 500)
   assert.ok(!JSON.stringify(requests).includes('secret-not-for-model'))
   const initial = calls
+  output = { kind: 'CHAT' }
   hook(opening('skip', {}, true)); await runtime.whenIdle()
   hook(opening('skip')); hook(opening('reused', undefined, false)); await runtime.whenIdle()
-  assert.equal(calls, initial)
-  await assert.rejects(readFile(path('skip')), { code: 'ENOENT' })
+  assert.equal(calls, initial + 2)
+  assert.equal(JSON.parse(await readFile(path('skip'), 'utf8')).kind, 'CHAT')
   const first = await readFile(path('json-task'), 'utf8')
   hook(opening('json-task', { groupChat: { executionId: 'later-dispatch' } })); await runtime.whenIdle()
   assert.equal(await readFile(path('json-task'), 'utf8'), first)
@@ -229,26 +230,21 @@ try {
   await assert.rejects(readFile(path('concurrent')), { code: 'ENOENT' })
   release(); await runtime.whenIdle(); hold = undefined
   assert.equal(calls, before + 1)
-  assert.deepEqual((await readdir(join(root, '.sessions', 'concurrent', '.byclaw'))).sort(), ['group-chat-disposition.json', 'session-opened.json'])
-  let competing, enteredWorker, releaseWorker
-  const workerStarted = new Promise(resolve => { enteredWorker = resolve })
-  hold = () => { enteredWorker(); return new Promise(resolve => { releaseWorker = resolve }) }
-  const other = installGroupChatDisposition({ ...ctx, on(_event, callback) { competing = callback; return () => {} } }, { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 65_536 })
-  const workerCalls = calls
+  assert.deepEqual((await readdir(join(root, '.sessions', 'concurrent', '.byclaw'))).sort(), ['group-chat-disposition-requests', 'group-chat-disposition.json'])
+  let restartedHook
+  const restarted = installGroupChatDisposition({ ...ctx, on(_event, callback) { restartedHook = callback; return () => {} } }, { timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 65_536 })
   try {
-    hook(opening('competing-workers'))
-    competing(opening('competing-workers', { groupChat: { executionId: 'other-dispatch' } }))
-    await workerStarted; releaseWorker(); await Promise.all([runtime.whenIdle(), other.whenIdle()]); hold = undefined
-    assert.equal(calls, workerCalls + 1, 'only the worker that claims the opening may classify')
-    assert.ok(['dispatch-a', 'other-dispatch'].includes(JSON.parse(await readFile(path('competing-workers'), 'utf8')).dispatchId))
-    assert.deepEqual((await readdir(join(root, '.sessions', 'competing-workers', '.byclaw'))).sort(), ['group-chat-disposition.json', 'session-opened.json'])
-  } finally { await other.close() }
+    const beforeRestart = calls
+    restartedHook(opening('concurrent')); await restarted.whenIdle()
+    assert.equal(calls, beforeRestart, 'a published TASK survives worker restart without another model call')
+  } finally { await restarted.close() }
+  await mkdir(join(path('publish-error'), '..'), { recursive: true })
   hold = async () => { await mkdir(path('publish-error')) }
   hook(opening('publish-error')); await runtime.whenIdle(); hold = undefined
   assert.ok(warnings.some(message => message.includes('publish-error')))
-  assert.deepEqual((await readdir(join(root, '.sessions', 'publish-error', '.byclaw'))).sort(), ['group-chat-disposition.json', 'session-opened.json'])
+  assert.deepEqual((await readdir(join(root, '.sessions', 'publish-error', '.byclaw'))).sort(), ['group-chat-disposition.json'])
   await runtime.close()
-  runtime = installGroupChatDisposition(ctx, { timeoutMs: 5, maxTokens: 500, historyMaxBytes: 65_536 })
+  runtime = installGroupChatDisposition(ctx, { timeoutMs: 200, maxTokens: 500, historyMaxBytes: 65_536 })
   hold = signal => new Promise((_, reject) => {
     if (signal.aborted) reject(signal.reason)
     else signal.addEventListener('abort', () => reject(signal.reason), { once: true })

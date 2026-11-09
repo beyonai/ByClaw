@@ -1,0 +1,16 @@
+{
+  "name": "@byclaw/byclaw-digital-human",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "exports": { ".": "./src/index.js" },
+  "files": ["src", "cordis.patch.yml", "README.md"],
+  "engines": { "node": ">=22.19.0" },
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "build": "node --check src/index.js && node --check src/config.js && node --check src/volcengine.js && node --check src/oss.js"
+  },
+  "dependencies": { "ali-oss": "6.23.0" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

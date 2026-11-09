@@ -157,6 +157,13 @@ public class TransactionAdviceConfig {
                         return notSurpportedTx;
                     }
                 }
+                if (targetClass != null && java.util.Set.of(
+                    "com.iwhalecloud.byai.state.domain.mobilepush.MobilePushService",
+                    "com.iwhalecloud.byai.state.domain.mobilepush.MobilePushAuthority")
+                    .contains(ClassUtils.getUserClass(targetClass).getName())) {
+                    // 通知编排及 Node 权限读取会访问远端，不应持有聊天数据库事务。
+                    return notSurpportedTx;
+                }
                 // Forwarding coordination performs remote control and file I/O; stores explicitly own short transactions.
                 if (targetClass != null && java.util.Set.of(
                     "com.iwhalecloud.byai.state.domain.groupchat.forward.application.GroupChatForwardService",

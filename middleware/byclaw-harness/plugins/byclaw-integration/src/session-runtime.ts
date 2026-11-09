@@ -153,6 +153,8 @@ export interface ByClawDshSessionRuntimeOptions {
   sessionMetadata: ByClawSessionMetadataStore
   /** Notify independently owned session observers; failure must not reject user input. */
   sessionOpening?: (command: AskAgentCommand, firstSession: boolean, signal: AbortSignal) => Promise<void>
+  /** Finish only this group's classification before returning its terminal result; ordinary requests return undefined. */
+  waitForGroupChatDisposition?: (command: AskAgentCommand) => Promise<void> | undefined
   /** Bind trusted root role before extensions, including new roots without metadata yet. */
   rootSetup?: (agentCtx: Context, agent: Agent, binding: ByClawRootBinding) => void
   /** Await host extensions before a new, resumed, or reused session accepts input. */
@@ -1543,8 +1545,14 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     this.assertAccepting()
     const route = this.commandSessionRoute(command)
     const stateWorkspace = byClawSessionCwd(route.externalRootSessionId, this.options.byRoot)
-    return teamStateRuntime(this.ctx).runWithWorkspaceAlias(route.cwd ?? stateWorkspace, stateWorkspace,
-      () => this.askInWorkspace(command, context))
+    try {
+      return await teamStateRuntime(this.ctx).runWithWorkspaceAlias(route.cwd ?? stateWorkspace, stateWorkspace,
+        () => this.askInWorkspace(command, context))
+    } finally {
+      // Classification owns its deadline and failures; it must not replace a conversation error.
+      const completion = this.options.waitForGroupChatDisposition?.(command)
+      if (completion !== undefined) await completion
+    }
   }
 
   private async askInWorkspace(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult> {

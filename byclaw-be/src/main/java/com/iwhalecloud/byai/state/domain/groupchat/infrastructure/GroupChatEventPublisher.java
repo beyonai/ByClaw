@@ -31,6 +31,8 @@ public class GroupChatEventPublisher {
     private final ChannelManager channelManager;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private TenantNodeClient tenantNodeClient;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.iwhalecloud.byai.state.domain.mobilepush.MobilePushService mobilePush;
 
     public GroupChatEventPublisher(SessionMemberService memberService, ChannelManager channelManager) {
         this.memberService = memberService;
@@ -41,13 +43,17 @@ public class GroupChatEventPublisher {
         if (sessionId == null || event == null) {
             return 0;
         }
+        Long groupEnterpriseId = null;
         if (sessionService != null && !"GROUP_DISSOLVED".equals(event.getString("event"))) {
             com.iwhalecloud.byai.manager.entity.session.ByaiSession session = sessionService.findById(sessionId);
             if (session == null || com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService
                 .DISSOLVED_STATE.equals(session.getState())) return 0;
+            groupEnterpriseId = session.getEnterpriseId();
         }
         int sent = 0;
         List<ByaiSessionMember> members = memberService.findSessionMembers(sessionId, MemObjType.USER.name(), null);
+        // 系统推送按真实成员发放，与其是否有在线 Channel 无关。
+        publishMobile(groupEnterpriseId, event, members.stream().map(ByaiSessionMember::getMemObjId).toList());
         for (ByaiSessionMember member : members) {
             // 群主交接提示只推送给新群主的在线设备。
             if ("OWNERSHIP_TRANSFERRED".equals(event.getString("event"))
@@ -82,12 +88,14 @@ public class GroupChatEventPublisher {
     public int publishTenantMembers(TenantRequestContext tenant, JSONObject event, List<?> members) {
         event.put("enterpriseId", String.valueOf(tenant.enterpriseId()));
         int sent = 0;
+        List<Long> mobileRecipients = new java.util.ArrayList<>();
         for (Object value : members) {
             if (!(value instanceof Map<?, ?> member) || !"USER".equals(member.get("memObjType"))) continue;
             Object rawId = member.get("memObjId");
             if ("OWNERSHIP_TRANSFERRED".equals(event.getString("event"))
                 && !String.valueOf(rawId).equals(event.getString("recipientUserId"))) continue;
             if (rawId == null || !rawId.toString().matches("[1-9][0-9]*")) continue;
+            mobileRecipients.add(Long.valueOf(rawId.toString()));
             for (Channel channel : channelManager.getChannels(Long.valueOf(rawId.toString()))) {
                 if (!channel.isActive() || !Objects.equals(String.valueOf(tenant.enterpriseId()),
                     channel.attr(Constant.ATT_ENTERPRISE_ID).get())) continue;
@@ -100,6 +108,7 @@ public class GroupChatEventPublisher {
                 }
             }
         }
+        publishMobile(tenant.enterpriseId(), event, mobileRecipients);
         return sent;
     }
     /** Only the forwarding service supplies freshly bound USER recipients; completion means enqueue, never client receipt. */
@@ -119,6 +128,7 @@ public class GroupChatEventPublisher {
                 long left=deadline-System.nanoTime();
                 if(left<=0||!send.await(left,java.util.concurrent.TimeUnit.NANOSECONDS)||!send.isSuccess())throw new IllegalStateException("FORWARD_DELIVERY_UNAVAILABLE");
             }
+            publishMobile(enterpriseId, event, recipientIds);
         } catch(InterruptedException interrupted) {
             Thread.currentThread().interrupt();throw new IllegalStateException("FORWARD_DELIVERY_UNAVAILABLE");
         } catch(RuntimeException failure) {
@@ -126,4 +136,15 @@ public class GroupChatEventPublisher {
         }
     }
 
+    /** 手机通知是提交后的旁路，配置、异步执行或厂商异常不能改变已有消息 ACK/广播语义。 */
+    private void publishMobile(Long enterpriseId, JSONObject event, List<Long> recipientIds) {
+        if (mobilePush == null || enterpriseId == null) {
+            return;
+        }
+        try {
+            mobilePush.notifyMembers(enterpriseId, event, recipientIds);
+        } catch (RuntimeException error) {
+            log.warn("Mobile notification submission failed, enterpriseId={}", enterpriseId);
+        }
+    }
 }
