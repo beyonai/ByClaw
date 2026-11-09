@@ -117,6 +117,8 @@ RUN set -eux; \
         printf '%s\n' "/workspace/packages/ssh/${ssh_package}/package.json" >>/tmp/byclaw-package-manifests; \
     done; \
     printf '%s\n' "/workspace/packages/deliverables/workspace-changes/package.json" >>/tmp/byclaw-package-manifests; \
+    # The profile installs DSH's tool registry itself; ship the patched build.
+    printf '%s\n' "/workspace/packages/core/tools/package.json" >>/tmp/byclaw-package-manifests; \
     package_count=0; \
     while IFS= read -r manifest; do \
         package_name="$(jq -er '.name | select(type == "string" and length > 0)' "${manifest}")"; \
@@ -250,6 +252,10 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/skill
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/skill/lib/ /workspace/packages/skill/skill/lib/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/tool-skill/src/ /workspace/packages/skill/tool-skill/src/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/tool-skill/lib/ /workspace/packages/skill/tool-skill/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/tools/src/ /workspace/packages/core/tools/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/tools/lib/ /workspace/packages/core/tools/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/subagent/tool-subagent/src/ /workspace/packages/subagent/tool-subagent/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/subagent/tool-subagent/lib/ /workspace/packages/subagent/tool-subagent/lib/
 COPY middleware/byclaw-harness/scripts/verify-by-framework-runtime.mjs /usr/local/lib/byclaw/verify-by-framework-runtime.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/prune-dsh-profile.mjs /tmp/prune-dsh-profile.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/link-dsh-installation-peers.mjs /tmp/link-dsh-installation-peers.mjs
@@ -300,6 +306,8 @@ RUN set -eux; \
     node /usr/local/lib/byclaw/verify-by-framework-runtime.mjs "$(node -p "require.resolve('@byclaw/dsh-integration/package.json')")"; \
     node --input-type=module -e "const {createRequire}=await import('node:module');const require=createRequire(import.meta.resolve('@byclaw/byclaw-model-router/dsh'));const runtime=await import(require.resolve('@deepseek-ai/dsh-agent-loop'));if(runtime.byclawRequestReassembly!==true)throw new Error('Profile resolved an unpatched DSH agent loop')"; \
     node --input-type=module -e "const {createRequire}=await import('node:module');const require=createRequire(import.meta.resolve('@byclaw/dsh-integration'));const {isSkillName}=await import(require.resolve('@deepseek-ai/dsh-skill'));if(!isSkillName('report_企业')||isSkillName('../report_企业'))throw new Error('Profile resolved unpatched Skill names')"; \
+    for tools in node_modules/@deepseek-ai/dsh-tools/lib/index.js /workspace/packages/core/tools/lib/index.js; do grep -q 'const stack = this.layers' "$tools" || { echo "unpatched DSH tool lookup: $tools" >&2; exit 1; }; done; \
+    grep -q 'delegationToolNames' /workspace/packages/subagent/tool-subagent/lib/index.js; \
     node -e "const pty=require('node-pty');if(typeof pty.spawn!=='function')process.exit(1)"; \
     cd /workspace; \
     node scripts/verify-shared-runtime.mjs /workspace "${BYCLAW_DSH_MANAGED_HOME}/profiles/web"; \
