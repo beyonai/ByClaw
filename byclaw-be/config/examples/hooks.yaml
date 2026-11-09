@@ -1,4 +1,5 @@
-# 通用配置示例；复制到部署环境后使用 spring.config.additional-location 加载。
+# 通用 YAML 配置示例；等价 JSON 见 hooks.json，完整保存到 byai.byai_system_config 的 BYCLAW_HOOKS_CONFIG 记录，param_type=text。
+# 启动时直接读库并绑定；无需 spring.config.additional-location，修改后重启生效。
 # 默认关闭；只启用实际需要的订阅，地址、Token 和签名密钥由部署系统注入。
 # 此处 HMAC 原文及头名仅为示范，双方必须约定相同协议。
 byclaw:

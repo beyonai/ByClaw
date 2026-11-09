@@ -28,7 +28,7 @@ class HookIntegrationTest {
     private String url;
     private final LinkedBlockingQueue<Received> received = new LinkedBlockingQueue<>();
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-        .withUserConfiguration(HookConfiguration.class, SchemaConfiguration.class);
+        .withUserConfiguration(HookConfiguration.class, HookDatabaseTestSupport.class, SchemaConfiguration.class);
     private final TransactionTemplate transactions = new TransactionTemplate(new TestTransactions());
 
     @BeforeEach
@@ -53,8 +53,9 @@ class HookIntegrationTest {
     void disabledByDefaultDoesNotResolveSecretsOrCreateWorkers() {
         runner.withPropertyValues("byclaw.hooks.subscriptions.crm.http.url=${UNSET_HOOK_URL}")
             .run(context -> {
-                assertThat(context).hasNotFailed().doesNotHaveBean(HookDispatcher.class);
-                assertThat(context.containsBean("hookExecutor")).isFalse();
+                assertThat(context).hasNotFailed();
+                assertThat(context.getBeanProvider(HookDispatcher.class).getIfAvailable()).isNull();
+                assertThat(context.getBeansOfType(org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor.class)).isEmpty();
                 transactions.executeWithoutResult(status -> context.getBean(HookPublisher.class)
                     .publish("user.registered", 1, Map.of("userId", "42")));
                 assertThat(received).isEmpty();
@@ -62,7 +63,7 @@ class HookIntegrationTest {
     }
 
     @Test
-    void externalYamlMapsHttpOnlyAfterCommitAndSnapshotsData() throws Exception {
+    void databaseYamlMapsHttpOnlyAfterCommitAndSnapshotsData() throws Exception {
         String yaml = """
             byclaw:
               hooks:
@@ -285,13 +286,16 @@ class HookIntegrationTest {
     }
 
     @Test
-    void deploymentExampleLoadsThroughSpringAdditionalLocation(@org.junit.jupiter.api.io.TempDir java.nio.file.Path directory)
+    void deploymentExampleIsStoredInDatabaseBeforeHookInitialization(@org.junit.jupiter.api.io.TempDir java.nio.file.Path directory)
         throws Exception {
         var config = directory.resolve("hooks.yaml");
         java.nio.file.Files.copy(java.nio.file.Path.of("config/examples/hooks.yaml"), config);
         var external = runner.withInitializer(new org.springframework.boot.test.context.ConfigDataApplicationContextInitializer())
             .withPropertyValues("spring.config.additional-location=" + config.toUri());
-        external.run(context -> assertThat(context).hasNotFailed().doesNotHaveBean(HookDispatcher.class));
+        external.run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBeanProvider(HookDispatcher.class).getIfAvailable()).isNull();
+        });
         external.withPropertyValues("byclaw.hooks.enabled=true", "REGISTRATION_HOOK_URL=" + url,
             "REGISTRATION_HOOK_TOKEN=deployment-test-token").run(context -> {
                 assertThat(context).hasNotFailed();

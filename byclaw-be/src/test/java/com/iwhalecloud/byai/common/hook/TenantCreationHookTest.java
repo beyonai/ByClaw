@@ -50,7 +50,7 @@ class TenantCreationHookTest {
             exchange.close();
         });
         receiver.start();
-        runner = new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, TenantHookConfiguration.class)
+        runner = new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, HookDatabaseTestSupport.class, TenantHookConfiguration.class)
             .withPropertyValues("byclaw.hooks.enabled=true", "byclaw.hooks.subscriptions.tenant.event=tenant.created",
                 "byclaw.hooks.subscriptions.tenant.http.url=http://127.0.0.1:" + receiver.getAddress().getPort() + "/tenant");
         var organization = new UsersOrganization();
@@ -141,7 +141,7 @@ class TenantCreationHookTest {
         runner.withPropertyValues("byclaw.hooks.enabled=false").run(context -> {
             assertThat(service().create("测试企业", 12L, "tenant-request-01")
                 .enterpriseId()).isEqualTo("9007199254740993");
-            assertThat(context).doesNotHaveBean(HookDispatcher.class);
+            assertThat(context.getBeanProvider(HookDispatcher.class).getIfAvailable()).isNull();
             assertThat(requests.poll(200, TimeUnit.MILLISECONDS)).isNull();
         });
     }
@@ -151,7 +151,7 @@ class TenantCreationHookTest {
         throws Exception {
         var yaml = directory.resolve("tenant-hooks.yaml");
         java.nio.file.Files.copy(java.nio.file.Path.of("config/examples/hooks.yaml"), yaml);
-        new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, TenantHookConfiguration.class)
+        new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, HookDatabaseTestSupport.class, TenantHookConfiguration.class)
             .withInitializer(new org.springframework.boot.test.context.ConfigDataApplicationContextInitializer())
             .withPropertyValues("spring.config.additional-location=" + yaml.toUri(), "byclaw.hooks.enabled=true",
                 "byclaw.hooks.subscriptions.registration-crm.enabled=false",

@@ -187,7 +187,7 @@ class HookAuthenticationIntegrationTest {
     @Test
     void anotherWebhookProtocolUsesOnlyConfiguredFieldsAndHeaders() throws Exception {
         enterpriseReady.set(true);
-        new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, TenantHookConfiguration.class)
+        new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, HookDatabaseTestSupport.class, TenantHookConfiguration.class)
             .withPropertyValues("byclaw.hooks.enabled=true",
                 "byclaw.hooks.subscriptions.other.event=tenant.created",
                 "byclaw.hooks.subscriptions.other.http.url=" + baseUrl + PREFIX + "/tenants",
@@ -238,7 +238,7 @@ class HookAuthenticationIntegrationTest {
     /** 加载待交付的同一份外置 YAML，只覆盖环境专用 URL、密钥与测试重试间隔。 */
     private ApplicationContextRunner configured() throws Exception {
         var sources = new YamlPropertySourceLoader().load("generic-hooks", new FileSystemResource("config/examples/hooks.yaml"));
-        return new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, TenantHookConfiguration.class, WorkgroupHooks.class, Metrics.class)
+        return new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, HookDatabaseTestSupport.class, TenantHookConfiguration.class, WorkgroupHooks.class, Metrics.class)
             .withInitializer(context -> sources.forEach(source -> context.getEnvironment().getPropertySources().addLast(source)))
             .withPropertyValues("BYCLAW_HOOKS_ENABLED=true",
                 "byclaw.hooks.subscriptions.registration-crm.enabled=false",
