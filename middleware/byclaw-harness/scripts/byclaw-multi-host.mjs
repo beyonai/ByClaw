@@ -133,7 +133,7 @@ export const USER_ROW_OVERLAYS = {
     // One consumer name per context boot: by-framework reclaims a dead worker's unacknowledged
     // commands only from a consumer other than its own, so a restarted host must not reuse the name.
     workerId: `byclaw-dsh-multi-${createHash('sha256').update(user).digest('hex').slice(0, 12)}-${spec.workerInstance ?? ''}${spec.workerInstance ? '-' : ''}${user}`,
-    ...(spec.managed ? { workerId: `byclaw-shared-${spec.instanceId}-${spec.mappingId}-${spec.generation}`, agentTypes: [spec.workerAgentType], stateDir: join(home, 'team-state') } : {}),
+    ...(spec.managed ? { workerId: `byclaw-shared-${spec.instanceId}-${spec.mappingId}-${spec.generation}${spec.workerInstance ? `-${spec.workerInstance}` : ''}`, agentTypes: [spec.workerAgentType], stateDir: join(home, 'team-state') } : {}),
     dshHome: home,
     agentTemplateDir: join(home, 'agent-templates'),
     byRoot: '/by',

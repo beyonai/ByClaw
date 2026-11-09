@@ -180,6 +180,13 @@ test('each context boot consumes commands under its own worker id', () => {
   const [second] = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...spec, workerInstance: 'e5f6a7b8' })
   assert.match(first.config.workerId, /^byclaw-dsh-multi-[0-9a-f]{12}-a1b2c3d4-u1$/)
   assert.notEqual(first.config.workerId, second.config.workerId)
+  // A managed host restarted within the same placement must not come back under the dead process's name either.
+  const managed = { ...spec, managed: true, userCode: 'u1', instanceId: 'i1', mappingId: 'm1', generation: 3, workerAgentType: 'BYCLAW_DSH_SHARED_ctx_3' }
+  const [before] = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...managed, workerInstance: 'a1b2c3d4' })
+  const [after] = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...managed, workerInstance: 'e5f6a7b8' })
+  assert.equal(before.config.workerId, 'byclaw-shared-i1-m1-3-a1b2c3d4')
+  assert.notEqual(before.config.workerId, after.config.workerId)
+  assert.deepEqual(before.config.agentTypes, ['BYCLAW_DSH_SHARED_ctx_3'])
 })
 
 test('every plugin that reads or writes the user tree does so in the tool environment', () => {
