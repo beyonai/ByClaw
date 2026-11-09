@@ -81,7 +81,7 @@ bash middleware/byclaw-harness/scripts/tool-easel-codex-smoke.sh \
   byclaw-harness-tools:easel-codex-candidate
 ```
 
-Podman 可通过 `CONTAINER_ENGINE=podman` 运行验收。完整 smoke 检查导出 rootfs 小于 4 GiB、真实 SSH、Python 导入、Playwright、通过镜像依赖链接离线渲染一帧、首次工作区低于 3000 个目录项，以及重启后用户文件保留。该文件数预算检查使用不跟随链接的 `find`，不是读取依赖链接后的全部镜像文件数。
+Podman 可通过 `CONTAINER_ENGINE=podman` 运行验收。完整 smoke 记录导出 rootfs 字节数，并检查真实 SSH、Python 导入、Playwright、通过镜像依赖链接离线渲染一帧、首次工作区低于 3000 个目录项，以及重启后用户文件保留。如部署环境有明确的镜像体积预算，可通过 `EASEL_ROOTFS_MAX_BYTES` 设置；默认不套用其他工具镜像的 4 GiB 预算。导出 tar 大小、容器引擎显示大小和压缩传输量需分别记录。该文件数预算检查使用不跟随链接的 `find`，不是读取依赖链接后的全部镜像文件数。
 
 本地工作区行为测试不需要启动容器：
 
