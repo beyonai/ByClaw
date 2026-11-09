@@ -26,9 +26,22 @@ class ModelHealthApplicationServiceTest {
     private final ModelHealthApplicationService service = new ModelHealthApplicationService(mapper, cache);
     private ModelHealthRedisFixture redis;
 
-    @org.junit.jupiter.api.BeforeEach void setupRedis() { redis = new ModelHealthRedisFixture(); }
+    @org.junit.jupiter.api.BeforeEach void setupRedis() { redis = new ModelHealthRedisFixture(); service.initializeClient(); }
 
     private HttpServer server;
+
+    @Test void appliesConfiguredProbeTimeouts() {
+        var configured = new ModelHealthApplicationService(mapper, cache);
+        org.springframework.test.util.ReflectionTestUtils.setField(configured, "connectTimeoutSeconds", 7L);
+        org.springframework.test.util.ReflectionTestUtils.setField(configured, "readTimeoutSeconds", 19L);
+        org.springframework.test.util.ReflectionTestUtils.setField(configured, "callTimeoutSeconds", 31L);
+        configured.initializeClient();
+        var client = (okhttp3.OkHttpClient) org.springframework.test.util.ReflectionTestUtils.getField(configured, "client");
+        assertThat(client.connectTimeoutMillis()).isEqualTo(7_000);
+        assertThat(client.readTimeoutMillis()).isEqualTo(19_000);
+        assertThat(client.callTimeoutMillis()).isEqualTo(31_000);
+        assertThat(client.retryOnConnectionFailure()).isFalse();
+    }
 
     @AfterEach void cleanup() {
         CurrentUserHolder.clearLoginInfo();
