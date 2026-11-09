@@ -54,14 +54,24 @@ const registerStream = (flowHandler: (props: any) => any) => {
   return answer;
 };
 
-const receiveBrowserTool = (sessionId: string, withRefs = false) => {
+const desktopRefs = [{ sandboxId: 'sandbox-a', instance: 'vnc' }];
+
+const receiveTool = (
+  sessionId: string,
+  instanceRefs?: typeof desktopRefs,
+  tool: { orderId: string; title: string; input?: Record<string, unknown> } = {
+    orderId: 'browser-a',
+    title: 'browser',
+    input: { operation: 'open' },
+  }
+) => {
   const payload = {
     sessionId,
     contentType: '3015',
     objectType: 'tool_call',
-    orderId: 'tool-a',
-    ...(withRefs ? { instanceRefs: [{ sandboxId: 'sandbox-a', instance: 'vnc' }] } : {}),
-    choices: [{ delta: { content: JSON.stringify({ title: 'browser', input: { operation: 'open' } }) } }],
+    orderId: tool.orderId,
+    ...(instanceRefs !== undefined ? { instanceRefs } : {}),
+    choices: [{ delta: { content: JSON.stringify({ title: tool.title, input: tool.input }) } }],
   };
   handleParsedChatStream({
     eventName: 'reasoningLogDelta',
@@ -93,25 +103,57 @@ beforeEach(() => {
 
 afterEach(() => clearChatRuntime());
 
-it.each([false, true])(
-  'opens the first new-chat desktop through its pre-ID stream callback (refs=%p)',
-  async (refs) => {
-    const { result, rerender } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
-    render(<MainDrawer />);
-    const answer = registerStream(result.current.browserHandler);
+it.each([
+  { refs: false, v2: false, input: { operation: 'open' } },
+  { refs: true, v2: false, input: { operation: 'open' } },
+  { refs: true, v2: true, input: { operation: 'open' } },
+  { refs: true, v2: true, input: { operation: 'navigate', url: 'https://example.test/' } },
+  { refs: true, v2: true, input: { operation: 'runGoal', goal: 'Read the page title' } },
+])('opens the first new-chat desktop for $input.operation (refs=$refs, v2=$v2)', async ({ refs, v2, input }) => {
+  const { result, rerender } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+  render(<MainDrawer />);
+  const { browserHandler, messageHandler } = result.current;
+  const answer = registerStream((props) => browserHandler(messageHandler(props)));
+  if (v2) answer.metadata = JSON.stringify({ messageRenderVersion: 'v2' });
 
-    // Initialization assigns an ID after the send registered its original stream callback.
-    mockSessionId = 'chat-a';
-    answer.sessionId = 'chat-a';
-    rerender();
-    await act(async () => receiveBrowserTool('chat-a', refs));
-
-    expect(await screen.findByTitle('remote desktop')).toHaveAttribute(
-      'src',
-      'http://localhost/v1/sandboxes/sandbox-a/proxy/8081/?autoconnect=true&resize=scale&hideHeader=true'
-    );
+  // Initialization assigns an ID after the send registered its original stream callback.
+  mockSessionId = 'chat-a';
+  answer.sessionId = 'chat-a';
+  rerender();
+  if (refs) {
+    await act(async () => receiveTool('chat-a', [], { orderId: 'browser-a', title: 'browser', input }));
+    expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
+    // The later instance update omits input and relies on the merged tool call.
+    await act(async () => receiveTool('chat-a', desktopRefs, { orderId: 'browser-a', title: 'browser' }));
+  } else {
+    await act(async () => receiveTool('chat-a'));
   }
-);
+
+  expect(await screen.findByTitle('remote desktop')).toHaveAttribute(
+    'src',
+    'http://localhost/v1/sandboxes/sandbox-a/proxy/8081/?autoconnect=true&resize=scale&hideHeader=true'
+  );
+});
+
+it.each([
+  { title: 'sandbox_acquire', input: { template_key: 'general-tools', request_id: 'request-a' } },
+  { title: 'sandbox_exec', input: { lease_id: 'lease-a', argv: ['wecom', 'contact', 'list'] } },
+  { title: 'browser', input: { operation: 'status' } },
+])('only associates a desktop for $title and leaves auto-open available for browser open', async (tool) => {
+  mockSessionId = 'chat-a';
+  const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+  render(<MainDrawer />);
+  const answer = registerStream(result.current.browserHandler);
+  answer.sessionId = 'chat-a';
+
+  await act(async () => receiveTool('chat-a', desktopRefs, { ...tool, orderId: 'tool-a' }));
+
+  expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
+  expect(useDesktopWorkspace.getState().owners['["session","chat-a"]']?.refs).toEqual(desktopRefs);
+
+  await act(async () => receiveTool('chat-a', desktopRefs));
+  expect(await screen.findByTitle('remote desktop')).toBeInTheDocument();
+});
 
 it('does not open a late previous-chat tool through the retained stream callback after navigation', async () => {
   mockSessionId = 'chat-a';
@@ -122,7 +164,7 @@ it('does not open a late previous-chat tool through the retained stream callback
 
   mockSessionId = 'chat-b';
   rerender();
-  await act(async () => receiveBrowserTool('chat-a', true));
+  await act(async () => receiveTool('chat-a', desktopRefs));
 
   expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
   expect(useDesktopWorkspace.getState().visible).toBe(false);
