@@ -31,6 +31,7 @@ COPY middleware/byclaw-harness/scripts/prepare-dsh-model-routing-runtime.mjs /wo
 COPY middleware/byclaw-harness/scripts/prepare-dsh-startup-021.mjs /workspace/scripts/prepare-dsh-startup-021.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-skill-names-021.mjs /workspace/scripts/prepare-dsh-skill-names-021.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-ripgrep-path-021.mjs /workspace/scripts/prepare-dsh-ripgrep-path-021.mjs
+COPY middleware/byclaw-harness/scripts/prepare-dsh-subagent-error-settle-021.mjs /workspace/scripts/prepare-dsh-subagent-error-settle-021.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-lazy-021.mjs /workspace/scripts/prepare-dsh-lazy-021.mjs
 COPY middleware/byclaw-harness/scripts/bundle-dsh-startup-deps.mjs /workspace/scripts/bundle-dsh-startup-deps.mjs
 COPY middleware/byclaw-harness/scripts/verify-startup-bundles.mjs /workspace/scripts/verify-startup-bundles.mjs
@@ -64,6 +65,13 @@ RUN node scripts/prepare-dsh-ripgrep-path-021.mjs /workspace \
     && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/fs/tool-fs-search \
     && grep -q byclaw-ripgrep-path-v1 packages/fs/tool-fs-search/src/search-core.ts \
     && grep -q BYCLAW_RIPGREP_PATH packages/fs/tool-fs-search/lib/index.js
+
+# A background child whose turn ended in error settles, instead of waiting on input it will never run.
+RUN node scripts/prepare-dsh-subagent-error-settle-021.mjs /workspace \
+    && pnpm exec tsc -b packages/subagent/subagent/tsconfig.json \
+    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/subagent/subagent \
+    && grep -q byclaw-subagent-error-settle-v1 packages/subagent/subagent/src/activation.ts \
+    && grep -q 'session !== child.session || event.type !== "turn/end"' packages/subagent/subagent/lib/index.js
 
 # Apply pinned startup and model-routing changes only in the build workspace.
 # Rebuild affected core packages before consumers; ship source and compiled output together.
@@ -110,6 +118,8 @@ RUN set -eux; \
         printf '%s\n' "/workspace/packages/ssh/${ssh_package}/package.json" >>/tmp/byclaw-package-manifests; \
     done; \
     printf '%s\n' "/workspace/packages/deliverables/workspace-changes/package.json" >>/tmp/byclaw-package-manifests; \
+    # The profile installs DSH's subagent package itself; ship the patched build.
+    printf '%s\n' "/workspace/packages/subagent/subagent/package.json" >>/tmp/byclaw-package-manifests; \
     package_count=0; \
     while IFS= read -r manifest; do \
         package_name="$(jq -er '.name | select(type == "string" and length > 0)' "${manifest}")"; \
@@ -186,6 +196,8 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/tool-
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/tool-skill/lib/ /workspace/packages/skill/tool-skill/lib/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/fs/tool-fs-search/src/ /workspace/packages/fs/tool-fs-search/src/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/fs/tool-fs-search/lib/ /workspace/packages/fs/tool-fs-search/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/subagent/subagent/src/ /workspace/packages/subagent/subagent/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/subagent/subagent/lib/ /workspace/packages/subagent/subagent/lib/
 COPY middleware/byclaw-harness/scripts/verify-by-framework-runtime.mjs /usr/local/lib/byclaw/verify-by-framework-runtime.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/prune-dsh-profile.mjs /tmp/prune-dsh-profile.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/link-dsh-installation-peers.mjs /tmp/link-dsh-installation-peers.mjs
@@ -236,6 +248,7 @@ RUN set -eux; \
     node /usr/local/lib/byclaw/verify-by-framework-runtime.mjs "$(node -p "require.resolve('@byclaw/dsh-integration/package.json')")"; \
     node --input-type=module -e "const {createRequire}=await import('node:module');const require=createRequire(import.meta.resolve('@byclaw/byclaw-model-router/dsh'));const runtime=await import(require.resolve('@deepseek-ai/dsh-agent-loop'));if(runtime.byclawRequestReassembly!==true)throw new Error('Profile resolved an unpatched DSH agent loop')"; \
     node --input-type=module -e "const {createRequire}=await import('node:module');const require=createRequire(import.meta.resolve('@byclaw/dsh-integration'));const {isSkillName}=await import(require.resolve('@deepseek-ai/dsh-skill'));if(!isSkillName('report_企业')||isSkillName('../report_企业'))throw new Error('Profile resolved unpatched Skill names')"; \
+    grep -q 'session !== child.session || event.type !== "turn/end"' node_modules/@deepseek-ai/dsh-subagent/lib/index.js; \
     node -e "const pty=require('node-pty');if(typeof pty.spawn!=='function')process.exit(1)"; \
     cd /workspace; \
     node scripts/verify-shared-runtime.mjs /workspace "${BYCLAW_DSH_MANAGED_HOME}/profiles/web"; \
