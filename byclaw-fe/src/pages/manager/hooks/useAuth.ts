@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { message } from 'antd';
 import { listAuthDetail, batchHandleAuth, allowManageAuth } from '@/pages/manager/service/DigitalResourceMgr';
 import useAuthorizationTask from './useAuthorizationTask';
@@ -26,6 +26,20 @@ function useAuth({
     grantObjType !== 'DIG_EMPLOYEE' &&
     authApiPath === '/byaiService/auth/privilegeGrant/setResourceUsers';
 
+  const generation = useRef(0);
+  const submissionPending = useRef(false);
+  const detailSequence = useRef(0);
+
+  useEffect(() => {
+    generation.current++;
+    submissionPending.current = false;
+    setAuthLoading(false);
+    return () => {
+      generation.current++;
+      submissionPending.current = false;
+    };
+  }, [grantType, grantObjType, grantObjId, orgId, pid, authApiPath]);
+
   // 详情item格式化出参
   const getGrantItem = useCallback(
     (ele) => ({
@@ -49,6 +63,9 @@ function useAuth({
   // 请求详情
   const getDetail = useCallback(() => {
     if (!grantType || !grantObjType || !grantObjId) return;
+    const current = generation.current;
+    const sequence = ++detailSequence.current;
+    const isCurrent = () => current === generation.current && sequence === detailSequence.current;
     setDetailLoading(true);
     listAuthDetail({
       grantType, // 授权类型 AVAILABLE_USE:使用授权,FORCE_USE：强制使用,ALLOW_MANAGE:管理授权
@@ -57,6 +74,7 @@ function useAuth({
       ...(includeUseGrantFamily ? { includeUseGrantFamily: true } : {}),
     })
       .then((detailRes) => {
+        if (!isCurrent()) return;
         if (detailRes && detailRes.code === 0) {
           setRedList(detailRes.data?.redList?.map(getGrantItem) || []);
           setBlackList(detailRes.data?.blackList?.map(getGrantItem) || []);
@@ -66,12 +84,13 @@ function useAuth({
         setApplicantList([]);
       })
       .catch((error) => {
+        if (!isCurrent()) return;
         message.error(`查询详情失败：${error}`);
       })
       .finally(() => {
-        setDetailLoading(false);
+        if (isCurrent()) setDetailLoading(false);
       });
-  }, [grantType, grantObjType, grantObjId, getGrantItem, includeUseGrantFamily]);
+  }, [grantType, grantObjType, grantObjId, orgId, pid, authApiPath, getGrantItem, includeUseGrantFamily]);
 
   const background = useAuthorizationTask({
     enabled: [
@@ -80,6 +99,7 @@ function useAuth({
     ].includes(authApiPath),
     resourceId: grantObjId,
     operation: authType === 'mgrAuth' ? 'MANAGE' : 'USE',
+    contextKey: JSON.stringify([orgId, pid, authApiPath]),
     onCompleted: getDetail,
   });
   const usesBackground = [
@@ -89,7 +109,9 @@ function useAuth({
 
   const setAuth = useCallback(
     async (cb) => {
-      if (!grantType || !grantObjType || authLoading || background.taskBlocked) return;
+      if (!grantType || !grantObjType || authLoading || submissionPending.current || background.taskBlocked) return;
+      const current = generation.current;
+      submissionPending.current = true;
       setAuthLoading(true);
       const use = grantType === grantTypeMap.useAuth;
       const target = (item) => ({ ...transFormGrandItem(item), ...(use ? { grantType: 'FORCE_USE' } : {}) });
@@ -105,17 +127,25 @@ function useAuth({
       };
       try {
         if (usesBackground) {
-          await background.submitTask(params, use ? 'USE' : 'MANAGE', cb);
+          await background.submitTask(params, use ? 'USE' : 'MANAGE', () => {
+            if (current === generation.current) cb?.();
+          });
         } else {
           const response = await (use ? batchHandleAuth : allowManageAuth)(params, authApiPath);
+          if (current !== generation.current) return;
           if (!response || response.code !== 0) throw new Error(response?.msg || '请求失败');
           message.success('授权成功');
           cb?.();
         }
       } catch (error) {
-        message.error(`授权失败：${error?.message || '网络异常，请重试'}`);
+        if (current !== generation.current) return;
+        const reason = typeof error === 'string' ? error : error?.msg || error?.message || '网络异常，请刷新后重试';
+        message.error(`授权失败：${reason}`);
       } finally {
-        setAuthLoading(false);
+        if (current === generation.current) {
+          submissionPending.current = false;
+          setAuthLoading(false);
+        }
       }
     },
     [

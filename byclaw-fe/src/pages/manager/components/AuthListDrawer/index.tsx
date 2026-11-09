@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useCallback } from 'react';
-import { Alert, Row, Col, Spin, message, Button, Progress, Space } from 'antd';
+import { Alert, Row, Col, Spin, message } from 'antd';
 import { useIntl, useDispatch, connect } from '@umijs/max';
 import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import AuthList from './AuthList';
@@ -8,7 +8,7 @@ import AddAuthModal from './AddAuthModal';
 import { showPublishConfirm } from '@/pages/manager/utils/publishConfirm';
 import styles from './index.module.less';
 import useAuth from '@/pages/manager/hooks/useAuth';
-import { taskBlocksResource } from '@/pages/manager/hooks/useAuthorizationTask';
+import AuthorizationTaskProgress from './AuthorizationTaskProgress';
 
 const AuthListDrawer = (props) => {
   const {
@@ -44,6 +44,8 @@ const AuthListDrawer = (props) => {
     detailLoading,
     authLoading,
     task,
+    blockingTask,
+    historicalTask,
     taskError,
     taskBlocked,
     taskChecking,
@@ -167,59 +169,17 @@ const AuthListDrawer = (props) => {
       confirmLoading={authLoading || checkLoading}
       okButtonProps={{ disabled: onlyView || taskBlocked || detailLoading }}
     >
-      {(task || taskError || taskChecking) && (
-        <Alert
-          showIcon
-          type={task?.status === 'FAILED' || taskError ? 'warning' : task?.status === 'SUCCEEDED' ? 'success' : 'info'}
-          message={taskError || task?.message || '正在查询后台授权进度'}
-          style={{ marginBottom: 16 }}
-          description={
-            <>
-              {taskBlocksResource(task) && task.operation !== (authType === 'mgrAuth' ? 'MANAGE' : 'USE') && (
-                <div>
-                  该资源有{task.operation === 'MANAGE' ? '管理' : '使用'}授权任务占用，请先等待完成或处理失败任务。
-                </div>
-              )}
-              {task && (
-                <Progress percent={task.progress || 0} status={task.status === 'FAILED' ? 'exception' : undefined} />
-              )}
-              {!!task?.totalUsers && (
-                <div>
-                  生效同步：{task.completedUsers} / {task.totalUsers} 人
-                </div>
-              )}
-              {task && ['QUEUED', 'RUNNING', 'RETRYING'].includes(task.status) && (
-                <div>可以关闭窗口，后台将继续处理；重新打开可查看进度。</div>
-              )}
-              {task?.submittedByCurrentUser === false && task.status === 'FAILED' && (
-                <div>
-                  {task.dataApplied === 0
-                    ? '该任务由其他人员提交，授权尚未保存。可放弃该任务后重新提交你的授权设置。'
-                    : '该任务由其他人员提交，授权已保存。可重试生效同步，无需重新授权。'}
-                </div>
-              )}
-              {task?.submittedByCurrentUser === false && ['QUEUED', 'RUNNING', 'RETRYING'].includes(task.status) && (
-                <div>其他人员提交的授权任务正在处理，请等待完成后再修改授权。</div>
-              )}
-              <Space>
-                <Button size="small" loading={taskChecking} onClick={refreshTask}>
-                  刷新进度
-                </Button>
-                {task?.status === 'FAILED' && task.canRetry !== false && (
-                  <Button size="small" loading={taskSubmitting} onClick={retryTask}>
-                    重试任务
-                  </Button>
-                )}
-                {task?.status === 'FAILED' && task.dataApplied === 0 && task.canCancel !== false && (
-                  <Button size="small" disabled={taskSubmitting} onClick={cancelTask}>
-                    放弃本次任务
-                  </Button>
-                )}
-              </Space>
-            </>
-          }
-        />
-      )}
+      <AuthorizationTaskProgress
+        task={task}
+        blockingTask={blockingTask}
+        historicalTask={historicalTask}
+        taskError={taskError}
+        taskChecking={taskChecking}
+        taskSubmitting={taskSubmitting}
+        refreshTask={refreshTask}
+        retryTask={retryTask}
+        cancelTask={cancelTask}
+      />
       <div className={`${styles.headWrap} ub ub-ac gap8`}>
         {icon || <span className="iconHead mr-8" />}
         <div className="ub-f1">

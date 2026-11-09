@@ -5,7 +5,6 @@ import {
   AuthorizationTask,
   cancelAuthorizationTask,
   findAuthorizationTaskRequest,
-  getAuthorizationTask,
   listAuthorizationTasks,
   retryAuthorizationTask,
   submitAuthorizationTask,
@@ -17,8 +16,10 @@ export const taskIsActive = (task?: AuthorizationTask) =>
 export const taskBlocksResource = (task?: AuthorizationTask) =>
   taskIsActive(task) || (task?.status === 'FAILED' && task.blocksResource !== false);
 
-export default function useAuthorizationTask({ enabled, resourceId, operation = 'USE', onCompleted }) {
+export default function useAuthorizationTask({ enabled, resourceId, operation = 'USE', contextKey = '', onCompleted }) {
   const [task, setTask] = useState<AuthorizationTask>();
+  const [blockingTask, setBlockingTask] = useState<AuthorizationTask>();
+  const [historicalTask, setHistoricalTask] = useState<AuthorizationTask>();
   const [error, setError] = useState('');
   const [checking, setChecking] = useState(enabled);
   const [submitting, setSubmitting] = useState(false);
@@ -30,24 +31,38 @@ export default function useAuthorizationTask({ enabled, resourceId, operation = 
   const completing = useRef(onCompleted);
   completing.current = onCompleted;
 
-  const accept = useCallback((value: AuthorizationTask) => {
-    setTask(value);
-    setError('');
-    if (value?.status === 'CANCELLED' && value.requestId === request.current?.requestId) {
-      request.current = undefined;
-      callback.current = undefined;
-    }
-    if (value?.status === 'SUCCEEDED' && completed.current !== value.taskId) {
-      completed.current = value.taskId;
-      completing.current?.();
-      if (value.submittedByCurrentUser !== false && callback.current?.requestId === value.requestId) {
-        const done = callback.current.done;
+  const matchesRequest = useCallback(
+    (value?: AuthorizationTask) =>
+      !!value &&
+      !!request.current &&
+      value.requestId === request.current.requestId &&
+      value.operation === request.current.operation &&
+      value.submittedByCurrentUser !== false,
+    []
+  );
+
+  // Only this request can acknowledge submission; blockers and history are independent.
+  const accept = useCallback(
+    (value: AuthorizationTask) => {
+      if (!matchesRequest(value)) return;
+      setTask(value);
+      if (value.status === 'CANCELLED') {
+        request.current = undefined;
         callback.current = undefined;
-        message.success('授权成功，已同步生效');
-        done();
       }
-    }
-  }, []);
+      if (value.status === 'SUCCEEDED' && completed.current !== value.taskId) {
+        completed.current = value.taskId;
+        completing.current?.();
+        if (callback.current?.requestId === value.requestId) {
+          const done = callback.current.done;
+          callback.current = undefined;
+          message.success('授权成功，已同步生效');
+          done();
+        }
+      }
+    },
+    [matchesRequest]
+  );
 
   const refresh = useCallback(async () => {
     if (!enabled || !resourceId) return;
@@ -55,44 +70,52 @@ export default function useAuthorizationTask({ enabled, resourceId, operation = 
     const sequence = ++refreshSequence.current;
     const submitted = request.current;
     setChecking(true);
-    try {
-      const [response, exact] = await Promise.all([
-        listAuthorizationTasks(resourceId),
-        submitted ? findAuthorizationTaskRequest(resourceId, submitted.requestId) : Promise.resolve(undefined),
-      ]);
-      if (
-        current !== generation.current ||
-        sequence !== refreshSequence.current ||
-        submitted?.requestId !== request.current?.requestId
-      )
-        return;
-      if (response.code !== 0) throw new Error(response.msg || '任务查询失败');
-      if (exact && exact.code !== 0) throw new Error(exact.msg || '提交结果查询失败');
-      const matching = exact?.data;
-      if (matching && (matching.requestId !== submitted?.requestId || matching.operation !== submitted?.operation)) {
-        throw new Error('提交结果与当前请求不匹配，请刷新进度确认');
+    // A failed request lookup must not hide a successfully queried resource blocker.
+    const [historyResult, exactResult] = await Promise.allSettled([
+      Promise.resolve().then(() => listAuthorizationTasks(resourceId)),
+      submitted
+        ? Promise.resolve().then(() => findAuthorizationTaskRequest(resourceId, submitted.requestId))
+        : Promise.resolve(undefined),
+    ]);
+    if (
+      current !== generation.current ||
+      sequence !== refreshSequence.current ||
+      submitted?.requestId !== request.current?.requestId
+    )
+      return;
+    let queryFailed = false;
+    let matching: AuthorizationTask;
+    if (exactResult.status === 'fulfilled' && (!exactResult.value || exactResult.value.code === 0)) {
+      const value = exactResult.value?.data;
+      if (value && !matchesRequest(value)) {
+        queryFailed = true;
+      } else {
+        matching = value || undefined;
+        setTask(matching);
       }
-      // 占用任务跨授权类型互斥；历史完成任务只属于当前类型，不能冒充本次提交结果。
-      const latest =
-        matching ||
-        response.data?.find(taskBlocksResource) ||
-        (!submitted
-          ? response.data?.find((item) => item.operation === operation && item.status !== 'FAILED')
-          : undefined);
-      accept(latest);
-      return latest;
-    } catch {
-      if (current === generation.current && sequence === refreshSequence.current) {
-        setError('暂时无法查询授权任务，请点击刷新进度后再提交。');
-      }
-    } finally {
-      if (current === generation.current && sequence === refreshSequence.current) setChecking(false);
+    } else {
+      queryFailed = true;
     }
-  }, [enabled, resourceId, operation, accept]);
+    if (historyResult.status === 'fulfilled' && historyResult.value?.code === 0) {
+      const records = historyResult.value.data || [];
+      setBlockingTask(records.find(taskBlocksResource));
+      setHistoricalTask(records.find((item) => item.status === 'SUCCEEDED' && !matchesRequest(item)));
+    } else {
+      queryFailed = true;
+    }
+    setError(queryFailed ? '暂时无法查询授权任务，请点击刷新进度后再提交。' : '');
+    setChecking(false);
+    if (matching) accept(matching);
+    return matching;
+  }, [enabled, resourceId, operation, contextKey, accept, matchesRequest]);
 
   useEffect(() => {
     generation.current++;
     setTask(undefined);
+    setSubmitting(false);
+    setChecking(enabled);
+    setBlockingTask(undefined);
+    setHistoricalTask(undefined);
     setError('');
     request.current = undefined;
     callback.current = undefined;
@@ -103,38 +126,19 @@ export default function useAuthorizationTask({ enabled, resourceId, operation = 
   }, [refresh]);
 
   useEffect(() => {
-    if (!taskIsActive(task)) return;
+    if (!taskIsActive(task) && !taskIsActive(blockingTask)) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
-      let delay = 2000;
-      try {
-        const response = await getAuthorizationTask(task.taskId);
-        if (stopped) return;
-        if (response.code !== 0) throw new Error(response.msg);
-        if (
-          !taskBlocksResource(response.data) &&
-          (response.data.operation !== operation ||
-            (request.current && response.data.requestId !== request.current.requestId))
-        ) {
-          await refresh();
-          return;
-        }
-        accept(response.data);
-        if (!taskIsActive(response.data)) return;
-      } catch {
-        if (stopped) return;
-        delay = 5000;
-        setError('暂时无法获取进度，正在重连；后台任务仍继续，请勿重复提交。');
-      }
-      timer = setTimeout(poll, delay);
+      await refresh();
+      if (!stopped) timer = setTimeout(poll, 2000);
     };
     timer = setTimeout(poll, 2000);
     return () => {
       stopped = true;
       clearTimeout(timer);
     };
-  }, [task?.taskId, task?.status, operation, accept, refresh]);
+  }, [task?.taskId, task?.status, blockingTask?.taskId, blockingTask?.status, refresh]);
 
   const submit = useCallback(
     async (setting, operation, done) => {
@@ -157,16 +161,16 @@ export default function useAuthorizationTask({ enabled, resourceId, operation = 
         const response = await submitAuthorizationTask({ setting, operation, requestId: request.current.requestId });
         if (current !== generation.current) return;
         if (response.code !== 0) throw new Error(response.msg || '提交失败');
+        if (!matchesRequest(response.data)) throw new Error('提交结果与当前请求不匹配');
         accept(response.data);
+        setBlockingTask((previous) => {
+          if (taskBlocksResource(response.data)) return response.data;
+          return previous?.taskId === response.data.taskId ? undefined : previous;
+        });
       } catch (failure) {
         if (current === generation.current) {
-          // Resolve a potentially accepted request after transport failure without resubmitting changes.
-          const latest = await refresh();
-          if (
-            current === generation.current &&
-            latest?.requestId !== request.current?.requestId &&
-            !taskBlocksResource(latest)
-          ) {
+          const matching = await refresh();
+          if (current === generation.current && !matching) {
             setError(
               `未能确认提交结果：${getRequestErrorMessage(
                 failure,
@@ -179,22 +183,28 @@ export default function useAuthorizationTask({ enabled, resourceId, operation = 
         if (current === generation.current) setSubmitting(false);
       }
     },
-    [accept, refresh]
+    [accept, refresh, matchesRequest]
   );
 
   const action = useCallback(
-    async (cancel = false) => {
-      if (!task) return;
+    async (cancel = false, target = blockingTask || task) => {
+      if (!target) return;
       const current = generation.current;
       setSubmitting(true);
+      refreshSequence.current++;
+      setChecking(false);
       try {
-        if (cancel ? task.canCancel === false : task.canRetry === false) return;
-        const response = await (cancel ? cancelAuthorizationTask : retryAuthorizationTask)(task.taskId);
+        if (cancel ? target.canCancel === false : target.canRetry === false) return;
+        const response = await (cancel ? cancelAuthorizationTask : retryAuthorizationTask)(target.taskId);
         if (current !== generation.current) return;
         if (response.code !== 0) throw new Error(response.msg || '操作失败');
+        if (response.data.taskId !== target.taskId || response.data.operation !== target.operation) {
+          throw new Error('任务操作结果不匹配，请刷新进度确认');
+        }
         accept(response.data);
+        setBlockingTask(taskBlocksResource(response.data) ? response.data : undefined);
+        setError('');
         if (cancel && response.data.status === 'CANCELLED') {
-          // 放弃后使用新请求标识，否则同一名单会命中已取消任务的幂等记录。
           request.current = undefined;
           callback.current = undefined;
         }
@@ -204,18 +214,21 @@ export default function useAuthorizationTask({ enabled, resourceId, operation = 
         if (current === generation.current) setSubmitting(false);
       }
     },
-    [task, accept]
+    [task, blockingTask, accept]
   );
 
   return {
     task,
+    blockingTask,
+    historicalTask,
     taskError: error,
     taskChecking: checking,
     taskSubmitting: submitting,
-    taskBlocked: enabled && (checking || submitting || !!error || taskBlocksResource(task)),
+    taskBlocked:
+      enabled && (checking || submitting || !!error || taskBlocksResource(task) || taskBlocksResource(blockingTask)),
     submitTask: submit,
     refreshTask: refresh,
-    retryTask: () => action(false),
-    cancelTask: () => action(true),
+    retryTask: (target?: AuthorizationTask) => action(false, target),
+    cancelTask: (target?: AuthorizationTask) => action(true, target),
   };
 }

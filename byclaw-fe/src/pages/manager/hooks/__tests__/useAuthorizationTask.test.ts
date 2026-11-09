@@ -21,22 +21,26 @@ beforeEach(() => {
 });
 afterEach(() => jest.useRealTimers());
 
-it('restores a running task when the drawer reopens and releases controls only after completion', async () => {
-  (api.listAuthorizationTasks as jest.Mock).mockResolvedValue({ code: 0, data: [queued] });
-  (api.getAuthorizationTask as jest.Mock).mockResolvedValue({
-    code: 0,
-    data: { ...queued, status: 'SUCCEEDED', progress: 100 },
-  });
-  const { result, unmount } = setup();
-  await waitFor(() => expect(result.current.task?.status).toBe('QUEUED'));
+it('restores a blocker on reopen and moves its success into history without confirming a new submission', async () => {
+  const onCompleted = jest.fn();
+  (api.listAuthorizationTasks as jest.Mock)
+    .mockResolvedValueOnce({ code: 0, data: [queued] })
+    .mockResolvedValue({ code: 0, data: [{ ...queued, status: 'SUCCEEDED', progress: 100 }] });
+  const { result } = renderHook(() => useAuthorizationTask({ enabled: true, resourceId: '13', onCompleted }));
+  await waitFor(() => expect(result.current.blockingTask?.status).toBe('QUEUED'));
+  expect(result.current.task).toBeUndefined();
   expect(result.current.taskBlocked).toBe(true);
-  await waitFor(() => expect(result.current.task?.status).toBe('SUCCEEDED'), { timeout: 4000 });
+  await waitFor(() => expect(result.current.historicalTask?.status).toBe('SUCCEEDED'), { timeout: 4000 });
+  expect(result.current.blockingTask).toBeUndefined();
   expect(result.current.taskBlocked).toBe(false);
-  unmount();
+  expect(onCompleted).not.toHaveBeenCalled();
 });
 
 it('does not treat queue acceptance as successful authorization', async () => {
-  (api.submitAuthorizationTask as jest.Mock).mockResolvedValue({ code: 0, data: queued });
+  (api.submitAuthorizationTask as jest.Mock).mockImplementation(async ({ requestId, operation }) => ({
+    code: 0,
+    data: { ...queued, requestId, operation },
+  }));
   const done = jest.fn();
   const { result } = setup();
   await waitFor(() => expect(result.current.taskChecking).toBe(false));
@@ -65,12 +69,14 @@ it('reuses the request id after an uncertain submission and does not acknowledge
   expect(result.current.task).toBeUndefined();
 });
 
-it('continues displaying a running job after progress polling fails', async () => {
-  (api.listAuthorizationTasks as jest.Mock).mockResolvedValue({ code: 0, data: [queued] });
-  (api.getAuthorizationTask as jest.Mock).mockRejectedValue(new Error('offline'));
+it('keeps the blocker visible when progress refresh fails', async () => {
+  (api.listAuthorizationTasks as jest.Mock)
+    .mockResolvedValueOnce({ code: 0, data: [queued] })
+    .mockRejectedValue(new Error('offline'));
   const { result } = setup();
-  await waitFor(() => expect(result.current.task?.status).toBe('QUEUED'));
-  await waitFor(() => expect(result.current.taskError).toContain('正在重连'), { timeout: 4000 });
+  await waitFor(() => expect(result.current.blockingTask?.status).toBe('QUEUED'));
+  await waitFor(() => expect(result.current.taskError).toContain('暂时无法查询'), { timeout: 4000 });
+  expect(result.current.blockingTask?.status).toBe('QUEUED');
   expect(result.current.taskBlocked).toBe(true);
   expect(api.submitAuthorizationTask).not.toHaveBeenCalled();
 });
@@ -82,9 +88,9 @@ it('shows failed cache synchronization and supports retry without resubmitting g
   });
   (api.retryAuthorizationTask as jest.Mock).mockResolvedValue({ code: 0, data: { ...queued, status: 'RETRYING' } });
   const { result } = setup();
-  await waitFor(() => expect(result.current.task?.status).toBe('FAILED'));
+  await waitFor(() => expect(result.current.blockingTask?.status).toBe('FAILED'));
   await act(async () => result.current.retryTask());
-  expect(result.current.task?.status).toBe('RETRYING');
+  expect(result.current.blockingTask?.status).toBe('RETRYING');
   expect(api.submitAuthorizationTask).not.toHaveBeenCalled();
 });
 
@@ -116,8 +122,9 @@ it('restores another operators blocking failure instead of covering it with an u
     data: { ...blocking, status: 'CANCELLED', canCancel: false },
   });
   await act(async () => result.current.submitTask({ resourceId: '13' }, 'MANAGE', jest.fn()));
-  expect(result.current.task).toEqual(blocking);
-  expect(result.current.taskError).toBe('');
+  expect(result.current.blockingTask).toEqual(blocking);
+  expect(result.current.task).toBeUndefined();
+  expect(result.current.taskError).toContain('该资源已有未完成的授权任务');
   expect(result.current.taskBlocked).toBe(true);
   await act(async () => result.current.retryTask());
   expect(api.retryAuthorizationTask).not.toHaveBeenCalled();
@@ -131,7 +138,14 @@ it('creates a new request id after cancelling an unsaved task with the same auth
     code: 0,
     data: { ...queued, requestId, status: 'FAILED', dataApplied: 0, canCancel: true },
   }));
-  (api.cancelAuthorizationTask as jest.Mock).mockResolvedValue({ code: 0, data: { ...queued, status: 'CANCELLED' } });
+  (api.cancelAuthorizationTask as jest.Mock).mockImplementation(async () => ({
+    code: 0,
+    data: {
+      ...queued,
+      requestId: (api.submitAuthorizationTask as jest.Mock).mock.calls[0][0].requestId,
+      status: 'CANCELLED',
+    },
+  }));
   const { result } = setup();
   await waitFor(() => expect(result.current.taskChecking).toBe(false));
   const done = jest.fn();
@@ -150,7 +164,7 @@ it('preserves action failure messages returned as strings', async () => {
   });
   (api.cancelAuthorizationTask as jest.Mock).mockRejectedValue('当前用户已无授权维护权限');
   const { result } = setup();
-  await waitFor(() => expect(result.current.task?.status).toBe('FAILED'));
+  await waitFor(() => expect(result.current.blockingTask?.status).toBe('FAILED'));
   await act(async () => result.current.cancelTask());
   expect(result.current.taskError).toBe('当前用户已无授权维护权限');
   expect(result.current.taskBlocked).toBe(true);
@@ -220,18 +234,18 @@ it('confirms only the exact request after a lost response even when it is absent
   expect(done).toHaveBeenCalledTimes(1);
 });
 
-it('keeps cross-operation blockers visible and clears their progress when they finish', async () => {
+it('keeps cross-operation blockers visible then displays their completed progress only as history', async () => {
   const blocker = { ...queued, operation: 'MANAGE', blocksResource: true };
-  (api.listAuthorizationTasks as jest.Mock).mockResolvedValue({ code: 0, data: [blocker] });
-  (api.getAuthorizationTask as jest.Mock).mockImplementation(async () => {
-    const finished = { ...blocker, status: 'SUCCEEDED', progress: 100, blocksResource: false };
-    (api.listAuthorizationTasks as jest.Mock).mockResolvedValue({ code: 0, data: [finished] });
-    return { code: 0, data: finished };
-  });
+  const finished = { ...blocker, status: 'SUCCEEDED', progress: 100, blocksResource: false };
+  (api.listAuthorizationTasks as jest.Mock)
+    .mockResolvedValueOnce({ code: 0, data: [blocker] })
+    .mockResolvedValue({ code: 0, data: [finished] });
   const { result } = setup();
-  await waitFor(() => expect(result.current.task?.operation).toBe('MANAGE'));
+  await waitFor(() => expect(result.current.blockingTask?.operation).toBe('MANAGE'));
   expect(result.current.taskBlocked).toBe(true);
-  await waitFor(() => expect(result.current.task).toBeUndefined(), { timeout: 4000 });
+  await waitFor(() => expect(result.current.historicalTask).toEqual(finished), { timeout: 4000 });
+  expect(result.current.task).toBeUndefined();
+  expect(result.current.blockingTask).toBeUndefined();
   expect(result.current.taskBlocked).toBe(false);
 });
 
@@ -275,4 +289,107 @@ it('ignores a failed history record whose resource reservation has been released
   await waitFor(() => expect(result.current.taskChecking).toBe(false));
   expect(result.current.task).toBeUndefined();
   expect(result.current.taskBlocked).toBe(false);
+});
+
+it('shows historical success separately even for the same operation and never invokes completion for it', async () => {
+  const history = { ...queued, status: 'SUCCEEDED', progress: 100, totalUsers: 37, completedUsers: 37 };
+  (api.listAuthorizationTasks as jest.Mock).mockResolvedValue({ code: 0, data: [history] });
+  (api.submitAuthorizationTask as jest.Mock).mockRejectedValue('timeout');
+  const onCompleted = jest.fn();
+  const done = jest.fn();
+  const { result } = renderHook(() => useAuthorizationTask({ enabled: true, resourceId: '13', onCompleted }));
+  await waitFor(() => expect(result.current.taskChecking).toBe(false));
+  await act(async () => result.current.submitTask({ resourceId: '13' }, 'USE', done));
+  expect(result.current.task).toBeUndefined();
+  expect(result.current.historicalTask).toEqual(history);
+  expect(result.current.taskError).toContain('timeout');
+  expect(done).not.toHaveBeenCalled();
+  expect(onCompleted).not.toHaveBeenCalled();
+});
+
+it('keeps another blocker visible even when the matching request has succeeded', async () => {
+  const blocker = {
+    ...queued,
+    taskId: 'other',
+    requestId: 'other',
+    operation: 'MANAGE',
+    submittedByCurrentUser: false,
+  };
+  (api.listAuthorizationTasks as jest.Mock).mockResolvedValue({ code: 0, data: [blocker] });
+  (api.findAuthorizationTaskRequest as jest.Mock).mockImplementation(async (resourceId, requestId) => ({
+    code: 0,
+    data: { ...queued, requestId, status: 'SUCCEEDED' },
+  }));
+  (api.submitAuthorizationTask as jest.Mock).mockRejectedValue('timeout');
+  const done = jest.fn();
+  const { result } = setup();
+  await waitFor(() => expect(result.current.taskChecking).toBe(false));
+  await act(async () => result.current.submitTask({ resourceId: '13' }, 'USE', done));
+  expect(result.current.task?.status).toBe('SUCCEEDED');
+  expect(result.current.blockingTask).toEqual(blocker);
+  expect(result.current.taskBlocked).toBe(true);
+  expect(done).toHaveBeenCalledTimes(1);
+});
+
+it('still exposes the blocker when the exact request query fails', async () => {
+  const blocker = { ...queued, operation: 'MANAGE', status: 'FAILED', blocksResource: true };
+  (api.listAuthorizationTasks as jest.Mock).mockResolvedValue({ code: 0, data: [blocker] });
+  (api.findAuthorizationTaskRequest as jest.Mock).mockRejectedValue('offline');
+  (api.submitAuthorizationTask as jest.Mock).mockRejectedValue('timeout');
+  const { result } = setup();
+  await waitFor(() => expect(result.current.taskChecking).toBe(false));
+  await act(async () => result.current.submitTask({ resourceId: '13' }, 'USE', jest.fn()));
+  expect(result.current.task).toBeUndefined();
+  expect(result.current.blockingTask).toEqual(blocker);
+  expect(result.current.taskBlocked).toBe(true);
+});
+
+it.each(['request', 'operation', 'owner'])(
+  'never confirms an unmatched %s in the submit response',
+  async (mismatch) => {
+    (api.submitAuthorizationTask as jest.Mock).mockImplementation(async ({ requestId, operation }) => ({
+      code: 0,
+      data: {
+        ...queued,
+        requestId: mismatch === 'request' ? 'old-request' : requestId,
+        operation: mismatch === 'operation' ? 'MANAGE' : operation,
+        submittedByCurrentUser: mismatch !== 'owner',
+        status: 'SUCCEEDED',
+      },
+    }));
+    const done = jest.fn();
+    const { result } = setup();
+    await waitFor(() => expect(result.current.taskChecking).toBe(false));
+    await act(async () => result.current.submitTask({ resourceId: '13' }, 'USE', done));
+    expect(result.current.task).toBeUndefined();
+    expect(result.current.taskError).toContain('不匹配');
+    expect(done).not.toHaveBeenCalled();
+  }
+);
+
+it('ignores a response from the previous operation after switching drawers', async () => {
+  let resolveSubmit;
+  (api.submitAuthorizationTask as jest.Mock).mockImplementation(
+    ({ requestId, operation }) =>
+      new Promise((resolve) => {
+        resolveSubmit = () => resolve({ code: 0, data: { ...queued, requestId, operation, status: 'SUCCEEDED' } });
+      })
+  );
+  const done = jest.fn();
+  const { result, rerender } = renderHook(
+    ({ operation }) => useAuthorizationTask({ enabled: true, resourceId: '13', operation, onCompleted: jest.fn() }),
+    { initialProps: { operation: 'USE' } }
+  );
+  await waitFor(() => expect(result.current.taskChecking).toBe(false));
+  let submission;
+  act(() => {
+    submission = result.current.submitTask({ resourceId: '13' }, 'USE', done);
+  });
+  rerender({ operation: 'MANAGE' });
+  await act(async () => {
+    resolveSubmit();
+    await submission;
+  });
+  expect(result.current.task).toBeUndefined();
+  expect(done).not.toHaveBeenCalled();
 });
