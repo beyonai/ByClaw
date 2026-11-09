@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ByClawBeBackend, ByClawTokenRejectedError, parseEndpoint, type ByClawBeBackendConfig } from '../src/be-backend.ts'
 import { ToolEnvIdentity } from '../src/identity.ts'
+import { instanceRefsFor, type SandboxInstanceContext } from '../src/instance-context.ts'
 
 interface Recorded { path: string; body: Record<string, unknown>; token: string | undefined; systemCode: string | undefined }
 
@@ -16,9 +17,14 @@ class FakeByClawBe {
   /** Endpoint map handed to the next created record. */
   nextEndpoints: Record<string, string> = {}
   endpointHeaders: Record<string, string> | undefined
+  instanceContext: SandboxInstanceContext | null | undefined
+  mappingId: string | null | undefined
+  isShared = false
+  launchWithoutSandboxId = false
   /** When set, launch answers with the primary endpoint only, as an older record would. */
   launchWithoutInstanceEndpoints = false
   launchFailure: string | undefined
+  leaseAcquireFailures = 0
   removeFailure: string | undefined
   removeSkipped = false
   releaseConfirmation: Record<string, unknown> | undefined
@@ -73,6 +79,12 @@ class FakeByClawBe {
       this.privateParams.set(key, { paramId: existing?.paramId ?? 100 + this.privateParams.size, value: String(body['value']) })
       return { code: 0, msg: 'success', data: null }
     }
+    if (path.startsWith('/byaiService/sandbox/toolLease/')) {
+      const op = path.split('/').at(-1)
+      if (op === 'acquire' && this.leaseAcquireFailures-- > 0) return { code: -1, msg: 'TOOL_LEASE_BUSY' }
+      if (op === 'release') return { code: 0, data: { released: true, destroyed: false } }
+      return { code: 0, data: { sandboxId: 'leased-sandbox', instanceEndpoints: { ...this.nextEndpoints }, leaseId: body['leaseId'] ?? 'lease-1', leaseToken: 'private-lease-token', leaseExpiresAt: Date.now() + 90000, renewAfterMs: 30000 } }
+    }
     const user = String(body['userCode'])
     if (path === '/byaiService/sandbox/launchByUserCode') {
       if (this.launchFailure !== undefined) return { code: -1, msg: this.launchFailure, data: null }
@@ -85,14 +97,16 @@ class FakeByClawBe {
       }
       const primary = Object.values(record.instanceEndpoints)[0] ?? ''
       return { code: 0, msg: 'success', data: {
-        endpointHeaders: this.endpointHeaders, sandboxId: record.sandboxId, endpoint: primary, endpoints: primary === '' ? [] : [primary],
+        endpointHeaders: this.endpointHeaders, sandboxId: this.launchWithoutSandboxId ? undefined : record.sandboxId, endpoint: primary, endpoints: primary === '' ? [] : [primary],
+        instanceContext: this.instanceContext, mappingId: this.mappingId, isShared: this.isShared,
         instanceEndpoints: this.launchWithoutInstanceEndpoints ? undefined : record.instanceEndpoints,
       } }
     }
     if (path === '/byaiService/sandbox/getSandboxInfo') {
       const data = [...this.records.entries()]
         .filter(([key]) => key.startsWith(`${user}/`) && (body['sandboxType'] === undefined || key.endsWith(`/${String(body['sandboxType'])}`)))
-        .map(([key, record]) => ({ userCode: user, sandboxType: key.split('/')[1], sandboxId: record.sandboxId, status: 'RUNNING', endpointHeaders: this.endpointHeaders, instanceEndpoints: record.instanceEndpoints }))
+        .map(([key, record]) => ({ userCode: user, sandboxType: key.split('/')[1], sandboxId: record.sandboxId, status: 'RUNNING', endpointHeaders: this.endpointHeaders, instanceEndpoints: record.instanceEndpoints,
+          instanceContext: this.instanceContext, mappingId: this.mappingId, isShared: this.isShared }))
       return { code: 0, msg: 'success', data }
     }
     if (path === '/byaiService/sandbox/removeSandbox') {
@@ -136,6 +150,97 @@ describe('ByClawBeBackend', () => {
     await fake.stop()
     await new Promise<void>(resolve => sshd.close(() => resolve()))
     await rm(dir, { recursive: true, force: true })
+  })
+
+  it('uses coordinated acquisition and exact-token returns without unscoped sandbox removal', async () => {
+    const backend = new ByClawBeBackend({ ...config, coordinatedLeases: true, idleTimeoutSeconds: 300,
+      parentContextId: 'mapping', parentContextGeneration: 7, parentSandboxId: 'shared-host' }, identity, () => {})
+    backend.startSession('actual-session')
+    const finish = await backend.runInSession('actual-session', () => backend.beginUse())
+    await backend.ensure()
+    await finish()
+    expect(fake.calls.filter(c => c.path.endsWith('/toolLease/acquire'))).toHaveLength(1)
+    expect(fake.calls.find(c => c.path.endsWith('/toolLease/acquire'))?.body).toEqual(expect.objectContaining({ userCode: 'u1', serviceKey: 'byclaw-dsh-tools', sessionId: 'actual-session', idleTimeoutSeconds: 300, parentContextId: 'mapping', parentContextGeneration: 7, parentSandboxId: 'shared-host' }))
+    const suppliedKeys = fake.calls.find(c => c.path.endsWith('/toolLease/acquire'))?.body['toolEnvironmentKeys'] as { authorizedKey: string; hostPrivateKeyBase64: string }
+    const keys = await identity.keys()
+    expect(suppliedKeys.authorizedKey).toBe(keys.authorizedKey)
+    expect(Buffer.from(suppliedKeys.hostPrivateKeyBase64, 'base64').toString()).toBe(keys.hostPrivateKey)
+    await backend.finishSession('actual-session')
+    expect(fake.calls.find(c => c.path.endsWith('/toolLease/release'))?.body).toEqual(expect.objectContaining({ leaseId: 'lease-1', leaseToken: 'private-lease-token', destroy: false, parentContextId: 'mapping' }))
+    expect(fake.calls.some(c => c.path.endsWith('/removeSandbox') || c.path.endsWith('/launchByUserCode'))).toBe(false)
+    await backend.dispose()
+  })
+
+  it('retries a busy coordinated acquisition with the same holder and session identity', async () => {
+    fake.leaseAcquireFailures = 1
+    let now = 1000
+    const backend = new ByClawBeBackend({ ...config, coordinatedLeases: true }, identity, () => {}, { now: () => now, sleep: async ms => { now += ms } })
+    backend.startSession('session')
+    const finish = await backend.runInSession('session', () => backend.beginUse())
+    const requests = fake.calls.filter(call => call.path.endsWith('/toolLease/acquire'))
+    expect(requests).toHaveLength(2)
+    expect(requests[0]?.body['holderId']).toBe(requests[1]?.body['holderId'])
+    expect(requests[0]?.body['sessionId']).toBe(requests[1]?.body['sessionId'])
+    await finish(); await backend.dispose()
+  })
+
+  it.each([false, true])('adapts only the exact legacy allocation and keeps browser on vnc (directory fallback=%s)', async fallback => {
+    fake.launchWithoutInstanceEndpoints = fallback
+    fake.instanceContext = null
+    fake.mappingId = 'logical-mapping'
+    fake.isShared = true
+    fake.nextEndpoints = { ...fake.nextEndpoints, vnc: 'https://viewer.test/browser', desktop: 'https://viewer.test/ide' }
+    const backend = new ByClawBeBackend(config, identity, () => {})
+    await backend.ensure()
+    expect(instanceRefsFor(backend.instanceContext, 'browser.automation')).toEqual([
+      { sandboxId: 'sb1', mappingId: 'logical-mapping', instance: 'vnc' },
+    ])
+    expect(instanceRefsFor(backend.instanceContext)).toEqual([
+      { sandboxId: 'sb1', mappingId: 'logical-mapping', instance: 'vnc' },
+      { sandboxId: 'sb1', mappingId: 'logical-mapping', instance: 'desktop' },
+    ])
+    await backend.dispose()
+  })
+
+  it('does not treat an old IDE-only desktop as the browser target', async () => {
+    fake.nextEndpoints.desktop = 'https://viewer.test/ide'
+    const backend = new ByClawBeBackend(config, identity, () => {})
+    await backend.ensure()
+    expect(instanceRefsFor(backend.instanceContext)).toEqual([{ sandboxId: 'sb1', instance: 'desktop' }])
+    expect(instanceRefsFor(backend.instanceContext, 'browser.automation')).toEqual([])
+    await backend.dispose()
+  })
+
+  it('normalizes a dedicated directory record null mapping before adapting its legacy browser', async () => {
+    fake.mappingId = null
+    fake.launchWithoutInstanceEndpoints = true
+    fake.nextEndpoints.vnc = 'https://viewer.test/browser'
+    const backend = new ByClawBeBackend(config, identity, () => {})
+    await backend.ensure()
+    expect(instanceRefsFor(backend.instanceContext, 'browser.automation')).toEqual([{ sandboxId: 'sb1', instance: 'vnc' }])
+    await backend.dispose()
+  })
+
+  it('preserves explicitly empty new bindings even when legacy endpoint names are present', async () => {
+    fake.nextEndpoints.vnc = 'https://viewer.test/browser'
+    fake.instanceContext = { version: 1, sandboxId: 'sb1', instanceBindings: {} }
+    const backend = new ByClawBeBackend(config, identity, () => {})
+    await backend.ensure()
+    expect(backend.instanceContext).toEqual(fake.instanceContext)
+    expect(instanceRefsFor(backend.instanceContext, 'browser.automation')).toEqual([])
+    await backend.dispose()
+  })
+
+  it.each(['unknown-allocation', 'unknown-shared-mapping', 'null-shared-mapping'])('does not adapt legacy endpoints with an %s identity', async missing => {
+    fake.nextEndpoints.vnc = 'https://viewer.test/browser'
+    fake.launchWithoutSandboxId = missing === 'unknown-allocation'
+    fake.launchWithoutInstanceEndpoints = missing === 'unknown-allocation'
+    fake.isShared = missing !== 'unknown-allocation'
+    if (missing === 'null-shared-mapping') fake.mappingId = null
+    const backend = new ByClawBeBackend(config, identity, () => {})
+    await backend.ensure()
+    expect(backend.instanceContext).toBeUndefined()
+    await backend.dispose()
   })
 
   it('keeps a healthy sandbox and stable request keys across automatic teardown and new backend handles', async () => {

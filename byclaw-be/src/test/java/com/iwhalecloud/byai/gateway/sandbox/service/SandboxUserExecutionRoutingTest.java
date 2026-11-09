@@ -14,6 +14,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Map;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,9 @@ import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
 import com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts;
+import com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshToolBootstrapClient;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
 import com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxGateway;
 import com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxPolicy;
 import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamCacheReader;
@@ -44,6 +48,8 @@ class SandboxUserExecutionRoutingTest {
     private final PlatformRemoteGateway gateway = mock(PlatformRemoteGateway.class);
     private final SandboxProperties properties = new SandboxProperties();
     private final SandboxLaunchData launched = new SandboxLaunchData();
+    private final SharedDshToolBootstrapClient bootstrap = mock(SharedDshToolBootstrapClient.class);
+    private final SandboxServiceSpecRepository specs = mock(SandboxServiceSpecRepository.class);
 
     @BeforeEach
     void setUp() {
@@ -54,6 +60,7 @@ class SandboxUserExecutionRoutingTest {
         ReflectionTestUtils.setField(service, "systemParamTargetAgentResolver",
             new SystemParamTargetAgentResolver(config, privateParameters, null));
         ReflectionTestUtils.setField(service, "sandboxProperties", properties);
+        ReflectionTestUtils.setField(service, "sandboxServiceSpecRepository", specs);
         SharedSandboxPolicy policy = new SharedSandboxPolicy();
         ReflectionTestUtils.setField(policy, "byaiSystemConfigService", config);
         ReflectionTestUtils.setField(service, "sharedSandboxPolicy", policy);
@@ -131,6 +138,92 @@ class SandboxUserExecutionRoutingTest {
 
         assertThat(sentRouting()).containsEntry("sandboxType", "managed-user-tools");
         verify(shared, never()).tryAcquire(USER, "byclaw-dsh");
+    }
+
+    @Test
+    void managedToolColdStartUsesTheCurrentHostsPersistentBootstrapIdentity() {
+        SharedSandboxGateway shared = managedShared();
+        declaredToolContract();
+        SandboxLaunchData parent = new SandboxLaunchData();
+        parent.setIsShared(true);
+        when(shared.tryAcquire(USER, "byclaw-dsh")).thenReturn(parent);
+        Map<String, String> keys = Map.of("authorizedKey", "current-user-public-key",
+            "hostPrivateKeyBase64", "current-user-host-key");
+        when(bootstrap.load(parent, "configured-tools")).thenReturn(keys);
+        ReflectionTestUtils.setField(service, "sharedDshToolBootstrapClient", bootstrap);
+
+        assertThat(service.launchUserExecutionSandbox(USER)).isSameAs(launched);
+
+        ArgumentCaptor<Map<String, Object>> request = ArgumentCaptor.forClass(Map.class);
+        verify(gateway).service(eq("launch"), request.capture());
+        assertThat(request.getValue()).containsEntry("toolEnvironmentKeys", keys);
+        assertThat(sentRouting()).containsEntry("sandboxType", "configured-tools");
+        verify(bootstrap).load(parent, "configured-tools");
+    }
+
+    @Test
+    void residentToolColdStartUsesItsOwnCurrentContext() {
+        SharedDshHostContexts host = residentHost();
+        declaredToolContract();
+        SandboxLaunchData parent = new SandboxLaunchData();
+        when(host.ensure(USER)).thenReturn(parent);
+        when(bootstrap.load(parent, "configured-tools")).thenReturn(Map.of("authorizedKey", "same-user-key"));
+        ReflectionTestUtils.setField(service, "sharedDshToolBootstrapClient", bootstrap);
+
+        service.launchUserExecutionSandbox(USER);
+
+        verify(host).ensure(USER);
+        verify(bootstrap).load(parent, "configured-tools");
+        assertThat(sentRouting()).containsEntry("sandboxType", "configured-tools");
+    }
+
+    @Test
+    void missingHostBootstrapDoesNotLaunchToolsWithAnotherIdentity() {
+        SharedSandboxGateway shared = managedShared();
+        declaredToolContract();
+        SandboxLaunchData parent = new SandboxLaunchData();
+        parent.setIsShared(true);
+        when(shared.tryAcquire(USER, "byclaw-dsh")).thenReturn(parent);
+        when(bootstrap.load(parent, "configured-tools")).thenThrow(new IllegalStateException("bootstrap unavailable"));
+        ReflectionTestUtils.setField(service, "sharedDshToolBootstrapClient", bootstrap);
+
+        assertThatThrownBy(() -> service.launchUserExecutionSandbox(USER))
+            .isInstanceOf(IllegalStateException.class).hasMessage("bootstrap unavailable");
+
+        verify(gateway, never()).service(eq("launch"), anyMap());
+    }
+
+    @Test
+    void missingSharedContextDoesNotLaunchAnUninitializedToolSandbox() {
+        managedShared();
+        declaredToolContract();
+        ReflectionTestUtils.setField(service, "sharedDshToolBootstrapClient", bootstrap);
+
+        assertThatThrownBy(() -> service.launchUserExecutionSandbox(USER))
+            .isInstanceOf(IllegalStateException.class).hasMessage("User execution host context is unavailable");
+
+        verify(bootstrap, never()).load(any(), any());
+        verify(gateway, never()).service(eq("launch"), anyMap());
+    }
+
+    @Test
+    void disabledToolContractDoesNotAllocateAHostOrReadItsKeys() {
+        SharedSandboxGateway shared = managedShared();
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        spec.setRuntimeOptions(Map.of("toolSandbox", Map.of("contract", "byclaw.tool-sandbox/v1", "enabled", "false")));
+        when(specs.findByServiceKeyAndProfile("configured-tools", null)).thenReturn(Optional.of(spec));
+
+        assertThatThrownBy(() -> service.launchUserExecutionSandbox(USER))
+            .isInstanceOf(IllegalStateException.class).hasMessage("User execution tool sandbox is disabled");
+
+        verify(shared, never()).tryAcquire(any(), any());
+        verify(gateway, never()).service(eq("launch"), anyMap());
+    }
+
+    private void declaredToolContract() {
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        spec.setRuntimeOptions(Map.of("toolSandbox", Map.of("contract", "byclaw.tool-sandbox/v1")));
+        when(specs.findByServiceKeyAndProfile("configured-tools", null)).thenReturn(Optional.of(spec));
     }
 
     @Test
@@ -263,6 +356,7 @@ class SandboxUserExecutionRoutingTest {
             .thenReturn("{\"defaultMode\":\"shared\",\"excludedUsers\":[]}");
         SharedSandboxGateway shared = mock(SharedSandboxGateway.class);
         when(shared.enabled()).thenReturn(true);
+        when(shared.executionAccess(any(), any(), any())).thenAnswer(call -> call.getArgument(2));
         ReflectionTestUtils.setField(service, "sharedSandboxGateway", shared);
         return shared;
     }

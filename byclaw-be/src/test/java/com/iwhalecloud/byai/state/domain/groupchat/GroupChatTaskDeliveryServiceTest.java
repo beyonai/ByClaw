@@ -34,6 +34,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatPendingP
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskDeliveryService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskDeliveryResponse;
 import com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatTaskController;
 
 class GroupChatTaskDeliveryServiceTest extends I18nTestSupport {
@@ -47,6 +48,10 @@ class GroupChatTaskDeliveryServiceTest extends I18nTestSupport {
 
     @BeforeEach
     void setup() {
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setTaskSessionId(60L);
+        task.setStatus("ACTIVE");
+        when(authorization.requireInitiator(60L)).thenReturn(task);
         when(storage.list(DIRECTORY, 1)).thenReturn(List.of(PATH));
     }
 
@@ -110,6 +115,17 @@ class GroupChatTaskDeliveryServiceTest extends I18nTestSupport {
     void deniedTaskNeverTouchesUserStorage() {
         when(authorization.requireInitiator(60L)).thenThrow(new IllegalArgumentException("Access denied"));
         assertThatThrownBy(() -> service.current(60L)).hasMessage("Access denied");
+        verifyNoInteractions(storage);
+    }
+
+    @Test
+    void nonActiveTaskIsUndeliveredWithoutReadingStorage() {
+        ByaiGroupChatTask privateTask = new ByaiGroupChatTask();
+        privateTask.setTaskSessionId(60L);
+        privateTask.setStatus("PRIVATE");
+        when(authorization.requireInitiator(60L)).thenReturn(privateTask);
+
+        assertThat(service.current(60L)).isEqualTo(new GroupChatTaskDeliveryResponse("60", false));
         verifyNoInteractions(storage);
     }
 

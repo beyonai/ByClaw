@@ -1,6 +1,8 @@
-import { access, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import ts from 'typescript'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const keygenGate = vi.hoisted(() => ({ enabled: false, calls: 0, kind: 'client', release: undefined as (() => void) | undefined }))
@@ -42,6 +44,33 @@ describe('ToolEnvIdentity', () => {
     const known = await readFile(join(dir, 'state', 'known_hosts'), 'utf8')
     expect(known).toMatch(/^byclaw-tool-env ssh-ed25519 \S+\n$/u)
     expect((await stat(join(dir, 'state'))).mode & 0o777).toBe(0o700)
+  })
+
+  it('shares canonical per-service keys while keeping each runtime SSH configuration isolated', async () => {
+    const canonical = join(dir, 'shared-service')
+    const a = new ToolEnvIdentity(join(dir, 'runtime-a'), 'actor-a', 'byclaw', canonical)
+    const b = new ToolEnvIdentity(join(dir, 'runtime-b'), 'actor-b', 'byclaw', canonical)
+    const [first, second] = await Promise.all([a.keys(), b.keys()])
+    expect(first).toEqual(second)
+    await Promise.all([a.writeClientConfig({ hostName: 'same-sandbox', port: 22 }), b.writeClientConfig({ hostName: 'same-sandbox', port: 22 })])
+    expect(await readFile(join(dir, 'runtime-a', 'ssh_config'), 'utf8')).toContain('Host actor-a')
+    expect(await readFile(join(dir, 'runtime-b', 'ssh_config'), 'utf8')).toContain('Host actor-b')
+    expect(await readFile(join(dir, 'runtime-a', 'known_hosts'), 'utf8')).toMatch(/^actor-a /)
+    expect(await readFile(join(dir, 'runtime-b', 'known_hosts'), 'utf8')).toMatch(/^actor-b /)
+  })
+
+  it('publishes one complete canonical key bundle across independent Harness processes', async () => {
+    const code = ts.transpileModule(await readFile(new URL('../src/identity.ts', import.meta.url), 'utf8'), {
+      compilerOptions: { target: ts.ScriptTarget.ES2024, module: ts.ModuleKind.ESNext },
+    }).outputText
+    const module = join(dir, 'identity.mjs'); await writeFile(module, code)
+    const { execFile } = await import('node:child_process')
+    const results = await Promise.all(Array.from({ length: 6 }, (_, index) => {
+      const script = `import(${JSON.stringify(pathToFileURL(module).href)}).then(async ({ToolEnvIdentity})=>{const {createHash}=await import('node:crypto');const keys=await new ToolEnvIdentity(${JSON.stringify(join(dir, `runtime-${index}`))},'alias-${index}','byclaw',${JSON.stringify(join(dir, 'shared-race'))}).keys();console.log(createHash('sha256').update(keys.authorizedKey+keys.hostPrivateKey).digest('hex'))})`
+      return new Promise<string>((resolve, reject) => execFile(process.execPath, ['-e', script], (error, stdout) => { if (error) reject(error); else resolve(stdout) }))
+    }))
+    expect(new Set(results.map(result => result.trim())).size).toBe(1)
+    expect(results.every(result => /^[a-f0-9]{64}$/u.test(result.trim()))).toBe(true)
   })
 
   it('points the alias at the endpoint through one Include line', async () => {

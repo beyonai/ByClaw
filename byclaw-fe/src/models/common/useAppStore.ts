@@ -109,6 +109,7 @@ export type IState = {
 };
 
 let directoryEpoch: number | undefined;
+let pendingDirectory: Promise<ISandboxesInfo[]> | undefined;
 
 const useAppStore = create<IState>()(
   devtools(
@@ -216,29 +217,25 @@ const useAppStore = create<IState>()(
           sandboxesInfo: [],
           getSandboxesInfoUrl() {
             const epoch = desktopAuthEpoch();
-            const sandboxesInfo = get().sandboxesInfo;
-            if (sandboxesInfo instanceof Promise && directoryEpoch === epoch) {
-              return sandboxesInfo;
-            }
+            if (pendingDirectory && directoryEpoch === epoch) return pendingDirectory;
+            if (directoryEpoch !== undefined && directoryEpoch !== epoch) set({ sandboxesInfo: [] });
 
             directoryEpoch = epoch;
+            const previousDirectory = get().sandboxesInfo;
             const sandboxesInfoPromise = withDesktopTimeout(getSandboxInfo({}), 5000).then((rows) => {
               if (desktopAuthEpoch() !== epoch) throw new Error('AUTH_CHANGED');
               return Array.isArray(rows) ? rows : [];
             });
 
-            set({ sandboxesInfo: sandboxesInfoPromise });
-
-            sandboxesInfoPromise.then(
-              (nextSandboxesInfo) => {
-                if (desktopAuthEpoch() === epoch && get().sandboxesInfo === sandboxesInfoPromise) {
-                  set({ sandboxesInfo: nextSandboxesInfo });
-                }
-              },
-              () => {
-                if (get().sandboxesInfo === sandboxesInfoPromise) set({ sandboxesInfo: [] });
+            pendingDirectory = sandboxesInfoPromise;
+            const publishDirectory = (rows: ISandboxesInfo[]) => {
+              if (pendingDirectory !== sandboxesInfoPromise) return;
+              pendingDirectory = undefined;
+              if (desktopAuthEpoch() === epoch && get().sandboxesInfo === previousDirectory) {
+                set({ sandboxesInfo: rows });
               }
-            );
+            };
+            sandboxesInfoPromise.then(publishDirectory, () => publishDirectory([]));
 
             return sandboxesInfoPromise;
           },
@@ -291,6 +288,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('byclaw-auth-change', () => {
     desktopAuthEpoch();
     directoryEpoch = undefined;
+    pendingDirectory = undefined;
     useAppStore.setState({ sandboxesInfo: [] });
   });
 }

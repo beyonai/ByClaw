@@ -5,6 +5,7 @@ import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
+import com.iwhalecloud.byai.common.constants.devloop.DeleteFlag;
 import com.iwhalecloud.byai.common.constants.devloop.ProjectType;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
@@ -13,6 +14,7 @@ import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -54,6 +56,30 @@ public class ProjectService {
      */
     public Project findById(Long projectId) {
         return projectMapper.selectById(projectId);
+    }
+
+    /**
+     * 批量读取工作组所引用的同企业项目名称，兼容默认企业的历史空归属。
+     *
+     * @param enterpriseId 工作组所属企业
+     * @param projectIds 当前页工作组关联的项目 ID
+     * @return 未删除项目的 ID 与名称
+     */
+    public List<Project> findNamesByIds(long enterpriseId, Collection<Long> projectIds) {
+        if (projectIds.isEmpty()) {
+            return List.of();
+        }
+        return projectMapper.selectList(new LambdaQueryWrapper<Project>()
+            .select(Project::getProjectId, Project::getProjectName)
+            .in(Project::getProjectId, projectIds)
+            .and(flag -> flag.ne(Project::getDeleteFlag, DeleteFlag.DELETED)
+                .or().isNull(Project::getDeleteFlag))
+            .and(scope -> {
+                scope.eq(Project::getEnterpriseId, enterpriseId);
+                if (enterpriseId == 1L) {
+                    scope.or().isNull(Project::getEnterpriseId);
+                }
+            }));
     }
 
     /** 按实际绑定的云盘资源反查项目，避免相信客户端传入的项目身份。 */

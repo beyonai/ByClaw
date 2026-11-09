@@ -101,6 +101,9 @@ public class SandboxService {
     @Autowired(required = false)
     private com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts sharedDshHostContexts;
 
+    @Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshToolBootstrapClient sharedDshToolBootstrapClient;
+
     @Lazy
     @Autowired
     private com.iwhalecloud.byai.state.domain.chat.service.SystemParamTargetAgentResolver systemParamTargetAgentResolver;
@@ -354,7 +357,9 @@ public class SandboxService {
         String targetAgentType = systemParamTargetAgentResolver.resolve(null, user);
         SandboxLaunchRouting routing = SandboxTargetRouting.resolve(user, targetAgentType,
             () -> sandboxLaunchContextFactory.resolveRouting(null, user));
+        Map<String, String> toolEnvironmentKeys = Map.of();
         if (isSharedExecutionContext(user, routing)) {
+            String sharedSandboxType = routing.getSandboxType();
             String selectedTool = com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts
                 .toolSandboxLookup(() -> byaiSystemConfigService.getDcSystemConfigValueByCode(
                     com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts.TOOL_SANDBOX_PARAM))
@@ -368,8 +373,28 @@ public class SandboxService {
             if (isSharedExecutionContext(user, routing)) {
                 throw new IllegalStateException("User execution tool sandbox resolves to a shared host context");
             }
+            if (platformRemote()) {
+                SandboxServiceSpec toolSpec = resolveEffectiveSpec(routing.getSandboxType(), routing.getProfileKey());
+                if (toolSpec != null && toolSpec.isToolSandbox()) {
+                    if (!toolSpec.isToolSandboxEnabled()) {
+                        throw new IllegalStateException("User execution tool sandbox is disabled");
+                    }
+                    SandboxLaunchData context = managedSharedLaunch(user, sharedSandboxType);
+                    if (context != null) {
+                        context = sharedSandboxGateway.executionAccess(user, sharedSandboxType, context);
+                    }
+                    if (context == null && sharedHostRoutes(user, sharedSandboxType)) {
+                        context = sharedDshHostContexts.ensure(user);
+                    }
+                    if (context == null) {
+                        throw new IllegalStateException("User execution host context is unavailable");
+                    }
+                    // Harness owns the persistent SSH identity; a second identity would break Agent reuse.
+                    toolEnvironmentKeys = sharedDshToolBootstrapClient.load(context, toolServiceKey);
+                }
+            }
         }
-        SandboxLaunchData launched = launchSandboxInternal(user, null, routing);
+        SandboxLaunchData launched = launchSandboxInternal(user, null, routing, null, false, toolEnvironmentKeys);
         if (launched != null && Boolean.TRUE.equals(launched.getIsShared())) {
             throw new IllegalStateException("Shared host contexts cannot execute sandbox commands");
         }
@@ -1493,24 +1518,45 @@ public class SandboxService {
      * @return 沙箱信息，不存在时返回 null
      */
     public List<SandboxInfo> sandboxInfo(String userCode) {
+        return sandboxInfo(userCode, null);
+    }
+
+    /** Resolve one known identity without preparing unrelated sandbox endpoints. */
+    public List<SandboxInfo> sandboxInfo(String userCode, String sandboxId) {
+        if (sandboxId != null && (StringUtils.isBlank(sandboxId) || !sandboxId.equals(sandboxId.trim()))) {
+            throw new IllegalArgumentException("sandboxId must be a nonblank exact identity");
+        }
         if (platformRemote()) {
+            Map<String, Object> params = platformGateway().params("userCode", userCode);
+            if (sandboxId != null) params.put("sandboxId", sandboxId);
             @SuppressWarnings("unchecked")
-            List<SandboxInfo> remote = (List<SandboxInfo>) platformGateway().convert(platformGateway().service("info",platformGateway().params("userCode",userCode)),new com.fasterxml.jackson.core.type.TypeReference<List<SandboxInfo>>(){}.getType());
-            return withSharedHostContext(userCode, remote);
+            List<SandboxInfo> remote = (List<SandboxInfo>) platformGateway().convert(platformGateway().service("info", params),new com.fasterxml.jackson.core.type.TypeReference<List<SandboxInfo>>(){}.getType());
+            return selectSandboxInfos(withSharedHostContext(userCode, remote), sandboxId);
         }
         if (StringUtils.isBlank(userCode)) {
             return null;
         }
         List<SandboxInfo> cached = sandboxMetadataCache.listByUser(userCode);
         if (cached != null && !cached.isEmpty()) {
-            cached.forEach(this::hydrateGatewayToken);
-            return withSharedHostContext(userCode, cached);
+            List<SandboxInfo> selected = selectSandboxInfos(cached, sandboxId);
+            if (!selected.isEmpty()) {
+                selected.forEach(this::hydrateGatewayToken);
+                return selectSandboxInfos(withSharedHostContext(userCode, selected), sandboxId);
+            }
         }
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
         List<SandboxInfo> result = records == null ? new ArrayList<>()
-            : records.stream().map(this::toSandboxInfo).collect(Collectors.toList());
+            : records.stream().filter(record -> sandboxId == null || sandboxId.equals(record.getSandboxId()))
+                .map(this::toSandboxInfo).collect(Collectors.toList());
         result.forEach(sandboxMetadataCache::put);
-        return withSharedHostContext(userCode, result);
+        return selectSandboxInfos(withSharedHostContext(userCode, result), sandboxId);
+    }
+
+    private List<SandboxInfo> selectSandboxInfos(List<SandboxInfo> infos, String sandboxId) {
+        if (sandboxId == null) return infos;
+        if (infos == null) return new ArrayList<>();
+        return infos.stream().filter(info -> info != null && sandboxId.equals(info.getSandboxId()))
+            .collect(Collectors.toList());
     }
 
     /** The resident host's context for the user is not a record; listings read it from the host. */

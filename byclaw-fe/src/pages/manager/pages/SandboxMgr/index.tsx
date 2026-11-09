@@ -26,6 +26,7 @@ import {
 } from '@ant-design/icons';
 import { useDispatch, useIntl, useSelector } from '@umijs/max';
 import {
+  Alert,
   Button,
   Col,
   Drawer,
@@ -68,6 +69,7 @@ import EndpointLinks from './EndpointLinks';
 import SandboxLifetime from './SandboxLifetime';
 import ServiceSpecCatalog from './ServiceSpecCatalog';
 import ToolSandboxCover from './ToolSandboxCover';
+import { applyBuiltinToolSandboxPreset, BUILTIN_TOOL_SANDBOX_PRESETS } from './toolSandboxPresets';
 import RecoveryPanel from './RecoveryPanel';
 import SharedConfigPanel from './SharedConfig';
 import TemplateRebuildActions, { useTemplateRebuildSupport } from './TemplateRebuildActions';
@@ -337,6 +339,10 @@ const SandboxMgr = () => {
   const [specForm] = Form.useForm();
   const [specDimension, setSpecDimension] = useState<ServiceSpecDimension>('USER');
   const formDimension = Form.useWatch('dimension', specForm) as ServiceSpecDimension | undefined;
+  const formServiceKey = Form.useWatch('serviceKey', specForm);
+  const builtinToolPreset = BUILTIN_TOOL_SANDBOX_PRESETS.find(
+    (preset) => preset.serviceKey === formServiceKey || preset.aliases.includes(formServiceKey)
+  );
   const [savingSpec, setSavingSpec] = useState(false);
   const [updatingSpecKey, setUpdatingSpecKey] = useState<string | null>(null);
 
@@ -2836,6 +2842,51 @@ const SandboxMgr = () => {
               </Form.Item>
             </Col>
           </Row>
+          {builtinToolPreset && (
+            <Form.Item>
+              <Alert
+                type="info"
+                showIcon
+                message={intl.formatMessage(
+                  { id: 'sandboxMgr.market.presetResources' },
+                  { cpu: builtinToolPreset.resources.limits.cpu, memory: builtinToolPreset.resources.limits.memory }
+                )}
+                description={
+                  <Space direction="vertical">
+                    <span>{builtinToolPreset.resources.guidance}</span>
+                    <span>{intl.formatMessage({ id: 'sandboxMgr.market.presetResourcesTip' })}</span>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        try {
+                          const current = specForm.getFieldsValue();
+                          const updated = applyBuiltinToolSandboxPreset(
+                            {
+                              ...editingSpec,
+                              serviceKey: current.serviceKey,
+                              specJson: current.specJson,
+                              enabled: current.enabled === false ? 0 : 1,
+                            },
+                            window.publicPath || '/'
+                          );
+                          specForm.setFieldsValue({
+                            dimension: 'TOOL',
+                            displayName: updated.displayName,
+                            ...getToolSandboxMetadata(updated),
+                            specJson: formatJsonIfValid(updated.specJson),
+                          });
+                        } catch {
+                          message.error(intl.formatMessage({ id: 'sandboxMgr.market.invalidSpec' }));
+                        }
+                      }}
+                    >
+                      {intl.formatMessage({ id: 'sandboxMgr.market.applyPreset' })}
+                    </Button>
+                  </Space>
+                }
+              />
+            </Form.Item>
+          )}
           {formDimension === 'TOOL' && (
             <>
               <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.market.description' })} name="description">

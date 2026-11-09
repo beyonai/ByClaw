@@ -89,7 +89,11 @@ export class MirrorInputWriter {
           "SELECT 1 FROM byai.byai_session s JOIN byai.byai_session_member m ON m.session_id=s.session_id WHERE s.session_id=$1 AND s.enterprise_id=$2 AND s.session_type='hs_as' AND COALESCE(s.state,'ACTIVE') NOT IN('GROUP_DISSOLVED','CLOSED') AND m.mem_obj_type='USER' AND m.mem_obj_id=$3 AND m.com_acct_id=$2",
           [task.groupSessionId, this.enterpriseId, event.payload.userId],
         );
-        if (!member || task.status !== "ACTIVE" || task.initiatorUserId !== event.payload.userId)
+        if (
+          !member ||
+          !["ACTIVE", "PRIVATE"].includes(task.status) ||
+          task.initiatorUserId !== event.payload.userId
+        )
           throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
       }
     }
@@ -138,7 +142,7 @@ export class MirrorInputWriter {
       );
       if (!bound) throw new DomainError("MIRROR_CONTEXT_MISMATCH");
     }
-    if (task) {
+    if (task && task.status === "ACTIVE") {
       const bound = await first(
         this.db,
         "UPDATE byai.byai_group_chat_task SET turn_status='RUNNING',current_turn_id=$1,current_turn_trace_id=$2,update_time=CURRENT_TIMESTAMP WHERE task_session_id=$3 AND status='ACTIVE' RETURNING task_session_id",

@@ -18,6 +18,110 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 /** 执行实际列表 SQL，校验资源中心与收藏排序在分页之前且不扩大资源可见范围。 */
 class ResourceFavoriteQueryIntegrationTest {
+    @Test
+    void employeeRelatedAuthorizationQueryExcludesRetiredTypesForEveryFilter() throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite::memory:")) {
+            initialize(connection);
+            for (long id = 1; id <= 35; id++) resource(connection, id, "MCP", 22, "enterprise", 2);
+            String[] retired = {"OBJECT", "view", "ONTOLOGY_BASE", " SCENE "};
+            for (int i = 0; i < 40; i++) resource(connection, 100 + i, retired[i % 4], 22, "enterprise", 2);
+            try (var sql = connection.createStatement()) {
+                sql.execute("INSERT INTO ss_resource_rel_detail SELECT 500, resource_id FROM ss_resource");
+            }
+            var params = new HashMap<String, Object>();
+            params.put("resourceId", 500L);
+            String mapper = "resource/SsResourceMapper.xml";
+            String query = "queryDigEmployeeRelResourceAuthList";
+            assertThat(executeMappedCount(connection, mapper, query, params)).isEqualTo(35);
+            params.put("resourceBizTypeList", List.of("MCP", "OBJECT", "view", "ONTOLOGY_BASE", " SCENE "));
+            assertThat(executeMappedCount(connection, mapper, query, params)).isEqualTo(35);
+            params.put("resourceBizTypeList", List.of(retired));
+            assertThat(executeMappedCount(connection, mapper, query, params)).isZero();
+        }
+    }
+
+    @Test
+    void openApiAndCatalogQueriesFilterBeforeCountAndLimit() throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite::memory:")) {
+            initialize(connection);
+            try (var sql = connection.createStatement()) {
+                sql.execute("CREATE TABLE ss_res_ext_agent(resource_id INTEGER, agent_type TEXT)");
+                sql.execute("CREATE TABLE ss_res_ext_doc(resource_id INTEGER, plugin_machine_id INTEGER, type TEXT, kdb_id TEXT)");
+                sql.execute("CREATE TABLE po_organization(org_id INTEGER, org_name TEXT)");
+                sql.execute("CREATE TABLE ss_resource_catalog(catalog_id INTEGER, catalog_name TEXT, catalog_type INTEGER, p_catalog_id INTEGER, catalog_path TEXT, order_index INTEGER)");
+                sql.execute("CREATE TABLE men_task(task_id INTEGER, deal_desc TEXT, resource_id INTEGER)");
+                sql.execute("INSERT INTO ss_resource_catalog VALUES(1,'normal directory',1,NULL,'1',1)");
+            }
+            for (long id = 1; id <= 10; id++) resource(connection, id, "TOOL", 22, "enterprise", 2);
+            String[] retired = {"OBJECT", "view", "ONTOLOGY_BASE", " SCENE "};
+            for (int i = 0; i < 4; i++) resource(connection, 100 + i, retired[i], 22, "enterprise", 2);
+            try (var sql = connection.createStatement()) {
+                sql.execute("UPDATE ss_resource SET parent_resource_id=-1, catalog_id=1, create_time=resource_id");
+            }
+            var query = new HashMap<String, Object>();
+            query.put("excludeRetiredConversationResources", true);
+            assertThat(executeMappedCount(connection, "resource/SsResourceMapper.xml", "getResourceListByPage", Map.of("query", query))).isEqualTo(10);
+            for (String field : List.of("resourceTypeList", "resourceBizTypeList")) {
+                query.put(field, List.of("TOOL", "OBJECT", "view", "ONTOLOGY_BASE", " SCENE "));
+                assertThat(executeMappedCount(connection, "resource/SsResourceMapper.xml", "getResourceListByPage", Map.of("query", query))).isEqualTo(10);
+                query.put(field, List.of(retired));
+                assertThat(executeMappedCount(connection, "resource/SsResourceMapper.xml", "getResourceListByPage", Map.of("query", query))).isZero();
+                query.remove(field);
+            }
+            query.put("resourceBizType", "OBJECT");
+            assertThat(executeMappedCount(connection, "resource/SsResourceMapper.xml", "getResourceListByPage", Map.of("query", query))).isZero();
+            query.remove("resourceBizType");
+            query.put("resourceIdList", List.of(100, 101, 102, 103));
+            assertThat(executeMappedCount(connection, "resource/SsResourceMapper.xml", "getResourceListByPage", Map.of("query", query))).isZero();
+            query.remove("resourceIdList");
+            // Independent administrative queries retain their previous scope.
+            query.put("excludeRetiredConversationResources", false);
+            assertThat(executeMappedCount(connection, "resource/SsResourceMapper.xml", "getResourceListByPage", Map.of("query", query))).isEqualTo(14);
+            assertThat(executeMappedCount(connection, "resource/SsResourceCatalogMapper.xml", "queryResourceListByCatalogId", Map.of("catalogDto", Map.of("catalogId", 1)))).isEqualTo(10);
+            // Directory remains once, rather than one repeated row per retired OBJECT leaf.
+            assertThat(executeMappedCount(connection, "resource/SsResourceCatalogMapper.xml", "queryResourceCatalogTree", Map.of("catalogType", 1))).isEqualTo(1);
+        }
+    }
+
+    private long executeMappedCount(Connection connection, String file, String id, Map<String, Object> params) throws Exception {
+        String xml;
+        try (var input = getClass().getResourceAsStream("/com/iwhalecloud/byai/manager/mapper/" + file)) {
+            xml = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        int start = xml.indexOf("<select id=\"" + id + "\"");
+        String body = xml.substring(xml.indexOf('>', start) + 1, xml.indexOf("</select>", start));
+        var configuration = new Configuration();
+        BoundSql bound = new XMLLanguageDriver().createSqlSource(configuration, "<script>" + body + "</script>", Map.class).getBoundSql(params);
+        try (var statement = connection.prepareStatement("SELECT COUNT(*) FROM (" + bound.getSql() + ") filtered")) {
+            int index = 1;
+            for (var parameter : bound.getParameterMappings()) {
+                String property = parameter.getProperty();
+                statement.setObject(index++, bound.hasAdditionalParameter(property)
+                    ? bound.getAdditionalParameter(property) : configuration.newMetaObject(params).getValue(property));
+            }
+            try (var result = statement.executeQuery()) { result.next(); return result.getLong(1); }
+        }
+    }
+
+
+    @Test
+    void retiredTypesCannotLeakThroughUnfilteredMixedOrExplicitQueries() throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite::memory:")) {
+            initialize(connection);
+            for (long id = 1; id <= 35; id++) resource(connection, id, "TOOL", 22, "enterprise", 2);
+            String[] retired = {"OBJECT", "view", "ONTOLOGY_BASE", " SCENE "};
+            for (int i = 0; i < 40; i++) resource(connection, 1000 + i, retired[i % 4], 22, "enterprise", 2);
+            Map<String, Object> params = new HashMap<>();
+            params.put("userId", 11L);
+            params.put("ownerType", "enterprise");
+            params.put("includeAllEnterpriseOwnerType", true);
+            assertThat(queryTwoPageIds(connection, "TOOL", params)).hasSize(35);
+            params.put("resourceBizTypeList", List.of("TOOL", "OBJECT", "view", "ONTOLOGY_BASE", " SCENE "));
+            assertThat(queryTwoPageIds(connection, "TOOL", params)).hasSize(35);
+            params.put("resourceBizTypeList", List.of(retired));
+            assertThat(query(connection, "TOOL", params, 0)).isEmpty();
+        }
+    }
 
     @Test
     void employeeRecommendationsReuseHistoricalUsageBeforePaginationAndKeepFavoriteSorting() throws Exception {
@@ -75,7 +179,7 @@ class ResourceFavoriteQueryIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT"})
+    @ValueSource(strings = {"SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "TOOL", "AGENT"})
     void managementSortsByTimeAcrossStatesAndPreservesOwnerScope(String type) throws Exception {
         for (String owner : List.of("personal", "enterprise")) {
             try (Connection connection = DriverManager.getConnection("jdbc:sqlite::memory:")) {
@@ -115,7 +219,7 @@ class ResourceFavoriteQueryIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT"})
+    @ValueSource(strings = {"SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "TOOL", "AGENT"})
     void resourceCenterTabSortsApplyBeforePaginationWithOptionalFavorites(String type) throws Exception {
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite::memory:")) {
             initialize(connection);
@@ -182,7 +286,7 @@ class ResourceFavoriteQueryIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"DIG_EMPLOYEE", "SKILL", "KG_DOC", "MCP"})
+    @ValueSource(strings = {"DIG_EMPLOYEE", "SKILL", "KG_DOC", "MCP", "TOOL"})
     void listsSortBeforePaginationPreserveOfficialVisibilityAndIsolateFavorites(String type) throws Exception {
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite::memory:")) {
             initialize(connection);
@@ -253,7 +357,7 @@ class ResourceFavoriteQueryIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"DIG_EMPLOYEE", "SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT"})
+    @ValueSource(strings = {"DIG_EMPLOYEE", "SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "TOOL", "AGENT"})
     void legacyUnscopedFavoritesRemainVisibleAndIsolatedByTenantAndUser(String type) throws Exception {
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite::memory:")) {
             initialize(connection);

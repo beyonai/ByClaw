@@ -129,3 +129,7 @@ byclaw:
               from: data.projectId
             createdBy:
               from: data.createdBy
+            userId:
+              from: data.userId
+            byaiSessionMemberId:
+              from: data.byaiSessionMemberId

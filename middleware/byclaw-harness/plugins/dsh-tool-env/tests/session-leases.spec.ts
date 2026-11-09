@@ -1,0 +1,127 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ToolSessionLeases } from '../src/session-leases.ts'
+
+describe('Platform tool session leases', () => {
+  afterEach(() => vi.useRealTimers())
+  function fixture() {
+    let next = 0
+    const calls: Array<{ operation: string; body: Record<string, unknown> }> = []
+    const request = vi.fn(async (operation: string, body: Record<string, unknown>) => {
+      calls.push({ operation, body })
+      if (operation === 'release') return { released: true, destroyed: false }
+      return { sandboxId: 'sandbox-b', leaseId: body['leaseId'] ?? `lease-${++next}`, leaseToken: 'private-token', leaseExpiresAt: Date.now() + 90000, renewAfterMs: 30000 }
+    })
+    const lost = vi.fn()
+    const leases = new ToolSessionLeases({ holderId: 'process-user-a', idleTimeoutSeconds: 300 }, request, lost)
+    return { leases, request, calls, lost }
+  }
+  it('does not acquire from session/UI events; first actual use acquires separate session leases', async () => {
+    const { leases, calls } = fixture()
+    leases.startSession('session-a'); leases.startSession('session-b')
+    expect(calls).toEqual([])
+    const finish = await leases.runInSession('session-a', () => leases.beginUse())
+    expect(calls.filter(c => c.operation === 'acquire').map(c => c.body['sessionId'])).toEqual(['session-a'])
+    const finishB = await leases.runInSession('session-b', () => leases.beginUse()); await finishB()
+    await finish()
+    await leases.finishSession('session-a')
+    expect(calls.filter(c => c.operation === 'release').map(c => c.body['leaseId'])).toEqual(['lease-1'])
+    await leases.finishSession('session-b')
+    expect(calls.filter(c => c.operation === 'release')).toHaveLength(2)
+    await leases.dispose()
+  })
+  it('releases actorless operation leases after the last concurrent operation, without a second idle delay', async () => {
+    const { leases, calls } = fixture()
+    const finishA = await leases.beginUse(), finishB = await leases.beginUse()
+    expect(calls.filter(c => c.operation === 'acquire')).toHaveLength(1)
+    await finishA(); expect(calls.filter(c => c.operation === 'release')).toHaveLength(0)
+    await finishB(); expect(calls.filter(c => c.operation === 'release')).toHaveLength(1)
+    await leases.dispose()
+  })
+  it('renews only active leases and returns exact tokens on context disposal', async () => {
+    vi.useFakeTimers()
+    const { leases, calls } = fixture()
+    leases.startSession('session-a'); const finish = await leases.runInSession('session-a', () => leases.beginUse()); await finish()
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(calls.find(c => c.operation === 'renew')?.body).toEqual({ leaseId: 'lease-1', leaseToken: 'private-token' })
+    await leases.dispose()
+    const n = calls.length
+    await vi.advanceTimersByTimeAsync(120000)
+    expect(calls).toHaveLength(n)
+    expect(calls.at(-1)).toEqual({ operation: 'release', body: { leaseId: 'lease-1', leaseToken: 'private-token', destroy: false } })
+  })
+  it('keeps an ended session lease until its already-running IO actually finishes', async () => {
+    const { leases, calls } = fixture()
+    leases.startSession('session-a')
+    const finish = await leases.runInSession('session-a', () => leases.beginUse())
+    await leases.finishSession('session-a')
+    expect(calls.filter(c => c.operation === 'release')).toHaveLength(0)
+    await finish()
+    expect(calls.filter(c => c.operation === 'release')).toHaveLength(1)
+    await leases.dispose()
+  })
+  it('never leases an unrelated active session when an actorless filesystem request arrives', async () => {
+    const { leases, calls } = fixture()
+    leases.startSession('text-only-session')
+    const finish = await leases.beginUse(); await finish()
+    expect(calls.filter(c => c.operation === 'acquire').map(c => c.body['sessionId'])).toEqual([expect.stringMatching(/^operation:/)])
+    expect(calls.filter(c => c.operation === 'release')).toHaveLength(1)
+    await leases.dispose()
+  })
+  it('retains exact ownership when a token return is not confirmed', async () => {
+    const { leases, request, calls } = fixture()
+    leases.startSession('a'); await leases.acquireSession('a')
+    request.mockImplementationOnce(async () => ({ released: false }))
+    await expect(leases.finishSession('a')).rejects.toThrow('TOOL_LEASE_RETURN_UNCONFIRMED')
+    await leases.dispose()
+    expect(calls.filter(c => c.operation === 'release')).toHaveLength(1)
+    expect(calls.at(-1)?.body['leaseId']).toBe('lease-1')
+  })
+  it('does not retain an acquisition that resolves after its session ended', async () => {
+    const { leases, request, calls } = fixture()
+    const pending = Promise.withResolvers<any>()
+    request.mockImplementationOnce(async () => pending.promise)
+    leases.startSession('ended')
+    const use = leases.runInSession('ended', () => leases.beginUse())
+    await Promise.resolve(); await Promise.resolve()
+    const end = leases.finishSession('ended')
+    pending.resolve({ sandboxId: 'b', leaseId: 'late', leaseToken: 'late-token', leaseExpiresAt: Date.now() + 90000, renewAfterMs: 30000 })
+    await expect(use).rejects.toThrow('TOOL_SESSION_ENDED')
+    await end
+    expect(calls.some(c => c.operation === 'release' && c.body['leaseId'] === 'late')).toBe(true)
+    await leases.dispose()
+  })
+  it('retries transient renewal contention within the confirmed deadline without breaking SSH', async () => {
+    vi.useFakeTimers()
+    const { leases, request, lost, calls } = fixture()
+    leases.startSession('a'); const finish = await leases.runInSession('a', () => leases.beginUse()); await finish()
+    request.mockImplementationOnce(async () => { throw new Error('HTTP 500 lock unavailable') })
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(lost).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(calls.some(c => c.operation === 'renew')).toBe(true)
+    expect(lost).not.toHaveBeenCalled()
+    await leases.dispose()
+  })
+  it('expires locally at the known deadline even when the renewal HTTP request hangs', async () => {
+    vi.useFakeTimers()
+    const { leases, request, lost } = fixture()
+    leases.startSession('a'); const finish = await leases.runInSession('a', () => leases.beginUse()); await finish()
+    const pending = Promise.withResolvers<any>()
+    request.mockImplementationOnce(async () => pending.promise)
+    await vi.advanceTimersByTimeAsync(90000)
+    expect(lost).toHaveBeenCalledTimes(1)
+    pending.resolve({ leaseId: 'lease-1', leaseToken: 'private-token', leaseExpiresAt: Date.now() + 90000, renewAfterMs: 30000 })
+    await Promise.resolve(); await Promise.resolve()
+    expect(leases.latest).toBeUndefined()
+    await leases.dispose()
+  })
+  it('invalidates SSH on renew rejection and stops claiming the lost lease', async () => {
+    vi.useFakeTimers()
+    const { leases, request, lost } = fixture()
+    leases.startSession('a'); const finish = await leases.runInSession('a', () => leases.beginUse()); await finish()
+    request.mockImplementationOnce(async () => { throw new Error('TOOL_PARENT_REVOKED') })
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(lost).toHaveBeenCalledTimes(1)
+    await leases.dispose()
+  })
+})

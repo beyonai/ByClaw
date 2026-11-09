@@ -77,15 +77,15 @@ peer 依赖的实际链接及 `Context` 声明合并，并检查重复执行与�
 
 ## 飞书与企业微信 CLI
 
-主 `Dockerfile` 在 `connector-tools` 阶段通过 npm 安装
+主 `Dockerfile` 和 `Dockerfile.slim` 在 `connector-tools` 阶段通过 npm 安装
 `@wecom/cli@1.3.4` 和 `@larksuite/cli@1.0.85`，再把 CLI 及其平台包复制到最终运行阶段，
 默认版本与 OpenClaw 主 Dockerfile 对齐。构建时精确检查 CLI 版本，企业微信允许官方的
 `(wecom 构建时间 提交号)` 版本后缀；并以 `byclaw` 用户执行企业微信的离线 `--version`
 和飞书的 `--help`。企业微信 1.x 的帮助命令会请求远端 discovery，不能作为未授权镜像的
 构建探针。安装或检查失败会中断构建。共享技能继续使用 `middleware/builtin/skills`，
-授权文件仍由运行时的用户私有目录提供。本次版本升级仅覆盖
-`middleware/byclaw-harness/Dockerfile`、`middleware/openclaw/Dockerfile` 和 `byclaw-be/Dockerfile`；
-其他 Dockerfile 变体保留原版本，不能据此视为已兼容 1.3.4 的共享技能。
+授权文件仍由运行时的用户私有目录提供。`Dockerfile.slim` 的飞书二进制只从配置的 npm
+镜像和 npmmirror 下载，并校验 SHA-256。企业微信 1.3.4 也用于 OpenClaw 主 `Dockerfile`
+及 `byclaw-be/Dockerfile`。
 
 从企业微信 0.1.9 升级时，授权命令改为 `wecom-cli auth init --noninteractive --no-browser`，
 状态查询使用 `wecom-cli auth show --status`；业务命令使用资源层级及 `--json` 参数。

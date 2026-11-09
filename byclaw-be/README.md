@@ -190,6 +190,23 @@ Agent 回复和发布成果中的 `@` 只表示普通提及或结果署名，均
 Gateway 的 `groupContextSnapshot` 由服务端加载，客户端同名字段会被删除；Harness 将目标、必要群历史及依赖结果显式交给成员，
 不依赖默认 spawn 继承父会话。群历史仍受已有 60 条、30,000 字符预算限制，并携带截断信息。
 
+## 共享 Harness 用户的连接器工具沙箱
+
+共享 Harness 用户的 CLI 连接器可能在 Agent 尚未调用工具时先启动工具沙箱。
+对于声明 `byclaw.tool-sandbox/v1` 的 Platform 工具规格，后端先获取当前用户的共享上下文，
+通过带用户凭证的 `/u/{context}/api/byclaw/tool-environment/bootstrap` 接口读取该上下文已持久化的
+SSH 公钥及工具宿主密钥，再以请求级 `toolEnvironmentKeys` 交给原有 Platform 启动流程。
+这与 Agent 后续使用的身份一致；不生成替代密钥，不修改工具规格、用户首选项或连接器凭据路径。
+独立 OpenClaw、旧本地执行和未声明工具契约的规格仍走原路径。
+
+发布顺序为先更新共享 Harness 宿主，再更新后端；旧宿主没有此接口，无法完成该冷启动流程。
+云入口需要访问请求头时，BE 通过 Platform 内部 `shared/executionAccess` 获取当前映射的执行端点，
+携带用户身份、mappingId 和 generation；仅连接器服务端初始化链使用该结果，不放入普通共享查询响应。
+发布时先更新支持该内部操作的 Platform，再更新 BE；已包含初始化接口的 Harness 宿主无需再次重建。
+不需要数据库迁移。宿主不可用、服务键不匹配或初始化信息无效时停止启动，
+取消授权继续保留原绑定；钉钉返回“钉钉凭据工作区暂不可用，请稍后重试”，底层异常保留在服务端诊断链中。
+验收应覆盖工具沙箱尚未创建时的连接器操作，以及随后 Agent 使用同一工具实例的场景。
+
 ## 飞书连接器执行沙箱
 
 飞书授权、凭证校验和取消授权通过统一的用户执行环境入口选择沙箱，无需配置连接器专用的沙箱类型。
@@ -1044,7 +1061,7 @@ enabled model and restores its Redis entry. Missing, disabled, or invalid IDs re
 
 检查先验证必要配置，再由后端 OkHttp 按模型的服务地址、凭证、协议及自定义请求头发起真实 POST 请求（不执行 shell/curl）。LLM 输入固定为 `Reply OK`，使用与文本调试一致的流式请求模式（`stream: true`、`Accept: text/event-stream`）；Embedding 输入为 `ping`，Rerank 使用固定查询及单条文档，不携带用户聊天内容。LLM 要求成功的 HTTP 状态、SSE 响应类型和有效正文或推理文本增量，并消费后续事件，避免忽略正文之后的错误；Embedding 要求非空向量，Rerank 要求非空结果数组。HTTP 200 中的 `code != 0`、`success: false`、协议错误事件，以及空响应均不视为成功。不验证回答语义、业务效果或 Embedding 维度是否与知识库一致。前端说明这是检查时的基础可用性，未通过检查不一概表述为模型无法使用。
 
-LLM 基础检查最多输出 16 token、不自动重试；按协议及 `reasoningConfig.compatFormat` 关闭可关闭的额外思考，不修改保存的模型设置。无法关闭思考的模型返回有效推理文本同样证明真实调用可用，不要求一定生成最终答案；仍需消费整个流并排除后续错误。解析同时兼容标准多行 SSE 和缺少空行分隔的完整 JSON 数据行。接口失败事件返回 `UPSTREAM_ERROR`，无文本返回 `EMPTY_RESPONSE`，明确耗尽探测额度且无文本返回 `PROBE_OUTPUT_LIMIT`，不再一概归因于协议不匹配。仅 `INVALID_RESPONSE` 表示响应格式无法识别。手动调试成功直接覆盖同一模型的 Redis 旧失败记录，不追加探测，也不重置其他模型结果或 24 小时登录检查期限；已有缓存不会因更新解析规则自动触发额外模型调用，可通过调试或“重新检查”更新。
+模型基础检查通过 `@Value` 读取配置 `byclaw.model-health.connect-timeout-seconds`（默认 30 秒）、`byclaw.model-health.read-timeout-seconds`（默认 60 秒）和 `byclaw.model-health.call-timeout-seconds`（默认 120 秒，覆盖整个请求含流读取）。无需新增配置项即可使用默认值。LLM 基础检查最多输出 16 token、不自动重试；按协议及 `reasoningConfig.compatFormat` 关闭可关闭的额外思考，不修改保存的模型设置。无法关闭思考的模型返回有效推理文本同样证明真实调用可用，不要求一定生成最终答案；仍需消费整个流并排除后续错误。解析同时兼容标准多行 SSE 和缺少空行分隔的完整 JSON 数据行。接口失败事件返回 `UPSTREAM_ERROR`，无文本返回 `EMPTY_RESPONSE`，明确耗尽探测额度且无文本返回 `PROBE_OUTPUT_LIMIT`，不再一概归因于协议不匹配。仅 `INVALID_RESPONSE` 表示响应格式无法识别。手动调试成功直接覆盖同一模型的 Redis 旧失败记录，不追加探测，也不重置其他模型结果或 24 小时登录检查期限；已有缓存不会因更新解析规则自动触发额外模型调用，可通过调试或“重新检查”更新。
 
 个人和公共模型的手动调试结果也会按精确模型 ID 更新 Redis 缓存及页面异常标记，复用已有调用，不为同步状态额外发起检查、不延长登录检查的 24 小时有效期，也不自动弹窗或跳转。调试失败使用 `DEBUG_FAILED`，引导核对当前调试请求及模型配置，避免误报为认证失败；成功只清除该模型的异常。取消调试、账号切换、模型已删除或更新的保存检查均阻止旧调试结果覆盖缓存。旧自动检查也不能覆盖之后完成的调试失败。调试请求可在表单中自定义，自动检查仍只验证固定最小请求，不能代替对全部业务参数的验证。
 
@@ -1252,3 +1269,66 @@ Whale 等来源通过 `/tool/addToolFromThird` 同步 `KG_DOC`、`KG_DB`、`KG_Q
 快照只保存员工配置与资源绑定，排除授权、组织范围、用户私有记忆、机器人/连接凭证及运行镜像。依赖使用 CURRENT 策略，不随员工回退而恢复技能源码或知识内容。`resource_d_verid` 指向最近保存，`resource_r_verid` 指向数据库当前生效配置；运行态同步通过独立生效记录追踪，失败返回 SYNC_FAILED 并可重试当前生效版本，不能把已提交的配置误报为回滚。现有运行端的会话热更新行为沿用，不保证正在执行的会话切换至历史版本。外部系统同步员工仍由来源系统维护，不开放本地版本覆盖。
 
 企业副本回退/切换先建立不可编辑的固定版本审核草稿，需全部已发布组织通过后统一生效。版本内容、资源归属和审核目标版本不得由客户端改变。若审批落地需要将个人技能复制为企业技能，系统另存实际企业绑定版本，并以所审核版本为 base_version_id；原快照不覆盖。绑定不变时，切换或回退直接使用所选历史版本。固定版本存在不可发布的依赖时拒绝生效，要求保存修正后的新版本，不静默丢弃依赖。
+
+## 火山数字人连接器
+
+`V0.6.0` 提供 `volcengine-digital-human` 连接器模板，复用通用凭据表单，只填写
+`accessKeyId` 和 `secretAccessKey`。两个字段均使用密码输入框，保存到加密授权元数据中，
+不注入 Runtime Manifest 或环境变量、不回传前端。保存仅校验字段格式，未验证火山账号权限、
+真实模型调用或视频生成能力。
+
+授权启用后，后端在事务提交后将下列内容投影到用户私有 Sandbox 的
+`/by/.connector-auth/.model/video.json`，复用私有工作区和原子文件写入机制（本地文件权限 `0600`）。
+
+```json
+{
+  "schemaVersion": 1,
+  "connectorCode": "volcengine-digital-human",
+  "enabled": true,
+  "accessKeyId": "<access-key-id>",
+  "secretAccessKey": "<secret-access-key>"
+}
+```
+
+重新保存会更新投影，禁用或断开连接会删除该文件；启用授权有定时补偿同步。
+投影由独立的 `DigitalHumanConfigProjectionService` 管理，不使用图片/语音的模型 Endpoint 配置格式。
+此处的 `video.json` 专用于火山数字人 AK/SK，不表示通用文生视频模型已接入。
+
+前端沿用媒体连接器错误标记。当工具结果中包含
+`MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=volcengine-digital-human;` 时，
+本轮聊天结束后显示“需要配置火山数字人视频连接器”按钮，点击打开该连接器的配置界面；重复错误合并为一个按钮。
+本次不修改 DSH 插件，因此缺失配置的检测及上述错误标记须由调用方返回；前端不会主动读取私有凭据文件。
+
+
+## 本地启动与加密环境变量
+
+`ByaiServerApplication` 的 `.env` 加载器只读取键值，不会自动解密 `ENC(...)`。
+部署的 `compose-detect.sh` 会先调用 `deploy/env-decrypt.sh`；IDE 直接启动 Java 不经过该步骤。
+若 `JWT_TOKEN_EXPIRED_HOUR` 仍为密文，会在 `JwtService` 注入整数配置时启动失败。
+
+本地可从仓库根目录执行以下命令，将环境文件解密后再重启后端：
+
+```bash
+bash deploy/env-encrypt.sh --decrypt byclaw-be/.env
+```
+
+该命令原地写入明文，并备份原始密文到 `byclaw-be/.env.encrypted.bak`；两份文件均不得提交。
+密钥使用现有部署脚本的解析顺序（`BYCLAW_SM4_KEY`、`BYCLAW_SM4_KEY_FILE`、
+系统/用户密钥文件、兼容默认密钥），须与加密时一致，不要替换 JWT 或凭据业务密钥来绕过启动错误。
+解密入口使用单行 Base64 模式，支持 JWT 私钥和 JSON 等长配置。
+也可用 `env-decrypt.sh` 生成私有临时环境文件，再通过 JVM 参数 `-Denv.file=<临时文件绝对路径>`
+指定它；使用后删除临时明文文件，保留原始加密 `.env`。
+
+回归检查：`python3 deploy/tests/env-decrypt.test.py`。
+
+## 对话资源停用与收藏兼容（D0.6.0，#267 / #287）
+
+对话资源入口停用 `OBJECT`、`VIEW`、`ONTOLOGY_BASE`、`SCENE`，按实际业务类型判断并兼容大小写和首尾空白，不按名称关键词匹配。列表在数据库分页和计数前过滤；ID/code 详情在原权限检查后拒绝；Redis 授权列表、单个与批量读取遵守同一规则，已授权的停用读取返回 `RESOURCE_TYPE_RETIRED`。普通知识库、技能、工具、MCP、Agent 和模型读取保留原有权限语义。
+
+员工对外详情与内部完整关联分离。普通编辑保存保留隐藏的历史停用关联，不能新挂载停用资源；发布执行时不携带停用依赖。运行 JSON 导出、已有 targetContent 的同步和运行读取均过滤停用元数据。历史数据库记录、会话和用户手写提示内容不清理；独立对象管理不在本次变更范围。
+
+Redis 批量资源读取按原键逐个 GET，不拼接跨槽 MGET，不更改键名、前缀或 TTL。部署需同时更新后端和 baiying-enhance 插件构建及所有运行实例，再刷新员工运行配置和带托管标记的提示文件；旧缓存即使尚未刷新，更新后的执行器仍会拒绝四类能力。用户手工维护文件不覆盖。外部动态 TOOL/MCP/AGENT 包装的具体服务定义需在目标环境逐项核实，不能将普通 MCP 或整个数据服务一并停用。
+
+商业版收藏补齐 `TOOL` 原子工具，沿用已有收藏、取消、幂等计数、租户隔离、权限和排序逻辑；`SKILL_GROUP` 仍不参与。本次不新增迁移，实际部署仍需具备已有收藏表。
+
+自测入口：`ConversationResourceRetirementTest`、`RedisResourceRetirementIntegrationTest`、`ResourceFavorite*Test`、`DigitalEmployee*Test` 和 `*EmployeePublication*Test`。真实 Redis Cluster 测试通过 `BYCLAW_TEST_REDIS_CLUSTER_PORT` 指向仅绑定本机、可销毁的专用测试集群；不得指向应用 Redis。模块完整检查使用 `mvn -B -f byclaw-be/pom.xml verify`。本地回归不能代替部署后的权限、历史会话、实际模型调用及动态包装工具验收。

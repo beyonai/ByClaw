@@ -74,6 +74,12 @@ export default defineConfig({
       changeOrigin: true,
       ws: true,
     },
+    // 授权桌面代理的页面、静态资源与 WebSocket 共用前缀，须先于通用业务代理匹配。
+    '/byaiService/sandbox/desktop': {
+      target,
+      changeOrigin: false,
+      ws: true,
+    },
     [`${routerBase}byaiService/ws`]: {
       target: wsTarget,
       changeOrigin: true,

@@ -4,6 +4,25 @@ import org.junit.jupiter.api.Test;
 import java.util.*;
 import static org.assertj.core.api.Assertions.assertThat;
 class InstanceContextSupportTest {
+    @Test void legacyPortsDoNotOptIntoExplicitInstanceReferences() {
+        SandboxServiceSpec spec = JSON.parseObject("{\"ports\":[{\"port\":8081,\"instance\":\"vnc\"}]}", SandboxServiceSpec.class);
+        assertThat(InstanceContextSupport.snapshot(spec)).isNull();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+        "{\"ports\":[{\"port\":8081,\"instance\":\"vnc\"}],\"instanceBindings\":{}}",
+        "{\"ports\":[{\"port\":8081,\"instance\":\"vnc\"}],\"instanceBindings\":{\"default\":[]}}",
+        "{\"ports\":[{\"port\":8081,\"instance\":\"vnc\",\"presentation\":{\"viewer\":\"novnc\"}}]}",
+        "{\"ports\":[{\"port\":8081,\"instance\":\"vnc\"}],\"instanceBindings\":{\"default\":[\"vnc\"]}}"
+    })
+    void declaredPresentationContractKeepsVersionedContext(String source) {
+        Map<String, Object> snapshot = InstanceContextSupport.snapshot(JSON.parseObject(source, SandboxServiceSpec.class));
+        assertThat(snapshot).containsEntry("version", 1);
+        assertThat(InstanceContextSupport.restore(JSON.toJSONString(snapshot), "host", null,
+            Collections.singleton("vnc"))).containsEntry("sandboxId", "host");
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {
         "false", "[]", "\"damaged\"", "null", "{}", "{\"viewer\":[]}",

@@ -204,7 +204,7 @@ test('byclaw-be tool environments get the host settings plus the user and the PU
   const [row] = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', beSpec)
   assert.equal(row.config.backend, 'byclaw-be')
   assert.equal(row.config.openSandbox, undefined)
-  assert.deepEqual(row.config.byclawBe, { ...beSpec.toolEnvBe, userCode: 'u1', token: 'jwt-u1' })
+  assert.deepEqual(row.config.byclawBe, { ...beSpec.toolEnvBe, coordinatedLeases: true, requestScopedKeys: true, idleTimeoutSeconds: Math.ceil((beSpec.toolEnvIdleMs || 300000) / 1000), userCode: 'u1', token: 'jwt-u1' })
   assert.equal(row.config.stateDir, '/r/users/u1/dsh-home/byclaw-tool-env')
   // Without the user's token BE cannot create B as the user: the PUT fails instead of a later launch.
   assert.throws(() => composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...beSpec, env: {} }), /BEYOND_TOKEN/)

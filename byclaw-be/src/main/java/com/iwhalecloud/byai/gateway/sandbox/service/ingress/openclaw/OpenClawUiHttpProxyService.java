@@ -7,6 +7,10 @@ import java.util.Enumeration;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Set;
+import java.util.Map;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -36,6 +40,7 @@ import okio.BufferedSink;
 public class OpenClawUiHttpProxyService {
 
     private static final Logger log = LoggerFactory.getLogger(OpenClawUiHttpProxyService.class);
+    private static final ObjectMapper GOAL_JSON = new ObjectMapper();
 
     private static final Set<String> HOP_BY_HOP_HEADERS = Set.of(
         "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -82,6 +87,71 @@ public class OpenClawUiHttpProxyService {
             log.debug("OpenClaw ui proxy forward failed: target={}", maskToken(targetUrl), e);
             throw new IllegalStateException("Failed to forward openclaw ui request to " + maskToken(targetUrl), e);
         }
+    }
+
+    /** Goal is untrusted sandbox data, never an executable same-origin response or redirect. */
+    public void forwardDesktopGoal(HttpServletRequest request, HttpServletResponse response, String targetUrl,
+                                   Map<String, String> cloudHeaders) {
+        response.setContentType("application/json;charset=UTF-8");
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; sandbox");
+        response.setHeader("Cache-Control", "private, no-store");
+        response.setHeader("Content-Disposition", "inline");
+        Request upstream = buildDesktopRequest(request, targetUrl, cloudHeaders == null ? Map.of() : cloudHeaders)
+            .newBuilder().header("Accept", "application/json").build();
+        try (Response result = httpClient.newCall(upstream).execute()) {
+            String type = result.header(HttpHeaders.CONTENT_TYPE, "").split(";", 2)[0].trim();
+            if (result.code() >= 400 && result.code() <= 599) {
+                invalidGoal(response, result.code()); return;
+            }
+            if (result.code() < 200 || result.code() >= 300 || result.header("Location") != null
+                || !"application/json".equalsIgnoreCase(type) || result.body() == null) {
+                invalidGoal(response); return;
+            }
+            byte[] bytes;
+            try (InputStream input = result.body().byteStream()) { bytes = input.readNBytes(1_048_577); }
+            if (bytes.length > 1_048_576) { invalidGoal(response); return; }
+            JsonNode json = GOAL_JSON.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(bytes);
+            if (json == null || !json.isObject()) { invalidGoal(response); return; }
+            byte[] safe = GOAL_JSON.writeValueAsBytes(json);
+            response.setStatus(result.code()); response.setContentLength(safe.length);
+            response.getOutputStream().write(safe);
+        } catch (IOException invalid) {
+            try { invalidGoal(response); }
+            catch (IOException failure) { throw new IllegalStateException("Failed to write desktop goal response", failure); }
+        }
+    }
+
+    private static void invalidGoal(HttpServletResponse response) throws IOException {
+        invalidGoal(response, HttpServletResponse.SC_BAD_GATEWAY);
+    }
+
+    private static void invalidGoal(HttpServletResponse response, int status) throws IOException {
+        byte[] body = "{\"error\":\"Desktop goal unavailable\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        response.setStatus(status); response.setContentLength(body.length);
+        response.getOutputStream().write(body);
+    }
+
+    private Request buildDesktopRequest(HttpServletRequest request, String targetUrl, Map<String, String> cloudHeaders) {
+        Headers.Builder headers = new Headers.Builder();
+        for (String name : Set.of("Accept", "Accept-Language", "Content-Type", "If-None-Match", "If-Modified-Since",
+            "Range", "X-Browser-Goal-Control")) {
+            String value = request.getHeader(name);
+            if (value != null) headers.set(name, value);
+        }
+        cloudHeaders.forEach((name, value) -> {
+            if (!Set.of("cookie", "beyond-token", "host", "connection", "upgrade").contains(name.toLowerCase(Locale.ROOT))) {
+                headers.set(name, value);
+            }
+        });
+        headers.set("Accept-Encoding", "identity");
+        String origin = originOf(targetUrl);
+        if (origin != null) {
+            headers.set("Origin", origin);
+            headers.set("Referer", origin + "/");
+        }
+        return new Request.Builder().url(targetUrl).headers(headers.build())
+            .method(request.getMethod(), buildRequestBody(request)).build();
     }
 
     private Request buildProxyRequest(HttpServletRequest request, String targetUrl) {

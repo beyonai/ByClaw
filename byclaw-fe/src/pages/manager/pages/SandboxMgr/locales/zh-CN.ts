@@ -1,4 +1,8 @@
 export default {
+  'sandboxMgr.market.presetResources': '建议基础规格：{cpu} CPU / {memory}',
+  'sandboxMgr.market.presetResourcesTip':
+    '应用预设会更新说明、能力与封面，并关闭登录自动启动；实际 CPU 和内存需在服务规格配置中保存，不会修改现有实例。',
+  'sandboxMgr.market.applyPreset': '应用内置工具模板说明与封面',
   'sandboxMgr.table.lifetime': '存活时长',
   'sandboxMgr.lifetime.days': '{value}天',
   'sandboxMgr.lifetime.hours': '{value}小时',

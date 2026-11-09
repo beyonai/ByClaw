@@ -2,7 +2,8 @@
 cd "$(dirname "$0")"
 . ../compose-detect.sh
 
-sh gen-nginx-conf.sh
+# 配置生成失败时保留现有容器，不能继续启动并把失败报告为成功。
+sh gen-nginx-conf.sh || exit $?
 
 echo "Starting Frontend..."
 NO_DEPS=""

@@ -64,7 +64,7 @@ try {
   await assert.rejects(cancelling, { name: 'AbortError' }); clearTimeout(cancelTimer); clearTimeout(keepAlive)
 
   const sessionRuntime = Object.assign(Object.create(ByClawDshSessionRuntime.prototype), {
-    options: { byRoot: root, voiceRuntime: runtime }, voiceRequests: new Map(), voiceControllers: new Map(),
+    options: { byRoot: root, sessionMetadata: { get() {} }, voiceRuntime: runtime }, voiceRequests: new Map(), voiceControllers: new Map(),
     messageAgents: new Map(), voiceSummaryStreams: new WeakMap(), askPrepared: async () => { admissions++; return { answer: '完整报告。', finalAnswer: '完整报告。<voice_summary>报告已打开。</voice_summary>', dshSessionId: '123' } },
   })
   admissions = 0
@@ -81,7 +81,7 @@ try {
   for (const character of summaryOutput) await sessionRuntime.emitBufferedChunk(outputTurn, { id: '123' }, '123:1:1', character)
   assert.equal(visibleChunks.join(''), '正常回答。\n结束。')
   const failedRuntime = Object.assign(Object.create(ByClawDshSessionRuntime.prototype), {
-    options: { byRoot: root, voiceRuntime: { prepare: async () => { throw Error('ASR_PROVIDER_REJECTED') } }, emitter: { emitChunk: async (_id, _trace, chunk) => visibleChunks.push(chunk.content) } },
+    options: { byRoot: root, sessionMetadata: { get() {} }, voiceRuntime: { prepare: async () => { throw Error('ASR_PROVIDER_REJECTED') } }, emitter: { emitChunk: async (_id, _trace, chunk) => visibleChunks.push(chunk.content) } },
     voiceRequests: new Map(), voiceControllers: new Map(), messageAgents: new Map(),
   })
   await assert.rejects(failedRuntime.ask(command, { ...context, sessionId: '123', traceId: 'trace' }), /ASR_PROVIDER_REJECTED/)
@@ -90,7 +90,7 @@ try {
   await assert.rejects(failedRuntime.ask(command, { ...context, sessionId: '123', traceId: 'trace' }), /ASR_SPEECH_NOT_DETECTED/)
   assert.equal(visibleChunks.at(-1), '未识别到语音，请靠近麦克风后重试')
   const cancellingRuntime = Object.assign(Object.create(ByClawDshSessionRuntime.prototype), {
-    options: { byRoot: root, voiceRuntime: { prepare: async (_, __, signal) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason))) } },
+    options: { byRoot: root, sessionMetadata: { get() {} }, voiceRuntime: { prepare: async (_, __, signal) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason))) } },
     voiceRequests: new Map(), voiceControllers: new Map(), messageAgents: new Map(),
   })
   const pendingAsk = cancellingRuntime.ask(command, context)

@@ -1,4 +1,5 @@
 import type { GoalControlState } from './goal-control.js'
+import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { connect, type Socket } from 'node:net'
@@ -7,6 +8,7 @@ import type { Duplex } from 'node:stream'
 
 const MAX_SESSION_ID_BYTES = 512
 const SOCKET_TIMEOUT_MS = 30_000
+const MAX_UPGRADE_HEADER_BYTES = 16 * 1024
 
 export interface ViewerTarget {
   readonly host: '127.0.0.1'
@@ -90,6 +92,29 @@ function staticPath(root: string, rawPathname: string): string | undefined {
   const normalizedRoot = resolve(root)
   if (candidate !== normalizedRoot && !candidate.startsWith(`${normalizedRoot}${sep}`)) return undefined
   return candidate
+}
+
+function confirmsWebSocketUpgrade(header: Buffer, request: IncomingMessage): boolean {
+  const key = request.headers['sec-websocket-key']
+  if (request.method !== 'GET' || request.headers['sec-websocket-version'] !== '13'
+    || typeof key !== 'string' || !/^[A-Za-z0-9+/]{22}==$/.test(key)) return false
+  const lines = header.toString('latin1').split('\r\n')
+  if (!/^HTTP\/1\.1 101(?:[ \t]|$)/.test(lines.shift() ?? '')) return false
+  const fields = new Map<string, string[]>()
+  for (const line of lines) {
+    if (!line) continue
+    const colon = line.indexOf(':')
+    const name = line.slice(0, colon)
+    if (colon <= 0 || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)) return false
+    const normalized = name.toLowerCase()
+    fields.set(normalized, [...(fields.get(normalized) ?? []), line.slice(colon + 1).trim()])
+  }
+  const includesToken = (name: string, token: string) => (fields.get(name) ?? [])
+    .flatMap(value => value.toLowerCase().split(',')).some(value => value.trim() === token)
+  const accept = fields.get('sec-websocket-accept')
+  const expected = createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
+  return includesToken('connection', 'upgrade') && includesToken('upgrade', 'websocket')
+    && accept?.length === 1 && accept[0] === expected
 }
 
 export async function startViewerGateway(options: ViewerGatewayOptions): Promise<ViewerGateway> {
@@ -211,6 +236,27 @@ export async function startViewerGateway(options: ViewerGatewayOptions): Promise
       if (!client.destroyed) rejectUpgrade(client, 502, 'Bad Gateway')
     })
     upstream.once('close', () => sockets.delete(upstream))
+    let responseHeader = Buffer.alloc(0)
+    const observeUpgrade = (bytes: Buffer) => {
+      // Observe the existing pipe without replaying bytes or retaining a coalesced WebSocket frame.
+      responseHeader = Buffer.concat([responseHeader, bytes.subarray(0, MAX_UPGRADE_HEADER_BYTES - responseHeader.length)])
+      const end = responseHeader.indexOf('\r\n\r\n')
+      if (end >= 0) {
+        upstream.off('data', observeUpgrade)
+        if (confirmsWebSocketUpgrade(responseHeader.subarray(0, end + 4), request)) {
+          // HTTP and pending handshakes remain bounded; an established desktop may legitimately be idle.
+          (client as Socket).setTimeout(0)
+          upstream.setTimeout(0)
+        }
+        responseHeader = Buffer.alloc(0)
+      } else if (responseHeader.length === MAX_UPGRADE_HEADER_BYTES) {
+        upstream.off('data', observeUpgrade)
+        responseHeader = Buffer.alloc(0)
+        client.destroy()
+        upstream.destroy()
+      }
+    }
+    upstream.on('data', observeUpgrade)
     upstream.once('connect', () => {
       const requestLine = `${request.method ?? 'GET'} ${request.url ?? '/'} HTTP/${request.httpVersion}\r\n`
       const headers: string[] = []

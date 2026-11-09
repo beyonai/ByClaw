@@ -58,6 +58,7 @@ try {
   })
   classifier = installGroupChatDisposition(ctx, {
     timeoutMs: 30_000, maxTokens: 500, historyMaxBytes: 65_536, environment,
+    resolveModel() { throw new Error('independent model must not use the conversation resolver') },
     resolveConfiguredModel: connection => models.resolveGroupChatDispositionModel(connection),
   })
   const conversationBefore = await models.resolve('conversation')

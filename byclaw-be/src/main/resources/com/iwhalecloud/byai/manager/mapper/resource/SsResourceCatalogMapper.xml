@@ -117,6 +117,7 @@
             on
                 a.man_org_id = c.org_id
         <where>
+            AND COALESCE(UPPER(TRIM(a.resource_biz_type)), '') NOT IN ('OBJECT', 'VIEW', 'ONTOLOGY_BASE', 'SCENE')
             <if test="catalogDto.isQueryParent != null">
                 <if test="catalogDto.isQueryParent == true">
                     and a.parent_resource_id &lt; 0
@@ -223,20 +224,18 @@
         SELECT
             c.catalog_name,
             c.catalog_id,
-            r.resource_biz_type,
-            r.resource_type,
-            r.resource_name,
+            NULL AS resource_biz_type,
+            NULL AS resource_type,
+            NULL AS resource_name,
             c.p_catalog_id,
             c.catalog_type,
             c.catalog_path,
             c.order_index,
-            r.catalog_id AS rel_catalog_id,
-            r.resource_id AS rel_resource_id,
-            r.create_time
+            NULL AS rel_catalog_id,
+            NULL AS rel_resource_id,
+            NULL AS create_time
         FROM
             ss_resource_catalog c
-        LEFT JOIN
-            ss_resource r ON c.catalog_id = r.catalog_id AND r.resource_biz_type = 'OBJECT'
         WHERE
              c.catalog_type = #{catalogType}
     </select>

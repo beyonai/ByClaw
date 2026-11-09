@@ -53,9 +53,17 @@ beforeEach(() => {
   setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
 });
 
+function getVisibleButton(label: string) {
+  // 大型管理页含多个弹层，按精确文案缩小范围后仍校验真实按钮可见性。
+  const button = screen.getByText(label).closest('button');
+  expect(button).toBeVisible();
+  if (!button) throw new Error(`Button not found: ${label}`);
+  return button;
+}
+
 const openMarket = async () => {
   render(<SandboxMgr />);
-  fireEvent.click(screen.getByRole('button', { name: /sandboxMgr.config.button/ }));
+  fireEvent.click(getVisibleButton('sandboxMgr.config.button'));
   const request = mockDispatch.mock.calls.find(([action]) => action.type === 'sandboxMgr/listServiceSpec')[0];
   act(() => request.success([toolSpec]));
   fireEvent.click(screen.getByText('sandboxMgr.dimension.TOOL'));
@@ -76,7 +84,7 @@ test('the reachable market saves availability through existing CRUD and rolls ba
 
 test('editing tool metadata preserves ownership, runtime options and the independent login startup value', async () => {
   await openMarket();
-  fireEvent.click(screen.getByRole('button', { name: /sandboxMgr.market.edit/ }));
+  fireEvent.click(getVisibleButton('sandboxMgr.market.edit'));
   const editor = screen.getByRole('dialog', { name: 'spec-editor' });
   expect(within(editor).queryByText('sandboxMgr.config.autoStart')).not.toBeInTheDocument();
   fireEvent.change(within(editor).getByLabelText('sandboxMgr.market.description'), {
@@ -106,7 +114,7 @@ test('editing tool metadata preserves ownership, runtime options and the indepen
 
 test('the manager keeps four ownership tabs reachable and applies login startup only to user specifications', async () => {
   render(<SandboxMgr />);
-  fireEvent.click(screen.getByRole('button', { name: /sandboxMgr.config.button/ }));
+  fireEvent.click(getVisibleButton('sandboxMgr.config.button'));
   const request = mockDispatch.mock.calls.find(([action]) => action.type === 'sandboxMgr/listServiceSpec')[0];
   const records = [
     { serviceKey: 'personal-runtime', ownerScope: 'USER', enabled: 1, specJson: '{}' },
@@ -149,7 +157,50 @@ test('the manager keeps four ownership tabs reachable and applies login startup 
 
 test('profile administration requests all service types including disabled resource profiles', () => {
   render(<SandboxMgr />);
-  fireEvent.click(screen.getByRole('button', { name: /sandboxMgr.config.button/ }));
+  fireEvent.click(getVisibleButton('sandboxMgr.config.button'));
   const request = mockDispatch.mock.calls.find(([action]) => action.type === 'sandboxMgr/listServiceProfiles')[0];
   expect(request.payload).toEqual({ allServiceTypes: true, enabledOnly: false });
+});
+
+test('the general execution sandbox can be explicitly admitted to the market from its legacy user category', async () => {
+  render(<SandboxMgr />);
+  fireEvent.click(getVisibleButton('sandboxMgr.config.button'));
+  const request = mockDispatch.mock.calls.find(([action]) => action.type === 'sandboxMgr/listServiceSpec')[0];
+  const original = {
+    serviceKey: 'byclaw-dsh-tools',
+    displayName: 'Legacy general tools',
+    serviceType: 'private-existing-profile-type',
+    ownerScope: 'USER',
+    enabled: 1,
+    specJson: JSON.stringify({
+      image: 'keep-tools-image',
+      env: { PRIVATE_TOKEN: 'keep-fixture' },
+      startup: { entrypoint: ['keep-entrypoint', 'tools'] },
+    }),
+  };
+  act(() => request.success([original]));
+  fireEvent.click(screen.getByText('sandboxMgr.dimension.USER'));
+  await screen.findByText('byclaw-dsh-tools');
+  fireEvent.click(getVisibleButton('sandboxMgr.market.edit'));
+  const editor = screen.getByRole('dialog', { name: 'spec-editor' });
+  expect(within(editor).getByText('sandboxMgr.market.presetResources')).toBeVisible();
+  fireEvent.click(within(editor).getByRole('button', { name: 'sandboxMgr.market.applyPreset' }));
+  expect((within(editor).getByLabelText('sandboxMgr.market.description') as HTMLTextAreaElement).value).toContain(
+    '用户级通用工具沙箱'
+  );
+  fireEvent.click(within(editor).getByRole('button', { name: 'save-spec' }));
+  await waitFor(() =>
+    expect(mockDispatch.mock.calls.some(([action]) => action.type === 'sandboxMgr/saveServiceSpec')).toBe(true)
+  );
+  const saved = mockDispatch.mock.calls.find(([action]) => action.type === 'sandboxMgr/saveServiceSpec')[0].payload;
+  expect(saved.serviceType).toBe('private-existing-profile-type');
+  expect(saved.ownerScope).toBe('USER');
+  const config = JSON.parse(saved.specJson);
+  expect(config.image).toBe('keep-tools-image');
+  expect(config.startup).toEqual({ entrypoint: ['keep-entrypoint', 'tools'] });
+  expect(config.env).toEqual({ PRIVATE_TOKEN: 'keep-fixture' });
+  expect(config.runtimeOptions.toolSandbox.purpose).toBe('general');
+  expect(config.runtimeOptions.toolSandbox.coverImage).toBe('/tool-sandbox/covers/general.svg');
+  expect(config.runtimeOptions.lifecycle.autoStart).toBe('false');
+  expect(mockDispatch.mock.calls.some(([action]) => action.type === 'sandboxMgr/saveServiceProfile')).toBe(false);
 });

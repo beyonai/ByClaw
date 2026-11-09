@@ -182,6 +182,7 @@ public class GroupChatTaskService {
     public List<ByaiGroupChatTask> list(Long groupSessionId) {
         groupAuthorizationService.requireCurrentUserMember(groupSessionId);
         List<ByaiGroupChatTask> result = taskMapper.selectByGroup(groupSessionId);
+        result.forEach(task -> task.setExecutionBackend("REMOTE"));
         if (coordinationService != null) result.forEach(coordinationService::attach);
         return result;
     }
@@ -314,7 +315,7 @@ public class GroupChatTaskService {
     private ByaiGroupChatTask requireActiveCancellation(Long taskId) {
         taskAuthorizationService.requireCanceller(taskId);
         ByaiGroupChatTask task = taskMapper.selectWithRedisLock(taskId);
-        if (task == null || !"ACTIVE".equals(task.getStatus())) {
+        if (task == null || (!"ACTIVE".equals(task.getStatus()) && !"PRIVATE".equals(task.getStatus()))) {
             throw new IllegalArgumentException(I18nUtil.get("groupchat.task.noLongerActive"));
         }
         return task;

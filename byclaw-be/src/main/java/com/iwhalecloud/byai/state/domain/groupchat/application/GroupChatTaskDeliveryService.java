@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.storage.UserFS;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatTaskDeliverySignal;
 import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskDeliveryResponse;
@@ -34,7 +35,11 @@ public class GroupChatTaskDeliveryService {
 
     public GroupChatTaskDeliveryResponse current(Long taskId) {
         // 先核验任务发起人和当前群成员资格，再使用登录上下文中的用户空间。
-        authorization.requireInitiator(taskId);
+        ByaiGroupChatTask task = authorization.requireInitiator(taskId);
+        // 私聊等非进行中任务不参与交付与发布，直接返回未交付，避免读取 UserFS。
+        if (!"ACTIVE".equals(task.getStatus())) {
+            return new GroupChatTaskDeliveryResponse(taskId.toString(), false);
+        }
         return currentAuthorized(taskId);
     }
 

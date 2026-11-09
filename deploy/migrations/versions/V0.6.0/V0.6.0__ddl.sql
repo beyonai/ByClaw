@@ -387,5 +387,25 @@ COMMENT ON TABLE byai.knowledge_provision_task IS '外部建库幂等任务，�
 -- END RESOURCE_ORGANIZATION_PUBLICATION
 
 -- Sandbox creation-time presentation metadata (independent of resource publication).
-ALTER TABLE ss_sandbox_record ADD COLUMN IF NOT EXISTS instance_context_snapshot TEXT;
+ALTER TABLE ss_sandbox_record ADD COLUMN instance_context_snapshot TEXT;
 COMMENT ON COLUMN ss_sandbox_record.instance_context_snapshot IS 'Credential-free versioned instance bindings and presentation captured at runtime creation';
+
+-- BEGIN MOBILE PUSH
+-- Apply once before enabling byclaw.mobile-push; no Tencent credentials are stored in these tables.
+CREATE TABLE byai.byai_mobile_push_device (
+    installation_id varchar(128) PRIMARY KEY,
+    account_id bigint NOT NULL,
+    revision bigint NOT NULL CHECK (revision > 0 AND revision <= 9007199254740991),
+    registration_id varchar(256) NOT NULL,
+    platform varchar(16) NOT NULL CHECK (platform IN ('ios', 'android')),
+    language varchar(32) NOT NULL,
+    enabled boolean NOT NULL DEFAULT false,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uk_mobile_push_registration ON byai.byai_mobile_push_device(registration_id)
+    WHERE enabled = true;
+CREATE INDEX idx_mobile_push_account ON byai.byai_mobile_push_device(account_id) WHERE enabled = true;
+COMMENT ON TABLE byai.byai_mobile_push_device IS '手机安装实例与当前认证账号的推送绑定；递增版本防止换号后迟到写入';
+COMMENT ON COLUMN byai.byai_mobile_push_device.revision IS '客户端按环境及服务器持久化递增；解绑保留版本墓碑';
+
+-- END MOBILE PUSH

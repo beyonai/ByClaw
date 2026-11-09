@@ -33,6 +33,10 @@ public class GroupChatTaskChatGuard {
         if (task == null) {
             return null;
         }
+        if ("PRIVATE".equals(task.getStatus())) {
+            // 私聊任务只作为会话入口，不参与群任务轮次准入与发布。
+            return null;
+        }
         authorizationService.requireActiveAgent(sessionId, agentId);
         if (StringUtils.isNotBlank(requestTraceId)) {
             // 表单/审批续传属于已有运行，不占用新任务轮次，也不覆盖正在回答的新 trace。

@@ -24,11 +24,33 @@ function toolAgent(callId: string) {
 afterEach(() => vi.unstubAllEnvs())
 
 describe('browser display target belongs to its execution provider', () => {
-  it('preserves the real browser execution error when display readiness also fails', async () => {
+  it('keeps local browser calls on the legacy viewer contract', async () => {
     const ctx = new Context()
+    const events: unknown[] = []
+    ;(ctx as any).on('byclaw/tool-instance-refs', (_session: unknown, data: unknown) => { events.push(data) })
     ctx.provide('systemPrompt', { tools() {} } as never)
     ctx.provide('sessionProjections', { stateOf: () => ({ openTurnStartSeq: 0, lastTurn: 1 }) } as never)
-    ctx.provide('ssh', { get ready() { return Promise.reject(new Error('display-provider-unavailable')) } } as never)
+    const tools = new ToolRuntime(ctx)
+    try {
+      registerBrowserTool(ctx, {}, {} as never)
+      const result = await tools.execute({ callId: 'local' as never, name: 'browser', arguments: { operation: 'close' },
+        agent: toolAgent('local') as never, signal: new AbortController().signal })
+      expect(result.isError).toBe(false)
+      expect(events).toEqual([])
+      expect((tools.get('browser') as any).byclawInstanceRefsVersion).toBeUndefined()
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('preserves the real browser execution error when display readiness also fails', async () => {
+    const ctx = new Context()
+    const events: any[] = []
+    ;(ctx as any).on('byclaw/tool-instance-refs', (_session: unknown, data: unknown) => { events.push(data) })
+    ctx.provide('systemPrompt', { tools() {} } as never)
+    ctx.provide('sessionProjections', { stateOf: () => ({ openTurnStartSeq: 0, lastTurn: 1 }) } as never)
+    ctx.provide('ssh', {
+      get ready() { return Promise.reject(new Error('display-provider-unavailable')) },
+      instanceRefs: () => [{ sandboxId: 'unused-cached-allocation', instance: 'vnc' }],
+    } as never)
     const tools = new ToolRuntime(ctx)
     try {
       registerBrowserTool(ctx, { workspaceOnToolEnvironment: true }, {
@@ -41,6 +63,30 @@ describe('browser display target belongs to its execution provider', () => {
       expect(result.isError).toBe(true)
       expect(JSON.stringify(result)).toContain('actual-browser-execution-failed')
       expect(JSON.stringify(result)).not.toContain('display-provider-unavailable')
+      expect(events).toEqual([{ callId: 'open', sourceCallSeq: 0, instanceRefs: [] }])
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('does not attach the previous allocation before a real open refreshes the provider', async () => {
+    const ctx = new Context()
+    const events: any[] = []
+    let sandboxId = 'previous-allocation'
+    ;(ctx as any).on('byclaw/tool-instance-refs', (_session: unknown, data: unknown) => { events.push(data) })
+    ctx.provide('systemPrompt', { tools() {} } as never)
+    ctx.provide('sessionProjections', { stateOf: () => ({ openTurnStartSeq: 0, lastTurn: 1 }) } as never)
+    ctx.provide('ssh', { instanceRefs: () => [{ sandboxId, instance: 'vnc' }] } as never)
+    const tools = new ToolRuntime(ctx)
+    try {
+      registerBrowserTool(ctx, { workspaceOnToolEnvironment: true }, {
+        open: async () => { sandboxId = 'actual-allocation' }, close: async () => {},
+        inspect: async () => ({ url: 'https://example.test/', title: 'test', text: '', semanticToken: 'page', elements: [] }),
+      } as never)
+      const result = await tools.execute({ callId: 'open' as never, name: 'browser',
+        arguments: { operation: 'open', startUrl: 'https://example.test', allowedDomains: ['example.test'] },
+        agent: toolAgent('open') as never, signal: new AbortController().signal })
+      expect(result.isError).toBe(false)
+      expect(events).toEqual([{ callId: 'open', sourceCallSeq: 0, instanceRefs: [] },
+        { callId: 'open', sourceCallSeq: 0, instanceRefs: [{ sandboxId: 'actual-allocation', instance: 'vnc' }] }])
     } finally { await ctx.fiber.dispose() }
   })
 
@@ -75,7 +121,7 @@ describe('browser display target belongs to its execution provider', () => {
     } finally { resolveReady(); await ctx.fiber.dispose() }
   })
 
-  it.each([false, true])('only uses SSH identity for an actual tool-environment browser (remote=%s)', async remote => {
+  it.each([false, true])('does not attach an unrelated SSH target when no browser is open (remote=%s)', async remote => {
     const ctx = new Context()
     let readyReads = 0
     const events: any[] = []
@@ -95,12 +141,12 @@ describe('browser display target belongs to its execution provider', () => {
       expect(result.isError).toBe(false)
       expect(readyReads).toBe(0)
       expect(events).toEqual(remote
-        ? [{ callId: 'one', sourceCallSeq: 0, instanceRefs: [] }, { callId: 'one', sourceCallSeq: 0, instanceRefs: [{ sandboxId: 'ssh-sandbox', instance: 'vnc' }] }]
-        : [{ callId: 'one', sourceCallSeq: 0, instanceRefs: [] }])
+        ? [{ callId: 'one', sourceCallSeq: 0, instanceRefs: [] }]
+        : [])
     } finally { await ctx.fiber.dispose() }
   })
 
-  it('reports a first runGoal target after its real open while the goal is still running', async () => {
+  it.each([false, true])('reports a confirmed runGoal target while the goal is still running (existing session=%s)', async existing => {
     const directory = await mkdtemp(join(tmpdir(), 'browser-target-goal-'))
     const ctx = new Context()
     const events: any[] = []
@@ -115,7 +161,7 @@ describe('browser display target belongs to its execution provider', () => {
       instanceRefs: () => allocated ? [{ sandboxId: 'real-open', instance: 'vnc' }] : [],
     } as never)
     const tools = new ToolRuntime(ctx)
-    const agent = toolAgent('goal')
+    const agent = toolAgent(existing ? 'warmup' : 'goal')
     try {
       registerBrowserTool(ctx, { workspaceOnToolEnvironment: true }, {
         open: async () => { allocated = true }, close: async () => {},
@@ -128,17 +174,26 @@ describe('browser display target belongs to its execution provider', () => {
         config: { ...resolveGoalConfig({}), lockPath: join(directory, 'lock') }, artifactRoot: directory,
         text: { forAgent: () => ({ generate: async () => { throw new Error('no model request expected') } }) }, log() {},
       } })
+      if (existing) {
+        const warmup = await tools.execute({ callId: 'warmup' as never, name: 'browser',
+          arguments: { operation: 'open', startUrl: 'https://example.test/' }, agent: agent as never,
+          signal: new AbortController().signal })
+        expect(warmup.isError).toBe(false)
+        events.length = 0
+        agent.session.append('tool/call', { callId: 'goal' as never, name: 'browser', arguments: '{}', turn: 1, step: 2 })
+      }
+      const sourceCallSeq = existing ? 1 : 0
       const running = tools.execute({ callId: 'goal' as never, name: 'browser', arguments: { operation: 'runGoal', goal: 'test', startUrl: 'https://example.test/' },
         agent: agent as never, signal: new AbortController().signal })
       await began
-      expect(events).toEqual([{ callId: 'goal', sourceCallSeq: 0, instanceRefs: [] },
-        { callId: 'goal', sourceCallSeq: 0, instanceRefs: [{ sandboxId: 'real-open', instance: 'vnc' }] }])
+      expect(events).toEqual([{ callId: 'goal', sourceCallSeq, instanceRefs: [] },
+        { callId: 'goal', sourceCallSeq, instanceRefs: [{ sandboxId: 'real-open', instance: 'vnc' }] }])
       // A reused model call id cannot retarget the running invocation's finally callback.
       agent.session.append('tool/call', { callId: 'goal' as never, name: 'browser', arguments: '{}', turn: 2, step: 1 })
       finish()
       expect((await running).isError).toBe(true)
-      expect(events.every(event => event.sourceCallSeq === 0)).toBe(true)
-      expect(agent.session.snapshotEvents().map(event => event.type)).toEqual(['tool/call', 'tool/call'])
+      expect(events.every(event => event.sourceCallSeq === sourceCallSeq)).toBe(true)
+      expect(agent.session.snapshotEvents().map(event => event.type)).toEqual(existing ? ['tool/call', 'tool/call', 'tool/call'] : ['tool/call', 'tool/call'])
     } finally { finish(); await ctx.fiber.dispose(); await rm(directory, { recursive: true, force: true }) }
   })
 })

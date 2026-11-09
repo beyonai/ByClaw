@@ -26,7 +26,7 @@
         stateDir: !!js dshHomePath('byclaw-tool-env')
         templates: !!js "JSON.parse(process.env.BYCLAW_TOOL_ENV_CATALOG || '[]')"
         workspace: !!js "process.env.BYCLAW_TOOL_ENV_WORKSPACE || '/by'"
-        idleMs: !!js "Number(process.env.BYCLAW_TOOL_ENV_IDLE_MS || 600000)"
+        idleMs: !!js "Number(process.env.BYCLAW_TOOL_ENV_IDLE_MS || 300000)"
         busyProcessMaxMs: !!js "Number(process.env.BYCLAW_TOOL_ENV_BUSY_PROCESS_MAX_MS || 21600000)"
         host: !!js "process.env.BYCLAW_TOOL_ENV_HOST || '127.0.0.1'"
         port: !!js "Number(process.env.BYCLAW_TOOL_ENV_PORT || 22)"
@@ -36,6 +36,9 @@
         # BEYOND_TOKEN are what BE already injects into A; the base URL is the one
         # the byclaw-dsh plugin uses.
         byclawBe:
+          coordinatedLeases: true
+          requestScopedKeys: true
+          idleTimeoutSeconds: !!js "Math.ceil(Number(process.env.BYCLAW_TOOL_ENV_IDLE_MS || 300000) / 1000)"
           baseUrl: !!js "process.env.BYCLAW_TOOL_ENV_BE_BASE_URL || process.env.BYCLAW_DSH_BASE_URL || process.env.BYAI_SERVICE_BASE_URL || ''"
           userCode: !!js "process.env.USER_CODE || ''"
           token: !!js "process.env.BEYOND_TOKEN || ''"

@@ -213,6 +213,23 @@ const hasBrowserInput = (input: Record<string, unknown> | undefined) => {
 const isBrowserTool = (title: unknown) =>
   typeof title === 'string' && (title.includes('jarvis_run_flow') || title.includes('browser'));
 
+export function isDesktopOpeningToolMessage(message?: Partial<IMessageListItem> | null): boolean {
+  if (String(message?.contentType) !== String(SSEMessageType.toolCall)) return false;
+  const substance = parseObject(message?.content?.substance);
+  if (substance?.title === 'sandbox_exec') {
+    const opts = parseObject(parseObject(substance.input)?.opts);
+    const showDesktop = opts?.show_desktop;
+    return (
+      substance.status === '_DONE_' &&
+      Boolean(showDesktop && typeof showDesktop === 'object' && !Array.isArray(showDesktop)) &&
+      parseObject(substance.output)?.exitCode === 0
+    );
+  }
+  if (substance?.title !== 'browser') return false;
+  const operation = parseObject(substance.input)?.operation;
+  return operation === 'open' || operation === 'navigate' || operation === 'runGoal';
+}
+
 export function isVncToolMessage(message?: Partial<IMessageListItem> | null): boolean {
   if (message?.content && Object.prototype.hasOwnProperty.call(message.content, 'instanceRefs')) return false;
   const substance = parseObject(message?.content?.substance);

@@ -103,6 +103,8 @@ class TenantGroupTaskRoutingAspectTest {
     @Test
     void tenantDeliveryAuthorizesWithNodeBeforeReadingSignal() throws Throwable {
         TenantRequestContextHolder.set(tenant);
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/group-chat/tasks/33"), eq(null), any()))
+            .thenReturn(Map.<String, Object>of("status", "ACTIVE"));
         when(delivery.currentAuthorized(33L)).thenReturn(new GroupChatTaskDeliveryResponse("33", false));
 
         ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("deliveryStatus", 33L));
@@ -110,6 +112,18 @@ class TenantGroupTaskRoutingAspectTest {
         verify(node).request(eq(tenant), eq("GET"), eq("/internal/v1/group-chat/tasks/33"),
             eq(null), any());
         assertThat(response.getData()).isEqualTo(new GroupChatTaskDeliveryResponse("33", false));
+    }
+
+    @Test
+    void privateTenantTaskIsUndeliveredWithoutReadingSignal() throws Throwable {
+        TenantRequestContextHolder.set(tenant);
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/group-chat/tasks/33"), eq(null), any()))
+            .thenReturn(Map.<String, Object>of("status", "PRIVATE"));
+
+        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("deliveryStatus", 33L));
+
+        assertThat(response.getData()).isEqualTo(new GroupChatTaskDeliveryResponse("33", false));
+        verify(delivery, never()).currentAuthorized(33L);
     }
 
     @Test

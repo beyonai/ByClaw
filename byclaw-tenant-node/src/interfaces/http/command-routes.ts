@@ -33,6 +33,7 @@ export function commandRoutes(
     ["POST", "/group-chats/:id/welcome", "CLAIM_WELCOME"],
     ["PATCH", "/group-chats/:id/members/me/nickname", "SET_NICKNAME"],
     ["POST", "/group-chats/:id/direct-sessions", "CREATE_DIRECT_SESSION"],
+    ["POST", "/group-chats/:id/direct-tasks", "CREATE_DIRECT_TASK"],
     ["POST", "/group-chats/:id/invitations", "CREATE_INVITATION"],
     ["POST", "/group-chats/:id/tasks/:taskId/cancel", "CANCEL_TASK"],
     ["PATCH", "/group-chats/:id/tasks/:taskId/pending-publication", "CHECKPOINT_PUBLICATION"],
@@ -50,6 +51,7 @@ export function commandRoutes(
     ["POST", "/sessions/:id/messages/:messageId/feedback", "UPDATE_FEEDBACK"],
     ["PATCH", "/sessions/:id/messages/:messageId/structure", "UPDATE_MESSAGE_STRUCTURE"],
     ["POST", "/group-chats/:id/messages", "SEND_GROUP_MESSAGE"],
+    ["POST", "/group-chats/:id/messages/persist", "PERSIST_GROUP_MESSAGE"],
   ];
   for (const [method, path, operation] of routes)
     app.route<{ Params: Record<string, string> }>({

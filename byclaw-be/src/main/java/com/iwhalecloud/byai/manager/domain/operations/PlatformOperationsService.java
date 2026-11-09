@@ -12,9 +12,11 @@ import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInventory;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxReleaseException;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.mapper.operations.OperationsGroupMapper;
 import com.iwhalecloud.byai.manager.mapper.operations.OperationsSandboxMapper;
 import com.iwhalecloud.byai.manager.vo.operations.OperationsSandboxVo;
@@ -34,6 +36,8 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.Future;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 import jakarta.annotation.PreDestroy;
 
 /** 复用现有生命周期能力与租户查询通道；不增加停用策略。
@@ -76,6 +80,12 @@ public class PlatformOperationsService {
 
     @Autowired
     private EnterpriseStorageService enterpriseStorageService;
+
+    @Autowired
+    private ProjectService projectService;
+
+    @Autowired
+    private UserService userService;
 
     /** 固定资源与操作集合，操作人和请求号必须由可信 HACU 服务提供。 */
     public JsonNode execute(JsonNode request) {
@@ -259,9 +269,33 @@ public class PlatformOperationsService {
     /** 工作组数据来自对应企业 Node，不读取主库遗留群表。 */
     private JsonNode groups(String operation, JsonNode input) {
         long enterpriseId = id(input, "enterpriseId");
-        if (tenantModes.isSharedDataTenant(enterpriseId)) {
-            return sharedGroups(operation, input, enterpriseId);
+        JsonNode result = tenantModes.isSharedDataTenant(enterpriseId)
+            ? sharedGroups(operation, input, enterpriseId)
+            : nodeGroups(operation, input, enterpriseId);
+        if (result == null) {
+            return null;
         }
+        switch (operation) {
+            case "list" -> resolveGroupProjects(enterpriseId, result.path("list"));
+            case "detail" -> {
+                resolveGroupProjects(enterpriseId, List.of(result));
+                resolveGroupCreators(List.of(result));
+            }
+            case "conversations" -> resolveGroupCreators(result.path("list"));
+            default -> { }
+        }
+        return result;
+    }
+
+    /**
+     * 从企业 Node 读取分页数据或详情。
+     *
+     * @param operation 工作组操作
+     * @param input 查询参数
+     * @param enterpriseId 已校验的企业 ID
+     * @return Node 的只读投影
+     */
+    private JsonNode nodeGroups(String operation, JsonNode input, long enterpriseId) {
         String path;
         String method;
         ObjectNode query = json.createObjectNode();
@@ -289,6 +323,68 @@ public class PlatformOperationsService {
         query.put("pageSize", page(input, "pageSize", 20, 100));
         return nodes.operationsRequest(enterpriseId, method, path, "GET".equals(method) ? null : query,
             new TypeReference<JsonNode>() { });
+    }
+
+    /**
+     * 项目记录由主库管理，共享和独立租户都在当前企业范围内批量补齐名称。
+     *
+     * @param enterpriseId 工作组所属企业
+     * @param rows 当前页或单条工作组记录
+     */
+    private void resolveGroupProjects(long enterpriseId, Iterable<JsonNode> rows) {
+        Set<Long> projectIds = displayIds(rows, "projectId");
+        if (projectIds.isEmpty()) {
+            return;
+        }
+        Map<Long, String> projectNames = new HashMap<>();
+        projectService.findNamesByIds(enterpriseId, projectIds)
+            .forEach(project -> projectNames.put(project.getProjectId(), project.getProjectName()));
+        rows.forEach(row -> putDisplayName(row, "projectId", "projectName", projectNames));
+    }
+
+    /**
+     * 根据全局账号补齐详情中的创建人，兼容已停用的历史账号。
+     *
+     * @param rows 工作组详情或当前页关联会话
+     */
+    private void resolveGroupCreators(Iterable<JsonNode> rows) {
+        Set<Long> creatorIds = displayIds(rows, "creatorId");
+        if (creatorIds.isEmpty()) {
+            return;
+        }
+        Map<Long, String> creatorNames = new HashMap<>();
+        userService.findByIds(creatorIds)
+            .forEach(user -> creatorNames.put(user.getUserId(), user.getUserName()));
+        rows.forEach(row -> putDisplayName(row, "creatorId", "creatorName", creatorNames));
+    }
+
+    /**
+     * 从投影收集去重后的主键，跳过空值和默认项目的占位 ID。
+     *
+     * @param rows 待补齐名称的记录
+     * @param field 主键字段
+     * @return 当前结果中的有效主键
+     */
+    private Set<Long> displayIds(Iterable<JsonNode> rows, String field) {
+        return StreamSupport.stream(rows.spliterator(), false)
+            .map(row -> row.path(field).asLong())
+            .filter(id -> id > 0)
+            .collect(Collectors.toSet());
+    }
+
+    /**
+     * 仅补齐有效名称，保留原始 ID 供调用端排查。
+     *
+     * @param row 工作组或关联会话记录
+     * @param idField 主键字段
+     * @param nameField 名称字段
+     * @param names 已查到的名称
+     */
+    private void putDisplayName(JsonNode row, String idField, String nameField, Map<Long, String> names) {
+        String name = names.get(row.path(idField).asLong());
+        if (row instanceof ObjectNode object && name != null && !name.isBlank()) {
+            object.put(nameField, name);
+        }
     }
 
     /** 公共企业及试用租户使用公共库，保留企业范围及分页。 */

@@ -185,6 +185,14 @@ public class GroupChatController {
         return ResponseUtil.successResponse(messageSearchService.search(sessionId, request));
     }
 
+    /** Desktop local turns persist a message projection without remote dispatch. */
+    @PostMapping("/{sessionId}/messages/persist")
+    public ResponseUtil<Long> persistMessage(@PathVariable Long sessionId,
+        @RequestBody com.iwhalecloud.byai.state.domain.ws.model.ChatMessage request) {
+        request.setSessionId(sessionId);
+        return ResponseUtil.successResponse(applicationService.persistRuntimeMessage(request));
+    }
+
     @GetMapping("/{sessionId}/messages/{messageId}/context")
     public ResponseUtil<GroupChatContextResponse> messageContext(@PathVariable Long sessionId,
         @PathVariable Long messageId) {
@@ -293,5 +301,12 @@ public class GroupChatController {
     public ResponseUtil<ByaiSession> directSession(@PathVariable Long sessionId,
         @Valid @RequestBody DirectSessionCreateRequest request) {
         return ResponseUtil.successResponse(applicationService.createDirectSession(sessionId, request.getAgentId()));
+    }
+
+    /** 从群创建私聊任务：与普通单聊会话同源，但以 PRIVATE 状态进入任务列表。 */
+    @PostMapping("/{sessionId}/direct-tasks")
+    public ResponseUtil<ByaiGroupChatTask> directTask(@PathVariable Long sessionId,
+        @Valid @RequestBody DirectSessionCreateRequest request) {
+        return ResponseUtil.successResponse(applicationService.createDirectTask(sessionId, request.getAgentId()));
     }
 }

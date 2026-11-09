@@ -1,4 +1,8 @@
 export default {
+  'sandboxMgr.market.presetResources': 'Suggested base size: {cpu} CPU / {memory}',
+  'sandboxMgr.market.presetResourcesTip':
+    'Applying a preset updates its description, capabilities and cover, and disables login startup. Save actual CPU and memory separately in service profiles; existing instances are unchanged.',
+  'sandboxMgr.market.applyPreset': 'Apply built-in tool description and cover',
   'sandboxMgr.table.lifetime': 'Lifetime',
   'sandboxMgr.lifetime.days': '{value}d',
   'sandboxMgr.lifetime.hours': '{value}h',

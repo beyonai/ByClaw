@@ -87,6 +87,7 @@ class WorkgroupCreationHookTest {
     private final TenantNodeClient node = mock(TenantNodeClient.class);
     private final TenantGroupData data = mock(TenantGroupData.class);
     private boolean failDetailRead;
+    private String ownerSnapshotFailure;
     private HttpServer server;
     private ApplicationContextRunner runner;
     private final Transactions transactions = new Transactions();
@@ -123,11 +124,14 @@ class WorkgroupCreationHookTest {
             var body = new ObjectMapper().readTree(raw);
             assertThat(body.path("event").path("type").asText()).isEqualTo("workgroup.created");
             assertThat(body.path("data").fieldNames()).toIterable().containsExactlyInAnyOrder(
-                "groupId", "groupName", "projectId", "enterpriseId", "createdBy");
+                "groupId", "groupName", "projectId", "enterpriseId", "createdBy", "userId", "byaiSessionMemberId");
             assertThat(body.path("data").path("groupId").isTextual()).isTrue();
             assertThat(body.path("data").path("groupName").asText()).isEqualTo("工作组");
             assertThat(body.path("data").path("projectId").asText()).isEqualTo("9007199254740994");
             assertThat(body.path("data").path("createdBy").asText()).isEqualTo("9007199254740995");
+            assertThat(body.path("data").path("userId").asText()).isEqualTo("9007199254740995");
+            assertThat(body.path("data").path("byaiSessionMemberId").isTextual()).isTrue();
+            assertThat(body.path("data").path("byaiSessionMemberId").asText()).isEqualTo("9007199254740996");
             assertThat(body.path("data").path("enterpriseId").asText()).isEqualTo("42");
             assertThat(requests).isEmpty();
         });
@@ -193,6 +197,17 @@ class WorkgroupCreationHookTest {
         });
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"missing", "userId", "groupId", "enterpriseId", "byaiSessionMemberId"})
+    void tenantOwnerSnapshotMustMatchSavedMembership(String failure) {
+        ownerSnapshotFailure = failure;
+        runner.run(context -> {
+            assertThatThrownBy(() -> create(true, context.getBean(WorkgroupHooks.class)))
+                .isInstanceOf(IllegalStateException.class).hasMessage("groupchat.member.id.unconfirmed");
+            assertThat(requests.poll(200, TimeUnit.MILLISECONDS)).isNull();
+        });
+    }
+
     @Test
     void memberWriteFailureAfterSessionCreationDoesNotSend() {
         runner.run(context -> {
@@ -221,6 +236,8 @@ class WorkgroupCreationHookTest {
                 var body = new ObjectMapper().readTree(requests.poll(5, TimeUnit.SECONDS));
                 assertThat(body.path("workgroupId").asText()).isEqualTo("9007199254740993");
                 assertThat(body.path("groupName").asText()).isEqualTo("工作组");
+                assertThat(body.path("userId").asText()).isEqualTo("9007199254740995");
+                assertThat(body.path("byaiSessionMemberId").asText()).isEqualTo("9007199254740996");
                 assertThat(body.path("eventId").asText()).isNotBlank();
             });
     }
@@ -228,6 +245,22 @@ class WorkgroupCreationHookTest {
     private void create(boolean tenant, WorkgroupHooks hooks) {
         var request = new GroupChatCreateRequest(); request.setName("工作组"); request.setGoal("不应发送的目标内容");
         if (tenant) {
+            when(node.command(any(), eq("POST"), eq("/internal/v1/group-chats"), anyString(), eq("CREATE_GROUP"),
+                any(TenantNodeModels.Fields.class), anyString(), anyList())).thenAnswer(invocation -> {
+                    String id = invocation.getArgument(3);
+                    var result = new ObjectMapper().createObjectNode();
+                    var saved = result.putArray("savedMembers");
+                    // 非 OWNER 的真人成员排在前面，不能直接取第一条成员。
+                    saved.addObject().put("groupId", id).put("enterpriseId", "42")
+                        .put("userId", "123").put("byaiSessionMemberId", "456");
+                    var owner = saved.addObject()
+                        .put("groupId", id).put("enterpriseId", "42").put("userId", "9007199254740995")
+                        .put("byaiSessionMemberId", "9007199254740996");
+                    if ("missing".equals(ownerSnapshotFailure)) saved.removeAll();
+                    else if (ownerSnapshotFailure != null) owner.put(ownerSnapshotFailure, "0");
+                    return new TenantNodeModels.CommandResult(id, "request", "CREATE_GROUP", null,
+                        null, null, null, result);
+                });
             var tenantMembers = mock(TenantGroupMemberService.class);
             when(tenantMembers.prepareMembers(any(), anyString(), anyList())).thenReturn(List.of());
             when(tenantMembers.prepareCoordinatorMember(50L)).thenReturn(new TenantNodeModels.InvitedMember("AGENT", "50", "助手", true));
@@ -246,7 +279,8 @@ class WorkgroupCreationHookTest {
             });
             proxy(target).create(new TenantRequestContext(9007199254740995L, 42L, "ADMIN"), request);
         } else {
-            var sequence = mock(SequenceService.class); when(sequence.nextVal()).thenReturn(9007199254740993L);
+            var sequence = mock(SequenceService.class);
+            when(sequence.nextVal()).thenReturn(9007199254740993L, 9007199254740997L, 9007199254740996L);
             var target = new GroupChatApplicationService(mock(SessionService.class), sequence, mock(GroupChatAuthorizationService.class),
                 members, projects, mock(ProjectMemberService.class), null, null, null, mock(SessionExtService.class));
             ReflectionTestUtils.setField(target, "quotaAdmission", mock(com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.class));

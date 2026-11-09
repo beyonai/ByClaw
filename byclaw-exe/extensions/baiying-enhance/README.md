@@ -310,3 +310,13 @@ npm test -- src/configured-thinking.test.ts src/config-writer.test.ts src/plugin
 该标记仅存储调用元数据的摘要，不写入原始凭据。启动时也会核对上次保存的摘要，以更新已有会话的工具快照。
 
 旧运行镜像缺少 `unzip` 时，Hub 技能下载器会使用已有的 `python3` 标准库解压，并在写入前校验路径、拒绝符号链接及超限包；不会因 ZIP 损坏而切换解压器。两种工具都不可用时回执为 `RUNTIME_DEPENDENCY_MISSING`，不能误报技能包损坏。正式镜像仍应保留 Dockerfile 中已有的 `unzip` 依赖。
+
+## Retired conversation resources (#267)
+
+`OBJECT`, `VIEW`, `ONTOLOGY_BASE`, and `SCENE` are retired for conversation discovery and execution. Type checks are case-insensitive and trim whitespace. Resource names and descriptions are not used to infer retirement; normal MCP, tools, agents and knowledge resources remain available.
+
+The adapter, tool descriptions, managed workspace files and sub-agent routing exclude retired metadata from old employee snapshots. Explicit type hints, matched context fallbacks and actual Redis snapshots are checked before MCP discovery or execution. The final MCP execution boundary also rejects retired capabilities with `RESOURCE_TYPE_RETIRED`. An explicit unknown resource ID/name cannot fall back to the first association or a different root agent.
+
+Update the backend and plugin together on every runtime instance, refresh employee configurations, and regenerate plugin-managed workspace files. Existing managed files are refreshed using their markers; user-maintained files and historical conversations are preserved. Do not interpret a model repeating old conversation text as a fresh successful lookup. Independently registered wrapper tools require inspection of their actual definitions and call traces; this policy does not disable every MCP or the entire data service.
+
+Run `npm test` and `npm run build`. Regression cases in `src/retired-resources.test.ts` cover backend/type-policy agreement, legacy snapshots, misleading hints, no remote execution, context projection and managed-file preservation. Build assets do not prove a deployed container or real model call succeeds.

@@ -165,8 +165,17 @@ BE 两种 Docker 镜像的健康检查使用 `/byaiService/actuator/health`，�
 
 A spec may declare `ports[].presentation: {viewer, label}` and `instanceBindings: {capability: [instance]}`. Publishing validates unique instance names, valid ports and existing binding targets. Runtime readers tolerate damaged optional presentation metadata; it must not stop sandbox execution.
 
+Legacy specs that declare neither valid presentation metadata nor instance bindings keep a null creation context, preserving existing tool viewer behavior. Explicit empty bindings (`{}` or a capability with `[]`) and presentation-only specs opt into version 1; an empty target list is not treated as missing metadata.
+
 Newly created runtimes return credential-free `instanceContext` (version 1, normalized sandboxId, optional mappingId, instanceBindings and instanceDescriptors). The launch CAS persists it separately in `ss_sandbox_record.instance_context_snapshot`; apply the authorized V0.6.0 migration before deploying this reader. Directory and allocation responses restore this snapshot and filter it to authorized endpoint keys. Existing NULL records and provider recovery without an actual creation snapshot remain legacy; current templates never reinterpret them. Shared context projection must not expose physical-host-only endpoints.
 
 Restoration also validates nested descriptor types. A damaged optional snapshot disables its presentation context while preserving existing endpoints and runtime reuse; it does not rewrite the saved record.
 
 Tool events carry optional root `AnswerDelta.instanceRefs` identities. Missing values retain legacy behavior; present invalid values become an explicit empty list. MessageContext unions valid identities by the exact sandbox/mapping/instance tuple and preserves them through streamed snapshots and stored messageStruct history. References never contain URLs, headers or tokens.
+
+
+### 工具沙箱会话租约
+
+`POST /sandbox/toolLease/{acquire,renew,release}` 将登录身份与工具会话身份分开处理。调用者只能为自身申请或归还租约，不能提交身份投影或替其他用户操作。BE 通过 Platform 协调租约，不再用断开 SSH 代表释放计算实例；Platform 不可用时请求失败，不回退到无租约启动。
+
+工具实例为用户全局资源，每个活跃会话单独持有租约。最后一个租约归还或过期后，默认闲置 300 秒释放；Harness 的 `BYCLAW_TOOL_ENV_IDLE_MS` 可配置空闲时长。共享用户上下文释放携带宿主、映射和代次身份，连带清理对应工具实例；旧上下文不能释放替代上下文的资源。

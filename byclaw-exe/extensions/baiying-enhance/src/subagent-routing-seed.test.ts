@@ -51,7 +51,8 @@ describe("buildSubagentRoutingMarkdown", () => {
     expect(md).toContain("**avoid**: password resets");
     expect(md).toContain("**dispatch**: 派发一个边界清晰的子任务");
     expect(md).toContain("**evidence**: 结构化结论");
-    expect(md).toContain("**resources**: OBJECT: Sales DB");
+    expect(md).not.toContain("Sales DB");
+    expect(md).not.toContain("OBJECT");
     expect(md).not.toContain("**persona**:");
     expect(md).not.toMatch(/\*\*res\*\*:/);
   });

@@ -209,7 +209,7 @@ describe("adaptAgentJson", () => {
                 {
                     resourceId: "10000045",
                     resourceName: "销售管理视图",
-                    resourceBizType: "VIEW",
+                    resourceBizType: "MCP",
                     resourceCode: "scene_sales_management",
                     resourceDesc: "销售漏斗视图",
                 },
@@ -235,7 +235,7 @@ describe("adaptAgentJson", () => {
         expect(res.associatedResources![0]).toMatchObject({
             resourceId: "10000045",
             resourceName: "销售管理视图",
-            resourceBizType: "VIEW",
+            resourceBizType: "MCP",
             resourceCode: "scene_sales_management",
             resourceDesc: "销售漏斗视图",
         });

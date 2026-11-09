@@ -16,7 +16,27 @@ A's `glob` and `grep` run in the tool sandbox as `rg` from `PATH`: the shared ho
 
 Use `192.168.0.81:8080/byclaw/byclaw-harness-tools:<tag>` for Dockerfile parent defaults and pin the tested digest for release builds. Keep exact donor-image digests, source SHA manifests, image/rootfs sizes, registry digests and validation logs with the release receipt. A changed canonical tag must not silently retarget an existing sandbox; validate a new template and update only the explicitly selected aliyun83 service configuration. Existing running instances retain their lifecycle.
 
-For a reviewed browser supervisor-only correction, `Dockerfile.tools.browser --target browser-runtime-update` can reuse an already validated slim browser through an immutable `INSTALLED_BROWSER_IMAGE` digest. The default target still performs the complete build from the slim base. Business Dockerfiles explicitly copy the current supervisor after dependency installation, so a pinned parent never omits that correction. Retest the complete runtime after this update; do not use the target to imply dependencies or binaries were rebuilt.
+For a reviewed browser supervisor or viewer-asset correction, `Dockerfile.tools.browser --target browser-runtime-update` can reuse an already validated slim browser through an immutable `INSTALLED_BROWSER_IMAGE` digest. Both this target and the complete browser build copy the current noVNC page and its connection bridge directly from this repository, after inherited viewer assets. Verify the already-built local image from the repository root with the following command. Set `IMAGE` to the image to inspect, preferably by its tested immutable digest.
+
+```bash
+IMAGE='' # Required: the already-built local browser image or digest.
+: "${IMAGE:?Set IMAGE to the local browser image to inspect}"
+docker run --pull=never --rm --network none --entrypoint node "$IMAGE" --input-type=module -e '
+import assert from "node:assert/strict";
+import { readFile, access } from "node:fs/promises";
+const root = process.env.BYCLAW_BROWSER_NOVNC_DIR || "/opt/byclaw/novnc";
+const html = await readFile(`${root}/index.html`, "utf8");
+assert.match(html, /import\s*\{\s*createConnectionBridge\s*\}\s*from\s*["\x27]\.\/connection-bridge\.js["\x27]/,
+  "desktop page must load its connection observation bridge");
+await access(`${root}/core/rfb.js`);
+const bridge = await readFile(`${root}/connection-bridge.js`, "utf8");
+const module = await import(`data:text/javascript;base64,${Buffer.from(bridge).toString("base64")}`);
+assert.equal(typeof module.createConnectionBridge, "function");
+console.log("browser viewer assets verified");
+'
+```
+
+This check starts only Node with networking disabled and never pulls an image or starts its supervisor. It checks that the desktop page loads the bridge and that the bridge module and RFB asset are present. Retest the complete runtime after this update; this check does not establish a live VNC connection or rebuild dependencies or binaries.
 
 All dependency downloads must default to verified domestic sources with no overseas fallback, as required by root `AGENTS.md`. The shared configurator persists APT, pip/npm/uv, Node/Corepack, Playwright/Puppeteer and Maven defaults in image configuration, login shells and SSH sessions. Reapply it after installing an older Maven3.8, which ignores `MAVEN_ARGS`. Explicit private repositories remain explicit. Godot installation uses fixed-SHA512 local archives admitted by its dedicated Docker ignore file, with no build-time fetch or fallback. Never bake runtime keys, licenses, Hub login, project data or provider credentials into any image.
 

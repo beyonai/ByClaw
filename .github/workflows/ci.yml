@@ -33,6 +33,9 @@ jobs:
               - '.github/workflows/**'
             be:
               - 'byclaw-be/**'
+              - 'middleware/byclaw-harness/browser/novnc-index.html'
+              - 'middleware/byclaw-harness/browser/desktop-viewer/**'
+              - 'middleware/builtin/runtime-tools/browser-viewer/connection-bridge.mjs'
               - '.github/workflows/**'
             exe:
               - 'byclaw-exe/**'

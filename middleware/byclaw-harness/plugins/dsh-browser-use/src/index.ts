@@ -539,9 +539,11 @@ function browserTool(controller: BrowserSessionController, goalEnabled: boolean,
       const report = (initial = false) => {
         try { reportTarget?.(exec, initial) } catch { /* display only */ }
       }
+      let targetReady = false
+      const target = () => { targetReady = true; report() }
       report(true)
-      try { return await controller.execute(args, exec.agent, exec.signal, report) }
-      finally { report() }
+      try { return await controller.execute(args, exec.agent, exec.signal, target) }
+      finally { if (targetReady) report() }
     },
   })
   return { ...defined, ...(reportTarget && process.env.BYCLAW_INSTANCE_REFS_ENABLED !== 'false' ? { byclawInstanceRefsVersion: 1 } : {}), parameters: { ...BROWSER_PARAMETERS, oneOf: [...BROWSER_PARAMETERS.oneOf, ...(goalEnabled ? GOAL_BRANCHES : [])] } as unknown as Record<string, unknown> } as ToolDefinition
@@ -580,7 +582,7 @@ export function registerBrowserTool(
   })
   const reportedTargets = new WeakMap<ToolRunContext, string>()
   const sourceCalls = new WeakMap<ToolRunContext, number | undefined>()
-  ctx.tools.register(browserTool(controller, lifecycle.goal !== undefined, (exec, initial) => {
+  ctx.tools.register(browserTool(controller, lifecycle.goal !== undefined, config.workspaceOnToolEnvironment ? (exec, initial) => {
     if (process.env.BYCLAW_INSTANCE_REFS_ENABLED === 'false') return
     if (initial) {
       const call = [...(exec.agent?.session.snapshotEvents?.() ?? [])].reverse().find(event => (
@@ -598,15 +600,14 @@ export function registerBrowserTool(
         reportedTargets.set(exec, signature)
       }
     }
-    if (initial) append([])
-    if (!config.workspaceOnToolEnvironment) return
-    // Read the actual SSH provider only; a local browser without a normalized
-    // control-plane identity deliberately reports no target.
+    if (initial) { append([]); return }
+    // Read only this remote browser's SSH provider. Local browsers keep the
+    // legacy viewer contract instead of falsely reporting an explicit empty target.
     const ssh = ctx.get('ssh') as unknown as { instanceRefs?: (capability: string) => unknown[] } | undefined
     // `ready` leases compute. Display reporting only observes an existing identity.
     const refs = ssh?.instanceRefs?.('browser.automation') ?? []
     if (refs.length > 0) append(refs)
-  }))
+  } : undefined))
 
   ctx.on('agent/disposed', ({ agent }) => {
     void controller.closeAgent(String(agent.id))

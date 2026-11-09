@@ -72,6 +72,26 @@ class ToolManControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
     }
 
     @Test
+    void runtimeUseRejectsMissingAndRetiredResourcesWithoutChangingNormalTools() {
+        var resources = org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class);
+        var auth = org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService.class);
+        var controller = new ToolManController();
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "ssResourceService", resources);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "authApplicationService", auth);
+        assertThat(controller.checkResourceUse(java.util.Map.of("resourceId", "999")).getData()).containsEntry("allowed", false);
+        var resource = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
+        resource.setResourceId(10L);
+        org.mockito.Mockito.when(resources.findById(10L)).thenReturn(resource);
+        for (String type : java.util.List.of("OBJECT", "view", "ONTOLOGY_BASE", "SCENE")) {
+            resource.setResourceBizType(type);
+            assertThat(controller.checkResourceUse(java.util.Map.of("resourceId", "10")).getData())
+                .containsEntry("allowed", false).containsEntry("reason", "RESOURCE_TYPE_RETIRED");
+        }
+        resource.setResourceBizType("TOOL");
+        assertThat(controller.checkResourceUse(java.util.Map.of("resourceId", "10")).getData()).containsEntry("allowed", true);
+    }
+
+    @Test
     void resourceSyncJobRequiresAuthenticatedTenantIdentity() {
         var controller = new ToolManController();
         var sync = org.mockito.Mockito.mock(

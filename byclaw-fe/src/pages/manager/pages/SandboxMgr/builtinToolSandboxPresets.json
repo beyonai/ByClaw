@@ -1,0 +1,129 @@
+[
+  {
+    "serviceKey": "byclaw-dsh-tools",
+    "purpose": "general",
+    "displayName": "通用执行环境",
+    "description": "共享 Harness 配套的用户级通用工具沙箱，执行 Shell、Python、Node 和业务 CLI，处理用户授权的文件，并按需启动 Chromium 与远程桌面。多个会话通过独立租约复用同一用户实例；它不运行共享 Harness 本身。专门的媒体渲染、Godot 和 Unity 任务应选择对应模板。文件存储独立于实例，最后一个租约结束后按闲时策略回收计算资源。",
+    "coverImage": "tool-sandbox/covers/general.svg",
+    "capabilities": ["process.exec", "filesystem", "browser.automation"],
+    "resources": {
+      "requests": {
+        "cpu": "2",
+        "memory": "4Gi"
+      },
+      "limits": {
+        "cpu": "2",
+        "memory": "4Gi"
+      },
+      "guidance": "适合脚本、CLI 与少量浏览器页面；批量计算或高并发浏览器任务应使用更大档位。"
+    },
+    "aliases": []
+  },
+  {
+    "serviceKey": "byclaw-tools-browser",
+    "purpose": "browser",
+    "displayName": "浏览器自动化环境",
+    "description": "提供 Chromium、浏览器自动化及远程桌面，用于网页操作、资料提取、截图和页面验证。仅操作用户授权的网站与数据；适合少量页面，多个重型页面应提高内存档位。按会话租约申请，空闲后回收计算资源。",
+    "coverImage": "tool-sandbox/covers/browser.svg",
+    "capabilities": ["process.exec", "filesystem", "browser.automation"],
+    "resources": {
+      "requests": {
+        "cpu": "2",
+        "memory": "2Gi"
+      },
+      "limits": {
+        "cpu": "2",
+        "memory": "2Gi"
+      },
+      "guidance": "少量页面的基础档；多页面、复杂前端或大型截图建议提升至4Gi内存。"
+    },
+    "aliases": []
+  },
+  {
+    "serviceKey": "byclaw-tools-media",
+    "purpose": "media",
+    "displayName": "媒体制作环境",
+    "description": "提供媒体转码、音视频处理和渲染工具，处理用户授权的素材并生成可交付文件。适合短视频与常规分辨率任务；高分辨率、长视频和大型合成需提高CPU与内存档位。按会话租约申请，空闲后回收计算资源。",
+    "coverImage": "tool-sandbox/covers/media.svg",
+    "capabilities": ["process.exec", "filesystem", "media.render"],
+    "resources": {
+      "requests": {
+        "cpu": "4",
+        "memory": "4Gi"
+      },
+      "limits": {
+        "cpu": "4",
+        "memory": "4Gi"
+      },
+      "guidance": "短视频、常规分辨率基础档；长视频、4K和大型合成按任务增加资源。"
+    },
+    "aliases": []
+  },
+  {
+    "serviceKey": "byclaw-tools-godot",
+    "purpose": "godot",
+    "displayName": "Godot 游戏开发环境",
+    "description": "提供 Godot、GDScript、项目导出工具及浏览器验证能力，用于小游戏开发、运行和交付。基础档适合小型2D与Web项目；大型3D项目和并行导出需提高资源档位。按会话租约申请，空闲后回收计算资源。",
+    "coverImage": "tool-sandbox/covers/godot.svg",
+    "capabilities": ["process.exec", "filesystem", "browser.automation", "game.godot", "game.gdscript"],
+    "resources": {
+      "requests": {
+        "cpu": "4",
+        "memory": "4Gi"
+      },
+      "limits": {
+        "cpu": "4",
+        "memory": "4Gi"
+      },
+      "guidance": "小型2D和Web导出基础档；大型3D与并行导出需要更大规格。"
+    },
+    "aliases": []
+  },
+  {
+    "serviceKey": "byclaw-dsh-unity-2",
+    "purpose": "unity",
+    "displayName": "Unity 游戏开发环境",
+    "description": "提供 Unity 项目工具链、编辑器与构建能力，并可在浏览器验证产物。使用前需具备有效的Unity授权及所需构建模块；基础档面向小型项目，首次资源导入、WebGL与大型构建需提高内存档位。按会话租约申请，空闲后回收计算资源。",
+    "coverImage": "tool-sandbox/covers/unity.svg",
+    "capabilities": ["process.exec", "filesystem", "browser.automation", "game.unity"],
+    "resources": {
+      "requests": {
+        "cpu": "4",
+        "memory": "8Gi"
+      },
+      "limits": {
+        "cpu": "4",
+        "memory": "8Gi"
+      },
+      "guidance": "保留编辑器所需内存；大型资源导入与WebGL构建建议16Gi或更大档位。"
+    },
+    "aliases": ["byclaw-tools-unity"]
+  },
+  {
+    "serviceKey": "byclaw-tools-software-development",
+    "aliases": [],
+    "purpose": "software-development",
+    "displayName": "软件开发环境",
+    "description": "面向TypeScript、Next.js和Python项目的编码、构建、测试及浏览器验收，内置仅本机访问的PostgreSQL与pgvector。适合需要本地数据库的完整应用开发；数据库不对公网开放，大型依赖安装、并行构建或高数据量任务应提高资源档位。按会话租约申请，空闲后回收计算资源。",
+    "coverImage": "tool-sandbox/covers/software-development.svg",
+    "capabilities": [
+      "process.exec",
+      "filesystem",
+      "software.development",
+      "database.postgresql",
+      "database.pgvector",
+      "browser.automation"
+    ],
+    "resources": {
+      "requests": {
+        "cpu": "4",
+        "memory": "8Gi"
+      },
+      "limits": {
+        "cpu": "4",
+        "memory": "8Gi"
+      },
+      "guidance": "保留本地PostgreSQL、Node构建与浏览器共用所需内存；大型数据集或并行构建按任务增加资源。"
+    }
+  }
+]

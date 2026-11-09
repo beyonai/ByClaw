@@ -12,6 +12,9 @@ import lombok.Data;
 @Data
 public class ResourceQueryRequest {
 
+    /** Set by conversation-facing services, not inferred from client type filters. */
+    private boolean excludeRetiredConversationResources;
+
     private Long resourceId;
 
     /**

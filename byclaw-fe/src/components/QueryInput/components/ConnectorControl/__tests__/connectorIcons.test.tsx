@@ -22,6 +22,7 @@ describe('connector icons', () => {
     ['deepseek-web-search', 'deepseek'],
     ['image-generation-model', 'image-generation'],
     ['speech-generation-model', 'speech-generation'],
+    ['volcengine-digital-human', 'video-camera'],
   ])('matches %s by code without relying on its localized name', (code, icon) => {
     const { container } = render(<>{getConnectorIcon(code)}</>);
     expect(container.querySelector(`svg[data-icon="${icon}"]`)).toBeInTheDocument();

@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import com.iwhalecloud.byai.common.constants.resource.RetiredConversationResources;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -744,6 +745,7 @@ public class SsResourceService {
 
         QueryWrapper<SsResource> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("resource_status", ResourceStatus.ON_SHELF.getNum());
+        queryWrapper.notIn("COALESCE(UPPER(TRIM(resource_biz_type)), '')", RetiredConversationResources.TYPES);
 
         if (ListUtil.isNotEmpty(resourceQo.getResourceIds())) {
             queryWrapper.in("resource_id", resourceQo.getResourceIds());

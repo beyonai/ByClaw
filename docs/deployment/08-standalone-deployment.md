@@ -126,6 +126,18 @@ STANDALONE_MODULES=fe,be
 
 `start-fe.sh` 和 `start-all.sh` 启动前会自动调用生成脚本。如需修改 nginx 配置，只需编辑 `.tpl` 模板文件。
 
+`.env` 中的 `KEY=ENC(...)` 保持部署加密格式，不需要为 Nginx 手动改成明文或加引号。
+生成器使用 `deploy/env-decrypt.sh` 解密到权限为 `600` 的本轮临时文件后再加载，退出时清理，
+不会覆盖 Compose 持有的 `.env.runtime`。环境目录中的 `nginx-standalone.conf.tpl` 仍优先使用。
+
+若日志出现 `../../.env: Syntax error: "(" unexpected`，说明服务器仍在使用直接 source 原始
+`.env` 的旧版生成器。更新部署目录中的 `gen-nginx-conf.sh` 和 `start-fe.sh`，保留现有
+`.env`、环境模板及解密密钥配置，然后通过原部署入口重新启动前端。解密失败或配置生成失败时，
+脚本应返回非零状态且不继续输出 `Starting Frontend...` 或重建前端容器；解密失败会保留原配置。
+不要仅凭容器启动日志判断配置已更新，仍需在部署环境验证生成结果和 Nginx 运行状态。
+
+回归用例：`python3 deploy/tests/nginx-env.test.py`（在隔离临时目录中使用虚构配置，不调用 Docker）。
+
 ## 单独启停服务
 
 拆分模式的优势之一就是可以单独启停某个服务：

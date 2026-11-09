@@ -1,7 +1,7 @@
 import ProjectDataSources from '@/components/ProjectDataSources';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Empty, Spin, Tabs } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { CloseOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { getAgentChatAvatar } from '@/utils/agent';
 import Knowledge from '@/layout/sider/components/Knowledge';
@@ -33,6 +33,7 @@ const SESSION_FILE_TAB_LABEL_IDS: Record<SessionFileTabKey, string> = {
 
 interface ResourcePanelProps {
   sessionId: string;
+  onClose?: () => void;
   projectId?: number;
   cloudResourceId?: string | number;
   onOpenDetail: (panel: React.ReactNode, options: DetailPanelOptions) => void;
@@ -47,7 +48,13 @@ function canPreviewAttachment(item: FileBrowserItem) {
   return !isDirectory(item);
 }
 
-const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, cloudResourceId, onOpenDetail }) => {
+const ResourcePanel: React.FC<ResourcePanelProps> = ({
+  sessionId,
+  projectId,
+  cloudResourceId,
+  onOpenDetail,
+  onClose,
+}) => {
   const intl = useIntl();
   const isEnglish = intl.locale.toLowerCase().startsWith('en');
   const activeEmployee = useActiveSiderAgent();
@@ -248,6 +255,18 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
         <Tabs
           className={styles.primaryTabs}
           size="small"
+          tabBarExtraContent={
+            onClose ? (
+              <Button
+                type="text"
+                className={styles.resourceCloseButton}
+                icon={<CloseOutlined />}
+                aria-label={intl.formatMessage({ id: 'chatResource.closeList' })}
+                title={intl.formatMessage({ id: 'chatResource.closeList' })}
+                onClick={onClose}
+              />
+            ) : undefined
+          }
           activeKey={upperScopeKey}
           onChange={(key) => setUpperScopeKey(key as UpperScopeKey)}
           items={[

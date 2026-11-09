@@ -1,10 +1,13 @@
-import { normalizeInstanceRefs } from '@/utils/desktopInstances';
+import useAppStore from '@/models/common/useAppStore';
+import { desktopKey, normalizeInstanceRefs, resolveDesktop } from '@/utils/desktopInstances';
+import useGlobal from '@/hooks/useGlobal';
 import React, { useEffect, useRef } from 'react';
 import { Button, Dropdown, message, Tooltip } from 'antd';
 import {
   CheckOutlined,
   CloseOutlined,
   CopyOutlined,
+  DesktopOutlined,
   DownOutlined,
   FileTextOutlined,
   LoadingOutlined,
@@ -86,6 +89,7 @@ type ToolCallComponent = React.FC<IProps> & {
 
 const ToolCall: ToolCallComponent = (props) => {
   const intl = useIntl();
+  const { EventEmitter } = useGlobal();
 
   const substance = get(props, 'messageListItemContent.substance');
 
@@ -93,14 +97,33 @@ const ToolCall: ToolCallComponent = (props) => {
   const { title, input, output, status, description } =
     typeof substance === 'string' ? ({ title: substance } as IToolCallSubstance) : substance || {};
 
-  const refs = normalizeInstanceRefs(props.messageListItemContent?.instanceRefs);
+  const instanceRefs = normalizeInstanceRefs(props.messageListItemContent?.instanceRefs);
+  const desktopRefsKey = instanceRefs.map(desktopKey).join();
+  const canCheckDesktop = Boolean(props.message?.sessionId && instanceRefs.length);
+  const directory = useAppStore((state) => (canCheckDesktop ? state.sandboxesInfo : undefined));
+  useEffect(() => {
+    if (!canCheckDesktop) return;
+    const refresh = () =>
+      void useAppStore
+        .getState()
+        .getSandboxesInfoUrl()
+        .catch(() => {});
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [canCheckDesktop, props.message?.sessionId, desktopRefsKey]);
+
+  const running = Array.isArray(directory) ? directory.filter((row) => row.status === 'RUNNING') : [];
+  const refs = instanceRefs.filter((ref) => {
+    const desktop = resolveDesktop(running, ref);
+    return Boolean(desktop?.row.instanceEndpoints?.[ref.instance]?.trim());
+  });
   const openDesktop = (index: number) => {
     if (!props.message?.sessionId) return;
-    window.dispatchEvent(
-      new CustomEvent('byclaw-desktop-open', {
-        detail: { owner: JSON.stringify(['session', String(props.message.sessionId)]), ref: refs[index] },
-      })
-    );
+    EventEmitter.emit('byclaw-desktop-open', {
+      owner: JSON.stringify(['session', String(props.message.sessionId)]),
+      ref: refs[index],
+    });
   };
   const inputText = formatDetail(input);
   const outputText = formatDetail(output);
@@ -191,25 +214,38 @@ const ToolCall: ToolCallComponent = (props) => {
         {status === '_ERROR_' && <CloseOutlined className={classnames(styles.statusIcon, styles.error)} />}
         <span className={styles.toolIdentity}>{toolName || intl.formatMessage({ id: 'toolCall.defaultTitle' })}</span>
         {description && <span className={styles.description}>{description}</span>}
+        {refs.length > 0 && props.message?.sessionId && (
+          <div style={{ marginInlineStart: 'auto', flexShrink: 0 }} onClick={(event) => event.stopPropagation()}>
+            {refs.length === 1 ? (
+              <Button
+                type="text"
+                size="small"
+                aria-label="查看桌面"
+                icon={<DesktopOutlined />}
+                onClick={() => openDesktop(0)}
+              >
+                查看桌面
+              </Button>
+            ) : (
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  items: refs.map((ref, index) => ({
+                    key: String(index),
+                    label: `${ref.instance} · ${ref.sandboxId}`,
+                  })),
+                  onClick: ({ key }) => openDesktop(Number(key)),
+                }}
+              >
+                <Button type="text" size="small" aria-label="查看桌面" icon={<DesktopOutlined />}>
+                  查看桌面 <DownOutlined />
+                </Button>
+              </Dropdown>
+            )}
+          </div>
+        )}
         {hasDetail && <span className={styles.collapseIcon}>{expanded ? <DownOutlined /> : <RightOutlined />}</span>}
       </div>
-
-      {refs.length > 0 &&
-        props.message?.sessionId &&
-        (refs.length === 1 ? (
-          <Button size="small" onClick={() => openDesktop(0)}>
-            查看桌面
-          </Button>
-        ) : (
-          <Dropdown
-            menu={{
-              items: refs.map((ref, index) => ({ key: String(index), label: `${ref.instance} · ${ref.sandboxId}` })),
-              onClick: ({ key }) => openDesktop(Number(key)),
-            }}
-          >
-            <Button size="small">查看桌面</Button>
-          </Dropdown>
-        ))}
       {expanded && hasDetail && (
         <div className={styles.detail}>
           {inputText && renderSection('input', inputText, isContextEvent ? 'contextEvent.input' : undefined)}

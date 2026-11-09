@@ -311,12 +311,12 @@ viewer 是前端已注册的展示适配器名称，首版实现 novnc；普通 
 1. 用规范化引用精确匹配当前认证身份的清单行及实例 key；共享映射必须完整匹配。
 2. URL、endpointHeaders 等访问数据只从授权清单取得，不接受工具事件自带地址。iframe 导航不能任意附加请求头；首版直接嵌入只接入现有完整授权 URL 或可用的 Cookie/代理入口。必须附加 endpointHeaders 才能访问的来源，需要由受控服务端访问适配器换成可导航入口，适配未就绪时明确提示不支持，不静默丢弃鉴权头，也不通过 postMessage 传递凭证。
 3. 完整保留地址的 host、path 和查询凭证；URL 处理集中在对应访问适配器，仅对明确的代理目录规则补尾斜杠，不给 vnc.html 等文件路径追加斜杠。保留服务器提供的 sessionId 等路由参数，不能用聊天 ID 替换。首版身份粒度为 spec 入口，不承诺为同一端口下每个浏览器租约额外隔离桌面。
-4. 明确目标暂时缺失时，复用现有端点刷新预算（最多 30 次、间隔 2 秒），显示“正在准备”；超时显示“暂时无法获取访问入口”。不改选其他沙箱。
+4. 明确目标暂时缺失时，复用现有端点刷新预算（最多 30 次、间隔 2 秒），显示“正在准备”；成功获取目录后仍无该身份，预算耗尽显示“实例不可用”，说明可能已释放或不再授权，可手动从“全部桌面”选择其他实例。目录中有该身份但入口未就绪时显示“暂时无法获取访问入口”。保留旧引用与页签，不自动改选其他沙箱。
 5. 保留已关联条目。清单请求失败、返回空数组或某行消失都不能将其标记为“已退出”。
 6. HTTP 暖机与 RFB 连接确认分开：现有入口若具备可靠的同源或已授权 CORS 响应，可保留访问适配器中最多 30 次、间隔 2 秒的有界准备等待，对明确的临时 5xx 重试；401/403 提示鉴权问题，不当作可用。该等待只优化首次页面加载，不等于已连接。对不可可靠读取 HTTP 的跨域入口，不以 fetch/CORS 成败或不透明响应阻止 iframe 加载。地址存在但代理尚未准备好时仍可能先显示错误页：外层保留当前目标、超时提示与“重新连接”，重试重新取地址并重新加载；不因没有状态事件而自动循环刷新可能仍可用的旧页面。连接证据统一来自 iframe 事件。
 7. 访问凭证更新只更新当前实例的访问数据，实例身份不变；重连或重新打开时使用最新地址。
 
-端点解析与 HTTP 暖机共用本次打开的 60 秒总预算，各自最多 30 次、间隔 2 秒；单次请求设不超过 5 秒且不超过剩余预算的超时。用户取消、切换 owner 或请求被手动重试取代时停止本次等待；共用目录请求只撤销本次订阅，不中断其他实例的合法等待。任一预算耗尽即退出准备态，提供手动重试，不能因一次请求永久 pending 而一直显示“正在准备”。后续 iframe 的 15 秒状态提示预算按第 7.2 节单独处理。
+端点解析与 HTTP 暖机共用本次打开的 60 秒总预算，各自最多 30 次、间隔 2 秒；单次请求设不超过 5 秒且不超过剩余预算的超时。下次调度不得超过截止时间，截止后不再发起请求；已有成功目录结果时，总预算耗尽不能误报“清单获取失败”，真实目录请求失败仍保留失败提示与重试。用户取消、切换 owner 或请求被手动重试取代时停止本次等待；共用目录请求只撤销本次订阅，不中断其他实例的合法等待。任一预算耗尽即退出准备态，提供手动重试，不能因一次请求永久 pending 而一直显示“正在准备”。后续 iframe 的 15 秒状态提示预算按第 7.2 节单独处理。
 
 目录投影需要覆盖实际提供者：本地管理路径由 ByClaw BE 生成描述；platformRemote 路径由平台控制面返回并经 BE DTO 透传；共享路径同时覆盖平台的上下文端点投影和 SharedSandboxGateway 转换。旧平台响应缺描述时按旧入口规则降级。共享上下文没有授权的桌面端点时，不得从物理 host 的 spec 额外补出桌面地址；新增共享桌面能力必须先具备对应的上下文路由与授权。
 
@@ -770,6 +770,122 @@ node --test middleware/tests/shared-builtin-portability.test.mjs
 当前审查与已完成验证范围内没有剩余确认回归。仍有环境边界：tool-env 的既有 SDK 类型错误、部分旧 browser 套件缺依赖、integration 完整构建未验证；HACU 额外旧重连用例在修改前源码也失败；没有完成真实容器、多沙箱 SSH/RFB、跨域或手机端联调。上线前必须确认已授权 V0.6.0 中新增快照字段实际执行，不能仅凭该版本已标记 applied 判断字段已存在。本轮兼容复审没有修改 SQL、initdb 或 `.applied`，没有执行部署；功能包含的 SQL 迁移仍位于已授权的 V0.6.0 目录。
 
 审查中的缺陷均先通过回归用例确认，再实施修复并复验。逐文件改动以功能提交的 diff 为准；上述验证边界是本次交付范围的一部分。
+
+### 11.5 云端实测后的访问适配补充（2026-11-06）
+
+云入口的 `e2b-traffic-access-token` 与业务网关 query token 是两层凭证。`ports[].exposure: public` 决定访问域名，并不取消云入口鉴权。浏览器 iframe 与原生 WebSocket 不能附带任意云请求头，因此由后端提供按实例精确鉴权的同源导航入口。
+
+```mermaid
+sequenceDiagram
+    participant F as ByClaw / HACU
+    participant B as ByClaw BE
+    participant P as Platform
+    participant C as 云入口与沙箱 noVNC
+    F->>B: 查询当前用户授权目录
+    B->>P: 读取实例元数据与访问凭证
+    P-->>B: 精确实例、快照、endpointHeaders
+    B-->>F: noVNC 导航地址替换为同源实例路径
+    F->>B: SESSION + GET 同源桌面路径
+    B->>B: 校验当前用户、sandboxId、instance、mappingId
+    B-->>F: 包内固定查看器 HTML / JS / 通用 bridge
+    F->>B: GET / POST goal
+    B->>C: 注入云请求头，读取或控制 goal
+    C-->>B: JSON 状态
+    B-->>F: 有界、严格解析的 JSON
+    F->>B: 同路径前缀的 WebSocket 握手
+    B->>C: 带云请求头的上游 WebSocket
+    C-->>F: 双向 RFB 帧经代理转发
+    F->>F: 受信 iframe 根据 RFB 事件 postMessage：connect / disconnect
+```
+
+受保护的桌面在 `getSandboxInfo.instanceEndpoints` 中使用如下路径，内部运行时元数据和 SSH 入口仍保留原地址：
+
+```text
+/byaiService/sandbox/desktop/exclusive/{sandboxId}/{instance}/
+/byaiService/sandbox/desktop/shared/{mappingId}/{sandboxId}/{instance}/
+```
+
+共享 mapping 必须处于路径中，以便 HTML、相对资源及 `websockify` 使用同一授权身份。文件型入口允许同一 tuple 下的单个 HTML 文件。前端只对同源且精确匹配引用的上述导航地址豁免 `endpointHeaders` 限制；不能据此放行任意外部 URL。
+
+HTTP 和 WS 均使用有效浏览器 Session 与当前授权目录，不允许客户端提供上游 IP、端口或凭证，也不新增旧会话必须具备独立租户成员记录的前置条件。WS 显式接入现有认证与租户选择拦截器，按相同 tuple 解析目标。浏览器 Cookie、Beyond-Token 等登录凭证不向云端透传；云鉴权头只在服务端注入。重定向不携回网关凭证，WS 不跟随上游跨地址跳转。
+
+沙箱内文件或服务响应可由所有者或工具控制，不能把其中的 HTML/JS 放到主应用同源下执行。同源查看器只使用后端包内固定、可校验的 HTML、原版 noVNC ESM 模块与通用 bridge；不代理沙箱页面、模块或任意静态路径。Maven 原样打包唯一源文件 `middleware/byclaw-harness/browser/novnc-index.html`、`middleware/builtin/runtime-tools/browser-viewer/connection-bridge.mjs`，以及位于原 HTML 同级目录 `middleware/byclaw-harness/browser/desktop-viewer/v1/` 的受信资源；不保留后端源码目录中的副本，不替换 HTML 或修改上游模块。构建要求保留完整仓库布局，缺页面、bridge 或 `core/rfb.js` 即在 validate 阶段失败；运行时只读取 JAR 内私有 classpath 资源，不需要仓库、Docker 或沙箱文件。普通 Maven 构建只打包现成资源，不执行 Node、Docker、npm 或下载。
+
+noVNC 改为在资源准备阶段从已检查的固定镜像 `192.168.0.81:8080/byclaw/byclaw-harness@sha256:1868e6a58ca1efce6b01740dd88439bc77e6d739a4afa82885b7dd3ef197446f`（`linux/amd64`，Debian `novnc 1:1.6.0-2`）提取。来源是镜像原有 `/opt/byclaw/novnc/core/rfb.js` 及完整的 52 个可达 ESM 模块，而不是运行中沙箱的响应。临时容器只 create/copy 后清理，不启动、不拉取镜像，不依赖 npm/esbuild，不做 CommonJS 转换或顶层 await 修补。`extract-desktop-viewer.mjs`、`desktop-viewer.lock.json`、`desktop-viewer.test.mjs` 与资源集中维护；锁定镜像 digest、平台、原始文件哈希及受控离线源包的完整校验和，保留同镜像的 Debian copyright 和引用的 MPL-2.0 全文，模块字节保持原样。
+
+离线包只接受仓库锁文件预先记录的校验和与大小，不接受输入 JSON 自报摘要作为信任依据。该校验确认受控提取制品，没有独立重建完整 OCI manifest/config/layer 摘要链；记录 Docker 观测标识时不将未验证的 `.Id` 冒称 config blob digest。更新固定镜像或离线源包须经过相同的来源检查与锁文件审查。提取器校验依赖闭包与文件哈希，拒绝远程、缺失、越界导入和不安全归档成员，不提取 HTML、bridge 或 HTML 别名 symlink。源包作为受控制品保存，不随源码重复提交。
+
+后端公开 `/index.html`、`/connection-bridge.js`，以及包内 `manifest.json.publicAssets` 中精确登记的 `core/`、`vendor/` JavaScript 路径。manifest 只从应用私有 classpath 启动加载，校验 schema、条目数、entry、路径、文件大小及 SHA-256，缓存为不可扩充的资源映射。请求、沙箱目录和上游响应都不能提供或修改白名单，manifest 与许可证自身不公开，缺文件或哈希不匹配阻止启动。旧 `/rfb.js` 在鉴权后 307 到同一 tuple 的 `/core/rfb.js`，使原 ESM 的相对 import 基于正确位置；其他合法 HTML 入口仍在鉴权后跳转到同一实例的 `/index.html`，只保留查看器参数。CI 已覆盖页面、bridge 与整个 desktop-viewer 目录。原 Nginx `/byaiService` 通用代理支持 Cookie 与 WebSocket Upgrade，并继承 server 长超时，主仓模板保持原样。
+
+HTTP 上游只允许精确 `/goal` 的 GET 与原有同源控制 POST。响应必须是大小受限、无尾随内容的 JSON 对象，解析后重新序列化；不透传上游响应头、错误正文或重定向，固定 JSON MIME、nosniff 和禁止脚本的 CSP。原 OpenClaw HTTP 转发及下载保持原行为。真实桌面帧超过默认 WebSocket 消息限制时会触发 1009，因此仅桌面 session 使用有界的 binary 2 MiB / text 64 KiB 限制。
+
+HTTP 公网 IP 部署可能没有 Fetch Metadata 头，而通用代理的 `$host` 可能丢失公网端口。后端通过构造器 `@Value("${sandbox.desktop.allowed-origins:${SANDBOX_DESKTOP_ALLOWED_ORIGINS:}}")` 直接读取逗号分隔的受信任完整 HTTP(S) Origin；支持显式小写属性、环境变量或本地 `.env` 加载的大写 JVM 属性，无需在两份 application.properties 重复映射。该允许列表仅在缺少 `Sec-Fetch-Site` 时作为原 servlet scheme/host/port 严格比较的补充。显式 cross-site、same-site、none 仍拒绝；缺失、非法 Origin 仍拒绝。配置不允许通配符、凭证、路径（含尾部斜杠）、query 或 fragment，非法配置启动失败，空配置保留原严格行为。默认端口作规范化比较；不根据任意 Forwarded 头或请求 Origin 自动建立信任，不复用 artifact preview 域名配置。配置只影响桌面 WS 和 goal 控制 POST，不替代当前登录、租户或实例权限校验。standalone 的 `.env` 已通过 env_file 传给后端；其他部署需显式提供变量或属性，修改后重启后端。验收时还需确认实际提供静态页面的容器与页面引用的构建文件一致；不能用另一前端容器中的新文件推断当前页面已更新。
+
+Platform 冷恢复或旧缓存缺少访问头时复用现有 provider 获取凭证，provider 仍要求真实 running 与 owner 匹配。单个不可授权实例从公开目录省略；内部 null 缓存占位表示尚未成功观察，下次只重试失败项，不能把 null 当作公开无鉴权入口。已成功观察的空 map / 非空 map 继续复用，保持 Redis 单机及 Cluster 通路。
+
+桌面资源和状态请求通过既有 `service/info` 的可选精确 sandboxId 查询，在访问恢复前筛选目标，避免已暖好的桌面因其他异常实例被反复拖慢。省略 sandboxId 时保留原完整目录行为，共享上下文覆盖和最终 tuple 校验仍按原规则执行。
+
+浏览器工具镜像的完整构建与 runtime-update 目标都必须从当前源码复制 noVNC 页面和 canonical connection bridge，不能只继承旧 donor 目录。已运行的旧镜像可能缺少桥接文件；仅更新平台/前端并不能补齐它。静态资产或构建夹具检查不等于真实 RFB 验收，现场连接结果单独记录。
+
+运行时 viewer gateway 的 HTTP 与待完成的 WebSocket 握手保留超时；只有收到完整、合法且大小受限的上游 101 响应后，才取消两端 socket 的 HTTP 空闲超时，允许已建立的桌面空闲。显式断开、会话关闭与运行时关闭仍回收连接。运行中的进程不会热加载此模块，发布需通过所属运行时的正常重建或重启流程，不能单独杀死受监督的 browserd。
+
+自动弹出验证应使用新会话的首次工具获取。会话已人工打开桌面后，现有 handled 防打扰策略允许登记新引用而不再次抢开。模板配置变更只作用于新分配的配置快照，不能把旧实例的显式空绑定当作 legacy 缺省覆盖。
+
+上轮原文件复用验证：后端 `clean verify` 成功，7175 项中 56 项跳过、零失败及错误；vendor 4 项测试与国内源实际下载重建检查通过。最终 JAR 的 10 个查看器资产逐字节比对通过，HTML/bridge 与唯一源文件一致，不包含旧副本名。完整源码构建和分别缺少 HTML、bridge 的三个 Maven 校验场景符合预期。
+
+本轮 vendor 迁移与可信 Origin 验证：后端 `clean verify` 成功，7212 项中 56 项跳过、零失败及错误；其中桌面定向回归 63 项通过。vendor 4 项测试、国内源实际下载重建检查、两份 Harness Dockerfile 的静态布局检查均通过。最终 JAR 的 10 个查看器资产逐字节匹配源文件，原页面、bridge、RFB 字节未变，不含旧副本名或 META-INF/resources 下的查看器副本；完整布局与分别缺失页面、bridge、RFB 的四个 Maven 校验场景符合预期。主仓 Nginx 模板与 HEAD 逐字节一致。
+
+本机真实 Nginx 1.27.1 使用撤销专用 location 后的模板，通过 66 项断言：保留原通用 Host 改写及 Cookie/Upgrade 转发，无 Fetch Metadata 时，配置精确 Origin 的 HTTP/HTTPS goal GET、POST 与 WS/WSS 握手均成功，96 KiB 二进制回显一致；错 Origin、错端口、显式跨站、无 Session、错误 sandbox 与空允许列表的端口不匹配均拒绝。受控 cloud 只收到合法请求，云鉴权头保留，浏览器 Cookie/Beyond-token/Authorization 不向上游转发。该夹具使用真实 Access、Controller、WebSocket 配置及代理，外部登录/租户、目录记录与上游为受控依赖；未验证生产登录或真实云沙箱。本轮未提交、推送或部署。
+
+工具目录迁移验证：三份维护工具已集中到 `middleware/byclaw-harness/browser/desktop-viewer/`，BE scripts 保持零改动。Node 4 项测试、国内源在线重建检查、离线检查及非仓库工作目录执行均通过；干净 `package` 和桌面回归 63 项通过。新 JAR 的 10 个查看器资产逐字节匹配来源，包含新 manifest provenance，不包含维护工具或公共静态副本；RFB、锁文件与许可/作者文件内容保持不变。POM 继续只负责私有资源打包及缺源检查。
+
+最终配置策略：保留 `SANDBOX_DESKTOP_ALLOWED_ORIGINS` 可选设计，默认不配置，不从 `HOST_PUBLIC`、Ingress 主机、别名或端口自动生成受信 Origin。现有同源判定和登录、租户、实例鉴权继续执行。仅在具体部署确需处理代理改写导致的合法请求拒绝时，显式配置受信完整 Origin 并重启后端；空配置不代表跳过来源校验。
+
+### 固定镜像原生模块复用验证（2026-11-07）
+
+本节记录当前固定镜像方案的验证；上文 4 项 vendor 测试和 10 个 JAR 资源等数据属于此前 npm 产物方案的历史记录。
+
+提取器 26 项测试通过，覆盖归档边界、锁定源完整性、静态模块闭包、原版 RFB 实际加载及 Docker 创建/复制/清理约束。已在真实 Docker 主机针对固定 digest 完成默认提取和 `--check`，没有拉取或启动镜像，临时容器全部清理；另从空目录使用已锁定校验和的离线源包重建，55 个产物逐字节一致。后端 `clean verify` 的 7238 项测试中，56 项跳过，零失败及错误；最终 JAR 的 57 个私有资源完整匹配来源，包括 52 个原生模块、原页面、bridge、manifest 和许可证，不包含公共静态旁路。Platform 定向 53 项验证通过，包含真实 PostgreSQL 与 Redis 单机、六节点 Cluster。
+
+真实浏览器验证使用最新后端类与资源、原通用 Nginx 代理、真实 `SandboxController.getSandboxInfo` 投影和前端 `resolveDesktop` 函数；外部登录/目录来源和云端 RFB 服务是受控依赖，不代表生产 SSO 或真实云沙箱验收。两个受保护沙箱分别加载完整 52 模块并完成 RFB 握手和 framebuffer 展示；A 断开时 B 保持连接，A 重连进入 attempt 2；随后 B 断开时 A 保持连接，B 重连后两者均为 connected/attempt 2。父页收到的事件始终对应各自 sandboxId、instance、channelId 和 attemptId，错配的 sb-a/vnc-b 引用无法解析。截图与最终观察记录保存在会话验证产物中。
+
+该受控链路还通过 721 项自动断言：HTTP/HTTPS 下两套身份的全部模块返回正确 MIME 和哈希，HTML 与 legacy RFB 307 保留正确身份及安全参数，goal GET/POST 和 WS/WSS 均成功；错 Origin/端口、显式跨站、缺少控制头、无 Session、错 tuple 及私有文件请求均拒绝。上游保留 provider 鉴权头，不收到浏览器 Cookie、Beyond-token 或 Authorization。验证结束后 Java/Nginx 正常退出，四个临时端口均关闭。
+
+前端生产构建及三项非修复 lint 通过。真实提交 hook 的完整 Jest 回归为 588 套通过、4 套跳过；5165 项断言通过、47 项跳过，零失败。运行时 viewer/session 27 项测试、与项目声明一致的 TypeScript 5.9.3 类型检查及两份 Harness Dockerfile 静态布局检查通过。提交 hook 的后端 clean test 再次确认 7238 项、56 项跳过，零失败及错误。
+
+推送前同步了 Platform 远端新增的共享宿主释放与私密文件路由提交，VNC 核心代码及其定向测试字节未变。扩大回归暴露既有测试隔离问题：普通存储测试调用的 helper 将 ROOT 日志级别留在 WARN，后续共享池 INFO 日志断言无法捕获事件。仅在该日志断言内保存目标 logger 原 Level、临时使用 INFO，并在 finally 恢复原值；不修改生产配置、ROOT 级别或原日志/敏感内容断言。固定两套测试的执行顺序后通过；同步后的真实 JDK8、PostgreSQL 完整 `clean verify` 最终为 1107 项、14 项跳过、零失败及错误，包含真实 Redis 单机和 Cluster 集成测试。
+
+本轮原 HTML、通用 bridge、鉴权类、桌面 WebSocket 类和主仓 Nginx 模板未被资源提取调整改写。镜像 Dockerfile 的静态布局检查与真实固定源资产读取通过；业务浏览器镜像的完整重建和新版服务的生产部署不属于上述本地链路验证结论。
+
+### 11.10 线上诊断后的 Host 与过期引用修正（2026-11-07）
+
+当前 HTTP 公网端口部署的通用 `/byaiService` 代理将 `Host $host` 改为 `Host $http_host`，保留浏览器请求中的主机和显式端口。仅修改该 location 的 Host 转发；Cookie、Upgrade、长超时和其他路由继续沿用原配置，无须桌面专用 location。实际部署的生成配置与模板需同步更新，并执行 `nginx -t` 和平滑重载。此修正不关闭 Origin 检查，默认仍不配置可信 Origin 列表；HTTP 请求的 Origin 可直接与 servlet 的 scheme/host/port 严格匹配。若另有 TLS 终止或多层代理导致 scheme 不同，仍需按实际部署配置可信 Origin 或正确的受信代理策略，不能据此声称所有 HTTPS 代理情形均无需配置。
+
+沙箱已释放时，旧引用不能恢复原物理实例，也不能被相同模板的新实例替代。前端仅根据成功返回的授权目录判断“当前不可用”，不将目录缺项当作“已退出”的确定证据；新实例通过新工具引用关联，或由用户从“全部桌面”显式添加。60 秒等待边界必须区分目录请求失败、目标缺失和入口未就绪。该修正集中在 `DesktopWorkspace`，不修改 `useHandler`、实例身份契约、后端鉴权、Platform 或 Harness。
+
+验证：真实 Nginx 与后端夹具 89 项断言通过，包含空 Origin 允许列表时 HTTP/WS 的主机和端口匹配、错误 Origin/端口、跨站、无 Session、错误沙箱拒绝及二进制回显；TLS 终止情况下未隐式信任转发头。桌面组件、目录与解析回归 49 项通过。线上 Nginx 已同步生成配置及模板，检查后平滑重载；2026-11-07 09:59:14 的受保护 DSH 桌面 WS 为 101，实际画面显示 Example Domain。该次连接通过手动打开已授权实例的同源查看器验证。聊天页中该 DSH 的目录仍给出云端直连地址，嵌入时被 Chrome 屏蔽；当前运行环境也未注册 `sandbox_acquire`，因此不能将本次成功扩展为“工具沙箱申请、工具引用关联、聊天内自动打开”的完整生产验收。前端本轮提示修正尚未部署。
+
+### 11.11 临时采用精确 hostname 校验（2026-11-07）
+
+按本轮明确要求，当前最终策略覆盖 11.10 的严格同源比较：桌面 WS 与 goal POST 仍要求合法 HTTP(S) Origin，但默认只将 Origin 的 hostname 与 servlet hostname 作不区分大小写的精确比较，不比较协议和端口，也不以 Fetch Metadata 独立放行或拒绝。已有显式可信 Origin 列表保留为兼容例外，该例外仍按完整协议、hostname 和有效端口精确匹配；默认列表为空。不信任任意 Forwarded 头，也不根据来信自动扩充允许范围。
+
+父域、子域、兄弟域名及形似后缀不会自动互信。例如 `example.com` 不匹配 `desktop.example.com`，`desktop.example.com.attacker.test` 也不匹配 `desktop.example.com`。iframe 内 WS 使用 iframe 文档自身的 Origin：父页为 `chat.example.com`、iframe 和 WS 目标均为 `desktop.example.com` 时，桌面 WS 可按后者匹配。这仅描述 WS 来源比较：当前受保护查看器仍发送 `X-Frame-Options: SAMEORIGIN` 和 CSP `frame-ancestors 'self'`，父子页面协议、域名或端口不同的跨域嵌入仍会被浏览器拦截，不能据此宣称已支持跨域 iframe。父子页 postMessage 的 source、origin、channel 和 attempt 校验保持原逻辑。
+
+安全待办已写入 `SandboxDesktopAccess.allowedOrigin`：hostname 相同的其他应用即使协议或端口不同，也可通过此来源检查；Session Cookie 不按端口隔离，因而可能借用已登录浏览器的桌面访问权限。后续需要恢复严格 Origin 隔离或重新收敛可信来源策略。当前仍执行登录 Session、租户、所属用户、分配运行态、沙箱及实例身份检查；此调整不扩大匿名访问。此前 Nginx 的原始 Host/端口透传保持，但端口保留已不再是这项临时检查的前提。本轮后端行为须随新版后端部署后才会在线上生效。
+
+### 11.12 同主域接口授权与跨子域 iframe 嵌入（2026-11-07，当前最终策略）
+
+按后续明确要求，本节替代 11.11 的精确 hostname 方案，并同时覆盖实际 iframe 嵌入。接口仍要求合法 HTTP(S) Origin，允许精确 hostname 相同，或可注册主域（eTLD+1）相同；协议、端口及 Fetch Metadata 不独立限制这项域名比较。复用当前 OkHttp 4.12.0 内置 Public Suffix List（包含私有托管后缀），不新增依赖、网络查询或下载器，也不按“最后两段”或任意字符串后缀判断。`example.com`、`chat.example.com` 和 `desktop.example.com` 可互通；`a.example.com.cn` 与 `b.other.com.cn`、不同 `co.uk` 注册域及 `a.github.io` 与 `b.github.io` 不互通。IP、localhost 和公共后缀本身没有可注册主域，只作精确 hostname 比较。已有显式可信完整 Origin 列表继续作为接口授权兼容例外。
+
+受保护查看器的 CSP `frame-ancestors` 由 servlet hostname 的可注册主域生成，默认允许自身、该主域及精确 hostname 的 HTTP(S) 父页、任意端口。兄弟子域或其他同主域父页，从浏览器 Referer 提取具体 Origin 后再次按 PSL 核验主域，逐个加入 CSP；不使用 `*.主域` 通配符，避免越过更深的私有公共后缀委派（例如 `bucket.s3.amazonaws.com`）。父页主动隐藏 Referer，或多层 iframe 中其他祖先页未被识别时，须在既有 `sandbox.desktop.allowed-origins` 中列出完整 Origin，只有与查看器可注册主域相同的配置项会加入 CSP，跨主域的接口例外不会扩大嵌入范围。不根据请求 Origin 或 Forwarded 头建立父页信任。IP 和不可归组的 hostname 仍保持 `'self'` 嵌入。保留 `X-Frame-Options: SAMEORIGIN` 为旧浏览器提供严格回退；支持 CSP 的现代浏览器按 `frame-ancestors` 执行，允许已核验的同主域父子、兄弟子域嵌入。HTTPS 父页仍须使用 HTTPS 查看器，不能绕过浏览器混合内容规则。
+
+跨子域 iframe 必须携带查看器域上的有效 Session。项目已有 `server.session.cookie.domain` 配置，确需共享 Cookie 时可按部署设置为具体业务主域（例如 `example.com`），或由现有 SSO 完成查看器域登录；本次不自动修改全局 Cookie 配置。父子页面消息桥继续精确校验 iframe URL origin、source、channel 和 attempt，不对 postMessage 使用主域比较。
+
+代码安全待办同步说明：同一可注册主域下的应用和全部子域被临时视作互信，其他子域可能借用已登录浏览器的桌面访问或嵌入其控制界面；后续需恢复严格 Origin/嵌入隔离或收敛可信域。登录、租户、所属用户、RUNNING 分配态及精确沙箱/实例身份校验继续执行。本轮新策略须随新版后端部署后生效，Nginx 保留原始 Host 和端口的改动继续保留。
+
+最终验证：后端当前代码的完整 `clean test` 与 `verify` 均通过，7282 项、56 项跳过、零失败和错误；前端提交钩子重新运行 588 个套件、5170 项断言通过。独立代码复核发现并修复了 CSP 通配符跨更深私有 PSL 委派、以及畸形 Referer 两套解析规则导致空指针的问题，均先复现失败再修复。
+
+真实 Chrome、当前后端类、通用 Nginx、原生 52 模块 noVNC/RFB 与消息桥的本地受控链路验证：`localtest.me` 父页嵌入子域、`a.localtest.me` 嵌入兄弟子域与父域均显示真实 RFB 图案；A 断开时 B 状态保持，A 重连后状态恢复；`other.lvh.me` 的异主域父页被浏览器拦截。两个 tuple 共加载 104 个模块路径，9 次 WS 连接中包含独立的 HTTP/WS 域名探针，6 次 RFB 初始化成功，cloud 未收到浏览器 Cookie/Beyond-token/Authorization。接口探针另有 21 项断言通过，覆盖同主域跨协议/端口、异域和后缀仿冒、缺少 Session、具体 CSP 父域与 Referer query 不被反射。本次是外部登录/目录与 RFB 服务受控的本地验证，不代表生产 SSO、实际 DNS/证书或生产跨子域部署验收；未自动修改生产 Cookie 域或部署本轮后端。
 
 ## 12. 参考源码
 

@@ -1,3 +1,4 @@
+import { isRetiredResource } from "./retired-resources.js";
 import { promises as fs } from "node:fs";
 import type { AdaptedManagedAgent } from "./agent-adapter.js";
 import { parseCorePersonaDefinition } from "./core-persona-definition.js";
@@ -339,7 +340,7 @@ function buildEvidenceContract(integrationType: string | undefined): string {
 }
 
 function collectResourceFragments(adapted: AdaptedManagedAgent): string[] {
-  const resources = adapted.associatedResources ?? [];
+  const resources = (adapted.associatedResources ?? []).filter((resource) => !isRetiredResource(resource));
   const out: string[] = [];
   const seen = new Set<string>();
   for (const resource of resources) {

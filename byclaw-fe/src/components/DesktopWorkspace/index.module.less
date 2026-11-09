@@ -1,0 +1,232 @@
+.workspace {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #fff;
+}
+
+.workspaceHeader {
+  display: flex;
+  align-items: flex-end;
+  flex: none;
+  height: 42px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid #eef0f3;
+  background: #f8f9fb;
+}
+
+.workspaceTabs {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+
+  :global {
+    .@{antPrefix}-tabs-nav {
+      height: 38px;
+      margin: 0;
+    }
+
+    .@{antPrefix}-tabs-nav::before {
+      border-bottom: 1px solid #d9dde5;
+    }
+
+    .@{antPrefix}-tabs-nav-list {
+      align-items: flex-end;
+      // 为首个标签的左侧边框预留空间，避免被导航容器裁切。
+      padding-left: 1px;
+    }
+
+    .@{antPrefix}-tabs-nav-more {
+      padding: 0 8px !important;
+    }
+
+    .@{antPrefix}-tabs-content-holder {
+      display: none;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      max-width: var(--desktop-tab-max-width, 260px);
+      height: 36px;
+      margin: 0 2px 0 0 !important;
+      padding: 7px var(--desktop-tab-padding, 12px) !important;
+      border: 0 !important;
+      border-radius: 12px 12px 0 0 !important;
+      background: #eef1f5;
+      color: #667085;
+    }
+
+    .@{antPrefix}-tabs-tab:hover {
+      background: #e4e8ee;
+      color: #344054;
+    }
+
+    .@{antPrefix}-tabs-tab-active {
+      background: #fff;
+      color: #14161a;
+      box-shadow: 0 -1px 0 #d9dde5, 1px 0 0 #d9dde5, -1px 0 0 #d9dde5;
+    }
+
+    .@{antPrefix}-tabs-tab.@{antPrefix}-tabs-tab-active .@{antPrefix}-tabs-tab-btn {
+      color: #14161a;
+      text-shadow: none;
+    }
+
+    .@{antPrefix}-tabs-tab-btn {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .@{antPrefix}-tabs-tab-icon {
+      flex: none;
+      margin-right: 6px;
+    }
+
+    .@{antPrefix}-tabs-tab-remove {
+      flex: none;
+      margin-left: 10px;
+      color: #667085;
+    }
+
+    .@{antPrefix}-tabs-tab-remove:hover {
+      color: #1f2937;
+    }
+  }
+}
+
+.tabLabel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tabName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabIdentity {
+  flex: none;
+  white-space: nowrap;
+}
+
+.singleDesktopTitle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  min-width: 0;
+  padding: 0 8px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.toolbarActions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  height: 38px;
+  padding-left: 6px;
+  margin-left: 6px;
+  border-left: 1px solid #e5e8ed;
+
+  button {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    color: #475467;
+  }
+}
+
+.desktopTabIcon {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.connectionStatus {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.connectionDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #98a2b3;
+
+  &[data-state='connected'] {
+    background: #389e0d;
+  }
+
+  &[data-state='connecting'] {
+    background: #d48806;
+  }
+
+  &[data-state='disconnected'] {
+    background: #cf1322;
+  }
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.desktopMenu {
+  min-width: 220px;
+  max-width: min(400px, calc(100vw - 32px));
+  max-height: 360px;
+  overflow: auto;
+
+  :global(.@{antPrefix}-dropdown-menu-title-content) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.notice {
+  flex: none;
+  margin: 12px 12px 0;
+}
+
+.desktopContent {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  color: #667085;
+}

@@ -18,13 +18,13 @@ import {
 import { addMembers, removeMember, changeRole, groupSettings } from "./member-writer.js";
 import { publishTask } from "./task-publication.js";
 import { createTask, changeTask, claimTask } from "./task-writer.js";
-import { sendGroupMessage } from "./group-message-writer.js";
+import { sendGroupMessage, persistGroupMessage } from "./group-message-writer.js";
 import { updateFeedback, updateMessageStructure } from "./message-update-writer.js";
 
 import { acknowledgeMessage } from "./message-ack-writer.js";
 import { ensureExternalChild, saveExternalChild } from "./external-child-writer.js";
 
-import { nickname, directSession } from "./group-management.js";
+import { nickname, directSession, directTask } from "./group-management.js";
 import { createInvitation } from "./group-invitation.js";
 import { cancelTask, checkpointPublication } from "./task-control.js";
 const handlers = {
@@ -32,6 +32,7 @@ const handlers = {
   SAVE_EXTERNAL_CHILD: saveExternalChild,
   SET_NICKNAME: nickname,
   CREATE_DIRECT_SESSION: directSession,
+  CREATE_DIRECT_TASK: directTask,
   CREATE_INVITATION: createInvitation,
   CANCEL_TASK: cancelTask,
   CHECKPOINT_PUBLICATION: checkpointPublication,
@@ -61,6 +62,7 @@ const handlers = {
   RECALL_MESSAGE: recallMessage,
   UNDO_RECALL_MESSAGE: undoRecallMessage,
   SEND_GROUP_MESSAGE: sendGroupMessage,
+  PERSIST_GROUP_MESSAGE: persistGroupMessage,
   UPDATE_FEEDBACK: updateFeedback,
   UPDATE_MESSAGE_STRUCTURE: updateMessageStructure,
 };

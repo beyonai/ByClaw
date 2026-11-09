@@ -2,11 +2,13 @@
 ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_base_slim
 ARG BROWSER_DONOR_IMAGE
 ARG INSTALLED_BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
-# Optional script-only update of an already validated slim-derived browser image.
+# Update runtime scripts and viewer assets in an already validated browser image.
 # Pin INSTALLED_BROWSER_IMAGE by digest; the default final target below is a full build.
 FROM ${INSTALLED_BROWSER_IMAGE} AS browser-runtime-update
 USER root
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
+COPY --chmod=0644 middleware/byclaw-harness/browser/novnc-index.html /opt/byclaw/novnc/index.html
+COPY --chmod=0644 middleware/builtin/runtime-tools/browser-viewer/connection-bridge.mjs /opt/byclaw/novnc/connection-bridge.js
 RUN test -x /usr/local/bin/byclaw-tool-slim-entrypoint \
     && node -e 'if(require("/etc/byclaw-tool-sandbox/capabilities.json").purpose!=="browser")process.exit(1)'
 
@@ -37,6 +39,8 @@ COPY --from=browser-runtime /ms-playwright/ /ms-playwright/
 COPY --from=browser-runtime /opt/nvm/current/lib/node_modules/playwright/ /opt/nvm/current/lib/node_modules/playwright/
 COPY --from=browser-runtime /opt/nvm/current/lib/node_modules/@sovovs/bycli/ /opt/nvm/current/lib/node_modules/@sovovs/bycli/
 COPY --from=browser-runtime /opt/byclaw/novnc/ /opt/byclaw/novnc/
+COPY --chmod=0644 middleware/byclaw-harness/browser/novnc-index.html /opt/byclaw/novnc/index.html
+COPY --chmod=0644 middleware/builtin/runtime-tools/browser-viewer/connection-bridge.mjs /opt/byclaw/novnc/connection-bridge.js
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-bycli-managed.py /usr/local/bin/byclaw-bycli-managed
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
 COPY --chmod=0755 middleware/byclaw-harness/scripts/tool-slim-entrypoint.sh /usr/local/bin/byclaw-tool-slim-entrypoint

@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.constants.resource.RetiredConversationResources;
 import cn.hutool.core.bean.BeanUtil;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson2.JSON;
@@ -1407,6 +1408,7 @@ public class DigitalEmployeeApplicationService {
         }
         if (employeeVersionStore != null) ssResource = this.lockDigitalEmployeeForSkillRelationMutation(digitalEmployeeId);
         this.validateResourceInstallPermission(ssResource, installRelResources);
+        installRelResources.forEach(resource -> RetiredConversationResources.requireAvailable(resource.getResourceBizType()));
 
         List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(digitalEmployeeId);
         LinkedHashSet<Long> mergedRelIds = new LinkedHashSet<>();
@@ -2732,7 +2734,7 @@ public class DigitalEmployeeApplicationService {
     private String resolveDigEmployeeJsonForRedisSync(Long resourceId) {
         SsResExtDigEmployee ext = ssResExtDigEmployeeService.findById(resourceId);
         if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
-            return ext.getTargetContent();
+            return RetiredConversationResources.sanitizeRuntimeJson(ext.getTargetContent());
         }
         // PR-1:target_content 空白时,若开关开启则直接跳过(避免回退到 findDetailsById
         // 的 7-10 SQL).要求:必须先跑 StartupTargetContentPreloader 补齐 target_content.
@@ -2791,7 +2793,7 @@ public class DigitalEmployeeApplicationService {
             }
         }
         json.put("controlledResources", controlled);
-        return json.toJSONString();
+        return RetiredConversationResources.sanitizeRuntimeJson(json.toJSONString());
     }
 
     private boolean doSyncOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto, boolean publication) {
@@ -3022,9 +3024,9 @@ public class DigitalEmployeeApplicationService {
      * 判断是否为支持补齐 JSON 的关联资源类型。
      */
     private boolean isSupportedRelatedResourceBizType(String resourceBizType) {
+        if (RetiredConversationResources.isRetired(resourceBizType)) return false;
         return StringUtils.equalsAny(resourceBizType, ResourceBizTypeEnum.TOOLKIT.name(),
-            ResourceBizTypeEnum.MCP.name(), ResourceBizTypeEnum.AGENT.name(), ResourceBizTypeEnum.VIEW.name(),
-            ResourceBizTypeEnum.OBJECT.name(), ResourceBizTypeEnum.SKILL.name())
+            ResourceBizTypeEnum.MCP.name(), ResourceBizTypeEnum.AGENT.name(), ResourceBizTypeEnum.SKILL.name())
             || StringUtils.startsWithIgnoreCase(resourceBizType, "KG_");
     }
 
@@ -3293,7 +3295,7 @@ public class DigitalEmployeeApplicationService {
         // PR-fix Major-2: 删掉原 else 分支内的 return result; —— 让控制流继续到关联资源处理,
         // 保持与原 collectDigEmployeeSyncEntries 的行为一致(fallback 路径也要写关联资源).
         // 主资源:命中预取直接用;未命中(prefetch 异常/空)回退到原 resolveDigEmployeeJsonForRedisSync
-        String mainJson = prefetchedMainTargetContent;
+        String mainJson = RetiredConversationResources.sanitizeRuntimeJson(prefetchedMainTargetContent);
         if (StringUtils.isBlank(mainJson)) {
             // target_content 预取未取到(空 / 异常):回退到原逐资源解析(保留原行为)
             // 若 skipBlankTargetContent=true,resolveDigEmployeeJsonForRedisSync 内部会记 warn 并 return null
@@ -3518,7 +3520,10 @@ public class DigitalEmployeeApplicationService {
             return;
         }
         String redisKey = DigEmployeeRedisKeys.resourceConfigJsonKey(resourceBizType, resourceId);
-        RedisUtil.setString(redisKey, jsonContent);
+        if (RetiredConversationResources.isRetired(resourceBizType)) return;
+        String runtimeJson = "DIG_EMPLOYEE".equals(resourceBizType)
+            ? RetiredConversationResources.sanitizeRuntimeJson(jsonContent) : jsonContent;
+        RedisUtil.setString(redisKey, runtimeJson);
         logger.debug("资源完整配置已同步至Redis, resourceBizType={}, resourceId={}, redisKey={}", resourceBizType, resourceId,
             redisKey);
     }
@@ -3601,6 +3606,22 @@ public class DigitalEmployeeApplicationService {
      */
     private void compareSsResourceRelDetail(SsResource ssResource, List<Long> relIds,
                                             List<SsResourceRelDetail> resourceRelDetails, List<RelResourceInfo> relResourceInfoList) {
+        // Hidden historical associations remain intact; clients cannot attach retired capabilities anew.
+        Set<Long> existingIds = safeRelations(resourceRelDetails).stream()
+            .map(SsResourceRelDetail::getRelResourceId).collect(Collectors.toSet());
+        Set<Long> allIds = new LinkedHashSet<>(existingIds);
+        if (relIds != null) allIds.addAll(relIds);
+        Set<Long> retiredIds = allIds.isEmpty() ? Collections.emptySet()
+            : safeResources(ssResourceService.findByIdList(new ArrayList<>(allIds))).stream()
+                .filter(resource -> RetiredConversationResources.isRetired(resource.getResourceBizType()))
+                .map(SsResource::getResourceId).collect(Collectors.toSet());
+        if (relIds != null && relIds.stream().anyMatch(id -> retiredIds.contains(id) && !existingIds.contains(id))) {
+            throw new IllegalArgumentException(RetiredConversationResources.REASON);
+        }
+        relIds = relIds == null ? Collections.emptyList()
+            : relIds.stream().filter(id -> !retiredIds.contains(id)).collect(Collectors.toList());
+        resourceRelDetails = safeRelations(resourceRelDetails).stream()
+            .filter(relation -> !retiredIds.contains(relation.getRelResourceId())).collect(Collectors.toList());
         Map<String, List<String>> relResourceInfoListMap = new HashMap<>(10);
         if (CollectionUtils.isNotEmpty(relResourceInfoList)) {
             relResourceInfoListMap = relResourceInfoList.stream().collect(
@@ -3796,12 +3817,15 @@ public class DigitalEmployeeApplicationService {
         return resp.getData();
     }
 
-    /**
-     * 查询详情
-     *
-     * @param employeeIdDTO 查询对象
-     * @return SsResource
-     */
+    /** Keep internal complete relations separate from the editor/API projection. */
+    public DigitalEmployeeDetailsDTO findVisibleDetailsById(EmployeeIdDTO employeeIdDTO) {
+        DigitalEmployeeDetailsDTO details = findDetailsById(employeeIdDTO);
+        if (details == null) return null;
+        return com.alibaba.fastjson.JSON.parseObject(RetiredConversationResources.sanitizeRuntimeJson(
+            com.alibaba.fastjson.JSON.toJSONString(details)), DigitalEmployeeDetailsDTO.class);
+    }
+
+    /** Complete internal details, including historical relations used by editing/publication reconciliation. */
     public DigitalEmployeeDetailsDTO findDetailsById(EmployeeIdDTO employeeIdDTO) {
         Long resourceId = employeeIdDTO.getResourceId();
 
@@ -4263,6 +4287,9 @@ public class DigitalEmployeeApplicationService {
             relResourceList = ssResourceService.findByIdList(relIds);
         }
 
+        relResourceList = relResourceList.stream()
+            .filter(resource -> !RetiredConversationResources.isRetired(resource.getResourceBizType()))
+            .collect(Collectors.toList());
         return ResponseUtil.successResponse(I18nUtil.get("digemployee.rel.resource.query.success"), relResourceList);
     }
 
@@ -4380,7 +4407,9 @@ public class DigitalEmployeeApplicationService {
             return null;
         }
 
-        return ssResourceService.getResourceListByCode(codes);
+        return ssResourceService.getResourceListByCode(codes).stream()
+            .filter(resource -> !RetiredConversationResources.isRetired(resource.getResourceBizType()))
+            .collect(Collectors.toList());
     }
 
     /**

@@ -55,7 +55,7 @@
  *                                  BE_PUBLISH_KEYS, READY_TIMEOUT_MS, BE_REQUEST_TIMEOUT_MS) apply as in the
  *                                  plugin's cordis.patch.yml. A PUT `env` BYCLAW_TOOL_ENV_SERVICE_KEY overrides
  *                                  SERVICE_KEY for that context (BE sets it per user); it applies when the context boots.
- *   BYCLAW_TOOL_ENV_IDLE_MS        tool-environment idle time (default 600000).
+ *   BYCLAW_TOOL_ENV_IDLE_MS        tool-environment idle time (default 300000).
  *   BYCLAW_DSH_TOOL_ENV            defaults to `opensandbox` for every context of this process.
  *   BYCLAW_RIPGREP_PATH            ripgrep glob/grep spawn; `rg` (from PATH where they run) unless the backend is `none`.
  *   BYCLAW_CREDENTIAL_SECRET_FILE  the host's service secret; with the session database, it encrypts the users'
@@ -173,13 +173,15 @@ export const USER_ROW_OVERLAYS = {
     stateDir: join(home, 'byclaw-tool-env'),
     alias: `byclaw-tool-env-${spec.managed ? spec.contextKey : user}`,
     workspace: '/by',
-    idleMs: spec.toolEnvIdleMs,
+    idleMs: Number(spec.env?.BYCLAW_TOOL_ENV_IDLE_MS || spec.toolEnvIdleMs || 300000),
     port: 22,
     // What the user's own sandbox would have started with (BE renders it from the harness spec for every PUT).
     launchEnv: toolLaunchEnvironment(spec.env, spec.managed ? spec.userCode : user),
     ...(spec.toolEnvBackend === 'byclaw-be'
       // BE creates B as the user: the token is the one BE handed this context in the PUT.
-      ? { byclawBe: { ...spec.toolEnvBe, userCode: user, token: toolEnvUserToken(spec.env, user), serviceKey: toolEnvServiceKey(spec) } }
+      ? { byclawBe: { ...spec.toolEnvBe, coordinatedLeases: true, requestScopedKeys: true,
+          idleTimeoutSeconds: Math.ceil(Number(spec.env?.BYCLAW_TOOL_ENV_IDLE_MS || spec.toolEnvIdleMs || 300000) / 1000),
+          ...(spec.managed ? { parentContextId: spec.mappingId, parentContextGeneration: spec.generation, parentSandboxId: spec.instanceId } : {}), userCode: user, token: toolEnvUserToken(spec.env, user), serviceKey: toolEnvServiceKey(spec) } }
       : { openSandbox: JSON.parse(spec.toolEnvTemplate.replaceAll('{user}', spec.managed ? spec.contextKey : user)) }),
   }),
 }
@@ -523,7 +525,7 @@ export function readHostConfig(env) {
     toolEnvTemplate,
     toolEnvCatalog: toolEnvCatalog({ env }),
     toolEnvBe,
-    toolEnvIdleMs: Number(env.BYCLAW_TOOL_ENV_IDLE_MS || 600000),
+    toolEnvIdleMs: Number(env.BYCLAW_TOOL_ENV_IDLE_MS || 300000),
     sessionDbUrl: env.BYCLAW_SESSION_DB_URL?.trim() || undefined,
     sessionDbUsers: (env.BYCLAW_SESSION_DB_USERS ?? '').split(',').map(entry => entry.trim()).filter(Boolean),
   }
@@ -986,12 +988,12 @@ function sendText(res, status, text, headers = {}) {
   res.end(text)
 }
 
-async function readJson(req) {
+async function readJson(req, maxBytes = MAX_BODY_BYTES) {
   let size = 0
   const chunks = []
   for await (const chunk of req) {
     size += chunk.length
-    if (size > MAX_BODY_BYTES) throw Object.assign(new Error('body too large'), { status: 413 })
+    if (size > maxBytes) throw Object.assign(new Error('body too large'), { status: 413 })
     chunks.push(chunk)
   }
   const text = Buffer.concat(chunks).toString('utf8')
@@ -1123,6 +1125,30 @@ export function createHostServer({ registry, adminToken, hostId, basePath = '/',
     }
     if (ready === undefined) return sendText(res, 503, `user context is ${entry.status}\n`)
     if (req.method !== 'GET' && req.method !== 'HEAD' && !isSameOriginRequest(req.headers)) return sendText(res, 403, 'forbidden\n')
+    if (route.rest === '/api/byclaw/tool-environment/bootstrap') {
+      res.setHeader('cache-control', 'no-store')
+      if (req.method !== 'POST') return sendJson(res, 405, { error: 'method not allowed' })
+      let done = () => {}
+      try {
+        done = registry.managed ? registry.beginWeb(route.user) : done
+        res.once('close', done)
+        let body
+        try { body = await readJson(req, 4096) }
+        catch { return sendJson(res, 400, { error: 'invalid tool bootstrap request' }) }
+        if (!body || Array.isArray(body) || typeof body !== 'object' || Object.keys(body).length !== 1
+          || typeof body.serviceKey !== 'string' || body.serviceKey.length === 0 || body.serviceKey.length > 256
+          || body.serviceKey.trim() !== body.serviceKey) return sendJson(res, 400, { error: 'invalid tool bootstrap request' })
+        if (typeof ready.handle.bootstrapToolEnvironment !== 'function') return sendJson(res, 503, { error: 'tool bootstrap unavailable' })
+        const keys = await ready.handle.bootstrapToolEnvironment(body.serviceKey)
+        // A lease may expire while identity storage is being read. Never return it after admission closes.
+        if (readyHandle(route.user) !== ready) return sendJson(res, 503, { error: 'tool bootstrap unavailable' })
+        return sendJson(res, 200, { serviceKey: body.serviceKey,
+          toolEnvironmentKeys: { authorizedKey: keys.authorizedKey, hostPrivateKeyBase64: keys.hostPrivateKeyBase64 } })
+      } catch (error) {
+        // Key providers may include sensitive filesystem or key material in errors; never relay or log it.
+        return sendJson(res, error?.code === 'TOOL_ENV_SERVICE_MISMATCH' ? 403 : 503, { error: 'tool bootstrap unavailable' })
+      } finally { done() }
+    }
     if (!ready.handle.port) return sendText(res, 503, 'user context has no web listener\n')
     const done = registry.managed ? registry.beginWeb(route.user) : () => {}
     res.once('close', done)
@@ -1524,6 +1550,11 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
           return connection.authenticatedUrl(origin)
         },
       }),
+      bootstrapToolEnvironment: serviceKey => {
+        const connection = ctx.get('ssh')
+        if (typeof connection?.bootstrapKeys !== 'function') throw new Error('tool bootstrap unavailable')
+        return connection.bootstrapKeys(serviceKey)
+      },
       activity: () => managedRuntimeActivity(ctx),
       stopAdmission: () => ctx.get('byclawManagedRuntime')?.stopAdmission(),
       forceStop: async () => {

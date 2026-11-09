@@ -215,6 +215,42 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
     }
 
     @Test
+    void getSandboxInfo_projectsDesktopEndpointsRegardlessOfHeadersWithoutChangingInternalMetadata() {
+        SandboxService service = mock(SandboxService.class);
+        SsSandboxRecordMapper records = mock(SsSandboxRecordMapper.class);
+        SandboxController controller = controllerWithInventory();
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", records);
+        ReflectionTestUtils.setField(controller, "contextPath", "/configured-api");
+        Map<String, String> raw = Map.of("ssh", "https://private.test/ssh", "vnc", "https://cloud.test/?token=fixture");
+        SandboxInfo exclusive = SandboxInfo.builder().sandboxId("sb-1").sandboxType("browser")
+            .instanceEndpoints(raw).endpointHeaders(Map.of("e2b-traffic-access-token", "fixture-cloud-token")).build();
+        SandboxInfo shared = SandboxInfo.builder().sandboxId("host-1").sandboxType("software")
+            .isShared(true).mappingId("mapping-1").instanceEndpoints(Map.of("editor", "https://cloud.test/"))
+            .instanceDescriptors(Map.of("editor", Map.of("viewer", "novnc")))
+            .endpointHeaders(Map.of("e2b-traffic-access-token", "fixture-cloud-token")).build();
+        SandboxInfo publicDesktop = SandboxInfo.builder().sandboxId("public-1").sandboxType("public")
+            .instanceEndpoints(Map.of("desktop", "https://public.test/")).build();
+        when(service.sandboxInfo("alice")).thenReturn(List.of(exclusive, shared, publicDesktop));
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setStatus("RUNNING");
+        when(records.selectLatestBySandboxId("alice", "browser", "sb-1")).thenReturn(record);
+        when(records.selectLatestBySandboxId("alice", "public", "public-1")).thenReturn(record);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) controller
+            .getSandboxIdByUserCode(Map.of("userCode", "alice")).getData();
+        assertThat((Map<?, ?>) rows.get(0).get("instanceEndpoints")).isEqualTo(Map.of(
+            "ssh", raw.get("ssh"), "vnc", "/configured-api/sandbox/desktop/exclusive/sb-1/vnc/"));
+        assertThat((Map<?, ?>) rows.get(1).get("instanceEndpoints")).isEqualTo(Map.of(
+            "editor", "/configured-api/sandbox/desktop/shared/mapping-1/host-1/editor/"));
+        assertThat(rows.get(2).get("instanceEndpoints")).isEqualTo(Map.of(
+            "desktop", "/configured-api/sandbox/desktop/exclusive/public-1/desktop/"));
+        assertThat(publicDesktop.getInstanceEndpoints()).containsEntry("desktop", "https://public.test/");
+        assertThat(exclusive.getInstanceEndpoints()).isSameAs(raw);
+    }
+
+    @Test
     void renewSandbox_returnsRenewedSandboxInfo() {
         SandboxService sandboxService = mock(SandboxService.class);
         SandboxController controller = controllerWithInventory();

@@ -25,6 +25,21 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class EmployeePublicationResourcesTest extends I18nTestSupport {
+    @ParameterizedTest
+    @ValueSource(strings = {"OBJECT", "VIEW", "ONTOLOGY_BASE", "SCENE"})
+    void retirementExcludesEnterpriseDependenciesWithoutChangingTheSource(String type) {
+        resource.setResourceBizType(type); resource.setOwnerType("enterprise"); resource.setResourceStatus(2);
+        var captured = service.capture(dto, 7L, 1L, 100L);
+        assertThat(captured.getFirst().getAction()).isEqualTo("OMIT_RESOURCE");
+        assertThat(captured.getFirst().getWarning()).contains("RESOURCE_TYPE_RETIRED");
+        service.validate(captured, 7L, 1L);
+        var mapping = service.materialize(captured, 1L, 90L);
+        assertThat(mapping).containsEntry(20L, null);
+        service.applyPublishedResources(dto, captured, mapping);
+        assertThat(dto.getRelIds()).isEmpty();
+        assertThat(resource.getResourceBizType()).isEqualTo(type);
+        verifyNoInteractions(storage, grants);
+    }
     SsResourceService resources = mock(SsResourceService.class);
     SsResExtSkillService skills = mock(SsResExtSkillService.class);
     ResourceArtifactStorageService storage = mock(ResourceArtifactStorageService.class);

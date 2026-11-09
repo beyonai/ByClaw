@@ -27,6 +27,14 @@ export interface ToolEnvEndpoint {
 
 /** Lifecycle owner for B. */
 export interface ToolEnvBackend {
+  /** Coordinated use scopes; streams retain the returned guard until close. */
+  beginUse?(): Promise<() => Promise<void>>
+  runInSession?<T>(sessionId: string, work: () => Promise<T>): Promise<T>
+  startSession?(sessionId: string): void
+  finishSession?(sessionId: string, destroy?: boolean): Promise<void>
+  acquireSession?(sessionId: string): Promise<void>
+  onInvalidated?(listener: () => void): () => void
+
   /** Make B reachable (create or resume as needed) and return its sshd endpoint. */
   ensure(): Promise<ToolEnvEndpoint>
   /** Detach while idle; persistent backends retain physical compute. */
