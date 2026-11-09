@@ -37,7 +37,7 @@ test('every business image verifies the actual shared launcher and packed employ
 test('slim final runtime receives and verifies the shared launcher across the stage boundary', async () => {
   const source = await readFile(new URL('../Dockerfile.slim', import.meta.url), 'utf8')
   const final = source.slice(source.lastIndexOf('\nFROM '))
-  assert.match(final, /COPY --from=profile-builder[^\n]* \/workspace\/scripts\/byclaw-multi-host\.mjs \/workspace\/scripts\/byclaw-managed-host\.mjs \/workspace\/scripts\/verify-shared-runtime\.mjs \/workspace\/scripts\//)
+  assert.match(final, /COPY --from=profile-builder[^\n]* \/workspace\/scripts\/byclaw-multi-host\.mjs \/workspace\/scripts\/byclaw-managed-host\.mjs \/workspace\/scripts\/host-durable-files\.mjs \/workspace\/scripts\/verify-shared-runtime\.mjs \/workspace\/scripts\//)
   assert.match(final, /node \/workspace\/scripts\/verify-shared-runtime\.mjs \/workspace/)
 })
 
