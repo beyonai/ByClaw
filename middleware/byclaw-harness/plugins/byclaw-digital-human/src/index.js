@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG_PATH, readConfiguration } from './config.js';
+import { CONNECTOR_CODE, DEFAULT_CONFIG_PATH, readConfiguration } from './config.js';
 import { uploadMedia } from './oss.js';
 import { invoke, MODES } from './volcengine.js';
 
@@ -81,6 +81,7 @@ export function apply(ctx, config = {}) {
       schema: { type: 'object', required: ['status'], additionalProperties: false, properties: {
         status: { type: 'string', enum: ['ready', 'configuration_required'] },
         stage: { type: 'string' }, reason: { type: 'string' },
+        connectorCode: { type: 'string', enum: [CONNECTOR_CODE] }, message: { type: 'string' },
       } },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
     },
@@ -92,7 +93,8 @@ export function apply(ctx, config = {}) {
       } catch (error) {
         exec.signal?.throwIfAborted();
         if (error?.code !== 'DIGITAL_HUMAN_CONFIGURATION_REQUIRED') throw error;
-        return { status: 'configuration_required', stage: error.stage, reason: error.reason };
+        return { status: 'configuration_required', stage: error.stage, reason: error.reason,
+          connectorCode: error.connectorCode, message: error.message };
       }
     },
   }));

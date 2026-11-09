@@ -119,9 +119,13 @@ test('real Cordis loader, DSH tools/fs, output validation, scope isolation and u
   await ctx.fs.writeText(await ctx.fs.resolve(path), JSON.stringify({ ...config, enabled: false }));
   const diagnostic = await dispatch('digital_human_check_configuration', {});
   assert.equal(diagnostic.isError, false);
-  assert.deepEqual(JSON.parse(diagnostic.content[0].text), { status: 'configuration_required', stage: 'validate', reason: 'CONNECTOR_DISABLED' });
+  const configuration = JSON.parse(diagnostic.content[0].text);
+  assert.deepEqual(configuration, { status: 'configuration_required', stage: 'validate', reason: 'CONNECTOR_DISABLED',
+    connectorCode: 'volcengine-digital-human', message: configuration.message });
+  assert.match(diagnostic.content[0].text, /MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=volcengine-digital-human;/u);
   const disabled = await dispatch('digital_human_get_role', { mode: 'normal', taskId: 'runtime-task' });
   assert.equal(disabled.isError, true);
+  assert.match(JSON.stringify(disabled), /MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=volcengine-digital-human;/u);
   assert.doesNotMatch(JSON.stringify(disabled), /runtime-sk|runtime-ak/);
   assert.equal(calls, before);
   const destination = join(root, 'linked-config.json');

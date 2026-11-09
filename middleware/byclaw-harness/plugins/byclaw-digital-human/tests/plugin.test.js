@@ -26,6 +26,39 @@ function mount(fs = filesystem()) {
   return { tools, fs, dispose: () => disposers.forEach((fn) => fn()) };
 }
 const success = (data) => Response.json({ code: 10000, data, request_id: 'fixture-request' });
+// Frontend connectorAuthorization recognizes this marker and semicolon-terminated code
+// in both plain error text and JSON-rendered diagnostic output.
+const connectorAction = /MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=volcengine-digital-human;/u;
+
+test('missing connector config renders a frontend action and blocks every provider tool', async (t) => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => { calls++; throw new Error('unexpected network'); });
+  const fs = filesystem();
+  fs.lstat = async () => undefined;
+  const { tools } = mount(fs);
+  const check = tools.get('digital_human_check_configuration');
+  const result = await check.execute({});
+  assert.deepEqual(result, {
+    status: 'configuration_required', stage: 'lstat', reason: 'FILE_NOT_FOUND',
+    connectorCode: 'volcengine-digital-human', message: result.message,
+  });
+  assert.match(check.output.render({}, result)[0].text, connectorAction);
+  assert.deepEqual(check.output.schema.properties.connectorCode.enum, [result.connectorCode]);
+  assert.equal(check.output.schema.properties.message.type, 'string');
+  for (const [name, tool] of tools) {
+    if (name === check.name) continue;
+    const args = name.includes('_get_') ? { mode: 'normal', taskId: 'task-1' }
+      : name.endsWith('_role') ? { mode: 'normal', imageUrl: 'https://assets.example/photo.png' }
+        : { mode: 'normal', resourceId: 'role-1', audioUrl: 'https://assets.example/voice.wav' };
+    await assert.rejects(tool.execute(args), (error) => {
+      assert.match(error.message, connectorAction);
+      assert.equal(error.retryable, false);
+      assert.equal(error.reason, 'FILE_NOT_FOUND');
+      return true;
+    });
+  }
+  assert.equal(calls, 0);
+});
 
 test('standalone registration, description budgets, closed schemas and no credential parameters', () => {
   const { tools, dispose } = mount();
@@ -161,6 +194,10 @@ test('provider failures and connection loss are sanitized and never retried', as
     Response.json({ message: 'fixture-sk' }, { status: 401 }), new Response('fixture-sk', { status: 500 })]) {
     t.mock.method(globalThis, 'fetch', async () => { calls++; return response; });
     await assert.rejects(invoke(credentials, 'role', 'normal', options, false), (error) => {
+      if (response.status === 401) {
+        assert.match(error.message, connectorAction);
+        assert.equal(error.reason, 'AUTHENTICATION_FAILED');
+      } else assert.doesNotMatch(error.message, connectorAction);
       assert.doesNotMatch(error.message + JSON.stringify(error), /fixture-sk/); return true;
     });
   }

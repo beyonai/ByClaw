@@ -66,12 +66,20 @@
 `ready` 仅证明文件可读且本地格式校验通过。失败结果例如：
 
 ```json
-{"status":"configuration_required","stage":"lstat","reason":"FILE_NOT_FOUND"}
+{
+  "status": "configuration_required",
+  "stage": "lstat",
+  "reason": "FILE_NOT_FOUND",
+  "connectorCode": "volcengine-digital-human",
+  "message": "MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=volcengine-digital-human; 火山数字人视频连接器不可用（stage=lstat; reason=FILE_NOT_FOUND）。请点击工具结果中的配置按钮，检查并重新保存连接信息；配置完成前停止重试当前工具。"
+}
 ```
 
 阶段分为 `provider`、`lstat`、`resolve`、`read`、`parse`、`validate`。
 缺文件、符号链接、超限、非法 JSON、禁用、字段不匹配以及已知 `FS_*` 权限错误分别返回安全原因；
-未知异常不携带原始错误文本。生成工具的配置异常消息也包含阶段和原因。
+未知异常不携带原始错误文本。创建、查询工具的配置异常及供应商鉴权失败也返回上述消息标记，
+供前端识别并显示“需要配置火山数字人视频连接器”按钮；配置完成前应停止重试。
+OSS 环境变量配置错误不使用此连接器标记，仍由部署环境配置。
 更新插件后须通过宿主重载插件或重启，使运行进程加载新代码；`--dump-config` 正确不代表运行中代码已更新。
 
 `mode` 为 `normal`、`loopy`、`loopyb`，全过程须一致，形象 ID 可以配合不同音频复用。

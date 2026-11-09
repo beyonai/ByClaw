@@ -6,7 +6,7 @@ const FS_CODES = new Set(['FS_NOT_FOUND', 'FS_NOT_DIRECTORY', 'FS_NOT_TEXT', 'FS
   'FS_PERMISSION_DENIED', 'FS_SANDBOX_DENIED', 'FS_IO_ERROR', 'FS_ABORTED']);
 
 export function configurationRequired(stage = 'authentication', reason = 'AUTHENTICATION_FAILED') {
-  return Object.assign(new Error(`火山单图音频驱动连接器不可用（stage=${stage}; reason=${reason}）。请检查连接器配置后再重试。`), {
+  return Object.assign(new Error(`MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=${CONNECTOR_CODE}; 火山数字人视频连接器不可用（stage=${stage}; reason=${reason}）。请点击工具结果中的配置按钮，检查并重新保存连接信息；配置完成前停止重试当前工具。`), {
     code: 'DIGITAL_HUMAN_CONFIGURATION_REQUIRED', connectorCode: CONNECTOR_CODE,
     configurationRequired: true, retryable: false, stage, reason, [CONFIG_FAILURE]: true,
   });
