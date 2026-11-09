@@ -56,6 +56,16 @@ test -f /by/Easel/pyproject.toml
 test -d /by/Easel/skills/builtin
 test -f /by/Easel/web/frontend/dist/index.html
 test -f /by/Easel/outputs/_harness/config.json
+test -f /by/Easel/.byclaw-easel-workspace.json
+test -L /by/Easel/.venv
+remotion=/by/Easel/skills/builtin/video-production/vendor/video-pipeline-sdk/deps/remotion
+test -L "$remotion/node_modules"
+test "$(readlink "$remotion/node_modules")" = /opt/easel-runtime/remotion/node_modules
+test ! -w /opt/easel-runtime/remotion/node_modules/remotion/package.json
+test -w /var/cache/easel
+test "$XDG_CACHE_HOME" = /var/cache/easel
+# find does not follow the dependency links. Guard the personal file-count budget.
+test "$(find /by/Easel -xdev -print | wc -l)" -lt 3000
 cd /by/Easel
 test "$(python -c 'import json;print(json.load(open("outputs/_harness/config.json"))["runtime"])')" = codex
 if command -v openclaw >/dev/null 2>&1; then
@@ -83,6 +93,28 @@ with sync_playwright() as p:
 print("EASEL_RUNTIME_IMPORTS_OK")
 PY
 python -m pip check
+# Exercise Node resolution through the image link and render a real frame offline.
+render_probe=$(mktemp -d /var/cache/easel/render-check.XXXXXX)
+ln -s /opt/easel-runtime/remotion/node_modules "$render_probe/node_modules"
+printf '%s\n' '{"private":true}' >"$render_probe/package.json"
+printf '%s\n' '{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"node","jsx":"react-jsx","esModuleInterop":true,"skipLibCheck":true}}' \
+    >"$render_probe/tsconfig.json"
+cat >"$render_probe/index.tsx" <<'TSX'
+import React from 'react';
+import {Composition, registerRoot} from 'remotion';
+const Frame = () => React.createElement('div', {style: {background: 'white'}}, 'Easel');
+registerRoot(() => React.createElement(Composition, {
+  id: 'Probe', component: Frame, durationInFrames: 1, fps: 30, width: 320, height: 240,
+}));
+TSX
+cat >"$render_probe/remotion.config.ts" <<'TS'
+import {Config} from '@remotion/cli/config';
+Config.setCachingEnabled(false);
+Config.setBrowserExecutable('/usr/local/bin/byclaw-playwright-chromium');
+TS
+(cd "$render_probe" && ./node_modules/.bin/remotion still index.tsx Probe frame.png --log=error)
+test -s "$render_probe/frame.png"
+rm -rf "$render_probe"
 mkdir -p outputs/_acceptance
 printf 'easel-codex-write-read\n' >outputs/_acceptance/smoke.txt
 grep -qx 'easel-codex-write-read' outputs/_acceptance/smoke.txt
@@ -99,4 +131,6 @@ test "$("$engine" exec "$container" stat -c %a /by/.codex)" = 700
 wait_ready
 "$engine" exec --user byclaw "$container" grep -qx \
     easel-codex-write-read /by/Easel/outputs/_acceptance/smoke.txt
+"$engine" exec --user byclaw "$container" test -L \
+    /by/Easel/skills/builtin/video-production/vendor/video-pipeline-sdk/deps/remotion/node_modules
 echo "BYCLAW_EASEL_CODEX_SMOKE_OK rootfs_tar_bytes=$bytes max_bytes=$maximum"
