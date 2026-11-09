@@ -1130,7 +1130,16 @@ test('credential files are stored in the database only with both the secret file
     assert.deepEqual(await opened.store.list('u1'), [])
     assert.match(queries.at(-1)[0], /SELECT name, value FROM byai\.dsh_host_file WHERE user_code = \$1/)
     assert.deepEqual(queries.at(-1)[1], ['u1'])
+    // Where no file can be mounted, the same secret as a value derives the same key.
+    const fromValue = await host.openHostFileStore({ sessionDbUrl: 'postgres://db' }, { BYCLAW_CREDENTIAL_SECRET: ' a-service-secret-of-enough-length ' }, () => pg)
+    assert.deepEqual(fromValue.key, opened.key)
   } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('the service secret as a value never reaches a launch environment', () => {
+  const values = host.launchEnvironmentValues({ BYCLAW_CREDENTIAL_SECRET: 'secret', PATH: '/bin' }, {}, 'u1')
+  assert.equal(values.BYCLAW_CREDENTIAL_SECRET, undefined)
+  assert.equal(values.PATH, '/bin')
 })
 
 test('managed hosts keep users in the database under their user code, not the context key', () => {

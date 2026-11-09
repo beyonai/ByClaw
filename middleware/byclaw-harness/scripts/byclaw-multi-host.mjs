@@ -60,6 +60,8 @@
  *   BYCLAW_RIPGREP_PATH            ripgrep glob/grep spawn; `rg` (from PATH where they run) unless the backend is `none`.
  *   BYCLAW_CREDENTIAL_SECRET_FILE  the host's service secret; with the session database, it encrypts the users'
  *                                  credential store and tool-environment SSH identities kept in `dsh_host_file`.
+ *   BYCLAW_CREDENTIAL_SECRET       the same secret as a value, where no file can be mounted; the host removes it from
+ *                                  its environment at start, so no context or tool environment inherits it.
  *   REDIS_HOST, REDIS_PORT, REDIS_USERNAME, REDIS_PASSWORD, REDIS_DATABASE  Redis for the user claims.
  *
  * Redis claim: while a user is starting or ready this host keeps
@@ -450,7 +452,7 @@ export function parseEnsureBody(body) {
 export function launchEnvironmentValues(processEnv, env, user, managed = false) {
   const values = {}
   // Launch values reach the tool sandbox, where model-generated commands could read the database password.
-  for (const [name, value] of Object.entries(processEnv)) if (!name.startsWith('BYCLAW_SESSION_DB_') && typeof value === 'string' && (!managed || !/TOKEN|SECRET|API_KEY|USER_INFO|USER_CODE|ENTERPRISE_ID|USER_ID/i.test(name))) values[name] = value
+  for (const [name, value] of Object.entries(processEnv)) if (!name.startsWith('BYCLAW_SESSION_DB_') && name !== 'BYCLAW_CREDENTIAL_SECRET' && typeof value === 'string' && (!managed || !/TOKEN|SECRET|API_KEY|USER_INFO|USER_CODE|ENTERPRISE_ID|USER_ID/i.test(name))) values[name] = value
   return { ...values, ...env, USER_CODE: user }
 }
 
@@ -1258,15 +1260,16 @@ export function managedRuntimeActivity(ctx) {
  * The store for users' credential files and SSH identities: the session database, keyed by the
  * service secret. `undefined` (no secret file or no database) keeps them only on this host's disk.
  * @param config - host config ({ sessionDbUrl, managedProfile }).
- * @param env - process environment (BYCLAW_CREDENTIAL_SECRET_FILE).
+ * @param env - process environment (BYCLAW_CREDENTIAL_SECRET_FILE, or BYCLAW_CREDENTIAL_SECRET where no file can be mounted).
  */
 export async function openHostFileStore(config, env, loadPg = () => {
   const require = createRequire(join(config.managedProfile, 'package.json'))
   return createRequire(require.resolve('@byclaw/dsh-session-persistence-db/package.json'))('pg')
 }) {
   const secretFile = env.BYCLAW_CREDENTIAL_SECRET_FILE?.trim()
-  if (config.sessionDbUrl === undefined || !secretFile) return undefined
-  const key = deriveFileKey(await readFile(secretFile, 'utf8'))
+  const secretValue = env.BYCLAW_CREDENTIAL_SECRET?.trim()
+  if (config.sessionDbUrl === undefined || (!secretFile && !secretValue)) return undefined
+  const key = deriveFileKey(secretFile ? await readFile(secretFile, 'utf8') : secretValue)
   const pg = loadPg()
   const pool = new pg.Pool({ connectionString: config.sessionDbUrl, max: 2, idleTimeoutMillis: 60_000, connectionTimeoutMillis: 30_000, query_timeout: 30_000 })
   // An idle connection dying emits 'error'; unhandled, that would kill the host and every user on it.
@@ -1589,6 +1592,9 @@ export function applyHostProcessDefaults(config, env) {
 }
 
 async function main() {
+  // The service secret may come as a value where no file can be mounted: take it before anything can inherit it.
+  const credentialSecret = process.env.BYCLAW_CREDENTIAL_SECRET
+  delete process.env.BYCLAW_CREDENTIAL_SECRET
   const config = readHostConfig(process.env)
   // Establish host defaults before evaluating any plugin modules.
   applyHostProcessDefaults(config, process.env)
@@ -1597,8 +1603,8 @@ async function main() {
   // user, loading employee resources or starting a tool environment.
   const preloaded = await preloadHostRuntime(config)
   log(`compiled runtime ready; elapsedMs=${Math.round(performance.now() - runtimeStarted)}; modules=${preloaded.loaded}; failed=${JSON.stringify(preloaded.failed)}`)
-  config.hostFiles = await openHostFileStore(config, process.env)
-  if (config.sessionDbUrl !== undefined && config.hostFiles === undefined) log('BYCLAW_CREDENTIAL_SECRET_FILE is not set: credential stores and SSH identities stay on this host only')
+  config.hostFiles = await openHostFileStore(config, { ...process.env, BYCLAW_CREDENTIAL_SECRET: credentialSecret })
+  if (config.sessionDbUrl !== undefined && config.hostFiles === undefined) log('neither BYCLAW_CREDENTIAL_SECRET_FILE nor BYCLAW_CREDENTIAL_SECRET is set: credential stores and SSH identities stay on this host only')
   const Redis = createRequire(join(config.managedProfile, 'package.json'))('ioredis')
   const redis = createHostRedis(Redis, process.env)
   redis.on('error', error => log('redis:', error.message))
