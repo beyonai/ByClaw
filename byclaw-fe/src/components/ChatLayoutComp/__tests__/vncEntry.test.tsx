@@ -18,7 +18,7 @@ const mockGlobal = {
   setSessionId: jest.fn(),
 };
 const mockAppStore = {
-  sandboxesInfo: [] as unknown[],
+  sandboxesInfo: [{ sandboxId: 'sandbox', status: 'RUNNING', instanceEndpoints: { vnc: '/proxy/8081' } }],
   getSandboxesInfoUrl: jest.fn(),
   setSiderCollapsed: jest.fn(),
   isSiderCollapsed: false,
@@ -125,16 +125,16 @@ const renderChat = (sessionId = 'session-1') => <ChatLayoutComp sessionId={sessi
 describe('chat remote computer entry', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAppStore.getSandboxesInfoUrl.mockResolvedValue(mockAppStore.sandboxesInfo);
     sessionStorage.clear();
     mockEventEmitter = new EventEmitter$Cls();
     mockGlobal.EventEmitter = mockEventEmitter;
     mockGlobal.platform = 'pc';
     mockMessages = [];
   });
-  it('keeps the entry reachable with zero references and without browser activity', () => {
+  it('hides the entry when there is no employee answer', () => {
     render(renderChat());
-    fireEvent.click(screen.getByTitle('远程桌面'));
-    expect(mockOpenVnc).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
   });
   it.each(['', '11273519'])('hides the title and desktop entry in welcome mode with session ID "%s"', (sessionId) => {
     render(<ChatLayoutComp sessionId={sessionId} isBottom={false} preserveNewSessionView readOnly />);
@@ -142,16 +142,15 @@ describe('chat remote computer entry', () => {
     expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
     expect(mockOpenVnc).not.toHaveBeenCalled();
   });
-  it('shows the desktop entry when entering a draft chat and hides it when returning to welcome mode', () => {
+  it('shows the draft title without a desktop entry and hides the title in welcome mode', () => {
     const view = render(<ChatLayoutComp sessionId="" isBottom={false} readOnly />);
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
     view.rerender(<ChatLayoutComp sessionId="" isBottom readOnly />);
     expect(screen.getByText('New Chat')).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle('远程桌面'));
-    expect(mockOpenVnc).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
     view.rerender(renderChat());
     expect(screen.getByText('当前会话')).toBeInTheDocument();
-    expect(screen.getByTitle('远程桌面')).toBeInTheDocument();
+    expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
     view.rerender(<ChatLayoutComp sessionId="" isBottom={false} readOnly />);
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
     expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
@@ -167,25 +166,28 @@ describe('chat remote computer entry', () => {
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
     expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
   });
-  it('restores history without automatically opening the workspace', () => {
+  it('restores history without automatically opening the workspace', async () => {
     mockMessages = [employeeMessage('answer-1', true)];
     render(renderChat());
-    expect(screen.getByTitle('远程桌面')).toBeInTheDocument();
+    expect(await screen.findByTitle('远程桌面')).toBeInTheDocument();
     expect(mockOpenVnc).not.toHaveBeenCalled();
   });
-  it('keeps the entry reachable through answer updates and route changes', () => {
+  it('uses only the latest employee answer in the current session to show the entry', async () => {
+    mockMessages = [employeeMessage('answer-1', true)];
     const view = render(renderChat());
-    mockMessages = [employeeMessage('answer-2')];
+    expect(await screen.findByTitle('远程桌面')).toBeInTheDocument();
     view.rerender(renderChat('session-2'));
-    expect(screen.getByTitle('远程桌面')).toBeInTheDocument();
+    expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
+    mockMessages = [...mockMessages, employeeMessage('answer-2')];
     view.rerender(renderChat());
-    expect(screen.getByTitle('远程桌面')).toBeInTheDocument();
+    expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
     expect(mockOpenVnc).not.toHaveBeenCalled();
   });
-  it('accepts numeric session IDs and preserves the manual entry when another panel is open', () => {
+  it('accepts numeric session IDs and preserves the manual entry when another panel is open', async () => {
+    mockMessages = [employeeMessage('answer-1', true, '11273519')];
     render(renderChat(11273519 as unknown as string));
     act(() => mockEventEmitter.emit('beyond-main-driver-open-type', { drawerType: 'preview' }));
-    fireEvent.click(screen.getByTitle('远程桌面'));
+    fireEvent.click(await screen.findByTitle('远程桌面'));
     expect(mockOpenVnc).toHaveBeenCalledTimes(1);
   });
 });

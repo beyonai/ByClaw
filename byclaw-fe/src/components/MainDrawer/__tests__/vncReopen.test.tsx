@@ -21,7 +21,7 @@ jest.mock('@umijs/max', () => ({
 jest.mock('@/hooks/useGlobal', () => () => ({ EventEmitter: mockEventEmitter }));
 jest.mock('@/models/common/useAppStore', () => ({
   __esModule: true,
-  default: { getState: () => mockAppState },
+  default: Object.assign((select: any) => select(mockAppState), { getState: () => mockAppState }),
 }));
 // Remote iframe loading is the boundary; opener, event bus, entry, and drawer stay real.
 jest.mock('@/components/MessagesComp/Iframe/IframeRender', () => ({
@@ -72,7 +72,7 @@ describe('chat VNC reopening', () => {
     (globalThis as any).fetch = jest.fn().mockResolvedValue({ type: 'basic', status: 200 });
   });
 
-  it('keeps the icon after a new answer and real drawer close, then reopens the desktop', async () => {
+  it('keeps an open desktop available when a text answer hides the title entry', async () => {
     const view = render(<ChatDesktop latestMessage={browserAnswer} />);
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Browser tool' })));
     expect(screen.getByTitle('remote desktop')).toHaveAttribute(
@@ -81,20 +81,25 @@ describe('chat VNC reopening', () => {
     );
 
     view.rerender(<ChatDesktop latestMessage={nextAnswer} />);
+    expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
+    expect(screen.getByTitle('remote desktop')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('img', { name: 'close' })[0]);
     expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
-    expect(screen.getByTitle('远程桌面')).toBeInTheDocument();
+    expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
 
-    await act(async () => fireEvent.click(screen.getByTitle('远程桌面')));
+    view.rerender(<ChatDesktop latestMessage={{ ...browserAnswer, msgId: 'answer-3' }} />);
+    const desktopButton = await screen.findByTitle('远程桌面');
+    await act(async () => fireEvent.click(desktopButton));
     expect(screen.getByTitle('remote desktop')).toBeInTheDocument();
   });
 
-  it('keeps the entry reachable and opens an empty workspace when no desktop exists', async () => {
+  it('keeps the entry hidden when the latest answer needs a desktop but none exists', async () => {
     mockAppState.sandboxesInfo = [];
-    render(<ChatDesktop latestMessage={nextAnswer} />);
-    await act(async () => fireEvent.click(screen.getByTitle('远程桌面')));
-    expect(screen.getByRole('button', { name: '全部桌面' })).toBeInTheDocument();
-    expect(screen.getByText('从全部桌面添加当前会话的远程桌面')).toBeInTheDocument();
+    await act(async () => {
+      render(<ChatDesktop latestMessage={browserAnswer} />);
+    });
+    expect(mockAppState.getSandboxesInfoUrl).toHaveBeenCalled();
+    expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
     expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
   });
 

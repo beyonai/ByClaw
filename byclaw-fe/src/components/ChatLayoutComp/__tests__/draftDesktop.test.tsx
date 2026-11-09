@@ -1,6 +1,5 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import ChatTitle from '../ChatTitle';
-import { getDesktopOwner, selectDesktop, useDesktopWorkspace } from '@/utils/desktopWorkspace';
 const mockEmit = jest.fn();
 const mockEmitter = { emit: mockEmit };
 const mockApp = { isSiderCollapsed: false, getSandboxesInfoUrl: jest.fn().mockResolvedValue([]) };
@@ -30,27 +29,21 @@ jest.mock('@/components/AntdIcon', () => () => null);
 jest.mock('@/components/NullableAntdCompWithAnim', () => () => null);
 jest.mock('../components/CreateTemplate', () => () => null);
 jest.mock('../ProjectSessionActions', () => () => null);
-it('keeps a real draft title desktop entry mounted through formal session creation', () => {
+it('keeps the title visible through formal session creation without a desktop entry', () => {
   mockAdminVip = false;
   sessionStorage.clear();
-  useDesktopWorkspace.setState({ owners: {}, activeOwner: '', visible: false });
   const view = render(<ChatTitle agentType={'main' as any} />);
-  fireEvent.click(screen.getByTitle('远程桌面'));
-  const request = mockEmit.mock.calls.find(([name]) => name === 'beyond-drawer-view')?.[1];
-  expect(request.content.owner).toMatch(/^temporary:/);
-  act(() => selectDesktop(request.content.owner, { sandboxId: 'draft-sandbox', instance: 'vnc' }));
+  expect(screen.getByText('New Chat')).toBeInTheDocument();
+  expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
   view.rerender(<ChatTitle agentType={'main' as any} sessionId="formal" />);
-  expect(screen.getByTitle('远程桌面')).toBeInTheDocument();
-  expect(getDesktopOwner(JSON.stringify(['session', 'formal'])).refs).toEqual([
-    { sandboxId: 'draft-sandbox', instance: 'vnc' },
-  ]);
-  expect(useDesktopWorkspace.getState().owners[request.content.owner]).toBeUndefined();
+  expect(screen.getByText('New Chat')).toBeInTheDocument();
+  expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
 });
 
 it('offers template saving to administrators only after the draft receives its session ID', () => {
   mockAdminVip = true;
   const view = render(<ChatTitle agentType={'main' as any} />);
-  expect(screen.getByTitle('远程桌面')).toBeInTheDocument();
+  expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
   expect(screen.queryByText('chatTitle.saveAsTemplate')).not.toBeInTheDocument();
   view.rerender(<ChatTitle agentType={'main' as any} sessionId="formal" />);
   expect(screen.getByText('chatTitle.saveAsTemplate')).toBeInTheDocument();
