@@ -163,6 +163,7 @@ export class ToolEnv extends ToolEnvConnection {
     const helper = realpathSync(fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-ssh/helper')))
     const bootstrapPath = join(dirname(realpathSync(fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-ptc-runtime-node')))), 'process.js')
     super(ctx, {
+      ...(config.backend === 'byclaw-be' ? { serviceKey: config.byclawBe.serviceKey } : {}),
       ssh: {
         // A and B run the same image, so A's own Node, helper and PTC bootstrap
         // paths and digests describe B's installation.

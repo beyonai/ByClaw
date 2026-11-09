@@ -24,6 +24,8 @@ type Hello = Awaited<SshConnection['ready']>
 
 /** Static coordinates shared by every inner connection. */
 export interface ToolEnvConnectionOptions {
+  /** Bound at construction for authenticated BE connector bootstrap; other backends leave it absent. */
+  serviceKey?: string
   /** Inner SshConnection configuration except the host alias, which the identity owns. */
   ssh: Omit<SshConfig, 'host'>
   /** Remote PTC invocation, valid because A and B run the same image. */
@@ -100,6 +102,17 @@ export class ToolEnvConnection extends Service {
   startSession(sessionId: string): void { this.backend.startSession?.(sessionId) }
   async acquireSession(sessionId: string): Promise<void> { await this.backend.acquireSession?.(sessionId) }
   async finishSession(sessionId: string, destroy = false): Promise<void> { await this.backend.finishSession?.(sessionId, destroy) }
+
+  /** Supply the same persistent identity used by normal tool leases, without starting compute or SSH. */
+  async bootstrapKeys(serviceKey: string): Promise<{ authorizedKey: string; hostPrivateKeyBase64: string }> {
+    if (this.closed || !this.options.serviceKey) throw new Error('tool bootstrap unavailable')
+    if (serviceKey !== this.options.serviceKey) {
+      throw Object.assign(new Error('tool bootstrap service does not match'), { code: 'TOOL_ENV_SERVICE_MISMATCH' })
+    }
+    const keys = await this.identity.keys()
+    if (this.closed) throw new Error('tool bootstrap unavailable')
+    return { authorizedKey: keys.authorizedKey, hostPrivateKeyBase64: Buffer.from(keys.hostPrivateKey).toString('base64') }
+  }
 
   /**
    * A turn starts B (its instruction-file and Skill reads, then its tools); a

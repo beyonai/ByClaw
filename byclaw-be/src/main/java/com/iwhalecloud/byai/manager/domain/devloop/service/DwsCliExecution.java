@@ -65,7 +65,7 @@ public class DwsCliExecution {
             throw e;
         } catch (RuntimeException e) {
             // Never expose platform connection details or fall back to BE-local credentials.
-            throw new WorkspaceUnavailableException();
+            throw new WorkspaceUnavailableException(e);
         }
     }
 
@@ -76,6 +76,9 @@ public class DwsCliExecution {
 
     public static final class WorkspaceUnavailableException extends IllegalStateException {
         public WorkspaceUnavailableException() { super("Unable to resolve DWS credential workspace"); }
+        public WorkspaceUnavailableException(Throwable cause) {
+            super("Unable to resolve DWS credential workspace", cause);
+        }
     }
 
     static void validate(List<String> command, Duration timeout, int maxOutputBytes) {

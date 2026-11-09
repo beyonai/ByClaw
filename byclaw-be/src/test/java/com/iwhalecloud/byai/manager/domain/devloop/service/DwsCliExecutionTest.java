@@ -67,6 +67,19 @@ class DwsCliExecutionTest {
         assertTrue(guest.requests.isEmpty());
     }
 
+    @Test void preservesSandboxFailureCauseWithoutExposingDetailsInWorkspaceMessage() {
+        IllegalStateException platformFailure = new IllegalStateException(
+            "Tool sandbox requires request-scoped SSH bootstrap keys: private-platform-detail");
+        when(resolver.resolve("account-code")).thenThrow(platformFailure);
+
+        DwsCliExecution.WorkspaceUnavailableException failure = assertThrows(
+            DwsCliExecution.WorkspaceUnavailableException.class, () -> execution.resolve(42L));
+
+        assertEquals("Unable to resolve DWS credential workspace", failure.getMessage());
+        assertSame(platformFailure, failure.getCause());
+        assertTrue(guest.requests.isEmpty());
+    }
+
     @Test void boundsOutputAndPreservesTimeoutFailureAndStderr() {
         DwsCliExecution.Context bound = execution.resolve(42L);
         guest.result = new SandboxCommandResult(0, "authorized", "warning", false, false);

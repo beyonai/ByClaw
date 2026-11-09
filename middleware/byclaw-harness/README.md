@@ -251,6 +251,18 @@ The launcher's header comment lists its environment variables. Running the
 image's default `web` entrypoint as a non-root user fails with "root entrypoint
 required for private browser runtime"; that mode is for per-user sandboxes.
 
+The authenticated `POST /u/{context}/api/byclaw/tool-environment/bootstrap` route
+accepts only `{ "serviceKey": "<configured tool service>" }`. It returns the same
+persistent SSH public key and tool host private key used by that context's
+`dsh-tool-env` plugin, allowing BE connector commands to cold-start the tool
+sandbox before the Agent's first tool call. It does not return the SSH client
+private key, acquire a tool lease, or start compute. The user cookie, same-origin
+checks, current managed admission, and the instantiated plugin's exact service
+key govern access; responses use `Cache-Control: no-store` and failures omit key
+material. Publish this shared-host change before the matching BE change. An old
+host cannot provide bootstrap information; BE fails without creating a substitute
+identity. No Platform update or database migration is required.
+
 Shared hosts run the compiled DSH packages resolved from `BYCLAW_DSH_INSTALL_ANCHOR`,
 without `tsx` source aliases. Mixing workspace sources with installed plugins
 creates separate scope identities and breaks employee preset mounting. Common

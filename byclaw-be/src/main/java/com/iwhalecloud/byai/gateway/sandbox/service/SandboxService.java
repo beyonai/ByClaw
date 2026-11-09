@@ -101,6 +101,9 @@ public class SandboxService {
     @Autowired(required = false)
     private com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts sharedDshHostContexts;
 
+    @Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshToolBootstrapClient sharedDshToolBootstrapClient;
+
     @Lazy
     @Autowired
     private com.iwhalecloud.byai.state.domain.chat.service.SystemParamTargetAgentResolver systemParamTargetAgentResolver;
@@ -354,7 +357,9 @@ public class SandboxService {
         String targetAgentType = systemParamTargetAgentResolver.resolve(null, user);
         SandboxLaunchRouting routing = SandboxTargetRouting.resolve(user, targetAgentType,
             () -> sandboxLaunchContextFactory.resolveRouting(null, user));
+        Map<String, String> toolEnvironmentKeys = Map.of();
         if (isSharedExecutionContext(user, routing)) {
+            String sharedSandboxType = routing.getSandboxType();
             String selectedTool = com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts
                 .toolSandboxLookup(() -> byaiSystemConfigService.getDcSystemConfigValueByCode(
                     com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts.TOOL_SANDBOX_PARAM))
@@ -368,8 +373,25 @@ public class SandboxService {
             if (isSharedExecutionContext(user, routing)) {
                 throw new IllegalStateException("User execution tool sandbox resolves to a shared host context");
             }
+            if (platformRemote()) {
+                SandboxServiceSpec toolSpec = resolveEffectiveSpec(routing.getSandboxType(), routing.getProfileKey());
+                if (toolSpec != null && toolSpec.isToolSandbox()) {
+                    if (!toolSpec.isToolSandboxEnabled()) {
+                        throw new IllegalStateException("User execution tool sandbox is disabled");
+                    }
+                    SandboxLaunchData context = managedSharedLaunch(user, sharedSandboxType);
+                    if (context == null && sharedHostRoutes(user, sharedSandboxType)) {
+                        context = sharedDshHostContexts.ensure(user);
+                    }
+                    if (context == null) {
+                        throw new IllegalStateException("User execution host context is unavailable");
+                    }
+                    // Harness owns the persistent SSH identity; a second identity would break Agent reuse.
+                    toolEnvironmentKeys = sharedDshToolBootstrapClient.load(context, toolServiceKey);
+                }
+            }
         }
-        SandboxLaunchData launched = launchSandboxInternal(user, null, routing);
+        SandboxLaunchData launched = launchSandboxInternal(user, null, routing, null, false, toolEnvironmentKeys);
         if (launched != null && Boolean.TRUE.equals(launched.getIsShared())) {
             throw new IllegalStateException("Shared host contexts cannot execute sandbox commands");
         }

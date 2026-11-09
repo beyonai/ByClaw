@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.manager.domain.connector.provider.dingtalk;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -12,10 +15,15 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.context.i18n.LocaleContextHolder;
 
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationSessionContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartResult;
@@ -26,9 +34,10 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialSta
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestCommandCatalog;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService.DwsCredentialStatus;
+import com.iwhalecloud.byai.manager.domain.devloop.service.DwsCliExecution.WorkspaceUnavailableException;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
-class DwsDingtalkAuthorizationProviderTest {
+class DwsDingtalkAuthorizationProviderTest extends com.iwhalecloud.byai.common.i18n.I18nTestSupport {
 
     private static final String AUTHORIZATION_ID = "auth-dws-1";
     private static final List<String> LOGIN_COMMAND =
@@ -234,6 +243,35 @@ class DwsDingtalkAuthorizationProviderTest {
         provider.revoke("42", new ConnectorInfo());
 
         verify(dwsAuthService).revokeCredential(42L, LOGOUT_COMMAND);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "zh-CN, 钉钉凭据工作区暂不可用，请稍后重试",
+        "en-US, DingTalk credential workspace is temporarily unavailable; please try again later"
+    })
+    void reportsLocalizedRevokeWorkspaceFailureWithoutPlatformDetails(String language, String expectedMessage) {
+        LocaleContextHolder.setLocale(Locale.forLanguageTag(language));
+        IllegalStateException platformFailure = new IllegalStateException("private-platform-detail");
+        WorkspaceUnavailableException workspaceFailure = new WorkspaceUnavailableException();
+        workspaceFailure.initCause(platformFailure);
+        doThrow(workspaceFailure).when(dwsAuthService).revokeCredential(42L, LOGOUT_COMMAND);
+
+        Throwable failure = catchThrowable(() -> provider.revoke("42", new ConnectorInfo()));
+
+        assertThat(failure).isInstanceOf(BaseException.class)
+            .hasMessage(expectedMessage)
+            .hasCause(workspaceFailure);
+        assertThat(failure.getMessage()).doesNotContain("private-platform-detail");
+        assertThat(failure.getCause().getCause()).isSameAs(platformFailure);
+    }
+
+    @Test
+    void preservesOtherRevokeFailures() {
+        IllegalStateException cleanupFailure = new IllegalStateException("Unable to revoke DWS credential");
+        doThrow(cleanupFailure).when(dwsAuthService).revokeCredential(42L, LOGOUT_COMMAND);
+
+        assertThatThrownBy(() -> provider.revoke("42", new ConnectorInfo())).isSameAs(cleanupFailure);
     }
 
     @Test

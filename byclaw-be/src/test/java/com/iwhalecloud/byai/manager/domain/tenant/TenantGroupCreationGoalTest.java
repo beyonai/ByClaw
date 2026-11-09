@@ -69,6 +69,17 @@ class TenantGroupCreationGoalTest {
         project.setProjectName("Optional goal group");
         when(projectApplicationService.createGroupChatProject(any())).thenReturn(project);
         TenantRequestContext tenantRequestContext = new TenantRequestContext(10L, 42L, "OWNER");
+        when(tenantNodeClient.command(eq(tenantRequestContext), eq("POST"), eq("/internal/v1/group-chats"),
+            anyString(), eq("CREATE_GROUP"), any(TenantNodeModels.Fields.class), anyString(), anyList()))
+            .thenAnswer(call -> {
+                String groupId = call.getArgument(3);
+                var saved = new ObjectMapper().createObjectNode();
+                saved.putArray("savedMembers").addObject()
+                    .put("groupId", groupId).put("enterpriseId", "42")
+                    .put("userId", "10").put("byaiSessionMemberId", "101");
+                return new TenantNodeModels.CommandResult(groupId, call.getArgument(6), "CREATE_GROUP", null,
+                    null, null, null, saved);
+            });
         JsonNode groupDetail = new ObjectMapper().createObjectNode();
         when(tenantGroupData.read(eq(tenantRequestContext), anyString())).thenReturn(groupDetail);
         GroupChatCreateRequest groupChatCreateRequest = new GroupChatCreateRequest();

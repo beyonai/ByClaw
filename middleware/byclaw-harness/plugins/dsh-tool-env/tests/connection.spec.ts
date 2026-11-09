@@ -1,10 +1,54 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { ToolEnvIdentity } from '../src/identity.ts'
 import { ToolEnvConnection, launchEnvironment, scrubEnvironment } from '../src/connection.ts'
 import { DeferredToolEnvironmentWork } from '../src/deferred-work.ts'
 import { resolveLocalExecutable } from '../src/local-executable.ts'
 import { answerWhileDown, isCleanupRequest } from '../src/pending-directories.ts'
+
+
+describe('connector bootstrap identity', () => {
+  it('returns the persistent service identity without acquiring or starting a tool environment', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tool-identity-bootstrap-'))
+    const ctx = new Context()
+    const backend = { ensure: vi.fn(async () => { throw new Error('must not launch') }), pause: vi.fn(async () => {}), acquireSession: vi.fn(async () => {}) }
+    const identity = new ToolEnvIdentity(join(root, 'connection'), 'own-alias', 'byclaw', join(root, 'service-keys'))
+    const connection = new ToolEnvConnection(ctx, { serviceKey: 'user-tools', ssh: {} as never,
+      ptcLaunch: { kind: 'node-script', executable: 'node', bootstrapPath: '/unused' }, idleMs: 0 }, backend, identity)
+    try {
+      const first = await connection.bootstrapKeys('user-tools')
+      const second = await connection.bootstrapKeys('user-tools')
+      expect(second).toEqual(first)
+      expect(Object.keys(first).sort()).toEqual(['authorizedKey', 'hostPrivateKeyBase64'])
+      expect(first.authorizedKey).toBe((await readFile(join(root, 'service-keys/keys-v1/client_ed25519.pub'), 'utf8')).trim())
+      expect(Buffer.from(first.hostPrivateKeyBase64, 'base64').toString()).toBe(await readFile(join(root, 'service-keys/keys-v1/host_ed25519'), 'utf8'))
+      expect(connection.connected).toBe(false)
+      expect(backend.ensure).not.toHaveBeenCalled()
+      expect(backend.acquireSession).not.toHaveBeenCalled()
+    } finally { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('refuses another service, absent service configuration and disposed contexts before reading keys', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tool-identity-denied-'))
+    const ctx = new Context()
+    const options = { ssh: {} as never, ptcLaunch: { kind: 'node-script' as const, executable: 'node', bootstrapPath: '/unused' }, idleMs: 0 }
+    const backend = { ensure: vi.fn(async () => { throw new Error('must not launch') }), pause: vi.fn(async () => {}) }
+    const identity = new ToolEnvIdentity(join(root, 'must-not-exist'))
+    const connection = new ToolEnvConnection(ctx, { ...options, serviceKey: 'user-tools' }, backend, identity)
+    const other = new Context()
+    const unsupported = new ToolEnvConnection(other, options, backend, identity)
+    try {
+      await expect(connection.bootstrapKeys('other-tools')).rejects.toMatchObject({ code: 'TOOL_ENV_SERVICE_MISMATCH' })
+      await expect(unsupported.bootstrapKeys('user-tools')).rejects.toThrow('unavailable')
+      await ctx.fiber.dispose()
+      await expect(connection.bootstrapKeys('user-tools')).rejects.toThrow('unavailable')
+      expect(await readdir(root)).toEqual([])
+    } finally { await ctx.fiber.dispose(); await other.fiber.dispose(); await rm(root, { recursive: true, force: true }) }
+  })
+})
 
 describe('physical ownership versus SSH lease teardown', () => {
   it('routes automatic teardown to detach, explicit release to destruction, and never destroys on context disposal', async () => {
