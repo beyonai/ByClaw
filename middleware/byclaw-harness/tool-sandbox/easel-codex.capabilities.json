@@ -1,6 +1,6 @@
 {
   "contract": "byclaw.tool-sandbox/v1",
-  "runtimeVersion": "D0.6.0_easel-codex-20261109-r2",
+  "runtimeVersion": "D0.6.0_easel-codex-20261110-r3",
   "purpose": "easel-codex",
   "os": "linux",
   "operations": {

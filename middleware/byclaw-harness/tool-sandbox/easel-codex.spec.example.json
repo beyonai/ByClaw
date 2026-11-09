@@ -1,5 +1,5 @@
 {
-  "image": "byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness:D0.6.0_easel-codex-20261109-r2",
+  "image": "byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness:D0.6.0_easel-codex-20261110-r3",
   "startup": {
     "entrypoint": [
       "/usr/local/bin/byclaw-easel-codex-entrypoint",
@@ -62,7 +62,7 @@
       "templateKey": "easel-codex",
       "purpose": "easel-codex",
       "enabled": "true",
-      "imageTag": "D0.6.0_easel-codex-20261109-r2",
+      "imageTag": "D0.6.0_easel-codex-20261110-r3",
       "description": "包含 Easel 完整源码、Codex CLI、Python/Node、FFmpeg、Playwright 和 Remotion；用于在 ByClaw 内调试、运行及验收 Easel。",
       "capabilities": "[\"process.exec\",\"filesystem\",\"software.development\",\"media.render\",\"browser.automation\",\"agent.codex\"]",
       "operations": "{\"protocol\":\"ssh\",\"exposure\":\"private\"}",
