@@ -1024,3 +1024,15 @@ test('purpose marketplace templates come from the trusted user launch environmen
   assert.deepEqual(row.config.templates, templates)
   assert.throws(() => composeUserOverlays(entries, 'u1', '/r/u1', { ...configured, env: { ...configured.env, BYCLAW_TOOL_ENV_CATALOG: JSON.stringify([templates[0], { ...templates[1], serviceKey: templates[0].serviceKey }]) } }), /CATALOG/)
 })
+
+test('each context is offered the Beyond-Token of its latest PUT, for BE calls while its user is logged out', () => {
+  const issued = host.contextTokenHolder({ BEYOND_TOKEN: ' first ' })
+  assert.equal(issued.current(), 'first')
+  issued.renew({ BEYOND_TOKEN: 'second' })
+  assert.equal(issued.current(), 'second')
+  // A PUT without a token keeps the last one.
+  issued.renew({})
+  issued.renew(undefined)
+  assert.equal(issued.current(), 'second')
+  assert.equal(host.contextTokenHolder(undefined).current(), undefined)
+})
