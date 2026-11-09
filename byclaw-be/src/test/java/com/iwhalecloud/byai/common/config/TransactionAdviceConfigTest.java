@@ -86,6 +86,23 @@ class TransactionAdviceConfigTest extends com.iwhalecloud.byai.common.i18n.I18nT
     }
 
     @Test
+    void stoppingAnOrphanedTurnHoldsNoTransaction() throws Exception {
+        TransactionAdviceConfig config = new TransactionAdviceConfig();
+        ReflectionTestUtils.setField(config, "transactionManager", mock(DataSourceTransactionManager.class));
+        var source = config.getAdvisor().getTransactionAttributeSource();
+        var chats = com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicationService.class;
+        assertThat(source.getTransactionAttribute(chats.getMethod("stopOrphanedChat", Long.class), chats)
+            .getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        var orphans = com.iwhalecloud.byai.state.application.service.chat.OrphanedChatTurnService.class;
+        assertThat(source.getTransactionAttribute(orphans.getMethod("releaseIfOrphaned", String.class, Long.class), orphans)
+            .getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        assertThat(source.getTransactionAttribute(orphans.getMethod("sweep"), orphans).getPropagationBehavior())
+            .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        assertThat(resolvePropagation(source, "createSomethingElse"))
+            .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
+    }
+
+    @Test
     void workspaceSkillCenterOwnsItsCommitBeforeFileCleanup() throws Exception {
         TransactionAdviceConfig config = new TransactionAdviceConfig();
         ReflectionTestUtils.setField(config, "transactionManager", mock(DataSourceTransactionManager.class));

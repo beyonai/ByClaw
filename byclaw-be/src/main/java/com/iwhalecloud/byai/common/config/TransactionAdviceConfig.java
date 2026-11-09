@@ -108,6 +108,8 @@ public class TransactionAdviceConfig {
         // stopChat 会先尝试补写运行快照，再调用远端取消并清理 Redis 运行态。各数据库写入由下层服务
         // 独立提交，外层不能持有 REQUIRED 事务，否则补写异常即使被捕获也会将停止流程标记为 rollback-only。
         txMap.put("stopChat", notSurpportedTx);
+        // 执行者离线的一轮按 stopChat 的方式收尾（内部直接调用私有 stopChat，不经过代理），同样不能持有外层事务。
+        txMap.put("stopOrphanedChat", notSurpportedTx);
         txMap.put("flushOnStop", notSurpportedTx);
         txMap.put("flushFromSnapshot", notSurpportedTx);
         txMap.put("persistAsyncGatewayContext", notSurpportedTx);
@@ -196,6 +198,11 @@ public class TransactionAdviceConfig {
                     "com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorageService")
                     && "publishResourceJson".equals(method.getName())) {
                     return resourceJsonFacadeTx;
+                }
+                // 离线轮次的收尾先确认 Redis 中的孤儿命令，再停止该轮；两者都不是数据库写入，不能开启或加入外层事务。
+                if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
+                    "com.iwhalecloud.byai.state.application.service.chat.OrphanedChatTurnService")) {
+                    return notSurpportedTx;
                 }
                 // 目录技能同步自行提交保存事务，随后清理文件；清理失败不得被外层事务转为提交失败。
                 if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
