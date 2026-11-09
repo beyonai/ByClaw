@@ -102,7 +102,9 @@ class TransactionAdviceConfigTest extends com.iwhalecloud.byai.common.i18n.I18nT
         // The services the turn calls still commit their own writes, and same-named methods elsewhere keep theirs.
         assertThat(source.getTransactionAttribute(chat.getMethod("createGroupChatSession", dto), chat).getPropagationBehavior())
             .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
-        assertThat(resolvePropagation(source, "createSomethingElse")).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
+        assertThat(resolvePropagation(source, "chat")).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
+        assertThat(resolvePropagation(source, "llmChat")).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
+        assertThat(resolvePropagation(source, "executeAssistantChat")).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
     }
 
     @Test
@@ -242,6 +244,15 @@ class TransactionAdviceConfigTest extends com.iwhalecloud.byai.common.i18n.I18nT
     }
 
     static class TxMethodSamples {
+
+        public void chat() {
+        }
+
+        public void llmChat() {
+        }
+
+        public void executeAssistantChat() {
+        }
 
         public void openCommonFileInputStream() {
         }
