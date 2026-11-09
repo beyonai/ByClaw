@@ -73,6 +73,39 @@ class TransactionAdviceConfigTest extends com.iwhalecloud.byai.common.i18n.I18nT
     }
 
     @Test
+    void aChatTurnDoesNotHoldOneTransactionAcrossItsEntryMethods() throws Exception {
+        TransactionAdviceConfig config = new TransactionAdviceConfig();
+        ReflectionTestUtils.setField(config, "transactionManager", mock(DataSourceTransactionManager.class));
+        var source = config.getAdvisor().getTransactionAttributeSource();
+        var chat = com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService.class;
+        var dto = com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto.class;
+        var out = java.io.OutputStream.class;
+        assertThat(source.getTransactionAttribute(chat.getMethod("chat", dto, out,
+            com.iwhalecloud.byai.common.login.bean.LoginInfo.class), chat).getPropagationBehavior())
+            .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        var script = com.iwhalecloud.byai.state.domain.chat.service.ScriptService.class;
+        assertThat(source.getTransactionAttribute(script.getMethod("executeAssistantChat", out, dto, Long.class), script)
+            .getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        var ws = com.iwhalecloud.byai.state.domain.ws.service.ChatService.class;
+        Method llmChat = java.util.Arrays.stream(ws.getMethods()).filter(m -> m.getName().equals("llmChat")).findFirst().orElseThrow();
+        assertThat(source.getTransactionAttribute(llmChat, ws).getPropagationBehavior())
+            .isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        for (Class<?> channel : new Class<?>[] {
+            com.iwhalecloud.byai.gateway.channels.service.app.AppChannelService.class,
+            com.iwhalecloud.byai.gateway.channels.service.dingtalk.DingtalkChannelService.class,
+            com.iwhalecloud.byai.gateway.channels.service.feishu.FeishuChannelService.class,
+            com.iwhalecloud.byai.gateway.channels.service.web.WebChannelService.class,
+            com.iwhalecloud.byai.gateway.channels.service.wecom.WecomChannelService.class}) {
+            assertThat(source.getTransactionAttribute(channel.getMethod("chat", dto, out), channel).getPropagationBehavior())
+                .as(channel.getSimpleName()).isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        }
+        // The services the turn calls still commit their own writes, and same-named methods elsewhere keep theirs.
+        assertThat(source.getTransactionAttribute(chat.getMethod("createGroupChatSession", dto), chat).getPropagationBehavior())
+            .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
+        assertThat(resolvePropagation(source, "createSomethingElse")).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
+    }
+
+    @Test
     void commonFileFallbackCannotMarkTheCallingChatRollbackOnly() throws Exception {
         TransactionAdviceConfig config = new TransactionAdviceConfig();
         ReflectionTestUtils.setField(config, "transactionManager", mock(DataSourceTransactionManager.class));

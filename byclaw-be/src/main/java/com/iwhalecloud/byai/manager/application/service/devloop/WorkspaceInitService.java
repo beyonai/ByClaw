@@ -15,6 +15,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -220,15 +222,26 @@ public class WorkspaceInitService {
         update.setUpdateTime(new Date());
         projectService.update(update);
 
-        // 会话已由 createGroupChatSession 落库，异步线程读得到；chat 流式耗时长，不能占住本请求。
-        INIT_CHAT_EXECUTOR.execute(() -> {
+        // chat 流式耗时长，不能占住本请求；会话行在本事务提交后异步线程才读得到，所以提交后再下发，
+        // 否则 chat 会按“新会话”再插一次同一会话并等在本事务的行锁上。
+        Runnable initChat = () -> {
             try {
                 assistantChatService.chat(chatDto, new ByteArrayOutputStream(), loginInfo);
             }
             catch (Exception e) {
                 log.error("[WorkspaceInit] 下发架构员工 chat 失败, projectId={}, sessionId={}", projectId, sessionId, e);
             }
-        });
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    INIT_CHAT_EXECUTOR.execute(initChat);
+                }
+            });
+        } else {
+            INIT_CHAT_EXECUTOR.execute(initChat);
+        }
         log.info("[WorkspaceInit] 已下发架构员工初始化, projectId={}, sessionId={}, architectAgentId={}", projectId, sessionId,
             architectAgentId);
         return new WorkspaceInitStarted(sessionId, architectAgentId, defaultAgent.getArchitectAgentName());
