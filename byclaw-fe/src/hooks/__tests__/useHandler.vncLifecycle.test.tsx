@@ -1,4 +1,4 @@
-import { act, render, renderHook, screen } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import MainDrawer from '@/components/MainDrawer';
 import { formatStreamPayload } from '@/hooks/useSseSender/chatStream';
 import useHandler from '@/hooks/useChat/useHandler';
@@ -59,19 +59,20 @@ const desktopRefs = [{ sandboxId: 'sandbox-a', instance: 'vnc' }];
 const receiveTool = (
   sessionId: string,
   instanceRefs?: typeof desktopRefs,
-  tool: { orderId: string; title: string; input?: Record<string, unknown> } = {
+  tool: { orderId: string; title: string; input?: Record<string, unknown>; output?: string; status?: string } = {
     orderId: 'browser-a',
     title: 'browser',
     input: { operation: 'open' },
   }
 ) => {
+  const { orderId, ...substance } = tool;
   const payload = {
     sessionId,
     contentType: '3015',
     objectType: 'tool_call',
-    orderId: tool.orderId,
+    orderId,
     ...(instanceRefs !== undefined ? { instanceRefs } : {}),
-    choices: [{ delta: { content: JSON.stringify({ title: tool.title, input: tool.input }) } }],
+    choices: [{ delta: { content: JSON.stringify(substance) } }],
   };
   handleParsedChatStream({
     eventName: 'reasoningLogDelta',
@@ -122,7 +123,9 @@ it.each([
   rerender();
   if (refs) {
     await act(async () => receiveTool('chat-a', [], { orderId: 'browser-a', title: 'browser', input }));
-    expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
+  }
+  expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
+  if (refs) {
     // The later instance update omits input and relies on the merged tool call.
     await act(async () => receiveTool('chat-a', desktopRefs, { orderId: 'browser-a', title: 'browser' }));
   } else {
@@ -154,6 +157,42 @@ it.each([
   await act(async () => receiveTool('chat-a', desktopRefs));
   expect(await screen.findByTitle('remote desktop')).toBeInTheDocument();
 });
+
+it.each([
+  { requested: true, exitCode: 0, opens: true },
+  { requested: true, exitCode: 1, opens: false },
+  { requested: false, exitCode: 0, opens: false },
+])(
+  'opens a scripted desktop only after an opted-in success ($requested, $exitCode)',
+  async ({ requested, exitCode, opens }) => {
+    mockSessionId = 'chat-a';
+    const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+    render(<MainDrawer />);
+    const { browserHandler, messageHandler } = result.current;
+    const answer = registerStream((props) => browserHandler(messageHandler(props)));
+    answer.sessionId = 'chat-a';
+    answer.metadata = JSON.stringify({ messageRenderVersion: 'v2' });
+    const tool = { orderId: 'script-a', title: 'sandbox_exec' };
+
+    await act(async () =>
+      receiveTool('chat-a', desktopRefs, {
+        ...tool,
+        input: { lease_id: 'lease-a', argv: ['bash', 'start-browser.sh'], opts: requested ? { show_desktop: {} } : {} },
+        status: '_START_',
+      })
+    );
+    expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
+
+    await act(async () =>
+      receiveTool('chat-a', desktopRefs, {
+        ...tool,
+        output: JSON.stringify({ exitCode, stdout: '', stderr: '' }),
+        status: '_DONE_',
+      })
+    );
+    await waitFor(() => expect(Boolean(screen.queryByTitle('remote desktop'))).toBe(opens));
+  }
+);
 
 it('does not open a late previous-chat tool through the retained stream callback after navigation', async () => {
   mockSessionId = 'chat-a';

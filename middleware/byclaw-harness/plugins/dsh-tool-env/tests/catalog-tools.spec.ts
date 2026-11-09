@@ -22,7 +22,7 @@ describe('real Harness tool registry contract', () => {
     try {
       registerCatalogTools(ctx, manager)
       const lease = await manager.acquire('actor', 'desktop', 'one')
-      const result = await tools.execute({ callId: 'exec' as never, name: 'sandbox_exec', arguments: { lease_id: lease.leaseId, argv: ['anything'] },
+      const result = await tools.execute({ callId: 'exec' as never, name: 'sandbox_exec', arguments: { lease_id: lease.leaseId, argv: ['anything'], opts: { show_desktop: {} } },
         agent: { id: 'actor', session } as never, signal: new AbortController().signal })
       expect(result.isError).toBe(false)
       expect(JSON.stringify(result)).toContain('business-result')
@@ -204,6 +204,12 @@ describe('real Harness tool registry contract', () => {
     expect((tools.get('sandbox_templates') as any).byclawInstanceRefsVersion).toBeUndefined()
     const schemas = tools.schemas()
     expect(schemas.map(s => s.name)).toEqual(['sandbox_templates', 'sandbox_acquire', 'sandbox_exec', 'sandbox_release'])
+    const execute = schemas.find(s => s.name === 'sandbox_exec')!
+    expect(execute.parameters.properties?.opts).toMatchObject({
+      type: 'object',
+      properties: { show_desktop: { type: 'object' } },
+    })
+    expect(execute.parameters.required).not.toContain('opts')
     const acquire = schemas.find(s => s.name === 'sandbox_acquire')!
     expect(acquire.description.length).toBeLessThanOrEqual(250)
     expect(acquire.description).toContain('idle')

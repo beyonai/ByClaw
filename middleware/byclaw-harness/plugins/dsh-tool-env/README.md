@@ -341,6 +341,12 @@ Old calls without metadata retain the absent field. The 3015 projection carries
 `instanceRefs` only on the AnswerDelta root, and late metadata preserves the
 exact call's success/error without attaching to a later turn that reuses its ID.
 
+`sandbox_exec` accepts an optional `opts: { show_desktop: {} }` for commands that open
+a visible window for the user. The launcher must verify the window on the
+sandbox display before returning exit code 0. The chat UI uses the explicit
+request, the successful command result and the authorized instance references
+to decide whether to expand the desktop.
+
 Browser adapters only read the explicit `browser.automation` binding; reporting
 never accesses the allocating SSH `ready` getter. Before execution they report
 only `[]`, so a cached identity cannot attach an old allocation to a new open.
