@@ -121,7 +121,7 @@ public class OpenApiController {
 
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(agentId);
-        DigitalEmployeeDetailsDTO digitalEmployeeDTO = digitalEmployeeApplicationService.findDetailsById(employeeIdDTO);
+        DigitalEmployeeDetailsDTO digitalEmployeeDTO = digitalEmployeeApplicationService.findVisibleDetailsById(employeeIdDTO);
 
         // 同步openClaw工作空间：透传原始入参，relTools / relPrompt 等不入 DB 的运行期字段需要从入参直接进 JSON。
         digitalEmployeeApplicationService.synOpenClawWorkSpace(agentId, digitalEmployeeDTO);

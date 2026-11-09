@@ -821,7 +821,7 @@ class DigitalEmployeeApplicationServiceTest extends com.iwhalecloud.byai.common.
         SsResource skill = buildSkillResource(300L, 2L);
         SsResource object = new SsResource();
         object.setResourceId(400L);
-        object.setResourceBizType(ResourceBizTypeEnum.OBJECT.name());
+        object.setResourceBizType(ResourceBizTypeEnum.TOOL.name());
         List<SsResourceRelDetail> savedRelations = new ArrayList<>();
         when(sequenceService.nextVal()).thenReturn(100L, 901L, 902L);
         when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -1245,7 +1245,7 @@ class DigitalEmployeeApplicationServiceTest extends com.iwhalecloud.byai.common.
 
     @ParameterizedTest
     @ValueSource(strings = { "KG_DOC", "KG_DB", "KG_QA", "KG_TERM", "TOOL", "TOOLKIT", "MCP", "MCP_TOOL",
-        "AGENT", "OBJECT", "VIEW" })
+        "AGENT" })
     void installDigitalEmployeeRelResources_installsAuthorizedNonSkillAndPreservesExistingRelations(
         String resourceBizType) {
         DigitalEmployeeApplicationService installService = snapshotServiceSpy();
@@ -1281,7 +1281,7 @@ class DigitalEmployeeApplicationServiceTest extends com.iwhalecloud.byai.common.
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"KG_DOC", "KG_DB", "KG_QA", "KG_TERM", "TOOL", "TOOLKIT", "MCP", "MCP_TOOL", "AGENT", "OBJECT", "VIEW"})
+    @ValueSource(strings = {"KG_DOC", "KG_DB", "KG_QA", "KG_TERM", "TOOL", "TOOLKIT", "MCP", "MCP_TOOL", "AGENT"})
     void enterpriseResourceInstallationLocksEmployeeAndSynchronizesAfterBinding(String type) {
         DigitalEmployeeApplicationService installer = snapshotServiceSpy();
         SsResource employee = buildDigitalEmployee(100L, OwnerType.ENTERPRISE, 1L); employee.setComAcctId(201L);
@@ -1739,6 +1739,23 @@ class DigitalEmployeeApplicationServiceTest extends com.iwhalecloud.byai.common.
         verifySnapshotRefresh(snapshotService, employee, 0);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"OBJECT", "VIEW", "ONTOLOGY_BASE", "SCENE"})
+    void retiredResourcesCannotBeInstalledEvenWithUsePermission(String type) {
+        var dto = new DigitalEmployeeInstallResourceDTO();
+        dto.setDigitalEmployeeId(100L); dto.setRelIds(List.of(400L));
+        SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource retired = new SsResource(); retired.setResourceId(400L);
+        retired.setResourceBizType(type); retired.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        when(ssResourceService.findById(100L)).thenReturn(employee);
+        when(ssResourceService.findByIdList(List.of(400L))).thenReturn(List.of(retired));
+        when(authApplicationService.hasResourceInstallTargetManagePermission(employee)).thenReturn(true);
+        when(authApplicationService.hasResourceUsePermission(retired)).thenReturn(true);
+        assertThatThrownBy(() -> service.installDigitalEmployeeRelResources(dto))
+            .hasMessage("RESOURCE_TYPE_RETIRED");
+        verifyNoInteractions(ssResourceRelDetailService, digitalEmployeeRuntimeRefreshService);
+    }
+
     @Test
     void ordinaryDirectSkillInstallMarksSkillManualCanonicalAndLeavesNonSkillMetadataUntouched() {
         DigitalEmployeeApplicationService installService = snapshotServiceSpy();
@@ -1749,7 +1766,7 @@ class DigitalEmployeeApplicationServiceTest extends com.iwhalecloud.byai.common.
         SsResource skill = buildSkillResource(301L, 2L);
         SsResource object = new SsResource();
         object.setResourceId(401L);
-        object.setResourceBizType(ResourceBizTypeEnum.OBJECT.name());
+        object.setResourceBizType(ResourceBizTypeEnum.TOOL.name());
         SsResourceRelDetail skillRelation = directSkillRelation(901L, 301L,
             "{\"manual\":false,\"sourceGroupIds\":[700,\"bad\"]}");
         skillRelation.setRelTypeName(null);
@@ -1824,7 +1841,7 @@ class DigitalEmployeeApplicationServiceTest extends com.iwhalecloud.byai.common.
         SsResource skill = buildSkillResource(301L, 2L);
         SsResource object = new SsResource();
         object.setResourceId(401L);
-        object.setResourceBizType(ResourceBizTypeEnum.OBJECT.name());
+        object.setResourceBizType(ResourceBizTypeEnum.TOOL.name());
         SsResourceRelDetail[] createdSkill = new SsResourceRelDetail[1];
         SsResourceRelDetail[] createdObject = new SsResourceRelDetail[1];
         when(ssResourceService.findById(100L)).thenReturn(employee);

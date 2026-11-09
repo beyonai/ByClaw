@@ -170,7 +170,7 @@ class PrivilegeGrantMapperSqlTest {
                     params.put("excludeDeleted", true);
                     String sql = source.getBoundSql(params).getSql().replaceAll("\\s+", " ");
                     // 条件在 OR 组外，包含默认个人资源和全部状态时也不能返回注销数据。
-                    assertThat(sql).contains("WHERE a.resource_status != -1 and (");
+                    assertThat(sql).contains("and a.resource_status != -1 and (");
                     params.put("excludeDeleted", false);
                     assertThat(source.getBoundSql(params).getSql()).doesNotContain("a.resource_status != -1");
                 }

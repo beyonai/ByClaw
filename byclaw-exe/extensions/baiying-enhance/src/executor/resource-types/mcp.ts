@@ -1,3 +1,4 @@
+import { isRetiredResource, retiredResourceError } from "../../retired-resources.js";
 import type {
   Capability,
   Dict,
@@ -40,15 +41,7 @@ export async function executeMcp(params: {
   signal?: AbortSignal;
 }): Promise<ExecutorResponse> {
   const { capability } = params;
-  const resourceType = String(capability.resource_type ?? "").trim().toUpperCase();
-  if (resourceType === "OBJECT" || resourceType === "VIEW") {
-    return executeObjectViewViaCallAgent({
-      capability,
-      parameters: params.parameters,
-      logger: params.logger,
-      signal: params.signal,
-    });
-  }
+  if (isRetiredResource(capability)) return retiredResourceError();
 
   const mcp = isRecord(capability.mcp) ? (capability.mcp as Dict) : {};
   const serverUrl = asString(mcp.server_url);

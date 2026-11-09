@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.interfaces.controller.resource;
 
+import com.iwhalecloud.byai.common.constants.resource.RetiredConversationResources;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -1894,7 +1895,10 @@ public class ToolManController {
         if (resource == null && identity.matches("[0-9]+")) resource = ssResourceService.findByIdOrCode(null, identity);
         boolean controlled = resource != null && (Boolean.TRUE.equals(resource.getUseAuthControlled())
             || Boolean.TRUE.equals(resource.getViewAuthControlled()));
-        boolean allowed = !controlled || authApplicationService.hasResourceUsePermission(resource);
+        boolean allowed = resource != null && (!controlled || authApplicationService.hasResourceUsePermission(resource));
+        if (allowed && resource != null && RetiredConversationResources.isRetired(resource.getResourceBizType())) {
+            return ResponseUtil.success(Map.of("controlled", controlled, "allowed", false, "reason", RetiredConversationResources.REASON));
+        }
         return ResponseUtil.success(Map.of("controlled", controlled, "allowed", allowed));
     }
 
@@ -1925,6 +1929,7 @@ public class ToolManController {
             || Boolean.TRUE.equals(resource.getUseAuthControlled())) && !authApplicationService.hasResourceAccessPermission(resource)) {
             throw new IllegalArgumentException(I18nUtil.get("resource.content.use.denied"));
         }
+        if (resource != null) RetiredConversationResources.requireAvailable(resource.getResourceBizType());
     }
 
 }

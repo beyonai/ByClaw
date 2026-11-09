@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.resource.service;
 
+import com.iwhalecloud.byai.common.constants.resource.RetiredConversationResources;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
 import java.util.Collections;
@@ -175,6 +176,7 @@ public class ResourceApplicationService {
         if (controlled && !authApplicationService.hasResourceViewPermission(ssResource)) {
             throw new IllegalArgumentException(I18nUtil.get("resource.basic.info.denied"));
         }
+        RetiredConversationResources.requireAvailable(ssResource.getResourceBizType());
         ResourceDetailVo resourceDetailVo = new ResourceDetailVo();
         if (controlled && !authApplicationService.hasResourceAccessPermission(ssResource)) {
             // Metadata whitelist: no host, schema, package URL, service configuration or member details.
@@ -196,6 +198,11 @@ public class ResourceApplicationService {
         BeanUtils.copyProperties(ssResource, resourceDetailVo);
         if (Constants.ResourceBizType.DIG_EMPLOYEE.equalsIgnoreCase(ssResource.getResourceBizType())) {
             SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(ssResource.getResourceId());
+            if (ssResExtDigEmployee != null) {
+                ssResExtDigEmployee = com.alibaba.fastjson.JSON.parseObject(
+                    RetiredConversationResources.sanitizeRuntimeJson(com.alibaba.fastjson.JSON.toJSONString(ssResExtDigEmployee)),
+                    SsResExtDigEmployee.class);
+            }
             resourceDetailVo.setParam(ssResExtDigEmployee);
         }
 
@@ -237,6 +244,7 @@ public class ResourceApplicationService {
                 request.setResourceName(resourceQo.getSearchName());
             }
         }
+        request.setExcludeRetiredConversationResources(true);
         request.setSortFields(sortFields);
         if (request.getOwnershipType() == null) {
             request.setOwnershipType(3);
@@ -709,7 +717,11 @@ public class ResourceApplicationService {
         if (resourceId == null) {
             return null;
         }
-        return ssResExtDigEmployeeService.findDetailsById(resourceId);
+        DigitalEmployeeDetailsDTO details = ssResExtDigEmployeeService.findDetailsById(resourceId);
+        if (details == null) return null;
+        // External projections never expose stored runtime snapshots.
+        return com.alibaba.fastjson.JSON.parseObject(RetiredConversationResources.sanitizeRuntimeJson(
+            com.alibaba.fastjson.JSON.toJSONString(details)), DigitalEmployeeDetailsDTO.class);
     }
 
     /**
@@ -725,6 +737,9 @@ public class ResourceApplicationService {
         }
         List<SsResourceRelDetailDTO> allSkills = ssResourceRelDetailService.querySkillsForOpenApi(resourceId);
 
+        allSkills = allSkills.stream()
+            .filter(skill -> !RetiredConversationResources.isRetired(skill.getResourceBizType()))
+            .collect(Collectors.toList());
         if (StringUtils.isNotBlank(resourceBizType)) {
             String normalizedType = resourceBizType.trim();
             allSkills = allSkills.stream()

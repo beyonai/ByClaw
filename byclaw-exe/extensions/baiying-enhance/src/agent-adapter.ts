@@ -1,3 +1,4 @@
+import { isRetiredResource } from "./retired-resources.js";
 import { parseCorePersonaDefinition } from "./core-persona-definition.js";
 import {
     MANAGED_AGENT_PREFIX,
@@ -430,7 +431,7 @@ function adaptRawBaiyingDetail(params: {
                 r &&
                 typeof r === "object" &&
                 typeof (r as Record<string, unknown>).resourceId === "string" &&
-                !isSkillRelResource(r as Record<string, unknown>),
+                !isSkillRelResource(r as Record<string, unknown>) && !isRetiredResource(r),
         )
         .map((r: Record<string, unknown>) => ({
             resourceId: String(r.resourceId),

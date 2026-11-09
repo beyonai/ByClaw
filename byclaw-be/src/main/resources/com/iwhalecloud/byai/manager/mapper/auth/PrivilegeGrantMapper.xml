@@ -470,6 +470,7 @@
              ) p
                 on a.resource_id = p.grant_obj_id
         <where>
+            AND COALESCE(UPPER(TRIM(a.resource_biz_type)), '') NOT IN ('OBJECT', 'VIEW', 'ONTOLOGY_BASE', 'SCENE')
             <if test="includeFavorites == true and favoriteTenantId != null">
                 and a.owner_type = 'enterprise' and a.resource_status = 2
                 and a.resource_biz_type != 'SKILL_GROUP'

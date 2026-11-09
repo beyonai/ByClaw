@@ -1320,3 +1320,15 @@ bash deploy/env-encrypt.sh --decrypt byclaw-be/.env
 指定它；使用后删除临时明文文件，保留原始加密 `.env`。
 
 回归检查：`python3 deploy/tests/env-decrypt.test.py`。
+
+## 对话资源停用与收藏兼容（D0.6.0，#267 / #287）
+
+对话资源入口停用 `OBJECT`、`VIEW`、`ONTOLOGY_BASE`、`SCENE`，按实际业务类型判断并兼容大小写和首尾空白，不按名称关键词匹配。列表在数据库分页和计数前过滤；ID/code 详情在原权限检查后拒绝；Redis 授权列表、单个与批量读取遵守同一规则，已授权的停用读取返回 `RESOURCE_TYPE_RETIRED`。普通知识库、技能、工具、MCP、Agent 和模型读取保留原有权限语义。
+
+员工对外详情与内部完整关联分离。普通编辑保存保留隐藏的历史停用关联，不能新挂载停用资源；发布执行时不携带停用依赖。运行 JSON 导出、已有 targetContent 的同步和运行读取均过滤停用元数据。历史数据库记录、会话和用户手写提示内容不清理；独立对象管理不在本次变更范围。
+
+Redis 批量资源读取按原键逐个 GET，不拼接跨槽 MGET，不更改键名、前缀或 TTL。部署需同时更新后端和 baiying-enhance 插件构建及所有运行实例，再刷新员工运行配置和带托管标记的提示文件；旧缓存即使尚未刷新，更新后的执行器仍会拒绝四类能力。用户手工维护文件不覆盖。外部动态 TOOL/MCP/AGENT 包装的具体服务定义需在目标环境逐项核实，不能将普通 MCP 或整个数据服务一并停用。
+
+商业版收藏补齐 `TOOL` 原子工具，沿用已有收藏、取消、幂等计数、租户隔离、权限和排序逻辑；`SKILL_GROUP` 仍不参与。本次不新增迁移，实际部署仍需具备已有收藏表。
+
+自测入口：`ConversationResourceRetirementTest`、`RedisResourceRetirementIntegrationTest`、`ResourceFavorite*Test`、`DigitalEmployee*Test` 和 `*EmployeePublication*Test`。真实 Redis Cluster 测试通过 `BYCLAW_TEST_REDIS_CLUSTER_PORT` 指向仅绑定本机、可销毁的专用测试集群；不得指向应用 Redis。模块完整检查使用 `mvn -B -f byclaw-be/pom.xml verify`。本地回归不能代替部署后的权限、历史会话、实际模型调用及动态包装工具验收。

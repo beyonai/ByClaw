@@ -113,11 +113,11 @@ describe("workspace-seed corePersonaDefinition", () => {
         },
       ],
     } as Parameters<typeof buildToolsMd>[0]);
-    expect(md).toContain("用户信息表");
-    expect(md).toContain("id: 10000018");
-    expect(md).toContain("type: OBJECT");
+    expect(md).not.toContain("用户信息表");
+    expect(md).not.toContain("id: 10000018");
+    expect(md).not.toContain("type: OBJECT");
     expect(md).not.toContain("DWS");
     expect(md).not.toContain("type: SKILL");
-    expect(md).not.toContain("(none declared");
+    expect(md).toContain("(none declared");
   });
 });
