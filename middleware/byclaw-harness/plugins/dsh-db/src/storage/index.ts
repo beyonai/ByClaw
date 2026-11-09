@@ -3,96 +3,34 @@
  * backend `db`; the storage-domain row routes units to it, so workspace records, ByClaw session
  * roots, the session projection cache and schedules leave the host's disk. One context serves
  * one user; every statement carries that user's code.
- * @module @byclaw/dsh-storage-db
+ * @module @byclaw/dsh-db/storage
  */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import pg from 'pg'
 import { StorageError, UNIT_NAME_RE, storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import type { KvFacet, KvUnit, KvUnitDescriptor, StorageBackend } from '@deepseek-ai/dsh-storage'
-import { ensureSchema, StorageSqlStore, type SqlPool } from './store.ts'
+import { acquirePool, createPgPool, releasePool, type PoolConfig, type PoolFactory, type SharedPool } from '../pool.ts'
+import { ensureSchema, StorageSqlStore } from './store.ts'
 
 export { StorageOwnershipLostError } from './store.ts'
-export type { Queryable, SqlPool } from './store.ts'
 
 export const name = 'storage-db'
 export const inject = ['storage']
 /** Backend name on the hub; the storage-domain config routes to it. */
 export const BACKEND = 'db'
 
-export interface Config {
-  /** `postgres://user:password@host:port/database`. */
-  connectionString: string
+export interface Config extends PoolConfig {
   /** The user this context serves. */
   userCode: string
-  /** Schema holding the tables. */
-  schema: string
-  /** Connections shared by all contexts in the process; an idle connection closes. */
-  poolMax: number
-  /** Client-side limit for one statement, so a stuck database fails the operation instead of hanging it. */
-  queryTimeoutMs: number
 }
 
 export const Config: z<Config> = z.object({
   connectionString: z.string().required(),
   userCode: z.string().required(),
   schema: z.string().pattern(/^[a-z_][a-z0-9_]*$/).default('byai'),
-  poolMax: z.natural().min(1).default(4),
+  poolMax: z.natural().min(1).default(8),
   queryTimeoutMs: z.natural().min(1).default(30_000),
 })
-
-/** Builds the pool for a config; tests substitute an in-process database. */
-export type PoolFactory = (config: Config) => SqlPool
-
-const createPgPool: PoolFactory = (config) => {
-  const pool = new pg.Pool({
-    connectionString: config.connectionString,
-    max: config.poolMax,
-    idleTimeoutMillis: 60_000,
-    connectionTimeoutMillis: config.queryTimeoutMs,
-    query_timeout: config.queryTimeoutMs,
-  })
-  // An idle connection dying emits 'error'; unhandled, that would kill the host and every user on it.
-  pool.on('error', (error) => {
-    console.warn(`${name}: idle database connection failed: ${error.message}`)
-  })
-  return pool as unknown as SqlPool
-}
-
-interface SharedPool {
-  readonly pool: SqlPool
-  /** Creates the tables once; a failure is not kept, so the next open retries after the database returns. */
-  readonly ready: () => Promise<void>
-  users: number
-}
-
-/** The host runs one context per user in one process; they share a pool per database. */
-const sharedPools = new Map<string, SharedPool>()
-
-const poolKey = (config: Config): string => `${config.connectionString}\0${config.schema}`
-
-function acquirePool(config: Config, factory: PoolFactory): SharedPool {
-  let shared = sharedPools.get(poolKey(config))
-  if (shared === undefined) {
-    const pool = factory(config)
-    let creating: Promise<void> | undefined
-    const ready = (): Promise<void> => creating ??= ensureSchema(pool, config.schema).catch((error: unknown) => {
-      creating = undefined
-      throw error
-    })
-    shared = { pool, ready, users: 0 }
-    sharedPools.set(poolKey(config), shared)
-  }
-  shared.users += 1
-  return shared
-}
-
-async function releasePool(config: Config, shared: SharedPool): Promise<void> {
-  shared.users -= 1
-  if (shared.users > 0) return
-  sharedPools.delete(poolKey(config))
-  await shared.pool.end()
-}
 
 /** Record keys of a `per-record` unit are path segments on the JSON backend; keep them portable back. */
 const PER_RECORD_KEY = /^[a-zA-Z0-9_-]+$/
@@ -218,7 +156,7 @@ export class DbStorageBackend implements StorageBackend {
     if (this.units.has(descriptor.name)) return Promise.reject(new Error(`kv unit '${descriptor.name}' is already open (double-open is a caller bug)`))
     // Reserve the name synchronously so a concurrent second open rejects instead of racing the awaits below.
     const pending = (async () => {
-      await this.shared.ready()
+      await this.shared.once('storage', pool => ensureSchema(pool, this.config.schema))
       const epoch = await this.store.claim(descriptor)
       return new DbKvUnit(this.store, descriptor, epoch, () => { this.units.delete(descriptor.name) })
     })()
@@ -233,7 +171,7 @@ export class DbStorageBackend implements StorageBackend {
         const unit = await pending.catch(() => undefined)
         await unit?.close()
       }
-      await releasePool(this.config, this.shared)
+      await releasePool(this.shared)
     })()
     return this.closing
   }

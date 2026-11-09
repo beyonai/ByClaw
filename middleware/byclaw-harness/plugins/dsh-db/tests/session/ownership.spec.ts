@@ -5,8 +5,8 @@ import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { SessionId, SessionSeq, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import { SessionOwnershipLostError } from '@deepseek-ai/dsh-session-persistence'
-import { Config, mount } from '../src/index.ts'
-import { createTestDatabase, type TestDatabase } from './pglite-pool.ts'
+import { Config, mount } from '../../src/session/index.ts'
+import { createTestDatabase, type TestDatabase } from '../pglite-pool.ts'
 
 const contexts: Context[] = []
 afterEach(async () => {

@@ -1,6 +1,6 @@
 /** An in-process PostgreSQL behind the pool interface; connections take turns because PGlite has one session. */
 import { PGlite } from '@electric-sql/pglite'
-import type { Queryable, SqlPool } from '../src/index.ts'
+import type { Queryable, SqlPool } from '../src/pool.ts'
 
 export interface TestDatabase {
   readonly db: PGlite

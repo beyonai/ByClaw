@@ -1264,7 +1264,7 @@ export function managedRuntimeActivity(ctx) {
  */
 export async function openHostFileStore(config, env, loadPg = () => {
   const require = createRequire(join(config.managedProfile, 'package.json'))
-  return createRequire(require.resolve('@byclaw/dsh-session-persistence-db/package.json'))('pg')
+  return createRequire(require.resolve('@byclaw/dsh-db/package.json'))('pg')
 }) {
   const secretFile = env.BYCLAW_CREDENTIAL_SECRET_FILE?.trim()
   const secretValue = env.BYCLAW_CREDENTIAL_SECRET?.trim()

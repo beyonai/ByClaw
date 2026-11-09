@@ -1,21 +1,7 @@
 /** SQL for one user's session logs. Fencing lives here: every append proves it still holds the writer epoch. */
 import { SessionAlreadyExistsError, SessionOwnershipLostError } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
-
-/** The part of a `pg` client this store uses. */
-export interface Queryable {
-  query(text: string, values?: unknown[]): Promise<{ rows: any[]; rowCount: number | null }>
-}
-
-/** The part of a `pg` pool this store uses. */
-export interface SqlPool extends Queryable {
-  connect(): Promise<Queryable & {
-    release(error?: Error): void
-    on?(event: 'error', listener: (error: Error) => void): unknown
-    off?(event: 'error', listener: (error: Error) => void): unknown
-  }>
-  end(): Promise<void>
-}
+import { isUniqueViolation, transaction, type Queryable, type SqlPool } from '../pool.ts'
 
 /** One stored session's metadata, without its events. */
 export interface StoredSession {
@@ -24,12 +10,8 @@ export interface StoredSession {
   readonly nextSeq: number
 }
 
-/** PostgreSQL's unique-violation code. */
-const UNIQUE_VIOLATION = '23505'
 /** Rows per INSERT; the widest events are hundreds of KB, so keep a statement bounded. */
 const INSERT_CHUNK = 100
-
-const isUniqueViolation = (error: unknown): boolean => (error as { code?: unknown } | undefined)?.code === UNIQUE_VIOLATION
 
 const toStored = (row: { header: string; inherited_event_count: string | number; next_seq: string | number }): StoredSession => ({
   header: JSON.parse(row.header) as SessionHeader,
@@ -119,7 +101,7 @@ export class SessionSqlStore {
    */
   async insert(header: SessionHeader, inheritedEventCount: number, batch: readonly SessionEvent[], isRetry: boolean): Promise<boolean> {
     try {
-      await this.transaction(async (tx) => {
+      await transaction(this.pool, async (tx) => {
         await tx.query(
           `INSERT INTO ${this.sessions} (user_code, session_id, header, inherited_event_count, next_seq, owner_epoch, updated_at)
            VALUES ($1, $2, $3, $4, $5, 1, $6)`,
@@ -142,7 +124,7 @@ export class SessionSqlStore {
    * @throws {SessionOwnershipLostError} when another writer took the session.
    */
   async append(id: SessionId, epoch: number, cursor: number, batch: readonly SessionEvent[]): Promise<void> {
-    await this.transaction(async (tx) => {
+    await transaction(this.pool, async (tx) => {
       const { rows } = await tx.query(
         `SELECT next_seq, owner_epoch FROM ${this.sessions} WHERE user_code = $1 AND session_id = $2 FOR UPDATE`,
         [this.userCode, id],
@@ -169,30 +151,6 @@ export class SessionSqlStore {
         return `($1, $2, $${values.length - 1}, $${values.length})`
       })
       await tx.query(`INSERT INTO ${this.events} (user_code, session_id, seq, data) VALUES ${rows.join(', ')}`, values)
-    }
-  }
-
-  private async transaction(body: (tx: Queryable) => Promise<void>): Promise<void> {
-    const client = await this.pool.connect()
-    let broken: Error | undefined
-    // The pool stops listening once a client is checked out. Unhandled, a dropped
-    // connection would throw from the socket and kill the host and every user on it.
-    const onError = (error: Error): void => { broken = error }
-    client.on?.('error', onError)
-    try {
-      await client.query('BEGIN')
-      await body(client)
-      await client.query('COMMIT')
-    } catch (error: unknown) {
-      try {
-        await client.query('ROLLBACK')
-      } catch (rollback: unknown) {
-        broken = rollback as Error
-      }
-      throw error
-    } finally {
-      client.off?.('error', onError)
-      client.release(broken)
     }
   }
 }

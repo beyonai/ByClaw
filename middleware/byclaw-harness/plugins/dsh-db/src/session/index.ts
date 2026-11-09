@@ -7,6 +7,7 @@
  * What differs is ownership: a write open takes the session's epoch from any
  * other host instead of waiting on a file lock, and that host's next append fails.
  * Only the current session format is stored; an older one is refused, not migrated.
+ * @module @byclaw/dsh-db/session
  */
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import { SessionLogOffset, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
@@ -41,26 +42,16 @@ import type {
 } from '@deepseek-ai/dsh-session-persistence'
 import { deepFreeze } from '@deepseek-ai/dsh-util-values'
 import z from '@deepseek-ai/schemastery'
-import pg from 'pg'
-import { ensureSchema, SessionSqlStore, type SqlPool, type StoredSession } from './store.ts'
-
-export type { Queryable, SqlPool } from './store.ts'
+import { acquirePool, createPgPool, releasePool, type PoolConfig, type PoolFactory } from '../pool.ts'
+import { ensureSchema, SessionSqlStore, type StoredSession } from './store.ts'
 
 /** Maximum intentional wait before a routed live batch starts writing; same as JSONL. */
 export const LIVE_WRITE_BATCH_MAX_DELAY_MS = 200
 
-/** Plugin configuration. */
-export interface Config {
-  /** Database URL; the shared host passes it per context and keeps it out of launch environments. */
-  connectionString: string
+/** Plugin configuration; the shared host passes the URL per context and keeps it out of launch environments. */
+export interface Config extends PoolConfig {
   /** Owner of every session this context stores. */
   userCode: string
-  /** Schema holding the session tables. */
-  schema: string
-  /** Connections shared by all contexts in the process; an idle connection closes. */
-  poolMax: number
-  /** Client-side limit for one statement, so a stuck database fails the turn instead of hanging it. */
-  queryTimeoutMs: number
 }
 
 export const name = 'session-persistence-db'
@@ -72,58 +63,6 @@ export const Config: z<Config> = z.object({
   poolMax: z.natural().min(1).default(8),
   queryTimeoutMs: z.natural().min(1).default(30_000),
 })
-
-/** Builds the pool for a config; tests substitute an in-process database. */
-export type PoolFactory = (config: Config) => SqlPool
-
-const createPgPool: PoolFactory = (config) => {
-  const pool = new pg.Pool({
-    connectionString: config.connectionString,
-    max: config.poolMax,
-    idleTimeoutMillis: 60_000,
-    connectionTimeoutMillis: config.queryTimeoutMs,
-    query_timeout: config.queryTimeoutMs,
-  })
-  // An idle connection dying emits 'error'; unhandled, that would kill the host and every user on it.
-  pool.on('error', (error) => {
-    console.warn(`${name}: idle database connection failed: ${error.message}`)
-  })
-  return pool as unknown as SqlPool
-}
-
-interface SharedPool {
-  readonly pool: SqlPool
-  /** Creates the tables once; a failure is not kept, so the next operation retries after the database returns. */
-  readonly ready: () => Promise<void>
-  users: number
-}
-
-/** The host runs one context per user in one process; they share a pool per database. */
-const sharedPools = new Map<string, SharedPool>()
-
-function acquirePool(config: Config, factory: PoolFactory): SharedPool {
-  const key = `${config.connectionString}\0${config.schema}`
-  let shared = sharedPools.get(key)
-  if (shared === undefined) {
-    const pool = factory(config)
-    let creating: Promise<void> | undefined
-    const ready = (): Promise<void> => creating ??= ensureSchema(pool, config.schema).catch((error: unknown) => {
-      creating = undefined
-      throw error
-    })
-    shared = { pool, ready, users: 0 }
-    sharedPools.set(key, shared)
-  }
-  shared.users += 1
-  return shared
-}
-
-async function releasePool(config: Config, shared: SharedPool): Promise<void> {
-  shared.users -= 1
-  if (shared.users > 0) return
-  sharedPools.delete(`${config.connectionString}\0${config.schema}`)
-  await shared.pool.end()
-}
 
 /** Mutable state of one open handle. */
 interface HandleState {
@@ -512,15 +451,16 @@ function snapshotOf(stored: StoredSession): SessionPersistenceSnapshot {
 export async function mount(ctx: Context, config: Config, factory: PoolFactory): Promise<void> {
   const shared = acquirePool(config, factory)
   const store = new SessionSqlStore(shared.pool, config.schema, config.userCode)
+  const ready = (): Promise<void> => shared.once('session', pool => ensureSchema(pool, config.schema))
   let service!: Fiber
   ctx.effect(function* () {
-    yield () => releasePool(config, shared)
+    yield () => releasePool(shared)
     const tracker = new DbBackendTracker()
     yield tracker.install(ctx)
     service = ctx.plugin({
       name: `${name}-service`,
       apply(serviceCtx: Context) {
-        new DbSessionPersistence(serviceCtx, store, tracker, shared.ready)
+        new DbSessionPersistence(serviceCtx, store, tracker, ready)
       },
     })
     yield service.dispose

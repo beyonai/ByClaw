@@ -1,21 +1,7 @@
 /** SQL for one user's storage units. Fencing lives here: every write proves it still holds the unit's writer epoch. */
 import { StorageError } from '@deepseek-ai/dsh-storage'
 import type { KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
-
-/** The part of a `pg` client this store uses. */
-export interface Queryable {
-  query(text: string, values?: unknown[]): Promise<{ rows: any[]; rowCount: number | null }>
-}
-
-/** The part of a `pg` pool this store uses. */
-export interface SqlPool extends Queryable {
-  connect(): Promise<Queryable & {
-    release(error?: Error): void
-    on?(event: 'error', listener: (error: Error) => void): unknown
-    off?(event: 'error', listener: (error: Error) => void): unknown
-  }>
-  end(): Promise<void>
-}
+import { isUniqueViolation, transaction, type Queryable, type SqlPool } from '../pool.ts'
 
 /** Another context opened the same unit after this one; this handle must not write again. */
 export class StorageOwnershipLostError extends Error {
@@ -25,13 +11,8 @@ export class StorageOwnershipLostError extends Error {
   }
 }
 
-/** PostgreSQL's unique-violation code. */
-const UNIQUE_VIOLATION = '23505'
-
 /** Table-name prefix of backed-up records; `#` is outside the unit/table name grammar, so it never collides. */
 export const BACKUP_PREFIX = '#backup:'
-
-const isUniqueViolation = (error: unknown): boolean => (error as { code?: unknown } | undefined)?.code === UNIQUE_VIOLATION
 
 /**
  * Create the tables when absent. Values are `text`, not `jsonb`: `jsonb` refuses `\u0000`
@@ -84,7 +65,7 @@ export class StorageSqlStore {
   async claim(descriptor: KvUnitDescriptor): Promise<number> {
     for (let attempt = 0; ; attempt++) {
       try {
-        return await this.transaction(async (tx) => {
+        return await transaction(this.pool, async (tx) => {
           const { rows } = await tx.query(
             `SELECT version FROM ${this.units} WHERE user_code = $1 AND unit = $2 FOR UPDATE`,
             [this.user, descriptor.name],
@@ -183,7 +164,7 @@ export class StorageSqlStore {
   }
 
   private fenced(unit: string, epoch: number, write: (tx: Queryable) => Promise<void>): Promise<void> {
-    return this.transaction(async (tx) => {
+    return transaction(this.pool, async (tx) => {
       const { rows } = await tx.query(
         `SELECT owner_epoch FROM ${this.units} WHERE user_code = $1 AND unit = $2 FOR UPDATE`,
         [this.user, unit],
@@ -191,25 +172,5 @@ export class StorageSqlStore {
       if (rows[0] === undefined || Number(rows[0].owner_epoch) !== epoch) throw new StorageOwnershipLostError(this.user, unit)
       await write(tx)
     })
-  }
-
-  private async transaction<T>(body: (tx: Queryable) => Promise<T>): Promise<T> {
-    const client = await this.pool.connect()
-    // A connection that drops mid-transaction emits 'error' on the client; unhandled, that kills the host.
-    let dropped: Error | undefined
-    const onError = (error: Error) => { dropped = error }
-    client.on?.('error', onError)
-    try {
-      await client.query('BEGIN')
-      const result = await body(client)
-      await client.query('COMMIT')
-      return result
-    } catch (error) {
-      if (dropped === undefined) await client.query('ROLLBACK').catch((rollback: unknown) => { dropped = rollback as Error })
-      throw error
-    } finally {
-      client.off?.('error', onError)
-      client.release(dropped)
-    }
   }
 }

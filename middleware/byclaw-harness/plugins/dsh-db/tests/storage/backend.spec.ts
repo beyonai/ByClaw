@@ -5,10 +5,10 @@ import type { KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
-import * as StorageDb from '../src/index.ts'
-import { Config, createBackend, mount, StorageOwnershipLostError } from '../src/index.ts'
+import * as StorageDb from '../../src/storage/index.ts'
+import { Config, createBackend, mount, StorageOwnershipLostError } from '../../src/storage/index.ts'
 import { runKvBackendContract } from './contract.ts'
-import { createTestDatabase, type TestDatabase } from './pglite-pool.ts'
+import { createTestDatabase, type TestDatabase } from '../pglite-pool.ts'
 
 // The process shares one pool per connection string, so each test database gets its own address.
 const addresses = new WeakMap<TestDatabase, string>()

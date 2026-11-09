@@ -1,8 +1,0 @@
-# Off by default: the shared DSH host enables this row, and routes storage-domain
-# to backend `db`, for the users in BYCLAW_SESSION_DB_USERS. A per-user sandbox
-# keeps the JSON files because model-generated commands run beside the harness
-# there and could read the database credentials.
-- insert:
-    - id: storage-db
-      name: '@byclaw/dsh-storage-db'
-      disabled: true

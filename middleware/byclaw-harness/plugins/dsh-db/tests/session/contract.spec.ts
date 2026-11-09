@@ -2,10 +2,10 @@
 import { afterEach } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore from '@deepseek-ai/dsh-session'
-import { Config, LIVE_WRITE_BATCH_MAX_DELAY_MS, mount } from '../src/index.ts'
+import { Config, LIVE_WRITE_BATCH_MAX_DELAY_MS, mount } from '../../src/session/index.ts'
 import { runPersistenceContract } from './contract/contract.ts'
 import { runLiveWritePathContract } from './contract/live-write-contract.ts'
-import { createTestDatabase } from './pglite-pool.ts'
+import { createTestDatabase } from '../pglite-pool.ts'
 
 const contexts: Context[] = []
 afterEach(async () => {
