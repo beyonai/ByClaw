@@ -34,7 +34,10 @@ test('missing connector config renders a frontend action and blocks every provid
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async () => { calls++; throw new Error('unexpected network'); });
   const fs = filesystem();
-  fs.lstat = async () => undefined;
+  fs.lstat = async (path) => {
+    fs.reads.push(['lstat', path]);
+    return path === '/by/.connector-auth/.model/video.json' ? undefined : { type: 'file', size: 256 };
+  };
   const { tools } = mount(fs);
   const check = tools.get('digital_human_check_configuration');
   const result = await check.execute({});
@@ -58,6 +61,7 @@ test('missing connector config renders a frontend action and blocks every provid
     });
   }
   assert.equal(calls, 0);
+  assert.deepEqual(fs.reads, Array.from({ length: 5 }, () => ['lstat', '/by/.connector-auth/.model/video.json']));
 });
 
 test('standalone registration, description budgets, closed schemas and no credential parameters', () => {
@@ -75,7 +79,7 @@ test('standalone registration, description budgets, closed schemas and no creden
 });
 
 test('reads live config only via ctx.fs with opaque targets and a bounded byte read', async () => {
-  assert.equal(DEFAULT_CONFIG_PATH, '/by/.connector-auth/.model/digital-human.json');
+  assert.equal(DEFAULT_CONFIG_PATH, '/by/.connector-auth/.model/video.json');
   const fs = filesystem();
   assert.deepEqual(await readConfiguration(fs, DEFAULT_CONFIG_PATH), { ...credentials, securityToken: undefined });
   assert.deepEqual(fs.reads[0], ['lstat', DEFAULT_CONFIG_PATH]);
