@@ -42,6 +42,21 @@ that numeric ownership before using this image; the non-root entrypoint does
 not change ownership of mounted files. Keep the database directory at mode
 `0700`.
 
+On a fresh NFS-backed data volume, the tenant entrypoint initializes the
+database and its tenant role on local scratch storage. The temporary server
+uses a separate loopback port so the normal readiness probe only observes the
+persistent server. After the temporary server stops, the entrypoint copies and
+syncs the initialized data on the mounted volume and publishes it as the
+`byclaw-cluster` directory. Restart reuses the published cluster. Existing
+databases with `PG_VERSION` at the volume root keep their layout.
+
+`BYCLAW_OPENGAUSS_LOCAL_INIT=0` disables staging for fresh volumes.
+`BYCLAW_OPENGAUSS_LOCAL_INIT=1` forces it for an isolated test. An interrupted
+copy cannot become the active cluster. Keep an image that supports
+`byclaw-cluster` when restarting a tenant initialized with the staged layout.
+The entrypoint reports initialization and persistent publish timings
+separately without logging credentials.
+
 Mount only the database directory to retain the image's tenant startup script:
 
 ```json

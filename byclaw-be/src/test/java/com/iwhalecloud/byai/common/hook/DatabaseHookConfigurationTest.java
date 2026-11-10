@@ -257,7 +257,9 @@ class DatabaseHookConfigurationTest {
     }
 
     @Test void hacuJsonPreservesTheThreeOriginalSubscriptionsAndSigningProtocol() throws Exception {
-        save(java.nio.file.Files.readString(java.nio.file.Path.of("config/examples/hacu-api-hooks.json")));
+        try (var fixture = new org.springframework.core.io.ClassPathResource("hooks/hacu-api-hooks.json").getInputStream()) {
+            save(new String(fixture.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+        }
         runner().withUserConfiguration(
                 com.iwhalecloud.byai.manager.domain.tenant.hook.TenantHookConfiguration.class,
                 com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.WorkgroupHooks.class,

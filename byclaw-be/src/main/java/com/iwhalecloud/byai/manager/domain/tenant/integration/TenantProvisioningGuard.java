@@ -57,7 +57,7 @@ public class TenantProvisioningGuard {
             check();
             var existing=jdbc.queryForList("SELECT status,result FROM byai.tenant_task_step WHERE command_id=? AND step_key=?",lease.id(),step);
             if (!existing.isEmpty()) {
-                // Only an audited recovery transaction may authorize a new attempt of this original intent.
+                // RETRY_READY requires audited recovery or a confirmed pre-create template response.
                 int resumed = jdbc.update("UPDATE byai.tenant_task_step SET status='STARTED',revision=revision+1 "
                     + "WHERE command_id=? AND step_key=? AND status='RETRY_READY'", lease.id(), step);
                 if (resumed == 1) {

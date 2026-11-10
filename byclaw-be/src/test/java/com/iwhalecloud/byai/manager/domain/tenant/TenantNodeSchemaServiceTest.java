@@ -4,14 +4,32 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.zip.ZipInputStream;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 class TenantNodeSchemaServiceTest {
     @org.junit.jupiter.api.Test
@@ -94,7 +112,9 @@ class TenantNodeSchemaServiceTest {
             int end = upload.indexOf("\r\n--", start);
             captures.add(new ObjectMapper().readTree(upload.substring(start, end)));
             // Stop after the real task upload; audit polling is outside this transport contract.
-            exchange.sendResponseHeaders(409, -1);
+            byte[] rejection = "{\"error\":{\"code\":\"IDEMPOTENCY_CONFLICT\"}}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(409, rejection.length);
+            exchange.getResponseBody().write(rejection);
             exchange.close();
         });
         server.start();
@@ -105,7 +125,9 @@ class TenantNodeSchemaServiceTest {
                 .thenReturn(java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
             var service = new TenantNodeSchemaService(jdbc, new ObjectMapper(), "", "token", nodeClient);
             var node = new com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService.TenantSandboxView(1L, "node", "http://127.0.0.1:1/unreachable-gateway");
-            assertThrows(IllegalStateException.class, () -> service.initialize(12L, 3L, 20L, node, "command-41", 2L));
+            var failure = assertThrows(IllegalStateException.class,
+                () -> service.initialize(12L, 3L, 20L, node, "command-41", 2L));
+            assertEquals("tenant Node rejected schema initialization: HTTP 409 (IDEMPOTENCY_CONFLICT)", failure.getMessage());
             assertThrows(IllegalStateException.class, () -> service.initialize(12L, 3L, 20L, node, "legacy"));
             assertEquals(2, captures.size());
             assertEquals("2", captures.get(0).path("fencingToken").asText());
@@ -123,6 +145,72 @@ class TenantNodeSchemaServiceTest {
         var service = new TenantNodeSchemaService(jdbc, new ObjectMapper(), "", "token", null);
         assertThrows(IllegalArgumentException.class, () -> service.initialize(12L, 3L, 20L, null, "request", 0L));
         org.mockito.Mockito.verifyNoInteractions(jdbc);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void retriesSchema503WithTheOriginalAuditAndUploadWhileLeaseIsValid(boolean leaseExpiredBeforeRetry) throws Exception {
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        var uploads = new CopyOnWriteArrayList<byte[]>();
+        var keys = new CopyOnWriteArrayList<String>();
+        var polls = new AtomicInteger();
+        server.createContext("/internal/v1/health/db", exchange -> {
+            byte[] health = """
+                {"enterpriseId":"12","generation":"3","dbSandboxRecordId":"20","dbWritable":true}
+                """.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, health.length);
+            exchange.getResponseBody().write(health);
+            exchange.close();
+        });
+        server.createContext("/internal/v1/schema-tasks", exchange -> {
+            if ("POST".equals(exchange.getRequestMethod())) {
+                uploads.add(exchange.getRequestBody().readAllBytes());
+                keys.add(exchange.getRequestHeaders().getFirst("Idempotency-Key"));
+                exchange.sendResponseHeaders(uploads.size() == 1 ? 503 : 202, -1);
+            } else {
+                polls.incrementAndGet();
+                byte[] verified = "{\"status\":\"VERIFIED\"}".getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, verified.length);
+                exchange.getResponseBody().write(verified);
+            }
+            exchange.close();
+        });
+        server.start();
+        try {
+            var jdbc = mock(JdbcTemplate.class);
+            when(jdbc.queryForObject(startsWith("SELECT status FROM byai.tenant_schema_audit"),
+                eq(String.class), any(String.class))).thenReturn("VERIFIED");
+            var client = mock(TenantNodeClient.class);
+            when(client.schemaEndpoint(12L, 3L, 20L))
+                .thenReturn(URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
+            var service = new TenantNodeSchemaService(jdbc, new ObjectMapper(), "", "token", client);
+            var fenceChecks = new AtomicInteger();
+            Consumer<Runnable> guard = action -> {
+                if (fenceChecks.incrementAndGet() == 3 && leaseExpiredBeforeRetry) {
+                    throw new IllegalStateException("STALE_COMMAND_LEASE");
+                }
+                action.run();
+            };
+
+            if (leaseExpiredBeforeRetry) {
+                var failure = assertThrows(IllegalStateException.class,
+                    () -> service.initialize(12L, 3L, 20L, null, "cold-provision", 26L, guard));
+                assertEquals("STALE_COMMAND_LEASE", failure.getMessage());
+                assertEquals(1, uploads.size());
+                assertEquals(0, polls.get());
+            } else {
+                service.initialize(12L, 3L, 20L, null, "cold-provision", 26L, guard);
+                assertEquals(2, uploads.size());
+                assertArrayEquals(uploads.get(0), uploads.get(1));
+                assertEquals(List.of(keys.getFirst(), keys.getFirst()), keys);
+                assertEquals(1, polls.get());
+            }
+            assertTrue(keys.getFirst().matches("[a-f0-9]{32}:1"));
+            assertEquals(3, fenceChecks.get());
+            verify(jdbc, times(1)).update(startsWith("INSERT INTO byai.tenant_schema_audit"), any(Object[].class));
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test

@@ -136,8 +136,10 @@ public class TenantGroupPublicationService {
         created.put("files", files);
         created.put("kind", "TASK_RESULT");
         created.put("creatorId", task.path("targetAgentId").asText());
-        if (direct) created.put("speaker", Map.of("type", "AGENT", "agentId", task.path("targetAgentId").asText(),
-            "displayName", payload.getOrDefault("creatorName", "")));
+        created.put("speaker", direct
+            ? Map.of("type", "AGENT", "agentId", task.path("targetAgentId").asText(),
+                "displayName", payload.getOrDefault("creatorName", ""))
+            : Map.of("type", "AGENT", "agentId", task.path("targetAgentId").asText()));
         created.put("resourceList", parsed.resourceList());
         events.publishTenant(tenant, Long.valueOf(groupId), created);
         if (direct) {

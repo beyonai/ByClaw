@@ -384,6 +384,23 @@
           </choose>
     </update>
 
+    <update id="updateTenantTemplateWait">
+        UPDATE ss_sandbox_record
+        SET release_reason = #{nextMarker,jdbcType=VARCHAR},
+            update_time = #{updateTime,jdbcType=TIMESTAMP},
+            version = version + 1,
+            lock_version = lock_version + 1
+        WHERE id = #{id,jdbcType=BIGINT}
+          AND owner_scope = 'TENANT'
+          AND status = 'STARTING'
+          AND sandbox_id IS NULL
+          AND lock_version = #{lockVersion,jdbcType=INTEGER}
+          <choose>
+              <when test="expectedMarker == null">AND release_reason IS NULL</when>
+              <otherwise>AND release_reason = #{expectedMarker,jdbcType=VARCHAR}</otherwise>
+          </choose>
+    </update>
+
     <update id="updateStatusToFailed">
         UPDATE ss_sandbox_record
         SET status = 'FAILED',

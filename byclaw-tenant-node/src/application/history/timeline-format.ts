@@ -84,6 +84,8 @@ export async function displayMessages(
     const reply = withReply && !passive ? byId.get(source.messageRef) : undefined;
     return {
       messageId: row.messageId,
+      // Notification consumers must verify a committed complete message before delivery.
+      complete: row.isComplete === true,
       clientRequestId: meta.clientRequestId,
       mentionAllUsers: !recalled(source) && !isSnapshotOnly(meta) && meta.mentionAllUsers === true,
       topicId: row.topicId,

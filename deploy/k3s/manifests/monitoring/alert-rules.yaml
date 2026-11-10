@@ -33,3 +33,21 @@ spec:
             severity: warning
           annotations:
             summary: "沙箱创建 P95 延迟过高"
+    - name: byclaw.mobile.push
+      rules:
+        - alert: HacuMobilePushFailures
+          expr: sum(increase(hacu_mobile_push_attempts_total{outcome=~"vendor_failed|error|rejected"}[5m])) > 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "手机消息通知异常 / Mobile push failures"
+            description: "推送存在厂商拒绝、内部异常或队列满载，请检查固定 outcome 指标；不要记录凭证或完整请求。"
+        - alert: HacuMobilePushThrottledOrExpired
+          expr: sum(increase(hacu_mobile_push_attempts_total{outcome=~"rate_limited|expired"}[10m])) > 10
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "手机通知积压或限流 / Mobile push throttled or expired"
+            description: "检查单发额度、Redis 和执行器延迟；不要对结果未知的请求自动补发。"

@@ -4,7 +4,14 @@ import { message, type MenuProps } from 'antd';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 import MessageFilePreviewPanel from '@/components/MessageList/components/FileRender/components/Previewer/MessageFilePreviewPanel';
 import type { IAgentFileUploadConf } from '@/hooks/useAgentUploadFileConfig';
-import { downloadFile, ensureFolder, listFiles, uploadFiles, type FileBrowserItem } from '@/service/fileBrowser';
+import {
+  downloadFile,
+  ensureFolder,
+  getPersonalStorageQuota,
+  listFiles,
+  uploadFiles,
+  type FileBrowserItem,
+} from '@/service/fileBrowser';
 import { downloadResourceFile } from '@/service/file';
 import { uploadFiles as uploadKnowledgeFiles } from '@/service/knowledgeCenter';
 import { getLocaleIntl } from '@/testUtils/localeIntl';
@@ -39,6 +46,7 @@ jest.mock('@/hooks/useGlobal', () => ({
 jest.mock('@/service/fileBrowser', () => ({
   downloadFile: jest.fn(),
   ensureFolder: jest.fn(),
+  getPersonalStorageQuota: jest.fn(),
   listFiles: jest.fn(),
   uploadFiles: jest.fn(),
 }));
@@ -106,11 +114,7 @@ jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', 
         {items
           .filter((item) => getActionItems(item)?.some((action) => action?.key === 'preview'))
           .map((item) => (
-            <button
-              key={`preview-${item.path}`}
-              type="button"
-              onClick={() => onAction('preview', item)}
-            >
+            <button key={`preview-${item.path}`} type="button" onClick={() => onAction('preview', item)}>
               Preview {item.name}
             </button>
           ))}
@@ -478,6 +482,7 @@ beforeEach(() => {
   jest.spyOn(message, 'error').mockImplementation(jest.fn());
   jest.spyOn(message, 'success').mockImplementation(jest.fn());
   const folders: FileBrowserItem[] = [{ name: 'reports', path: '/reports/', isDir: true }];
+  jest.mocked(getPersonalStorageQuota).mockResolvedValue({ enabled: false });
   jest.mocked(listFiles).mockResolvedValue(folders);
   jest.mocked(queryProjectCloudDrive).mockResolvedValue(folders);
   jest.mocked(uploadFiles).mockResolvedValue({});
@@ -531,7 +536,8 @@ it.each([
 
     const [panel, options] = onOpenDetail.mock.calls[0];
     expect(options).toEqual({ tabKey: `${scope}-file:${resourceId}:${path}`, title: 'report.html' });
-    if (!isValidElement<ComponentProps<typeof MessageFilePreviewPanel>>(panel)) throw new Error('Missing preview panel');
+    if (!isValidElement<ComponentProps<typeof MessageFilePreviewPanel>>(panel))
+      throw new Error('Missing preview panel');
     expect(panel.type).toBe(MessageFilePreviewPanel);
     expect(panel.props.fileType).toBe('html');
     await expect(panel.props.fileItem.downloadRequest?.()).resolves.toEqual({ file, fileName: 'report.html' });

@@ -873,11 +873,6 @@
         <!-- ==================== From byai-common ==================== -->
         <!-- Tencent 官方服务端签名库；管理员 SecretKey 不下发给 App。 -->
         <dependency>
-            <groupId>com.github.tencentyun</groupId>
-            <artifactId>tls-sig-api-v2</artifactId>
-            <version>2.0</version>
-        </dependency>
-        <dependency>
             <groupId>io.opentelemetry.instrumentation</groupId>
             <artifactId>opentelemetry-instrumentation-annotations</artifactId>
         </dependency>

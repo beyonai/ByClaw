@@ -1254,6 +1254,8 @@ export default {
   'chatResource.projectFile': 'Project Files',
   'chatResource.processFile': 'Process Files',
   'chatResource.localSharedFile': 'Local Shared Files',
+  'chatResource.personalStorageUsage': 'Personal storage usage',
+  'chatResource.storageUsage': 'Storage usage',
   'chatResource.projectCloudDrive': 'Project Drive',
   'projectSpace.projectDrive.save': 'Save to Project Drive',
   'projectSpace.projectDrive.loadFailed': 'Failed to load Project Drive folders',

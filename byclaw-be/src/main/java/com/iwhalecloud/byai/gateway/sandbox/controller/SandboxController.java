@@ -531,7 +531,7 @@ public class SandboxController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "sandbox.userScope.required");
         }
 
-        Map<String, String> inventory = runtimeInventory.current();
+        Map<String, String> inventory = runtimeInventory.currentForManagement();
         final String requestedStatus = status;
         String providerStatus = params.get("providerStatus") == null ? null : params.get("providerStatus").toString().trim();
         if (providerStatus != null && providerStatus.isEmpty()) providerStatus = null;
@@ -553,7 +553,8 @@ public class SandboxController {
         query.put("observedSandboxIds", "UNKNOWN".equals(requestedProviderStatus) ? inventory.entrySet().stream()
             .filter(entry -> !"UNKNOWN".equals(entry.getValue())).map(Map.Entry::getKey).collect(Collectors.toList()) : null);
         query.put("status", requestedStatus);
-        List<SandboxRecordView> list = sandboxRecordMapper.selectInventoryPage(query).stream().map(record -> {
+        List<SsSandboxRecord> records = sandboxRecordMapper.selectInventoryPage(query);
+        List<SandboxRecordView> list = records.stream().map(record -> {
                 // Persisted lifecycle and current provider observation are independent.
                 // An inventory miss is unknown, not proof that a remote instance was deleted.
                 String sandboxId = record.getSandboxId();
@@ -600,6 +601,23 @@ public class SandboxController {
         typeQuery.put("ownerScope", ownerScope);
         typeQuery.put("enterpriseId", enterpriseId);
         result.put("sandboxTypes", sandboxRecordMapper.selectInventoryTypes(typeQuery));
+        if (Boolean.TRUE.equals(params.get("includePreferredServiceKeys"))) {
+            Map<String, String> preferences = new HashMap<>();
+            records.stream()
+                .filter(record -> !"TENANT".equals(record.getOwnerScope()))
+                .map(SsSandboxRecord::getUserCode)
+                .filter(StringUtils::isNotBlank)
+                .distinct()
+                .forEach(userCode -> {
+                    try {
+                        String serviceKey = sandboxService.getPreferredServiceKey(userCode);
+                        if (StringUtils.isNotBlank(serviceKey)) preferences.put(userCode, serviceKey);
+                    } catch (RuntimeException failure) {
+                        log.warn("Failed to resolve preferred sandbox service key, userCode={}", userCode, failure);
+                    }
+                });
+            result.put("preferredServiceKeys", preferences);
+        }
 
         return ResponseUtil.successResponse(result);
     }

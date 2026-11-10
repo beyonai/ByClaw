@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import java.util.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserInfoFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -44,6 +45,28 @@ class SharedSandboxGatewayTest {
         assertThatThrownBy(() -> gateway.executionAccess("alice", "byclaw-dsh", context))
             .hasMessage("Shared execution context is unavailable");
         verifyNoInteractions(client);
+    }
+
+    @Test
+    void onlyFetchesProviderHeadersForTheCurrentBoundEndpoint() {
+        var gateway = gateway();
+        when(policy.eligible("alice")).thenReturn(true);
+        var binding = SandboxInfo.builder().mappingId("m1").sandboxId("pool1").build();
+        String endpoint = "https://example.test/u/context/";
+        Map<String, Object> current = Map.of("mappingId", "m1", "sandboxId", "pool1", "generation", 2L, "endpoint", endpoint);
+        when(client.call(eq("lookup"), anyMap())).thenReturn(Map.of("code", 0, "data", current));
+        var access = new HashMap<>(current);
+        access.put("endpointHeaders", Map.of("e2b-traffic-access-token", "fixture-ingress"));
+        when(client.call(eq("executionAccess"), anyMap())).thenReturn(Map.of("code", 0, "data", access));
+
+        assertThat(gateway.executionHeaders("alice", binding, endpoint))
+            .containsEntry("e2b-traffic-access-token", "fixture-ingress");
+        verify(client).call(eq("executionAccess"), argThat(p -> "m1".equals(p.get("mappingId"))
+            && Long.valueOf(2).equals(p.get("generation"))));
+        clearInvocations(client);
+        assertThatThrownBy(() -> gateway.executionHeaders("alice", binding, endpoint + "old"))
+            .hasMessage("Shared execution context changed");
+        verify(client, never()).call(eq("executionAccess"), anyMap());
     }
 
     @Test

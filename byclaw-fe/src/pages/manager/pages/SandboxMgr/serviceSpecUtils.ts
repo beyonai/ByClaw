@@ -138,18 +138,33 @@ export interface ToolSandboxFields {
   enabled: boolean;
 }
 
-export const buildToolSandboxPayload = (spec: ServiceSpecConfig, fields: ToolSandboxFields): ServiceSpecConfig => {
+export const buildToolSandboxPayload = (
+  spec: ServiceSpecConfig,
+  fields: ToolSandboxFields,
+  originalSpec?: ServiceSpecConfig
+): ServiceSpecConfig => {
   const config = readSpecConfig(spec);
+  const original = originalSpec && getToolSandboxMetadata(originalSpec);
+  const current = getToolSandboxMetadata({ ...spec, enabled: originalSpec?.enabled });
+  const capabilities = JSON.stringify(normalizeCapabilities(fields.capabilities));
+  const enabled = original && fields.enabled === original.enabled ? current.enabled : fields.enabled;
+  // Only edited form fields take precedence over the current Spec JSON.
   config.runtimeOptions = {
     ...config.runtimeOptions,
     toolSandbox: {
       ...config.runtimeOptions?.toolSandbox,
       contract: TOOL_SANDBOX_CONTRACT,
-      description: fields.description || '',
-      coverImage: fields.coverImage || '',
-      capabilities: JSON.stringify(normalizeCapabilities(fields.capabilities)),
-      enabled: String(fields.enabled),
+      description:
+        original && fields.description === original.description ? current.description : fields.description || '',
+      coverImage: (
+        (original && fields.coverImage === original.coverImage ? current.coverImage : fields.coverImage) || ''
+      ).trim(),
+      capabilities:
+        original && capabilities === JSON.stringify(original.capabilities)
+          ? JSON.stringify(current.capabilities)
+          : capabilities,
+      enabled: String(enabled),
     },
   };
-  return { ...spec, enabled: fields.enabled ? 1 : 0, specJson: JSON.stringify(config) };
+  return { ...spec, enabled: enabled ? 1 : 0, specJson: JSON.stringify(config) };
 };

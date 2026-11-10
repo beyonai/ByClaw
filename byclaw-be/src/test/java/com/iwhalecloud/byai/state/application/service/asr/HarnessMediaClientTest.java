@@ -11,6 +11,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.gateway.sandbox.service.ingress.SandboxIngressEndpointResolver;
 import com.iwhalecloud.byai.gateway.sandbox.service.ingress.SandboxIngressRequestContext;
 import com.iwhalecloud.byai.gateway.sandbox.service.ingress.SandboxIngressRuntimeResolver;
@@ -18,21 +20,28 @@ import com.iwhalecloud.byai.gateway.sandbox.service.ingress.SandboxIngressRuntim
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import okhttp3.Request;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class HarnessMediaClientTest extends I18nTestSupport {
     private HttpServer server;
     private HarnessMediaClient client;
-    private SandboxIngressEndpointResolver endpoints;
+    private SandboxService sandboxes;
+    private String endpoint;
     private final ObjectMapper mapper = new ObjectMapper();
     private final AtomicReference<JsonNode> requestBody = new AtomicReference<>();
     private final AtomicReference<String> token = new AtomicReference<>();
+    private final AtomicReference<String> runtimeInstance = new AtomicReference<>();
     private final AtomicReference<String> runtimeKey = new AtomicReference<>();
+    private final AtomicReference<String> gatewayCookie = new AtomicReference<>();
+    private final AtomicReference<String> trafficToken = new AtomicReference<>();
     private final AtomicReference<String> requestUri = new AtomicReference<>();
     private String response = "{\"text\":\"识别后的语音\",\"provider\":\"TEST\",\"model\":\"test\"}";
     private int status = 200;
@@ -44,9 +53,11 @@ class HarnessMediaClientTest extends I18nTestSupport {
         login.setUserCode("user42");
         CurrentUserHolder.setLoginInfo(login);
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/sandbox/api/byclaw/", exchange -> {
+        server.createContext("/sandbox/", exchange -> {
             requestUri.set(exchange.getRequestURI().toString());
             requestBody.set(mapper.readTree(exchange.getRequestBody()));
+            gatewayCookie.set(exchange.getRequestHeaders().getFirst("Cookie"));
+            trafficToken.set(exchange.getRequestHeaders().getFirst("e2b-traffic-access-token"));
             token.set(exchange.getRequestHeaders().getFirst("Beyond-Token"));
             runtimeKey.set(exchange.getRequestHeaders().getFirst("OPEN-SANDBOX-API-KEY"));
             byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
@@ -55,21 +66,22 @@ class HarnessMediaClientTest extends I18nTestSupport {
             exchange.close();
         });
         server.start();
-        var endpoint = "http://127.0.0.1:" + server.getAddress().getPort() + "/sandbox";
-        endpoints = mock(SandboxIngressEndpointResolver.class);
-        when(endpoints.resolveRequiredEndpoint("user42", "openclaw")).thenReturn(endpoint);
+        endpoint = "http://127.0.0.1:" + server.getAddress().getPort() + "/sandbox";
+        sandboxes = mock(SandboxService.class);
+        bindExclusive(endpoint);
         var runtimes = mock(SandboxIngressRuntimeResolver.class);
         when(runtimes.resolve()).thenReturn(new SandboxIngressRuntimeSupport() {
             public boolean supports(String type) { return true; }
             public String baseUrl() { return endpoint; }
             public void customizeRequest(Request.Builder builder, SandboxIngressRequestContext context) {
                 assertThat(context.userCode()).isEqualTo("user42");
+                runtimeInstance.set(context.instance());
                 builder.header("OPEN-SANDBOX-API-KEY", "runtime-test-key");
             }
         });
         var authorization = mock(HarnessMediaAuthorizationService.class);
         when(authorization.currentToken()).thenReturn("user-session-token");
-        client = new HarnessMediaClient(endpoints, runtimes, authorization, mapper, "openclaw");
+        client = new HarnessMediaClient(new SandboxIngressEndpointResolver(sandboxes), runtimes, authorization, mapper, "openclaw");
     }
 
     @AfterEach
@@ -83,10 +95,33 @@ class HarnessMediaClientTest extends I18nTestSupport {
         assertThat(client.transcribe(audio(), null)).containsEntry("text", "识别后的语音");
         assertThat(token.get()).isEqualTo("user-session-token");
         assertThat(runtimeKey.get()).isEqualTo("runtime-test-key");
+        assertThat(requestUri.get()).isEqualTo("/sandbox/api/byclaw/asr/transcribe");
+        assertThat(runtimeInstance.get()).isEqualTo("openclaw");
+        assertThat(gatewayCookie.get()).isNull();
         assertThat(requestBody.get().path("sessionId").asText()).isEqualTo("100");
         assertThat(requestBody.get().has("model")).isFalse();
         assertThat(requestBody.get().has("debug")).isFalse();
         assertThat(requestBody.get().path("audioBase64").asText()).isEqualTo("SUQz");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void transcribesThroughSharedDshEvenIfAnExclusiveBindingAlsoExists(boolean hasExclusiveBinding) {
+        var shared = SandboxInfo.builder().isShared(true).mappingId("mapping-42").gatewayToken("web-token")
+            .instanceEndpoints(Map.of("byclaw-dsh", endpoint + "/u/context/?token=web-token")).build();
+        var bindings = hasExclusiveBinding
+            ? List.of(SandboxInfo.builder().instanceEndpoints(Map.of("openclaw", endpoint)).build(), shared)
+            : List.of(shared);
+        when(sandboxes.sandboxInfo("user42")).thenReturn(bindings);
+        when(sandboxes.resolveSharedIngressHeaders("user42", shared, endpoint + "/u/context/?token=web-token"))
+            .thenReturn(Map.of("e2b-traffic-access-token", "provider-token"));
+
+        assertThat(client.transcribe(audio(), null)).containsEntry("text", "识别后的语音");
+        assertThat(requestUri.get()).isEqualTo("/sandbox/u/context/api/byclaw/asr/transcribe");
+        assertThat(runtimeInstance.get()).isEqualTo("byclaw-dsh");
+        assertThat(gatewayCookie.get()).isEqualTo("byclaw_web_token=web-token");
+        assertThat(trafficToken.get()).isEqualTo("provider-token");
+        assertThat(token.get()).isEqualTo("user-session-token");
     }
 
     @Test
@@ -98,8 +133,7 @@ class HarnessMediaClientTest extends I18nTestSupport {
 
     @Test
     void transcriptionUsesApiBesideChatPageAndPreservesProxyPrefixAndQuery() {
-        when(endpoints.resolveRequiredEndpoint("user42", "openclaw")).thenReturn(
-            "http://127.0.0.1:" + server.getAddress().getPort() + "/sandbox/chat?token=gateway%2Btoken");
+        bindExclusive(endpoint + "/chat?token=gateway%2Btoken");
         assertThat(client.transcribe(audio(), null)).containsEntry("text", "识别后的语音");
         assertThat(requestUri.get()).isEqualTo("/sandbox/api/byclaw/asr/transcribe?token=gateway%2Btoken");
         assertThat(token.get()).isEqualTo("user-session-token");
@@ -108,8 +142,7 @@ class HarnessMediaClientTest extends I18nTestSupport {
 
     @Test
     void speechDebugUsesApiBesideChatPageWithTrailingSlash() {
-        when(endpoints.resolveRequiredEndpoint("user42", "openclaw")).thenReturn(
-            "http://127.0.0.1:" + server.getAddress().getPort() + "/sandbox/chat/?token=gateway-token");
+        bindExclusive(endpoint + "/chat/?token=gateway-token");
         client.transcribe(audio(), Map.of("provider", "TEST", "model", "test"));
         assertThat(requestBody.get().path("debug").asBoolean()).isTrue();
         assertThat(requestUri.get()).isEqualTo("/sandbox/api/byclaw/asr/transcribe?token=gateway-token");
@@ -194,6 +227,11 @@ class HarnessMediaClientTest extends I18nTestSupport {
     void rejectsNonHttpProcessOverrides() {
         org.springframework.test.util.ReflectionTestUtils.setField(client, "endpointOverride", "file:///tmp/runtime");
         assertThatThrownBy(() -> client.transcribe(audio(), null)).hasMessageContaining("502");
+    }
+
+    private void bindExclusive(String url) {
+        when(sandboxes.sandboxInfo("user42")).thenReturn(List.of(
+            SandboxInfo.builder().instanceEndpoints(Map.of("openclaw", url)).build()));
     }
 
     private VoiceAudioService.VoiceAudio audio() {

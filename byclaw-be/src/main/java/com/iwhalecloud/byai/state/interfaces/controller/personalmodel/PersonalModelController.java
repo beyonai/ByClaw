@@ -13,6 +13,7 @@ import com.iwhalecloud.byai.manager.dto.aimodel.ModelVO;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.application.service.langfuse.LangfuseUsageService;
 import com.iwhalecloud.byai.state.application.service.limit.TokenQuotaService;
+import com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.extern.slf4j.Slf4j;
@@ -52,6 +53,25 @@ public class PersonalModelController {
 
     @Autowired
     private TokenQuotaService tokenQuotaService;
+
+    @Autowired
+    private PlatformRemoteGateway platformRemoteGateway;
+
+    /** Returns personal NAS usage when the remote Aliyun storage admission is enabled. */
+    @ApiOperation("个人存储用量")
+    @GetMapping("/storage/quota")
+    public ResponseUtil<Map<String, Object>> storageQuota() {
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        boolean enabled = platformRemoteGateway.isRemote();
+        result.put("enabled", enabled);
+        if (!enabled) return ResponseUtil.success(result);
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        Map<String, Object> details = platformRemoteGateway.readPersonalStorageQuota(userCode);
+        if (details != null) {
+            result.putAll(details);
+        }
+        return ResponseUtil.success(result);
+    }
 
     @ApiOperation("个人模型列表")
     @PostMapping("/list")

@@ -5,6 +5,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLaunchRouting;
 import com.iwhalecloud.byai.gateway.sandbox.service.ingress.SandboxIngressEndpointResolver;
 import com.iwhalecloud.byai.gateway.sandbox.service.ingress.SandboxIngressInstanceType;
 import com.iwhalecloud.byai.gateway.sandbox.service.ingress.SandboxIngressRequestContext;
@@ -13,6 +14,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -27,6 +29,8 @@ import org.springframework.web.server.ResponseStatusException;
 /** Delegate provider selection and speech protocols to the authenticated Harness media plugins. */
 @Service
 public class HarnessMediaClient {
+    private static final String ASR_PATH = "/api/byclaw/asr/transcribe";
+
     private final SandboxIngressEndpointResolver endpoints;
     private final SandboxIngressRuntimeResolver runtimes;
     private final HarnessMediaAuthorizationService authorization;
@@ -37,6 +41,8 @@ public class HarnessMediaClient {
     private String endpointOverride;
     private final OkHttpClient http = new OkHttpClient.Builder().connectTimeout(Duration.ofSeconds(15))
         .callTimeout(Duration.ofSeconds(120)).readTimeout(Duration.ofSeconds(120)).build();
+
+    private final OkHttpClient sharedHttp = http.newBuilder().followRedirects(false).build();
 
     public HarnessMediaClient(SandboxIngressEndpointResolver endpoints, SandboxIngressRuntimeResolver runtimes,
         HarnessMediaAuthorizationService authorization, ObjectMapper mapper,
@@ -58,7 +64,7 @@ public class HarnessMediaClient {
             body.put("model", model);
             body.put("debug", true);
         }
-        JsonNode result = invoke("/api/byclaw/asr/transcribe", body, 1024 * 1024);
+        JsonNode result = invoke(ASR_PATH, body, 1024 * 1024);
         if (!result.path("text").isTextual() || result.path("text").asText().isBlank()) throw unavailable();
         return Map.of("text", result.path("text").asText());
     }
@@ -87,24 +93,40 @@ public class HarnessMediaClient {
         }
         String token = authorization.currentToken();
         try {
-            String endpoint = resolveEndpoint(login.getUserCode());
+            var route = resolveEndpoint(login.getUserCode(), ASR_PATH.equals(path));
+            String endpoint = route.endpoint();
             var runtime = runtimes.resolve();
             // Sandbox discovery can return the console entry /chat?token=... .
             // Media APIs are siblings of /chat; retain any gateway prefix and query.
             var base = runtime.buildTargetUrl(endpoint, "", null);
             String apiPath = base.encodedPath().replaceFirst("/chat/?$", "");
-            endpoint = base.newBuilder().encodedPath(apiPath.isEmpty() ? "/" : apiPath).build().toString();
+            var baseBuilder = base.newBuilder().encodedPath(apiPath.isEmpty() ? "/" : apiPath);
+            if (route.shared()) {
+                // A query token triggers a 303 at the shared gateway, which would discard the POST body.
+                var queryTokens = base.queryParameterValues("token");
+                String webToken = route.webToken();
+                if (webToken == null || !webToken.matches("[A-Za-z0-9._~-]{1,4096}")
+                    || (!queryTokens.isEmpty() && !queryTokens.equals(List.of(webToken)))) {
+                    throw unavailable();
+                }
+                baseBuilder.removeAllQueryParameters("token");
+            }
+            endpoint = baseBuilder.build().toString();
             var target = runtime.buildTargetUrl(endpoint, path, null);
             Request.Builder builder = new Request.Builder().url(target).header("Beyond-Token", token)
                 .post(RequestBody.create(mapper.writeValueAsBytes(body), MediaType.get("application/json")));
             runtime.customizeRequest(builder, new SandboxIngressRequestContext(SandboxIngressInstanceType.UNKNOWN,
-                instance, login.getUserCode(), endpoint, "POST", path, null, target, token, login, Map.of()));
-            try (Response response = http.newCall(builder.build()).execute()) {
+                route.instance(), login.getUserCode(), endpoint, "POST", path, null, target, token, login, Map.of()));
+            if (route.shared()) {
+                route.headers().forEach(builder::header);
+                builder.header("Cookie", "byclaw_web_token=" + route.webToken()).header("Beyond-Token", token);
+            }
+            try (Response response = (route.shared() ? sharedHttp : http).newCall(builder.build()).execute()) {
                 if (response.body() == null) throw unavailable();
                 byte[] bytes = response.body().byteStream().readNBytes(maxResponseBytes + 1);
                 if (bytes.length > maxResponseBytes) throw unavailable();
                 if (!response.isSuccessful()) {
-                    if (path.equals("/api/byclaw/asr/transcribe")
+                    if (ASR_PATH.equals(path)
                         && (response.code() == 400 || response.code() == 422)) {
                         JsonNode failure = mapper.readTree(bytes);
                         if (failure != null && "ASR_SPEECH_NOT_DETECTED".equals(failure.path("code").asText())) {
@@ -133,16 +155,18 @@ public class HarnessMediaClient {
         }
     }
 
-    private String resolveEndpoint(String userCode) {
+    private SandboxIngressEndpointResolver.Endpoint resolveEndpoint(String userCode, boolean asr) {
         if (endpointOverride == null || endpointOverride.isBlank()) {
-            return endpoints.resolveRequiredEndpoint(userCode, instance);
+            boolean preferSharedDsh = asr && (SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(instance)
+                || SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(instance));
+            return endpoints.resolveRequiredEndpoint(userCode, instance, preferSharedDsh);
         }
         try {
             var endpoint = java.net.URI.create(endpointOverride);
             if (!("http".equalsIgnoreCase(endpoint.getScheme()) || "https".equalsIgnoreCase(endpoint.getScheme()))
                 || endpoint.getHost() == null || endpoint.getUserInfo() != null
                 || endpoint.getQuery() != null || endpoint.getFragment() != null) throw unavailable();
-            return endpointOverride;
+            return new SandboxIngressEndpointResolver.Endpoint(instance, endpointOverride, false, null, Map.of());
         } catch (IllegalArgumentException e) {
             throw unavailable();
         }

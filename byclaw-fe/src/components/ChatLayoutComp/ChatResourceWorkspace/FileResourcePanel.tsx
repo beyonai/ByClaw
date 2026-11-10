@@ -63,6 +63,7 @@ import {
   listFiles,
   renameFile,
   uploadFiles,
+  getPersonalStorageQuota,
   type FileBrowserItem,
 } from '@/service/fileBrowser';
 import {
@@ -164,6 +165,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const [loadedDirectoryKeys, setLoadedDirectoryKeys] = useState<Key[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   const [loading, setLoading] = useState(false);
+  const [storageQuota, setStorageQuota] = useState<{ enabled: boolean; quotaBytes?: number; usedBytes?: number }>();
   const [loadError, setLoadError] = useState<string>();
   const [renameTarget, setRenameTarget] = useState<FileBrowserItem | null>(null);
   const [renameLoading, setRenameLoading] = useState(false);
@@ -178,6 +180,25 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   // 根节点异步到达时仍保持展开；Tree 需关闭 defaultExpandParent，避免过滤尚未加载的根键。
   // 每次打开移动弹窗重新初始化，后续由用户控制目录展开状态。
   const [moveExpandedKeys, setMoveExpandedKeys] = useState<Key[]>(['/']);
+
+  useEffect(() => {
+    if (scope !== 'shared') {
+      setStorageQuota(undefined);
+      return;
+    }
+    let active = true;
+    void getPersonalStorageQuota()
+      .then((response) => {
+        if (active && response?.enabled) setStorageQuota(response);
+      })
+      .catch(() => {
+        // Local NFS/Longhorn and older Platform versions do not expose quota; hide the optional UI.
+        if (active) setStorageQuota(undefined);
+      });
+    return () => {
+      active = false;
+    };
+  }, [scope, refreshKey]);
   const [moveTreeLoading, setMoveTreeLoading] = useState(false);
   const [saveDestination, setSaveDestination] = useState<'project' | 'shared'>('project');
   const [saveTarget, setSaveTarget] = useState<FileBrowserItem | null>(null);
@@ -1402,6 +1423,27 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         }
         contentBefore={
           <>
+            {storageQuota?.enabled &&
+              Number.isFinite(storageQuota.quotaBytes) &&
+              Number.isFinite(storageQuota.usedBytes) && (
+              <div
+                style={{ padding: '0 12px 8px' }}
+                aria-label={intl.formatMessage({ id: 'chatResource.personalStorageUsage' })}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                  <span>{intl.formatMessage({ id: 'chatResource.storageUsage' })}</span>
+                  <span>
+                    {(storageQuota.usedBytes! / 1024 ** 3 || 0).toFixed(2)} /{' '}
+                    {(storageQuota.quotaBytes! / 1024 ** 3).toFixed(0)} GB
+                  </span>
+                </div>
+                <Progress
+                  percent={Math.min(100, (storageQuota.usedBytes! / storageQuota.quotaBytes!) * 100)}
+                  size="small"
+                  showInfo={false}
+                />
+              </div>
+            )}
             <UnfinishedUploads
               onCancelQueued={fileTransfers.cancelQueued}
               ownerKey={transferContext.ownerKey}

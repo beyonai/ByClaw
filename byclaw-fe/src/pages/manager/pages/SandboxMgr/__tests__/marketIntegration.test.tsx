@@ -1,12 +1,19 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  getTemplateRebuildCapabilities,
+  listTemplateRebuildRecords,
+  startTemplateRebuild,
+} from '@/pages/manager/service/TemplateRebuild';
 import { setMultiTenancyConfig } from '@/utils/multiTenancy';
 import SandboxMgr from '../index';
 
 const mockDispatch = jest.fn();
+let mockUserTypes: string[];
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
   useDispatch: () => mockDispatch,
-  useSelector: (select: any) => select({ user: { userInfo: { usersOrganizations: [] } } }),
+  useSelector: (select: any) =>
+    select({ user: { userInfo: { usersOrganizations: mockUserTypes.map((userType) => ({ userType })) } } }),
 }));
 jest.mock('@/pages/manager/service/session', () => ({
   getDcSystemConfig: jest.fn().mockResolvedValue({ paramValue: 'commercial' }),
@@ -26,6 +33,11 @@ jest.mock('@/pages/manager/components/JsonCodeEditor', () => ({ value, onChange,
 ));
 jest.mock('@/pages/manager/utils/auth', () => ({ isAdminVip: () => true }));
 jest.mock('@/pages/manager/service/SandboxMgr', () => ({ getPreferredServiceKey: jest.fn() }));
+jest.mock('@/pages/manager/service/TemplateRebuild', () => ({
+  getTemplateRebuildCapabilities: jest.fn(),
+  listTemplateRebuildRecords: jest.fn(),
+  startTemplateRebuild: jest.fn(),
+}));
 jest.mock('@/pages/manager/service/TenantMgr', () => ({ listTenants: jest.fn().mockResolvedValue([]) }));
 
 const toolSpec = {
@@ -50,6 +62,19 @@ const toolSpec = {
 
 beforeEach(() => {
   mockDispatch.mockClear();
+  mockUserTypes = [];
+  jest.mocked(getTemplateRebuildCapabilities).mockResolvedValue({ supported: false });
+  jest.mocked(listTemplateRebuildRecords).mockResolvedValue({ records: [], total: 0 });
+  jest.mocked(startTemplateRebuild).mockResolvedValue({
+    id: 'rebuild-1',
+    serviceKey: toolSpec.serviceKey,
+    serviceName: toolSpec.displayName,
+    actorCode: 'admin',
+    actorName: 'Admin',
+    createdAt: 1,
+    updatedAt: 1,
+    state: 'SUCCEEDED',
+  });
   setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
 });
 
@@ -112,6 +137,78 @@ test('editing tool metadata preserves ownership, runtime options and the indepen
   });
 });
 
+test('persists raw tool metadata edits together with changed form fields and refreshes the card', async () => {
+  await openMarket();
+  fireEvent.click(getVisibleButton('sandboxMgr.market.edit'));
+  const editor = screen.getByRole('dialog', { name: 'spec-editor' });
+  const spec = JSON.parse(toolSpec.specJson);
+  spec.runtimeOptions.toolSandbox.description = 'Saved from Spec JSON';
+  spec.runtimeOptions.toolSandbox.capabilities = ['process.exec'];
+  spec.runtimeOptions.toolSandbox.coverImage = 'https://example.com/raw.png';
+  fireEvent.change(within(editor).getByLabelText('sandboxMgr.config.specJson'), {
+    target: { value: JSON.stringify(spec) },
+  });
+  fireEvent.change(within(editor).getByLabelText('sandboxMgr.market.coverUrl'), {
+    target: { value: 'https://example.com/cover.png?version=2' },
+  });
+  fireEvent.click(within(editor).getByRole('button', { name: 'save-spec' }));
+
+  await waitFor(() =>
+    expect(mockDispatch.mock.calls.some(([action]) => action.type === 'sandboxMgr/saveServiceSpec')).toBe(true)
+  );
+  const { payload, success } = mockDispatch.mock.calls.find(
+    ([action]) => action.type === 'sandboxMgr/saveServiceSpec'
+  )[0];
+  expect(JSON.parse(payload.specJson).runtimeOptions.toolSandbox).toEqual({
+    ...spec.runtimeOptions.toolSandbox,
+    capabilities: '["process.exec"]',
+    coverImage: 'https://example.com/cover.png?version=2',
+  });
+  act(() => success());
+  const reloads = mockDispatch.mock.calls.filter(([action]) => action.type === 'sandboxMgr/listServiceSpec');
+  expect(reloads).toHaveLength(2);
+  act(() => reloads[1][0].success([payload]));
+  expect(await screen.findByText('Saved from Spec JSON')).toBeVisible();
+  expect(screen.getByText('Browser workspace').closest('article')?.querySelector('img')).toHaveAttribute(
+    'src',
+    'https://example.com/cover.png?version=2'
+  );
+});
+
+test('waits for the local cover file before saving its data URL', async () => {
+  await openMarket();
+  fireEvent.click(getVisibleButton('sandboxMgr.market.edit'));
+  const editor = screen.getByRole('dialog', { name: 'spec-editor' });
+  let reader: FileReader | undefined;
+  const readFile = jest.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader) {
+    reader = this;
+  });
+  try {
+    fireEvent.change(editor.querySelector('input[type="file"]')!, {
+      target: { files: [new File(['new cover'], 'cover.png', { type: 'image/png' })] },
+    });
+    fireEvent.click(within(editor).getByRole('button', { name: 'save-spec' }));
+    await act(async () => {});
+    expect(mockDispatch.mock.calls.some(([action]) => action.type === 'sandboxMgr/saveServiceSpec')).toBe(false);
+    if (!reader) throw new Error('Expected a pending file read');
+    Object.defineProperty(reader, 'result', { value: 'data:image/png;base64,bmV3IGNvdmVy' });
+    act(() => {
+      reader?.dispatchEvent(new Event('load'));
+      reader?.dispatchEvent(new Event('loadend'));
+    });
+    expect(screen.getByRole('img', { name: 'sandboxMgr.market.cover' })).toBeVisible();
+  } finally {
+    readFile.mockRestore();
+  }
+
+  fireEvent.click(within(editor).getByRole('button', { name: 'save-spec' }));
+  await waitFor(() =>
+    expect(mockDispatch.mock.calls.some(([action]) => action.type === 'sandboxMgr/saveServiceSpec')).toBe(true)
+  );
+  const { payload } = mockDispatch.mock.calls.find(([action]) => action.type === 'sandboxMgr/saveServiceSpec')[0];
+  expect(JSON.parse(payload.specJson).runtimeOptions.toolSandbox.coverImage).toBe('data:image/png;base64,bmV3IGNvdmVy');
+});
+
 test('the manager keeps four ownership tabs reachable and applies login startup only to user specifications', async () => {
   render(<SandboxMgr />);
   fireEvent.click(getVisibleButton('sandboxMgr.config.button'));
@@ -155,11 +252,25 @@ test('the manager keeps four ownership tabs reachable and applies login startup 
   expect(screen.queryByText('shared-runtime')).not.toBeInTheDocument();
 });
 
-test('profile administration requests all service types including disabled resource profiles', () => {
+test('configuration loads profiles and health only when their tabs are first opened', () => {
   render(<SandboxMgr />);
   fireEvent.click(getVisibleButton('sandboxMgr.config.button'));
-  const request = mockDispatch.mock.calls.find(([action]) => action.type === 'sandboxMgr/listServiceProfiles')[0];
-  expect(request.payload).toEqual({ allServiceTypes: true, enabledOnly: false });
+  const calls = (type: string) => mockDispatch.mock.calls.filter(([action]) => action.type === type);
+  const profiles = 'sandboxMgr/listServiceProfiles';
+  const health = 'sandboxMgr/getSandboxHealthGlobalSwitch';
+  const watermarks = 'sandboxMgr/listSandboxHealthWatermarkModels';
+  expect(calls('sandboxMgr/listServiceSpec')).toHaveLength(1);
+  expect(calls(profiles)).toHaveLength(0);
+  expect(calls(health)).toHaveLength(0);
+  expect(calls(watermarks)).toHaveLength(0);
+
+  fireEvent.click(screen.getByRole('tab', { name: 'sandboxMgr.config.tab.profile' }));
+  expect(calls(profiles)[0][0].payload).toEqual({ allServiceTypes: true, enabledOnly: false });
+  fireEvent.click(screen.getByRole('tab', { name: 'sandboxMgr.config.tab.health' }));
+  expect(calls(health)).toHaveLength(1);
+  expect(calls(watermarks)).toHaveLength(1);
+  fireEvent.click(screen.getByRole('tab', { name: 'sandboxMgr.config.tab.profile' }));
+  expect(calls(profiles)).toHaveLength(1);
 });
 
 test('the general execution sandbox can be explicitly admitted to the market from its legacy user category', async () => {
@@ -204,3 +315,34 @@ test('the general execution sandbox can be explicitly admitted to the market fro
   expect(config.runtimeOptions.lifecycle.autoStart).toBe('false');
   expect(mockDispatch.mock.calls.some(([action]) => action.type === 'sandboxMgr/saveServiceProfile')).toBe(false);
 });
+
+test('shows template actions in the editor and after saving without rebuilding unsaved changes', async () => {
+  mockUserTypes = ['PLAT_MAN'];
+  jest.mocked(getTemplateRebuildCapabilities).mockResolvedValue({ supported: true });
+  await openMarket();
+  fireEvent.click(getVisibleButton('sandboxMgr.market.edit'));
+  const editor = screen.getByRole('dialog', { name: 'spec-editor' });
+  const rebuild = await within(editor).findByRole('button', { name: '重建模板' });
+  expect(rebuild).toBeEnabled();
+  fireEvent.change(within(editor).getByLabelText('sandboxMgr.market.description'), {
+    target: { value: 'Edited before rebuilding' },
+  });
+  expect(rebuild).toBeDisabled();
+  expect(within(editor).getByRole('button', { name: '重建模板记录' })).toBeEnabled();
+  expect(startTemplateRebuild).not.toHaveBeenCalled();
+
+  fireEvent.click(within(editor).getByRole('button', { name: 'save-spec' }));
+  await waitFor(() =>
+    expect(mockDispatch.mock.calls.some(([action]) => action.type === 'sandboxMgr/saveServiceSpec')).toBe(true)
+  );
+  const saved = mockDispatch.mock.calls.find(([action]) => action.type === 'sandboxMgr/saveServiceSpec')![0];
+  act(() => saved.success());
+  const notice = (await screen.findByText('sandboxMgr.config.rebuildSaved')).closest('[role="alert"]') as HTMLElement;
+  expect(within(notice).getByRole('button', { name: '重建模板记录' })).toBeEnabled();
+  fireEvent.click(within(notice).getByRole('button', { name: '重建模板' }));
+  fireEvent.click(await screen.findByRole('button', { name: '确认重建' }));
+  await waitFor(() =>
+    expect(startTemplateRebuild).toHaveBeenCalledWith(toolSpec.serviceKey, expect.any(String), undefined)
+  );
+  await waitFor(() => expect(listTemplateRebuildRecords).toHaveBeenCalledWith(toolSpec.serviceKey, 1, 10));
+}, 20000);

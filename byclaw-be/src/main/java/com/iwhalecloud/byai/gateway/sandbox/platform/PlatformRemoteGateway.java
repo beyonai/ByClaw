@@ -139,6 +139,21 @@ public class PlatformRemoteGateway {
         return null;
     }
 
+    /** Reads the remote storage quota for display without changing upload/admission policy. */
+    public Map<String, Object> readPersonalStorageQuota(String user) {
+        if (!remote || user == null || user.isBlank()) return null;
+        try {
+            Object value = data(envelope("storage", "quota-check",
+                params("userCode", user, "operation", "CHAT", "requestedBytes", 0L)));
+            if (!(value instanceof Map<?, ?> details)) return null;
+            Map<String, Object> result = new LinkedHashMap<>();
+            details.forEach((key, item) -> result.put(String.valueOf(key), item));
+            return result;
+        } catch (com.iwhalecloud.byai.state.common.exception.NasQuotaExceededException quota) {
+            return quota.details();
+        }
+    }
+
     public Map<String,Object> reportQuotaRejection(String user,String requestId) {
         if(!personalStorageAdmissionEnabled || !remote || user==null || user.isBlank())return null;
         try { call("storage","quota-rejected",params("userCode",user,"operation","CHAT","requestId",requestId)); }

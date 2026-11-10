@@ -94,6 +94,22 @@ public class SharedSandboxGateway {
         return access;
     }
 
+    /** Read provider ingress headers for an existing, user-bound shared context. */
+    public Map<String, String> executionHeaders(String user, SandboxInfo binding, String endpoint) {
+        if (!policy.eligible(user)) {
+            throw new IllegalStateException("Shared execution context is unavailable");
+        }
+        var request = identity(user, DSH_SERVICE);
+        var current = json.convertValue(call("lookup", request), SandboxLaunchData.class);
+        if (current == null || !Objects.equals(binding.getMappingId(), current.getMappingId())
+            || !Objects.equals(binding.getSandboxId(), current.getSandboxId())
+            || !Objects.equals(endpoint, current.getEndpoint())) {
+            throw new IllegalStateException("Shared execution context changed");
+        }
+        var access = executionAccess(user, DSH_SERVICE, current);
+        return access.getEndpointHeaders() == null ? Map.of() : access.getEndpointHeaders();
+    }
+
     /** Return only user-facing preparation state; never expose NAS bindings or other users. */
     public Map<String, Object> userStorageStatus(String user) {
         if (!policy.userNasEnabled(user, DSH_SERVICE)) return Map.of("enabled", false, "ready", true, "state", "LOGICAL");

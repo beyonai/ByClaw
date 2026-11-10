@@ -133,6 +133,24 @@ class HookIntegrationTest {
     }
 
     @Test
+    void committedFactsSendWithoutTransactionAndInsideAfterCommitWithoutSecondCallback() {
+        enabled().run(context -> {
+            var publisher = context.getBean(HookPublisher.class);
+            publisher.publishCommitted("user.registered", 1, Map.of("userId", "41"));
+            assertThat(received.poll(5, TimeUnit.SECONDS)).isNotNull();
+            transactions.executeWithoutResult(status ->
+                org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            publisher.publishCommitted("user.registered", 1, Map.of("userId", "42"));
+                        }
+                    }));
+            assertThat(received.poll(5, TimeUnit.SECONDS)).isNotNull();
+        });
+    }
+
+    @Test
     void invalidEventAndFieldFailAtStartupWithoutEchoingSecret() {
         enabled().withPropertyValues("byclaw.hooks.subscriptions.crm.event=unknown",
             "byclaw.hooks.subscriptions.crm.http.auth.token=private-value").run(context -> {

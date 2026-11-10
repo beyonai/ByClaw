@@ -64,6 +64,7 @@ export function byClawAuthorizationKey(userId: string): string {
 export async function resolveByClawAuthorization(
   redis: ByClawAuthorizationRedis,
   userCode: string,
+  fallbackToken?: () => Promise<string | undefined> | string | undefined,
 ): Promise<ByClawAuthorization> {
   const normalizedUserCode = userCode.trim()
   if (normalizedUserCode === '') throw new Error('ByClaw userCode must not be empty')
@@ -85,6 +86,12 @@ export async function resolveByClawAuthorization(
   for (const key of ['Beyond-Token', 'Sso-Token', 'WHALE_AGENT_AUTHORIZATION']) {
     const value = text(loginAuth[key])
     if (value !== '') authHeaders[key] = value
+  }
+  if (authHeaders['Beyond-Token'] === undefined) {
+    // A turn the server starts (a scheduled chat) runs while the user is logged out, so the login
+    // state has no token; the one BE issued for this context stands in.
+    const issued = text(await fallbackToken?.())
+    if (issued !== '') authHeaders['Beyond-Token'] = issued
   }
   if (authHeaders['Beyond-Token'] === undefined) {
     throw new Error(`ByClaw Beyond-Token was not found for userCode ${normalizedUserCode}`)

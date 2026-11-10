@@ -158,10 +158,10 @@ public class TransactionAdviceConfig {
                     }
                 }
                 if (targetClass != null && java.util.Set.of(
-                    "com.iwhalecloud.byai.state.domain.mobilepush.MobilePushService",
-                    "com.iwhalecloud.byai.state.domain.mobilepush.MobilePushAuthority")
+                    "com.iwhalecloud.byai.state.domain.groupchat.integration.WorkgroupUnreadService",
+                    "com.iwhalecloud.byai.state.domain.groupchat.integration.WorkgroupMessageAccessService")
                     .contains(ClassUtils.getUserClass(targetClass).getName())) {
-                    // 通知编排及 Node 权限读取会访问远端，不应持有聊天数据库事务。
+                    // 通用群事实读取可能访问 Node，不应持有共享数据库事务。
                     return notSurpportedTx;
                 }
                 // Forwarding coordination performs remote control and file I/O; stores explicitly own short transactions.
@@ -227,6 +227,14 @@ public class TransactionAdviceConfig {
                     && "restorePublicationRuntimeAfterRollback".equals(method.getName())) {
                     return notSurpportedTx;
                 }
+                // A chat turn spans model streaming and the wait for its sandbox or shared host. Its entry methods
+                // must not hold one REQUIRED transaction across it: the new session row would stay uncommitted,
+                // and the exception path's REQUIRES_NEW write of the same session then waits on that row lock
+                // from the same thread, a deadlock that pins a chat thread and a connection. Each service the
+                // turn calls commits its own transaction instead (as startExistingMessageTurn already does).
+                if (isChatTurnEntry(method, targetClass)) {
+                    return notSurpportedTx;
+                }
                 // Stream projections use memory/Redis and must not borrow a JDBC connection for each chunk.
                 // Match the owning class as well as the method so ordinary business writes keep their transactions.
                 if (isStreamProjectionMethod(method, targetClass)) {
@@ -278,6 +286,25 @@ public class TransactionAdviceConfig {
                 "canRead".equals(name) && method.getParameterCount() == 3;
             case "com.iwhalecloud.byai.common.feign.client.FeignPythonBuildService" ->
                 "fileDownloadForActor".equals(name) || "listDirForActor".equals(name);
+            default -> false;
+        };
+    }
+
+    private static boolean isChatTurnEntry(Method method, Class<?> targetClass) {
+        if (targetClass == null) {
+            return false;
+        }
+        String owner = ClassUtils.getUserClass(targetClass).getName();
+        String name = method.getName();
+        return switch (owner) {
+            case "com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService",
+                 "com.iwhalecloud.byai.gateway.channels.service.app.AppChannelService",
+                 "com.iwhalecloud.byai.gateway.channels.service.dingtalk.DingtalkChannelService",
+                 "com.iwhalecloud.byai.gateway.channels.service.feishu.FeishuChannelService",
+                 "com.iwhalecloud.byai.gateway.channels.service.web.WebChannelService",
+                 "com.iwhalecloud.byai.gateway.channels.service.wecom.WecomChannelService" -> "chat".equals(name);
+            case "com.iwhalecloud.byai.state.domain.chat.service.ScriptService" -> "executeAssistantChat".equals(name);
+            case "com.iwhalecloud.byai.state.domain.ws.service.ChatService" -> "llmChat".equals(name);
             default -> false;
         };
     }

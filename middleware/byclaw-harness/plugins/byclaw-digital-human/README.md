@@ -12,7 +12,8 @@
 火山配置和本地素材通过插件上下文每次查找的 `ctx.get('fs')`（同一个 `ctx.fs` 核心服务）读取，
 支持文件实际位于远程工具环境的宿主。不会解析 `FsTarget.targetKey` 或使用 `node:fs`。
 
-部署配置仅允许 `configPath`，默认 `/by/.connector-auth/.model/digital-human.json`，
+部署配置仅允许 `configPath`，默认 `/by/.connector-auth/.model/video.json`，
+与后端数字人连接器生成路径一致；文件不存在时直接返回连接器未配置提示，不尝试其他文件名。
 与图片的 `.model/image.json`、语音的 `.model/tts.json` 使用同一目录约定。
 此路径属于用户连接器投影，必须由宿主隔离到当前用户；多租户宿主应将插件挂载到用户作用域，
 并提供该用户的文件系统能力与投影路径，不要在全局工具作用域暴露用户凭据。
