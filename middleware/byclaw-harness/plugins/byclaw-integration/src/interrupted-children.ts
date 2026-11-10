@@ -58,7 +58,8 @@ export function interruptedChildren(events: readonly SessionEvent[], isLive: (ch
  * @returns the user message to deliver to the parent.
  */
 export function interruptionNotice(childId: string): UserMessage {
-  const summary = `Background subagent ${childId} was interrupted by a host restart before it finished.`
+  // Not "a host restart": the same check also finds a child whose root was reloaded in this process.
+  const summary = `Background subagent ${childId} stopped before it finished and is no longer running.`
   return createUserMessage({
     content: [
       { type: 'text', text: summary },

@@ -756,6 +756,10 @@ try {
   // Other providers, routes no model id reproduces, and unknown models leave the registration alone.
   for (const provider of ['deepseek', 'baiying-m-', 'baiying-m-Upper', 'baiying-m-99999999']) await restarted.restoreRoute(provider)
   assert.deepEqual(restoredRegistrations[0].routes, ['baiying-m-20010925'])
+  // A model that is gone is not looked up again on the agent's next request.
+  const afterUnknown = redisReads
+  await restarted.restoreRoute('baiying-m-99999999')
+  assert.equal(redisReads, afterUnknown, 'an unrestorable route must not be read again right away')
 }
 
 const runtime = new ByClawDynamicModelRuntime(ctx, redis, { provider: 'static-fallback', model: 'fallback-model' })

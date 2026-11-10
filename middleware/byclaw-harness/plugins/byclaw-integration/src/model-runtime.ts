@@ -57,6 +57,8 @@ const DEFAULT_REQUEST_IMAGE_MAX_BYTES = 1024 * 1024
 const PROVIDER_PREFIX = 'baiying-m-'
 /** Suffix of a model's native adaptive-thinking route next to its ordinary one. */
 const ADAPTIVE_ROUTE_SUFFIX = ':adaptive'
+/** How long a route that could not be restored is left alone before its model is read again. */
+const UNRESTORABLE_ROUTE_RETRY_MS = 60_000
 
 export type ByClawModelProtocol = 'openai-completions' | 'openai-responses' | 'anthropic-messages'
 
@@ -949,6 +951,8 @@ export class ByClawDynamicModelRuntime {
   private readonly reasonings = new Map<string, ResolvedByClawReasoning>()
   private readonly lastGood = new Map<string, ByClawModelSelection>()
   private readonly routeModelIds = new Map<string, string>()
+  /** Routes that could not be restored, with when to ask again: a deleted model is not read on every request. */
+  private readonly unrestorable = new Map<string, number>()
   private registration: AdapterRegistrationHandle | undefined
   private readonly adapter: PiAiAdapter
   private readonly fallback: ByClawModelSelection | undefined
@@ -1046,11 +1050,16 @@ export class ByClawDynamicModelRuntime {
     const modelId = key.startsWith('neg-') ? `-${key.slice('neg-'.length)}` : key
     // The route name normalises the model id; only an id it reproduces exactly is the one it came from.
     if (byClawProviderKey(modelId) !== route) return
+    if ((this.unrestorable.get(provider) ?? 0) > Date.now()) return
     const model = await this.readExplicit(modelId).catch((error: unknown) => {
       this.ctx.logger.warn(`byclaw-dsh: restoring model route ${provider} failed: ${String(error)}`)
       return undefined
     })
-    if (model === undefined) return
+    if (model === undefined) {
+      this.unrestorable.set(provider, Date.now() + UNRESTORABLE_ROUTE_RETRY_MS)
+      return
+    }
+    this.unrestorable.delete(provider)
     this.publish(`restored:${provider}`, model, adaptive ? 'adaptive' : undefined)
   }
 

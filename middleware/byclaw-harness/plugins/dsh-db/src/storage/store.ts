@@ -147,10 +147,12 @@ export class StorageSqlStore {
     const backupTable = `${BACKUP_PREFIX}${table}`
     const backupKey = `${key}@${Date.now()}`
     await this.fenced(unit, epoch, async (tx) => {
-      await tx.query(
+      const moved = await tx.query(
         `UPDATE ${this.records} SET table_name = $1, record_key = $2, updated_at = $3 WHERE user_code = $4 AND unit = $5 AND table_name = $6 AND record_key = $7`,
         [backupTable, backupKey, Date.now(), this.user, unit, table, key],
       )
+      // Nothing moved: do not report a location that holds nothing.
+      if (moved.rowCount === 0) throw new Error(`kv unit '${unit}' has no record '${key}' in table '${table}' to back up`)
     })
     return `${this.records} user_code=${this.user} unit=${unit} table_name=${backupTable} record_key=${backupKey}`
   }

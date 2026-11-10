@@ -57,7 +57,8 @@ export interface Config extends PoolConfig {
 export const name = 'session-persistence-db'
 
 export const Config: z<Config> = z.object({
-  connectionString: z.string().required(),
+  // Carries the database password: settings reads that redact secrets leave it out.
+  connectionString: z.string().role('secret').required(),
   userCode: z.string().required(),
   schema: z.string().pattern(/^[a-z_][a-z0-9_]*$/).default('byai'),
   poolMax: z.natural().min(1).default(8),

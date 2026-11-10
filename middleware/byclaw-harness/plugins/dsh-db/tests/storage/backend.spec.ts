@@ -70,6 +70,8 @@ describe('db backend specifics', () => {
     expect((await unit.loadAll()).tables['sessions']).toEqual({ dropped: { v: 7 } })
     const { rows } = await database.db.query<{ value: string }>(`SELECT value FROM byai.dsh_storage_record WHERE table_name = '#backup:sessions'`)
     expect(rows.map(row => JSON.parse(row.value))).toEqual([{ v: 5 }])
+    // A record that is not there is not reported as backed up.
+    await expect(unit.backupRecord!('sessions', 'kept')).rejects.toThrow(/no record 'kept'/)
   })
 
   it('refuses unsafe per-record keys and undeclared tables', async () => {

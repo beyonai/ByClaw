@@ -36,7 +36,7 @@ assert.deepEqual(interruptedChildren([...events, queued], none), ['child-ptc'])
 const notice = interruptionNotice('child-cut')
 assert.equal(notice.source.kind, 'subagent-settled')
 assert.equal(notice.source.senderSessionId, 'child-cut')
-assert.match(notice.content[0].text, /interrupted by a host restart/)
+assert.match(notice.content[0].text, /child-cut stopped before it finished and is no longer running/)
 const afterNotice = [...events, { type: 'user/message', seq: seq++, data: notice }]
 assert.deepEqual(interruptedChildren(afterNotice, none), ['child-ptc'])
 
