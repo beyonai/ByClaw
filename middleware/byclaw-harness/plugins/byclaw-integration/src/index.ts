@@ -80,8 +80,9 @@ import { registerByClawAgentWorkspacePolicy, ByClawSessionWorkspaceRegistry } fr
 import { resolveByClawByRoot, resolveByClawLocalE2eStorageRoot, resolveByClawInboundPath } from './inbound-context.ts'
 import { ByClawDshWorkerRuntime } from './worker-runtime.ts'
 import { ByClawExecutionRouter, type ExecutionSandbox } from './coding-router.ts'
+import { codingEventPresentation } from './coding-presentation.ts'
 import { byClawInboundTurnContextDeclaration, buildByClawInboundTurnContext } from './inbound-context.ts'
-import { emitByClawProjection, reasoningProjection, toolCallProjection, type DshProjectionContext } from './byclaw-presentation.ts'
+import { emitByClawProjection, reasoningProjection, toolCallProjection } from './byclaw-presentation.ts'
 import type { AskAgentCommand } from '@byclaw/by-framework'
 import { ByClawDshSandboxBusyPublisher } from './sandbox-busy.ts'
 import {
@@ -1154,23 +1155,18 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       resolveTarget: resolveInboundTarget,
       sandbox: () => (ctx.get('ssh') as ExecutionToolEnvironment | undefined)?.sandboxCatalog,
       onActivityChange: () => sandboxBusy?.activityChanged(),
+      log: entry => ctx.logger('byclaw-execution').info(`execution.lifecycle ${JSON.stringify(entry)}`),
       prepareContext: (command, target) => [
         '执行以下用户任务。附件和工作文件位于同一用户的 /by 卷。请返回任务结果。',
         byClawInboundTurnContextDeclaration(buildByClawInboundTurnContext(command)),
         '<user-task>', target.text, '</user-task>',
       ].join('\n\n'),
       emit: async (command, context, event) => {
-        const projectionContext: DshProjectionContext = {
-          sessionId: String(command.header.sessionId), rootSessionId: String(command.header.sessionId),
-          externalParentSessionId: String(context.sessionId), scope: 'parent', depth: 0,
-          sequence: `codex:${command.header.messageId}:${event.id}`, eventKind: event.kind === 'tool' ? 'tool.call' : 'session.output',
-          parentMessageId: command.header.messageId,
-          groupMetadata: { executor: event.executionType, employee_id: event.employeeId },
-        }
+        const presentation = codingEventPresentation(event, { sessionId: String(command.header.sessionId),
+          hostSessionId: String(context.sessionId), messageId: String(command.header.messageId) })
         const projection = event.kind === 'progress'
-          ? reasoningProjection(event.detail ?? event.title, projectionContext)
-          : toolCallProjection({ toolCallId: `codex:${command.header.messageId}:${event.id}`, toolName: event.title,
-            phase: event.phase, source: 'runtime', ...(event.detail === undefined ? {} : { output: event.detail }) }, projectionContext)
+          ? reasoningProjection(presentation.text, presentation.context)
+          : toolCallProjection(presentation.tool, presentation.context)
         await emitByClawProjection(emitter, String(context.sessionId), context.traceId, projection, sourceAgentType)
       },
     })

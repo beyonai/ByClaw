@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto'
 import type { AskAgentCommand, AgentContext } from '@byclaw/by-framework'
 import { CodexEventAdapter, type CodingEvent } from './cli-event-adapter.ts'
+import { summarizeCodingDiagnostic, type CodingDiagnosticSummary } from './coding-diagnostics.ts'
 
 export type ExecutionType = 'CODEX_CLI' | 'CLAUDE_CLI' | 'UNITY'
 export type ExecutionKind = 'codex' | 'claude' | 'unity'
@@ -27,7 +28,27 @@ export interface ExecutionSandbox {
 
 export interface ExecutionTarget { resourceId: string; kind: 'employee' | 'group'; text: string }
 export interface ExecutionResult { answer: string; finalAnswer: string; executor: ExecutionKind; executionType: ExecutionType; codexThreadId?: string }
-export interface ExecutionRouteEvent extends CodingEvent { employeeId: string; executionType: ExecutionType }
+export interface ExecutionRouteEvent extends CodingEvent {
+  employeeId: string
+  executionType: ExecutionType
+  origin: 'runtime' | 'cli'
+  sequence: number
+}
+export interface ExecutionDiagnostic {
+  sessionId: string
+  messageId: string
+  traceId: string
+  employeeId: string
+  executionType: ExecutionType
+  templateKey: string
+  stage: 'queue' | 'sandbox' | 'exec' | 'first_stdout' | 'first_activity' | 'cleanup' | 'request' | 'stderr'
+  status: 'start' | 'waiting' | 'success' | 'error'
+  elapsedMs: number
+  totalElapsedMs: number
+  exitCode?: number | null
+  reason?: string
+  diagnostic?: CodingDiagnosticSummary
+}
 export interface ExecutionRouterEnvironment {
   BYCLAW_AGENT_EXECUTION_MAP?: string
   CODEX_EXEC_TIMEOUT_MS?: string
@@ -40,6 +61,9 @@ export interface ExecutionRouterOptions {
   sandbox: () => ExecutionSandbox | undefined
   emit: (command: AskAgentCommand, context: AgentContext, event: ExecutionRouteEvent) => Promise<void>
   onActivityChange?: () => void
+  log?: (entry: ExecutionDiagnostic) => void
+  /** Internal test seam; deployments use the fixed 10-second status interval. */
+  progressIntervalMs?: number
 }
 
 /** A routed failure rejects; only an unmatched request may call DSH. */
@@ -122,8 +146,9 @@ export class ByClawExecutionRouter {
     if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 900000) throw new Error('EXECUTION_INVALID_TIMEOUT')
     const control = new AbortController()
     const queued = this.queues.get(identity) ?? Promise.resolve()
+    const queuedAt = performance.now()
     const request: Request = { messageId: command.header.messageId, fingerprint, control, settled: false, promise: Promise.resolve(undefined as never) }
-    request.promise = queued.catch(() => {}).then(() => this.execute(command, context, target, prompt, identity, executionType, control, timeout))
+    request.promise = queued.catch(() => {}).then(() => this.execute(command, context, target, prompt, identity, executionType, control, timeout, queuedAt))
       .finally(() => {
         request.settled = true
         this.options.onActivityChange?.()
@@ -137,7 +162,7 @@ export class ByClawExecutionRouter {
     return request.promise
   }
 
-  private async execute(command: AskAgentCommand, context: AgentContext, target: ExecutionTarget, prompt: string, identity: string, executionType: ExecutionType, control: AbortController, timeout: number): Promise<ExecutionResult> {
+  private async execute(command: AskAgentCommand, context: AgentContext, target: ExecutionTarget, prompt: string, identity: string, executionType: ExecutionType, control: AbortController, timeout: number, queuedAt: number): Promise<ExecutionResult> {
     const definition = EXECUTION_DEFINITIONS[executionType]
     if (definition.executor !== 'codex') throw new Error(`EXECUTOR_NOT_IMPLEMENTED:${executionType}`)
     const signal = AbortSignal.any([control.signal, AbortSignal.timeout(timeout)])
@@ -148,44 +173,115 @@ export class ByClawExecutionRouter {
     const actor = `execution:${createHash('sha256').update(JSON.stringify([identity, command.header.messageId])).digest('hex')}`
     let forwarding = Promise.resolve()
     let forwardingError: unknown
-    const emit = (event: CodingEvent) => {
-      forwarding = forwarding.then(() => this.options.emit(command, context, { ...event, employeeId: target.resourceId, executionType }))
-        .catch(error => { forwardingError = error; control.abort(new Error('EXECUTION_EVENT_FORWARDING_FAILED')) })
+    let sequence = 0
+    const emit = (event: CodingEvent, origin: ExecutionRouteEvent['origin'] = 'runtime') => {
+      const routed: ExecutionRouteEvent = { ...event, employeeId: target.resourceId, executionType, origin, sequence: ++sequence }
+      forwarding = forwarding.then(async () => {
+        if (!forwardingError) await this.options.emit(command, context, routed)
+      }).catch(error => { forwardingError = error; control.abort(new Error('EXECUTION_EVENT_FORWARDING_FAILED')) })
     }
-    const parser = new CodexEventAdapter(emit)
+    const log = (stage: ExecutionDiagnostic['stage'], status: ExecutionDiagnostic['status'], startedAt: number, extra: Pick<ExecutionDiagnostic, 'exitCode' | 'reason' | 'diagnostic'> = {}) => {
+      const now = performance.now()
+      // Only allowlisted fields reach the logger. No prompt, argv, stdout, stderr or Error object.
+      try { this.options.log?.({ sessionId: String(command.header.sessionId), messageId: String(command.header.messageId),
+        traceId: context.traceId, employeeId: target.resourceId, executionType, templateKey: definition.templateKey,
+        stage, status, elapsedMs: Math.round(now - startedAt), totalElapsedMs: Math.round(now - queuedAt), ...extra }) } catch { /* Logging cannot break a task. */ }
+    }
+    let stage: { id: 'sandbox' | 'exec' | 'cleanup'; title: string; startedAt: number } | undefined
+    let heartbeat: ReturnType<typeof setInterval> | undefined
+    const updateStage = (phase: CodingEvent['phase'], reason?: string) => {
+      if (!stage) return
+      const elapsedMs = Math.round(performance.now() - stage.startedAt)
+      emit({ kind: 'tool', id: stage.id, phase, title: stage.title,
+        detail: `${reason === undefined ? '' : `${reason}；`}已耗时 ${Math.floor(elapsedMs / 1000)} 秒`,
+        output: { stage: stage.id, elapsedMs, ...(reason === undefined ? {} : { reason }) } })
+    }
+    const startStage = (id: 'sandbox' | 'exec' | 'cleanup', title: string) => {
+      if (heartbeat) clearInterval(heartbeat)
+      stage = { id, title, startedAt: performance.now() }
+      updateStage('start'); log(id, 'start', stage.startedAt)
+      heartbeat = setInterval(() => {
+        if (!stage || forwardingError) return
+        updateStage('start'); log(stage.id, 'waiting', stage.startedAt)
+      }, this.options.progressIntervalMs ?? 10_000)
+      heartbeat.unref()
+    }
+    const endStage = (phase: 'success' | 'error', reason?: string, extra: Pick<ExecutionDiagnostic, 'exitCode' | 'diagnostic'> = {}) => {
+      if (heartbeat) clearInterval(heartbeat)
+      if (!stage) return
+      updateStage(phase, reason); log(stage.id, phase, stage.startedAt, { ...extra, ...(reason === undefined ? {} : { reason }) })
+      stage = undefined
+    }
+    let executionStarted = queuedAt
+    let firstActivity = false
+    const parser = new CodexEventAdapter(event => emit(event, 'cli'), () => {
+      if (!firstActivity) { firstActivity = true; log('first_activity', 'success', executionStarted) }
+    })
     let sandbox: ExecutionSandbox | undefined
+    let result: ExecutionResult | undefined
+    let failure: Error | undefined
+    let processOutcome: Pick<ExecutionDiagnostic, 'exitCode' | 'diagnostic'> = {}
+    const failureCode = () => forwardingError ? 'EXECUTION_EVENT_FORWARDING_FAILED'
+      : signal.aborted ? (control.signal.aborted ? 'EXECUTION_CANCELLED' : 'EXECUTION_TIMEOUT') : 'EXECUTION_FAILED'
+    log('queue', 'success', queuedAt)
     try {
       signal.throwIfAborted()
       sandbox = this.options.sandbox()
       if (!sandbox) throw new Error('EXECUTION_SANDBOX_UNAVAILABLE')
-      emit({ kind: 'tool', id: 'sandbox', phase: 'start', title: `申请 ${definition.templateKey} 工具沙箱` })
+      startStage('sandbox', `申请 ${definition.templateKey} 工具沙箱`)
       const lease = await sandbox.acquire(actor, definition.templateKey, executionType)
       signal.throwIfAborted()
-      emit({ kind: 'tool', id: 'sandbox', phase: 'success', title: `申请 ${definition.templateKey} 工具沙箱` })
-      emit({ kind: 'tool', id: 'exec', phase: 'start', title: 'Codex 执行任务' })
+      endStage('success')
+      startStage('exec', 'Codex 执行任务')
       const cwd = `${lease.workspaceRoot}/.sessions/codex-${createHash('sha256').update(identity).digest('hex')}`
-      const result = await sandbox.execute(actor, lease.leaseId, ['sh', '-c', CODEX_EXEC_SCRIPT, 'byclaw-codex', cwd, '--', prompt], lease.workspaceRoot, signal, chunk => parser.write(chunk))
+      executionStarted = performance.now()
+      let firstStdout = false
+      const processResult = await sandbox.execute(actor, lease.leaseId, ['sh', '-c', CODEX_EXEC_SCRIPT, 'byclaw-codex', cwd, '--', prompt], lease.workspaceRoot, signal, chunk => {
+        if (!firstStdout && chunk) { firstStdout = true; log('first_stdout', 'success', executionStarted) }
+        parser.write(chunk)
+      })
+      const diagnostic = summarizeCodingDiagnostic(processResult.stderr) ?? parser.diagnostic
+      processOutcome = { exitCode: processResult.exitCode, ...(diagnostic === undefined ? {} : { diagnostic }) }
+      if (diagnostic) log('stderr', 'success', executionStarted, { diagnostic, exitCode: processResult.exitCode })
       signal.throwIfAborted()
-      const answer = parser.finish(result.exitCode)
-      emit({ kind: 'tool', id: 'exec', phase: 'success', title: 'Codex 执行任务' })
+      const answer = parser.finish(processResult.exitCode)
+      endStage('success', undefined, processOutcome)
       await forwarding
       if (forwardingError) throw forwardingError
-      return { answer, finalAnswer: answer, executor: definition.executor, executionType, ...(parser.threadId === undefined ? {} : { codexThreadId: parser.threadId }) }
+      result = { answer, finalAnswer: answer, executor: definition.executor, executionType, ...(parser.threadId === undefined ? {} : { codexThreadId: parser.threadId }) }
     } catch (error) {
-      const message = error instanceof Error ? error.message : ''
-      const code = forwardingError ? 'EXECUTION_EVENT_FORWARDING_FAILED'
-        : message.startsWith('EXECUTOR_NOT_IMPLEMENTED:') ? message
-        : signal.aborted ? (control.signal.aborted ? 'EXECUTION_CANCELLED' : 'EXECUTION_TIMEOUT') : 'EXECUTION_FAILED'
-      emit({ kind: 'tool', id: 'exec', phase: 'error', title: code })
-      await forwarding
-      throw new Error(code, { cause: error })
+      const code = failureCode()
+      const knownReason = error instanceof Error ? /^(?:CODEX|EXECUTION|SANDBOX)_[A-Z_]+/u.exec(error.message)?.[0] : undefined
+      failure = new Error(code, { cause: new Error(knownReason ?? code) })
+      parser.abort(code)
+      endStage('error', knownReason ?? code, processOutcome)
     } finally {
-      clearInterval(timer)
+      if (heartbeat) clearInterval(heartbeat)
       if (sandbox) {
-        const cleanup = await sandbox.releaseActor(actor)
-        if (cleanup.retainedLeases.length || cleanup.retainedAllocations.length) throw new Error('EXECUTION_CLEANUP_RETAINED')
+        startStage('cleanup', '归还 coding 工具沙箱租约')
+        try {
+          const cleanup = await sandbox.releaseActor(actor)
+          if (cleanup.retainedLeases.length || cleanup.retainedAllocations.length) throw new Error('EXECUTION_CLEANUP_RETAINED')
+          endStage('success')
+        } catch {
+          endStage('error', 'EXECUTION_CLEANUP_RETAINED')
+          failure ??= new Error('EXECUTION_CLEANUP_RETAINED')
+        }
       }
+      await forwarding
+      clearInterval(timer)
     }
+    check()
+    if (forwardingError) failure = new Error('EXECUTION_EVENT_FORWARDING_FAILED')
+    else if (signal.aborted) failure ??= new Error(failureCode())
+    if (failure) {
+      const diagnostic = processOutcome.diagnostic ?? parser.diagnostic
+      log('request', 'error', queuedAt, { ...processOutcome, reason: failure.cause instanceof Error ? failure.cause.message : failure.message,
+        ...(diagnostic === undefined ? {} : { diagnostic }) })
+      throw failure
+    }
+    log('request', 'success', queuedAt)
+    return result!
   }
 
   cancel(messageId: string): void {

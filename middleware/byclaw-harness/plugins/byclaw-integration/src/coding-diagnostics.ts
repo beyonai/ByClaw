@@ -1,0 +1,32 @@
+/** Bounded public text and allowlisted diagnostics; never persist raw CLI stderr. */
+export function codingPublicText(value: string, maxLength = 4096): string {
+  return value
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/gu, '')
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/gu, '')
+    .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/giu, '$1[REDACTED]@')
+    .replace(/\bBearer\s+[^\s"'`,;]+/giu, 'Bearer [REDACTED]')
+    .replace(/\b(?:sk|pk|apikey|vck)[-_][A-Za-z0-9_-]{16,}/gu, '[REDACTED]')
+    .replace(/((?:[\w-]*(?:api[_-]?key|password|secret|token)|CODEX_AUTH|authorization|cookie)["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;&]+)/giu, '$1[REDACTED]')
+    .replace(/((?:--[\w-]*(?:api-key|password|secret|token)|--auth)\s+)("[^"]*"|'[^']*'|[^\s]+)/giu, '$1[REDACTED]')
+    .slice(0, maxLength)
+}
+
+export interface CodingDiagnosticSummary {
+  category: 'authentication' | 'rate_limit' | 'network' | 'provider' | 'unknown'
+  httpStatus?: number
+  retryMessages: number
+}
+
+/** Classify text in memory; messages/URLs/headers/credentials never leave this function. */
+export function summarizeCodingDiagnostic(text: string): CodingDiagnosticSummary | undefined {
+  if (!text.trim()) return undefined
+  const sample = text.slice(-32 * 1024)
+  const status = /(?:HTTP(?:\/\d(?:\.\d)?)?\s*|status(?:\s+code)?[\s:=]+)([45]\d{2})\b/iu.exec(sample)?.[1]
+  const httpStatus = status === undefined ? undefined : Number(status)
+  const category = httpStatus === 401 || httpStatus === 403 || /unauthori[sz]ed|authentication|invalid.{0,12}(?:key|credential)/iu.test(sample)
+    ? 'authentication'
+    : httpStatus === 429 || /rate.?limit|too many requests/iu.test(sample) ? 'rate_limit'
+    : /reconnect|retry|timed?\s*out|timeout|ECONN|ENOTFOUND|connection|network|stream disconnected/iu.test(sample) ? 'network'
+    : httpStatus !== undefined && httpStatus >= 500 ? 'provider' : 'unknown'
+  return { category, ...(httpStatus === undefined ? {} : { httpStatus }), retryMessages: [...sample.matchAll(/\b(?:reconnecting|retrying|retry)\b/giu)].length }
+}
