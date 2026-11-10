@@ -27,6 +27,12 @@ With `BYCLAW_CREDENTIAL_SECRET_FILE` (the host's service secret) also set, the h
 - **Users are separated by `user_code` in every statement.** They share one process and one database account, so this guards against mistakes, not against plugin code in the host.
 - openGauss has no `ON CONFLICT`; a storage write locks the unit row, then updates the record and inserts it when absent.
 
+## Deploying
+
+- **Listing an existing user hides their old state.** On the next boot the user reads only the database, so their earlier chats, workspace pins, session roots and schedules no longer appear (nothing is imported, see below); the files stay on the host's disk, unread. Removing the user from the list shows the files again, without what was written to the database meanwhile. Durable files are the exception: a local file with no row is stored on first boot. List new users, or tell existing ones their history restarts.
+- **Every context boot adds a by-framework consumer.** The worker id carries a random part per boot, so that a restarted host reclaims its predecessor's open commands. by-framework never removes consumers, so the `agent_engines` group of each user's command stream keeps one per boot. Once reclaimed they hold no pending entries; delete those idle for a day or more with `XGROUP DELCONSUMER <stream> agent_engines <name>`, never one whose `XINFO CONSUMERS` shows `pending` above 0 (deleting it drops those commands).
+- **Platform-managed hosts must switch together.** With `BYCLAW_SESSION_DB_URL` set (as with a shared user root), a managed host claims a context once per context (`byclaw:dsh:managed-host:storage:<context>`) instead of once per generation. A host without it still claims per generation, so the two do not exclude each other and could run one context at once. Set it on every managed host of a deployment in the same rollout, with the old instances drained first.
+
 ## Not done yet
 
 - Existing session files and `storages/*.json` are not imported. For a listed user, an old chat starts an empty log, workspace pins and session roots start empty (old chats need re-opening from BE), and the projection cache rebuilds itself.
