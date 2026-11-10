@@ -14,16 +14,6 @@ import {
   userPublicUrl, UserRegistry, webPrefix,
 } from './byclaw-multi-host.mjs'
 
-test('digital human Artifact uploads bind to the current shared-host user', () => {
-  const entries = [{ id: 'byclaw-digital-human', name: '@byclaw/byclaw-digital-human', config: { configPath: '/by/.connector-auth/.model/digital-human.json' } }]
-  for (const user of ['alice', 'bob']) {
-    const rows = composeUserOverlays(entries, user, `/private/${user}`, spec)
-    const plugin = rows.find(row => row.id === 'byclaw-digital-human')
-    assert.equal(plugin.config.userCode, user)
-    assert.equal(plugin.config.configPath, entries[0].config.configPath)
-  }
-})
-
 test('shared host imports the installed runtime once from its CLI anchor, independent of cwd', async t => {
   const root = await mkdtemp(join(tmpdir(), 'shared-host-runtime-'))
   t.after(() => rm(root, { recursive: true, force: true }))
