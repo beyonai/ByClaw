@@ -244,6 +244,9 @@ export default {
   'sandboxMgr.config.addTitle': 'Add Sandbox Config',
   'sandboxMgr.config.serviceKey': 'Service Key',
   'sandboxMgr.config.specJson': 'Spec JSON',
+  'sandboxMgr.config.rebuildSaved':
+    'Saved the service specification for {serviceKey}. Rebuild the template or view its rebuild history here.',
+  'sandboxMgr.config.saveBeforeRebuild': 'Save the service specification before rebuilding.',
   'sandboxMgr.config.templateJson': 'Template JSON',
   'sandboxMgr.config.autoStart': 'Start on Login',
   'sandboxMgr.config.autoStartTip':

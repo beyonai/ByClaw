@@ -1,12 +1,19 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  getTemplateRebuildCapabilities,
+  listTemplateRebuildRecords,
+  startTemplateRebuild,
+} from '@/pages/manager/service/TemplateRebuild';
 import { setMultiTenancyConfig } from '@/utils/multiTenancy';
 import SandboxMgr from '../index';
 
 const mockDispatch = jest.fn();
+let mockUserTypes: string[];
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
   useDispatch: () => mockDispatch,
-  useSelector: (select: any) => select({ user: { userInfo: { usersOrganizations: [] } } }),
+  useSelector: (select: any) =>
+    select({ user: { userInfo: { usersOrganizations: mockUserTypes.map((userType) => ({ userType })) } } }),
 }));
 jest.mock('@/pages/manager/service/session', () => ({
   getDcSystemConfig: jest.fn().mockResolvedValue({ paramValue: 'commercial' }),
@@ -26,6 +33,11 @@ jest.mock('@/pages/manager/components/JsonCodeEditor', () => ({ value, onChange,
 ));
 jest.mock('@/pages/manager/utils/auth', () => ({ isAdminVip: () => true }));
 jest.mock('@/pages/manager/service/SandboxMgr', () => ({ getPreferredServiceKey: jest.fn() }));
+jest.mock('@/pages/manager/service/TemplateRebuild', () => ({
+  getTemplateRebuildCapabilities: jest.fn(),
+  listTemplateRebuildRecords: jest.fn(),
+  startTemplateRebuild: jest.fn(),
+}));
 jest.mock('@/pages/manager/service/TenantMgr', () => ({ listTenants: jest.fn().mockResolvedValue([]) }));
 
 const toolSpec = {
@@ -50,6 +62,19 @@ const toolSpec = {
 
 beforeEach(() => {
   mockDispatch.mockClear();
+  mockUserTypes = [];
+  jest.mocked(getTemplateRebuildCapabilities).mockResolvedValue({ supported: false });
+  jest.mocked(listTemplateRebuildRecords).mockResolvedValue({ records: [], total: 0 });
+  jest.mocked(startTemplateRebuild).mockResolvedValue({
+    id: 'rebuild-1',
+    serviceKey: toolSpec.serviceKey,
+    serviceName: toolSpec.displayName,
+    actorCode: 'admin',
+    actorName: 'Admin',
+    createdAt: 1,
+    updatedAt: 1,
+    state: 'SUCCEEDED',
+  });
   setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
 });
 
@@ -290,3 +315,34 @@ test('the general execution sandbox can be explicitly admitted to the market fro
   expect(config.runtimeOptions.lifecycle.autoStart).toBe('false');
   expect(mockDispatch.mock.calls.some(([action]) => action.type === 'sandboxMgr/saveServiceProfile')).toBe(false);
 });
+
+test('shows template actions in the editor and after saving without rebuilding unsaved changes', async () => {
+  mockUserTypes = ['PLAT_MAN'];
+  jest.mocked(getTemplateRebuildCapabilities).mockResolvedValue({ supported: true });
+  await openMarket();
+  fireEvent.click(getVisibleButton('sandboxMgr.market.edit'));
+  const editor = screen.getByRole('dialog', { name: 'spec-editor' });
+  const rebuild = await within(editor).findByRole('button', { name: '重建模板' });
+  expect(rebuild).toBeEnabled();
+  fireEvent.change(within(editor).getByLabelText('sandboxMgr.market.description'), {
+    target: { value: 'Edited before rebuilding' },
+  });
+  expect(rebuild).toBeDisabled();
+  expect(within(editor).getByRole('button', { name: '重建模板记录' })).toBeEnabled();
+  expect(startTemplateRebuild).not.toHaveBeenCalled();
+
+  fireEvent.click(within(editor).getByRole('button', { name: 'save-spec' }));
+  await waitFor(() =>
+    expect(mockDispatch.mock.calls.some(([action]) => action.type === 'sandboxMgr/saveServiceSpec')).toBe(true)
+  );
+  const saved = mockDispatch.mock.calls.find(([action]) => action.type === 'sandboxMgr/saveServiceSpec')![0];
+  act(() => saved.success());
+  const notice = (await screen.findByText('sandboxMgr.config.rebuildSaved')).closest('[role="alert"]') as HTMLElement;
+  expect(within(notice).getByRole('button', { name: '重建模板记录' })).toBeEnabled();
+  fireEvent.click(within(notice).getByRole('button', { name: '重建模板' }));
+  fireEvent.click(await screen.findByRole('button', { name: '确认重建' }));
+  await waitFor(() =>
+    expect(startTemplateRebuild).toHaveBeenCalledWith(toolSpec.serviceKey, expect.any(String), undefined)
+  );
+  await waitFor(() => expect(listTemplateRebuildRecords).toHaveBeenCalledWith(toolSpec.serviceKey, 1, 10));
+}, 20000);

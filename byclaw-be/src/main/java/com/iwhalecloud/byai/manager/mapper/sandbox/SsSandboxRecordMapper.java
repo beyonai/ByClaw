@@ -148,6 +148,13 @@ public interface SsSandboxRecordMapper {
                             @Param("lastResizeError") String lastResizeError,
                             @Param("lockVersion") Integer lockVersion);
 
+    /** Mark or claim a pre-create wait on an unbound tenant launch record. */
+    int updateTenantTemplateWait(@Param("id") Long id,
+                                 @Param("expectedMarker") String expectedMarker,
+                                 @Param("nextMarker") String nextMarker,
+                                 @Param("updateTime") Date updateTime,
+                                 @Param("lockVersion") Integer lockVersion);
+
     int updateStatusToFailed(@Param("id") Long id,
                              @Param("reason") String reason,
                              @Param("updateTime") Date updateTime,

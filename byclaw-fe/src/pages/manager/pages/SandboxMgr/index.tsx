@@ -336,6 +336,8 @@ const SandboxMgr = () => {
   const [specFormVisible, setSpecFormVisible] = useState(false);
   const [maximizedField, setMaximizedField] = useState<'specJson' | 'templateJson' | null>(null);
   const [editingSpec, setEditingSpec] = useState<ServiceSpecItem | null>(null);
+  const [specDirty, setSpecDirty] = useState(false);
+  const [savedRebuildServiceKey, setSavedRebuildServiceKey] = useState<string>();
   const [specForm] = Form.useForm();
   const [specDimension, setSpecDimension] = useState<ServiceSpecDimension>('USER');
   const formDimension = Form.useWatch('dimension', specForm) as ServiceSpecDimension | undefined;
@@ -889,6 +891,7 @@ const SandboxMgr = () => {
 
   const handleCloseSpecDrawer = useCallback(() => {
     setSpecDrawerOpen(false);
+    setSavedRebuildServiceKey(undefined);
     setSpecFormVisible(false);
     setEditingSpec(null);
     setProfileFormVisible(false);
@@ -908,6 +911,7 @@ const SandboxMgr = () => {
 
   const handleAddSpec = useCallback(
     (dimension: ServiceSpecDimension = 'USER') => {
+      setSpecDirty(false);
       setEditingSpec(null);
       specForm.resetFields();
       specForm.setFieldsValue({
@@ -933,6 +937,7 @@ const SandboxMgr = () => {
 
   const handleEditSpec = useCallback(
     (record: ServiceSpecItem) => {
+      setSpecDirty(false);
       setEditingSpec(record);
       specForm.setFieldsValue({
         serviceKey: record.serviceKey,
@@ -1008,6 +1013,7 @@ const SandboxMgr = () => {
           success: () => {
             setSavingSpec(false);
             setSpecFormVisible(false);
+            setSavedRebuildServiceKey(payload.serviceKey);
             specForm.resetFields();
             loadSpecList();
           },
@@ -2418,11 +2424,35 @@ const SandboxMgr = () => {
               children: (
                 <div className={styles.specDrawerContent}>
                   {templateRebuild.error && <Typography.Text type="warning">{templateRebuild.error}</Typography.Text>}
+                  {templateRebuild.supported && savedRebuildServiceKey && (
+                    <Alert
+                      type="success"
+                      showIcon
+                      closable
+                      onClose={() => setSavedRebuildServiceKey(undefined)}
+                      message={intl.formatMessage(
+                        { id: 'sandboxMgr.config.rebuildSaved' },
+                        { serviceKey: savedRebuildServiceKey }
+                      )}
+                      action={
+                        <Space wrap size={4}>
+                          <TemplateRebuildActions
+                            key={savedRebuildServiceKey}
+                            serviceKey={savedRebuildServiceKey}
+                            supported
+                          />
+                        </Space>
+                      }
+                    />
+                  )}
                   <ServiceSpecCatalog
                     specs={specList}
                     loading={specLoading}
                     dimension={specDimension}
-                    onDimensionChange={setSpecDimension}
+                    onDimensionChange={(dimension) => {
+                      setSavedRebuildServiceKey(undefined);
+                      setSpecDimension(dimension);
+                    }}
                     updatingKey={updatingSpecKey}
                     onAdd={handleAddSpec}
                     onEdit={handleEditSpec}
@@ -2843,7 +2873,24 @@ const SandboxMgr = () => {
         okButtonProps={{ disabled: savingSpec || readingSpecCover }}
         width={720}
       >
-        <Form form={specForm} layout="vertical" preserve={false}>
+        <Form form={specForm} layout="vertical" preserve={false} onValuesChange={() => setSpecDirty(true)}>
+          {specFormVisible && editingSpec && templateRebuild.supported && (
+            <Form.Item>
+              <Space wrap size={4}>
+                <TemplateRebuildActions
+                  key={editingSpec.serviceKey}
+                  serviceKey={editingSpec.serviceKey}
+                  supported
+                  rebuildDisabled={specDirty || savingSpec || readingSpecCover}
+                />
+                {specDirty && (
+                  <Typography.Text type="secondary">
+                    {intl.formatMessage({ id: 'sandboxMgr.config.saveBeforeRebuild' })}
+                  </Typography.Text>
+                )}
+              </Space>
+            </Form.Item>
+          )}
           <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.dimension.label' })} name="dimension">
             <Select
               disabled
@@ -2910,6 +2957,7 @@ const SandboxMgr = () => {
                             ...getToolSandboxMetadata(updated),
                             specJson: formatJsonIfValid(updated.specJson),
                           });
+                          setSpecDirty(true);
                         } catch {
                           message.error(intl.formatMessage({ id: 'sandboxMgr.market.invalidSpec' }));
                         }
