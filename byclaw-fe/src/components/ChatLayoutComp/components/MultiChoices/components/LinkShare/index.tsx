@@ -51,7 +51,18 @@ function LinkShare(props: IProps) {
 
   // 处理创建链接
   const handleCreateLink = () => {
-    // TODO: 实现创建链接的逻辑
+    // 校验自定义天数
+    if (duration === 'custom') {
+      if (customDurationDays === null || customDurationDays === undefined) {
+        message.error(intl.formatMessage({ id: 'linkShare.pleaseEnterCustomDays' }));
+        return;
+      }
+      if (customDurationDays < 1 || customDurationDays > 365) {
+        message.error(intl.formatMessage({ id: 'linkShare.customDaysRange' }));
+        return;
+      }
+    }
+
     const finalDuration = duration === 'custom' ? customDurationDays : duration;
     const finalMaxAccessDays = limitedAccess ? maxAccessDays : undefined;
 
