@@ -486,6 +486,18 @@ public class TenantSandboxService {
 
     /** Only a complete provider inventory and exact ownership can authorize command recovery. */
     public RecoveryResource inspectRecovery(long enterpriseId, String step, String providerRequestKey) {
+        return inspectResource(enterpriseId, step, providerRequestKey, null);
+    }
+
+    /** A restart candidate needs independent command, audit and readiness proof before adoption. */
+    public RecoveryResource inspectRestartRecord(long enterpriseId, String step, String recordId) {
+        if (recordId == null || !recordId.matches("[1-9][0-9]{0,18}")) {
+            return new RecoveryResource("RESOURCE_IDENTITY_MISMATCH", null, null);
+        }
+        return inspectResource(enterpriseId, step, null, recordId);
+    }
+
+    private RecoveryResource inspectResource(long enterpriseId, String step, String providerRequestKey, String restartRecordId) {
         if ("whale-agent".equalsIgnoreCase(recoveryStorageType)) return new RecoveryResource("PROVIDER_RECOVERY_QUERY_UNSUPPORTED", null, null);
         String type = "DB_CREATE".equals(step) ? DB_TYPE : NODE_TYPE;
         List<SandboxDetail> resources;
@@ -515,7 +527,11 @@ public class TenantSandboxService {
         }
         if (candidates.size() != 1) return new RecoveryResource("MULTIPLE_PROVIDER_RESOURCES", null, null);
         SandboxDetail candidate = candidates.getFirst();
-        if (!providerRequestKey.equals(candidate.getMetadata().get("providerRequestKey"))) {
+        boolean identified = restartRecordId == null
+            ? providerRequestKey != null && providerRequestKey.equals(candidate.getMetadata().get("providerRequestKey"))
+            : !candidate.getMetadata().containsKey("providerRequestKey")
+                && restartRecordId.equals(candidate.getMetadata().get("recordId"));
+        if (!identified) {
             return new RecoveryResource("RESOURCE_IDENTITY_MISMATCH", null, null);
         }
         if (active == null || !"TENANT".equals(active.getOwnerScope()) || !Long.valueOf(enterpriseId).equals(active.getEnterpriseId())

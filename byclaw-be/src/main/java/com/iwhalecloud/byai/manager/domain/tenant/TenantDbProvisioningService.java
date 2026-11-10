@@ -525,6 +525,18 @@ public class TenantDbProvisioningService {
     }
 
     private void probeDatabase(HostPort endpoint, String dbName, String dbUser, String password) throws Exception {
+        probeDatabase(endpoint, dbName, dbUser, password, 40);
+    }
+
+    /** Check the stored tenant role against the replacement database and the Node registration before adoption. */
+    public void verifyRestartedPair(long tenant, TenantSandboxView database, TenantSandboxView node) throws Exception {
+        String name = "byclaw_t_" + tenant;
+        String password = decrypt(tenant, name, tenantMapper.selectConfig(tenant, "DB_PASSWORD"));
+        probeDatabase(parseEndpoint(database.endpoint(), database.sandboxId()), name, "bc_t_" + tenant + "_admin", password, 1);
+        schemaService.awaitBusinessReady(tenant, 1, database.recordId(), node, Duration.ofSeconds(5), Duration.ofMillis(250));
+    }
+
+    private void probeDatabase(HostPort endpoint, String dbName, String dbUser, String password, int attempts) throws Exception {
         String host = dbProbeHost == null || dbProbeHost.isBlank() ? endpoint.host() : dbProbeHost;
         String url = "jdbc:postgresql://" + host + ":" + endpoint.port() + "/" + dbName
             + "?connectTimeout=5&socketTimeout=5";
@@ -546,7 +558,7 @@ public class TenantDbProvisioningService {
                 }
                 throw new IllegalStateException("tenant DB identity probe mismatch");
             }
-        }, 40, 5000);
+        }, attempts, 5000);
     }
 
     @FunctionalInterface

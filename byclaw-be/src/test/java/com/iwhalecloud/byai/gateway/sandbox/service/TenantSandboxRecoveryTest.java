@@ -30,6 +30,12 @@ class TenantSandboxRecoveryTest {
         when(records.selectActiveTenantByResourceAndType(7L,"tenant-opengauss")).thenReturn(row);
         assertEquals("MATCHED",service.inspectRecovery(7,"DB_CREATE","command-6:DB_CREATE").reasonCode());
         assertEquals("RESOURCE_IDENTITY_MISMATCH",service.inspectRecovery(7,"DB_CREATE","command-99:DB_CREATE").reasonCode());
+        // A restart may omit a request key, but cannot override a key already attached to another intent.
+        assertEquals("RESOURCE_IDENTITY_MISMATCH",service.inspectRestartRecord(7,"DB_CREATE","8").reasonCode());
+        remote.setMetadata(Map.of("enterpriseId","7","ownerScope","TENANT","serviceKey","tenant-opengauss","recordId","8"));
+        assertEquals("RESOURCE_IDENTITY_MISMATCH",service.inspectRecovery(7,"DB_CREATE","command-6:DB_CREATE").reasonCode());
+        assertEquals("RESOURCE_IDENTITY_MISMATCH",service.inspectRestartRecord(7,"DB_CREATE","9").reasonCode());
+        assertEquals("MATCHED",service.inspectRestartRecord(7,"DB_CREATE","8").reasonCode());
         when(client.recoveryInventory(anyMap())).thenReturn(List.of(remote,remote));
         assertEquals("MULTIPLE_PROVIDER_RESOURCES",service.inspectRecovery(7,"DB_CREATE","command-6:DB_CREATE").reasonCode());
         when(client.recoveryInventory(anyMap())).thenThrow(new OpenSandboxClient.OpenSandboxException("PROVIDER_QUERY_DISABLED"));

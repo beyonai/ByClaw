@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeSchemaService;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -21,6 +22,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Component
 @ConditionalOnProperty(name="byclaw.integration.enabled",havingValue="true")
 public class TenantCommandRecovery {
+    private final TenantDbProvisioningService provisioning;
     private final TenantCommandStore store;
     private final JdbcTemplate jdbc;
     private final TenantSandboxService sandboxes;
@@ -30,9 +32,9 @@ public class TenantCommandRecovery {
     private final TransactionTemplate tx;
 
     public TenantCommandRecovery(TenantCommandStore store, JdbcTemplate jdbc, TenantSandboxService sandboxes,
-        TenantAdminTenantMapper tenants, TenantNodeSchemaService schemas, ObjectMapper json, PlatformTransactionManager transactions) {
+        TenantAdminTenantMapper tenants, TenantNodeSchemaService schemas, TenantDbProvisioningService provisioning, ObjectMapper json, PlatformTransactionManager transactions) {
         this.store=store; this.jdbc=jdbc; this.sandboxes=sandboxes; this.tenants=tenants;
-        this.schemas=schemas; this.json=json; this.tx=new TransactionTemplate(transactions);
+        this.provisioning=provisioning; this.schemas=schemas; this.json=json; this.tx=new TransactionTemplate(transactions);
     }
 
     public Map<String,Object> inspect(long id) { return inspectState(id).view(); }
@@ -117,6 +119,20 @@ public class TenantCommandRecovery {
                 }
                 fenceResource(inspection.resource());
                 fenceResource(inspection.nodeResource());
+                if ("RESTARTED_RESOURCES_VERIFIED".equals(inspection.reason())) {
+                    long tenant = Long.parseLong(command.enterpriseId());
+                    var db = inspection.resource().adopted();
+                    var node = inspection.nodeResource().adopted();
+                    if (!restartBindingsMatch(tenant, id, db.recordId(), node.recordId())
+                        || !schemas.verifiedRecoveryAudit(tenant, "internal-" + id, db.recordId())) {
+                        throw new TenantCommandException(409,"RECOVERY_RESOURCE_CHANGED");
+                    }
+                    // Record the already verified Node result alongside the DB result in this same transaction.
+                    if (jdbc.update("INSERT INTO byai.tenant_task_step(command_id,step_key,status,provider_request_key,result) "
+                            + "VALUES (?,'NODE_CREATE','SUCCEEDED',?,?)", id, "command-" + id + ":NODE_CREATE", encode(node)) != 1) {
+                        throw new TenantCommandException(409,"RECOVERY_STEP_CHANGED");
+                    }
+                }
                 // A concurrent audit insertion must not turn a no-dispatch observation into a replay.
                 if ("SCHEMA_NOT_DISPATCHED".equals(inspection.reason())
                     && !schemas.canRetryBeforeDispatch(Long.parseLong(command.enterpriseId()))) {
@@ -188,6 +204,10 @@ public class TenantCommandRecovery {
             if (credential==null || credential.isBlank()) return decision(command,"MANUAL_REQUIRED","RESOURCE_CREDENTIALS_UNAVAILABLE",step,slot,null,null);
             var resource=sandboxes.inspectRecovery(tenant,command.stage(),step.providerKey());
             if ("MATCHED".equals(resource.reasonCode())) return decision(command,"ADOPT_EXISTING","RESOURCE_IDENTITY_VERIFIED",step,slot,resource,resource.adopted());
+            if ("RESOURCE_IDENTITY_MISMATCH".equals(resource.reasonCode()) && "DB_CREATE".equals(command.stage())
+                    && "STARTED".equals(step.status()) && "PROVIDER_RESULT_UNKNOWN".equals(command.errorCode())) {
+                return inspectRestart(command, step, slot, tenant);
+            }
             if (!"ABSENT".equals(resource.reasonCode())) return decision(command,"MANUAL_REQUIRED",resource.reasonCode(),step,slot,resource,null);
             if ("SUCCEEDED".equals(step.status())) return decision(command,"MANUAL_REQUIRED","ACKNOWLEDGED_RESOURCE_MISSING",step,slot,resource,null);
             boolean safe="PROVIDER_NOT_CALLED_FILE_PREPARATION".equals(command.errorCode()) && "DB_CREATE".equals(command.stage());
@@ -224,6 +244,43 @@ public class TenantCommandRecovery {
             return decision(command,"MANUAL_REQUIRED","SCHEMA_AUDIT_RECONCILIATION_REQUIRED",step,slot,null,null);
         }
         return decision(command,"MANUAL_REQUIRED","RECOVERY_STEP_UNSUPPORTED",step,slot,null,null);
+    }
+
+    /** Reconcile an out-of-band restart only when both bound records belong to the original verified initialization. */
+    private Inspection inspectRestart(TenantCommandStore.Command command, Step step, long slot, long tenant) {
+        var denied = decision(command,"MANUAL_REQUIRED","RESOURCE_IDENTITY_MISMATCH",step,slot,null,null);
+        long id = Long.parseLong(command.commandId());
+        String dbId = tenants.selectConfig(tenant, "DB_SANDBOX_RECORD_ID");
+        String nodeId = tenants.selectConfig(tenant, "NODE_SANDBOX_RECORD_ID");
+        if (dbId == null || nodeId == null || dbId.equals(nodeId)
+            || !"hacu".equals(command.sourceSystem()) || !("internal-" + id).equals(tenants.selectConfig(tenant,"PROVISION_REQUEST_ID"))) return denied;
+        var db = sandboxes.inspectRestartRecord(tenant,"DB_CREATE",dbId);
+        var node = sandboxes.inspectRestartRecord(tenant,"NODE_CREATE",nodeId);
+        if (!matchesRecord(db,dbId) || !matchesRecord(node,nodeId)
+            || !restartBindingsMatch(tenant,id,db.adopted().recordId(),node.adopted().recordId())
+            || !schemas.verifiedRecoveryAudit(tenant,"internal-" + id,db.adopted().recordId())
+            || jdbc.queryForObject("SELECT count(*) FROM byai.tenant_task_step WHERE command_id=? AND step_key<>'DB_CREATE'",
+                Integer.class,id) != 0) return denied;
+        try {
+            provisioning.verifyRestartedPair(tenant, db.adopted(), node.adopted());
+        } catch (Exception unavailable) {
+            if (unavailable instanceof InterruptedException) Thread.currentThread().interrupt();
+            org.slf4j.LoggerFactory.getLogger(TenantCommandRecovery.class).warn("Restarted resources not ready for command {} ({})", id,
+                unavailable.getClass().getSimpleName());
+            return decision(command,"MANUAL_REQUIRED","RESTARTED_RESOURCES_NOT_READY",step,slot,null,null);
+        }
+        return new Inspection(command,"ADOPT_EXISTING","RESTARTED_RESOURCES_VERIFIED",step,slot,db,db.adopted(),node);
+    }
+
+    private boolean restartBindingsMatch(long tenant,long id,long database,long node) {
+        String storedState = tenants.selectConfig(tenant,"PROVISION_STATE");
+        if (storedState == null || storedState.isBlank()) return false;
+        var state = decode(storedState);
+        return "READY".equals(state.get("status")) && "1".equals(String.valueOf(state.get("generation")))
+            && "true".equals(tenants.selectConfig(tenant,"COMMERCIAL_MANAGED"))
+            && ("internal-" + id).equals(tenants.selectConfig(tenant,"PROVISION_REQUEST_ID"))
+            && Long.toString(database).equals(tenants.selectConfig(tenant,"DB_SANDBOX_RECORD_ID"))
+            && Long.toString(node).equals(tenants.selectConfig(tenant,"NODE_SANDBOX_RECORD_ID"));
     }
 
     /** Require the provider observation to match the original persisted resource binding. */
