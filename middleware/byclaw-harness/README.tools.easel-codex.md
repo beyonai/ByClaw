@@ -2,6 +2,10 @@
 
 ## 应用预览
 
+本次预览更新可用 `Dockerfile.tools.easel-preview` 增量构建。父镜像固定为已验收
+的 r3 digest，只增加 Nginx、登记命令和启动配置；Python/Node/Remotion 环境沿用
+r3。`Dockerfile.tools.easel-codex` 保留完整构建能力，也包含相同的预览组件。
+
 新版镜像在实例内以 `byclaw` 用户启动 Nginx（8082）。通过已有 `sandbox_exec`
 执行 `sandbox-app expose --name easel --port 7860 --sandbox-id <租约 sandboxId>`，
 从标准输出读取分享链接；没有新增平台工具或 `openUrl` 返回字段。
