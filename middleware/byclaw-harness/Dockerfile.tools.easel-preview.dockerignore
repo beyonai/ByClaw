@@ -1,0 +1,9 @@
+**
+!middleware/
+!middleware/byclaw-harness/
+!middleware/byclaw-harness/scripts/
+!middleware/byclaw-harness/scripts/sandbox-app.py
+!middleware/byclaw-harness/scripts/easel-codex-entrypoint.py
+!middleware/byclaw-harness/tool-sandbox/
+!middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh
+!middleware/byclaw-harness/tool-sandbox/APP_PREVIEW.md

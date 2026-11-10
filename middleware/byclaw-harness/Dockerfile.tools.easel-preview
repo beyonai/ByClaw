@@ -1,0 +1,19 @@
+# Instance-local application preview update on the accepted Easel r3 runtime.
+# Full clean builds remain available through Dockerfile.tools.easel-codex.
+ARG EASEL_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_easel-codex-20261110-r3@sha256:06e3c30ca24c4f332753a673f3f8d163500041422be3b17e4a524903f3bc17d1
+FROM ${EASEL_IMAGE} AS tools-easel-preview
+USER root
+COPY middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh /tmp/configure-cn-sources.sh
+RUN set -eux; \
+    bash /tmp/configure-cn-sources.sh; \
+    apt-get -o APT::Update::Error-Mode=any update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nginx; \
+    rm -rf /var/lib/apt/lists/* /tmp/configure-cn-sources.sh
+COPY --chmod=0755 middleware/byclaw-harness/scripts/sandbox-app.py /usr/local/bin/sandbox-app
+COPY --chmod=0755 middleware/byclaw-harness/scripts/easel-codex-entrypoint.py /usr/local/bin/byclaw-easel-codex-entrypoint
+COPY middleware/byclaw-harness/tool-sandbox/APP_PREVIEW.md /etc/byclaw-tool-sandbox/APP_PREVIEW.md
+RUN python3 -m py_compile /usr/local/bin/sandbox-app /usr/local/bin/byclaw-easel-codex-entrypoint \
+    && nginx -V \
+    && /usr/local/bin/sandbox-app --help >/dev/null
+EXPOSE 8082
+LABEL io.byclaw.tool-sandbox.preview="nginx/v1"
