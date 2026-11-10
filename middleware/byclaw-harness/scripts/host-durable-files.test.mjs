@@ -217,7 +217,7 @@ test('a file deleted on one host is deleted from another host that kept a copy, 
     await new DurableFiles({ store, key, user: 'u1', home: a.dir, log: m => logs.push(m) }).restore()
     await assert.rejects(stat(join(a.dir, name)), { code: 'ENOENT' })
     assert.equal(store.rows.get(`u1\0${name}`), DELETED)
-    assert.match(logs.join('\n'), /1 deleted, 0 stored new/)
+    assert.match(logs.join('\n'), /1 deleted, 0 kept from this host, 0 stored new/)
 
     // A new record is stored as usual.
     const again = new DurableFiles({ store, key, user: 'u1', home: a.dir })
@@ -225,6 +225,110 @@ test('a file deleted on one host is deleted from another host that kept a copy, 
     await writeFile(join(a.dir, name), '{"sandboxId":"b-2"}')
     await again.sync(name)
     assert.equal(openFile(key, 'u1', name, store.rows.get(`u1\0${name}`)).toString(), '{"sandboxId":"b-2"}')
+  } finally { await a.cleanup(); await b.cleanup() }
+})
+
+test('a host that never had a file kept on another host does not mark it deleted', async () => {
+  const store = memoryStore()
+  const a = await home(), b = await home()
+  const name = 'runtime/byclaw-agent-teams/abc123/t/archive/big.json'
+  const big = Buffer.alloc(MAX_FILE_BYTES + 1, 3)
+  try {
+    await mkdir(join(a.dir, dirname(name)), { recursive: true })
+    await writeFile(join(a.dir, name), big)
+    await new DurableFiles({ store, key, user: 'u1', home: a.dir }).restore()
+    assert.equal(store.rows.get(`u1\0${name}`), LOCAL_ONLY)
+
+    // The user moves to host B, which has no copy, and its context goes away again.
+    const onB = new DurableFiles({ store, key, user: 'u1', home: b.dir })
+    await onB.restore()
+    await onB.sync(name)
+    await onB.close()
+    assert.equal(store.rows.get(`u1\0${name}`), LOCAL_ONLY)
+
+    // Back on A the file is still there; deleting it there is a deletion.
+    const onA = new DurableFiles({ store, key, user: 'u1', home: a.dir })
+    await onA.restore()
+    assert.ok((await readFile(join(a.dir, name))).equals(big))
+    await rm(join(a.dir, name))
+    await onA.sync(name)
+    assert.equal(store.rows.get(`u1\0${name}`), DELETED)
+  } finally { await a.cleanup(); await b.cleanup() }
+})
+
+test('an older copy of a file kept on another host is not stored by a flush, only a new change is', async () => {
+  const store = memoryStore()
+  const a = await home(), b = await home()
+  const name = 'runtime/byclaw-agent-teams/abc123/t/inbox/captain.jsonl'
+  try {
+    await mkdir(join(b.dir, dirname(name)), { recursive: true })
+    await writeFile(join(b.dir, name), 'old')
+    await new DurableFiles({ store, key, user: 'u1', home: b.dir }).restore()
+    await new DurableFiles({ store, key, user: 'u1', home: a.dir }).restore()
+    await writeFile(join(a.dir, name), Buffer.alloc(MAX_FILE_BYTES + 1, 5))
+    await new DurableFiles({ store, key, user: 'u1', home: a.dir }).restore()
+    assert.equal(store.rows.get(`u1\0${name}`), LOCAL_ONLY)
+
+    const logs = []
+    const onB = new DurableFiles({ store, key, user: 'u1', home: b.dir, log: m => logs.push(m) })
+    await onB.restore()
+    await onB.flush()
+    assert.equal(store.rows.get(`u1\0${name}`), LOCAL_ONLY)
+    assert.match(logs.join('\n'), /kept on another host/)
+    await writeFile(join(b.dir, name), 'new on B')
+    await onB.close()
+    assert.equal(openFile(key, 'u1', name, store.rows.get(`u1\0${name}`)).toString(), 'new on B')
+  } finally { await a.cleanup(); await b.cleanup() }
+})
+
+test('a row that cannot be opened is skipped, and the local file replaces it', async () => {
+  const store = memoryStore()
+  const { dir, cleanup } = await home()
+  try {
+    const other = deriveFileKey('another-service-secret-value')
+    store.rows.set('u1\0.credentials.yaml', sealFile(other, 'u1', '.credentials.yaml', Buffer.from('old')))
+    store.rows.set('u1\0byclaw-tool-env/known_hosts', 'v1:garbage')
+    await writeFile(join(dir, '.credentials.yaml'), 'local')
+    const logs = []
+    await new DurableFiles({ store, key, user: 'u1', home: dir, log: m => logs.push(m) }).restore()
+    assert.equal(openFile(key, 'u1', '.credentials.yaml', store.rows.get('u1\0.credentials.yaml')).toString(), 'local')
+    await assert.rejects(stat(join(dir, 'byclaw-tool-env/known_hosts')), { code: 'ENOENT' })
+    assert.match(logs.join('\n'), /cannot be opened/)
+    assert.match(logs.join('\n'), /2 unreadable/)
+  } finally { await cleanup() }
+})
+
+test('a change whose write failed is stored at the next restore instead of being overwritten', async () => {
+  const store = memoryStore()
+  let failing = false
+  const flaky = { list: user => store.list(user), put: async (...args) => { if (failing) throw new Error('db down'); return store.put(...args) } }
+  const a = await home(), b = await home()
+  const credentials = '.credentials.yaml', key2 = 'byclaw-tool-env/client_ed25519'
+  try {
+    await writeFile(join(a.dir, credentials), 'v1')
+    await mkdir(join(a.dir, 'byclaw-tool-env'), { recursive: true })
+    await writeFile(join(a.dir, key2), 'id-1')
+    const first = new DurableFiles({ store: flaky, key, user: 'u1', home: a.dir })
+    await first.restore()
+
+    failing = true
+    await writeFile(join(a.dir, credentials), 'v2')
+    await rm(join(a.dir, key2))
+    await assert.rejects(first.close(), /db down/)
+    failing = false
+
+    await new DurableFiles({ store: flaky, key, user: 'u1', home: a.dir }).restore()
+    assert.equal(await readFile(join(a.dir, credentials), 'utf8'), 'v2')
+    assert.equal(openFile(key, 'u1', credentials, store.rows.get(`u1\0${credentials}`)).toString(), 'v2')
+    assert.equal(store.rows.get(`u1\0${key2}`), DELETED)
+
+    // A change another host stored still wins over this host's unchanged copy.
+    const onB = new DurableFiles({ store, key, user: 'u1', home: b.dir })
+    await onB.restore()
+    await writeFile(join(b.dir, credentials), 'v3')
+    await onB.close()
+    await new DurableFiles({ store, key, user: 'u1', home: a.dir }).restore()
+    assert.equal(await readFile(join(a.dir, credentials), 'utf8'), 'v3')
   } finally { await a.cleanup(); await b.cleanup() }
 })
 

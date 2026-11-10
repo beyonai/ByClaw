@@ -10,6 +10,9 @@
  * A deleted file leaves a {@link DELETED} row, so a host still holding an old copy deletes it
  * instead of storing it again. A file over {@link MAX_FILE_BYTES} leaves a {@link LOCAL_ONLY} row:
  * the host that wrote it keeps it, and no older copy overwrites it or is stored in its place.
+ * Restoring lets the store win, except where it still holds what this host last stored and the
+ * file changed here since (the write failed, or the host died first): {@link SYNCED_FILE}
+ * remembers what this host stored.
  *
  * One host serves a user at a time (the Redis claim), so the files have one writer.
  */
@@ -27,6 +30,8 @@ export const MAX_FILE_BYTES = 16 * 1024 * 1024
 export const DELETED = 'deleted'
 /** Stored value of a file too large to store, kept by the host that wrote it. */
 export const LOCAL_ONLY = 'local-only'
+/** Digests of what this host last stored or restored, in the home: a local file that differs changed here since. */
+export const SYNCED_FILE = '.byclaw-durable-files.json'
 
 /** Whether a DSH-home-relative name is one of the durable files. */
 export function isDurableFile(name) {
@@ -140,46 +145,82 @@ export class DurableFiles {
     Object.assign(this, { store, key, user, home, log })
     /** name -> what the store holds: the content's digest, {@link DELETED} or {@link LOCAL_ONLY}. Unchanged rewrites are not sent. */
     this.stored = new Map()
+    /** name -> digest of the content this host last stored or restored, kept in {@link SYNCED_FILE} across boots. */
+    this.synced = new Map()
+    /** {@link LOCAL_ONLY} files this host holds: only their deletion here is a deletion. */
+    this.held = new Set()
+    /** name -> digest of a local copy older than the one another host keeps; not stored unless it changes. */
+    this.stale = new Map()
     this.queue = new Map()
+    this.savingSynced = Promise.resolve()
     this.watchers = []
     this.closed = false
     this.rescan = undefined
   }
 
   /**
-   * Bring the home in line with the store (the store wins): write stored files, delete deleted
-   * ones, and leave files kept on their host alone. Then store local files the store never had.
+   * Bring the home in line with the store: write stored files, delete deleted ones, and leave
+   * files kept on their host alone. The store wins, except where it still holds what this host
+   * last stored and the file changed here since (the write failed, or the host died first).
+   * Then store local files the store never had. A row that cannot be opened is logged and
+   * replaced by the local file, if there is one.
    */
   async restore() {
     const rows = await this.store.list(this.user)
-    let restored = 0, deleted = 0
+    this.synced = await this.readSynced()
+    let restored = 0, deleted = 0, kept = 0, unreadable = 0
     for (const row of rows) {
       if (!isDurableFile(row.name)) continue
       const path = join(this.home, row.name)
-      if (row.value === LOCAL_ONLY || row.value === DELETED) {
-        this.stored.set(row.name, row.value)
-        if (row.value === DELETED && await removeIfPresent(path)) deleted += 1
-        continue
-      }
-      const data = openFile(this.key, this.user, row.name, row.value)
-      this.stored.set(row.name, digest(data))
       const current = await readIfPresent(path)
-      // Only this host can have grown it past the limit, after it was last stored: the local file is newer.
-      if (current !== undefined && current.length > MAX_FILE_BYTES) {
-        await this.sync(row.name)
+      if (row.value === LOCAL_ONLY) {
+        this.stored.set(row.name, LOCAL_ONLY)
+        if (current !== undefined && current.length > MAX_FILE_BYTES) this.held.add(row.name)
+        else if (current !== undefined) {
+          // Only the host holding it can have grown it past the limit: this copy is older.
+          this.stale.set(row.name, digest(current))
+          this.log(`durable file ${row.name} of ${this.user} is kept on another host; this host's copy is older and not stored`)
+        }
         continue
       }
-      if (current === undefined || !current.equals(data)) {
-        await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-        const staged = `${path}.${randomBytes(6).toString('hex')}.restore`
-        await writeFile(staged, data, { mode: 0o600 })
-        await rename(staged, path)
-        restored += 1
+      if (row.value === DELETED) {
+        this.stored.set(row.name, DELETED)
+        if (current === undefined) continue
+        await removeIfPresent(path)
+        this.synced.delete(row.name)
+        deleted += 1
+        continue
       }
+      let data
+      try {
+        data = openFile(this.key, this.user, row.name, row.value)
+      } catch (error) {
+        this.log(`durable file ${row.name} of ${this.user} cannot be opened (${error.message}); skipped`)
+        unreadable += 1
+        continue
+      }
+      const hash = digest(data)
+      this.stored.set(row.name, hash)
+      if (current !== undefined && current.equals(data)) { this.synced.set(row.name, hash); continue }
+      // Only this host can have grown it past the limit, after it was last stored: the local file is newer.
+      // So is a file changed or deleted here while the store still holds what this host last stored.
+      const changedHere = this.synced.get(row.name) === hash
+      if ((current !== undefined && current.length > MAX_FILE_BYTES) || changedHere) {
+        await this.sync(row.name)
+        kept += 1
+        continue
+      }
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+      const staged = `${path}.${randomBytes(6).toString('hex')}.restore`
+      await writeFile(staged, data, { mode: 0o600 })
+      await rename(staged, path)
+      this.synced.set(row.name, hash)
+      restored += 1
     }
     const missing = (await presentFiles(this.home)).filter(name => !this.stored.has(name))
     for (const name of missing) await this.sync(name)
-    this.log(`durable files for ${this.user}: ${rows.length} stored, ${restored} restored, ${deleted} deleted, ${missing.length} stored new`)
+    await this.saveSynced()
+    this.log(`durable files for ${this.user}: ${rows.length} stored, ${restored} restored, ${deleted} deleted, ${kept} kept from this host, ${missing.length} stored new${unreadable > 0 ? `, ${unreadable} unreadable` : ''}`)
   }
 
   /**
@@ -218,26 +259,63 @@ export class DurableFiles {
     const next = previous.catch(() => {}).then(async () => {
       const data = await readIfPresent(join(this.home, name))
       if (data === undefined) {
-        if (!this.stored.has(name) || this.stored.get(name) === DELETED) return
+        const stored = this.stored.get(name)
+        // A file kept on another host is not missing there.
+        if (stored === undefined || stored === DELETED || (stored === LOCAL_ONLY && !this.held.has(name))) return
         await this.store.put(this.user, name, DELETED)
         this.stored.set(name, DELETED)
+        this.held.delete(name)
+        this.markSynced(name, undefined)
         return
       }
       if (data.length > MAX_FILE_BYTES) {
+        this.held.add(name)
         if (this.stored.get(name) === LOCAL_ONLY) return
         this.log(`durable file ${name} of ${this.user} is ${data.length} bytes; kept on this host only`)
         await this.store.put(this.user, name, LOCAL_ONLY)
         this.stored.set(name, LOCAL_ONLY)
+        this.markSynced(name, undefined)
         return
       }
       const hash = digest(data)
-      if (this.stored.get(name) === hash) return
+      if (this.stored.get(name) === hash || this.stale.get(name) === hash) return
       await this.store.put(this.user, name, sealFile(this.key, this.user, name, data))
       this.stored.set(name, hash)
+      this.held.delete(name)
+      this.stale.delete(name)
+      this.markSynced(name, hash)
     })
     this.queue.set(name, next)
     void next.finally(() => { if (this.queue.get(name) === next) this.queue.delete(name) }).catch(() => {})
     return next
+  }
+
+  async readSynced() {
+    const raw = await readIfPresent(join(this.home, SYNCED_FILE))
+    if (raw === undefined) return new Map()
+    try {
+      return new Map(Object.entries(JSON.parse(raw.toString('utf8'))).filter(([, hash]) => typeof hash === 'string'))
+    } catch {
+      this.log(`${SYNCED_FILE} of ${this.user} is unreadable; the store wins for every file`)
+      return new Map()
+    }
+  }
+
+  markSynced(name, hash) {
+    if (hash === undefined) this.synced.delete(name)
+    else this.synced.set(name, hash)
+    void this.saveSynced()
+  }
+
+  /** Write {@link synced} to the home; writes run in order, and a failed one only loses the newer-here check. */
+  saveSynced() {
+    this.savingSynced = this.savingSynced.then(async () => {
+      const path = join(this.home, SYNCED_FILE)
+      const staged = `${path}.${randomBytes(6).toString('hex')}.tmp`
+      await writeFile(staged, JSON.stringify(Object.fromEntries(this.synced)), { mode: 0o600 })
+      await rename(staged, path)
+    }).catch(error => this.log(`writing ${SYNCED_FILE} of ${this.user} failed: ${error.message}`))
+    return this.savingSynced
   }
 
   /** Store whatever changed since the last write (a missed watch event, or one still queued). */
@@ -251,7 +329,7 @@ export class DurableFiles {
     this.closed = true
     clearTimeout(this.rescan)
     for (const watcher of this.watchers) watcher.close()
-    await this.flush()
+    try { await this.flush() } finally { await this.savingSynced }
   }
 }
 
