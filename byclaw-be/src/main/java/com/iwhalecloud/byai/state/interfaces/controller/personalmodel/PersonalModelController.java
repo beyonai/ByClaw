@@ -62,14 +62,13 @@ public class PersonalModelController {
     @GetMapping("/storage/quota")
     public ResponseUtil<Map<String, Object>> storageQuota() {
         Map<String, Object> result = new java.util.LinkedHashMap<>();
-        boolean enabled = platformRemoteGateway.isRemote() && platformRemoteGateway.isPersonalStorageAdmissionEnabled();
+        boolean enabled = platformRemoteGateway.isRemote();
         result.put("enabled", enabled);
         if (!enabled) return ResponseUtil.success(result);
         String userCode = CurrentUserHolder.getCurrentUserCode();
-        Object data = platformRemoteGateway.call("storage", "quota-check",
-                platformRemoteGateway.params("userCode", userCode, "operation", "CHAT", "requestedBytes", 0L));
-        if (data instanceof Map<?, ?> details) {
-            details.forEach((key, value) -> result.put(String.valueOf(key), value));
+        Map<String, Object> details = platformRemoteGateway.readPersonalStorageQuota(userCode);
+        if (details != null) {
+            result.putAll(details);
         }
         return ResponseUtil.success(result);
     }
