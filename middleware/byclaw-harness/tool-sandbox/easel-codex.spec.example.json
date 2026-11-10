@@ -1,5 +1,5 @@
 {
-  "image": "byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness:D0.6.0_easel-codex-20261110-r3",
+  "image": "byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness:D0.6.0_easel-codex-20261110-r4",
   "startup": {
     "entrypoint": [
       "/usr/local/bin/byclaw-easel-codex-entrypoint",
@@ -16,7 +16,8 @@
     "BYCLAW_BROWSER_STARTUP": "eager",
     "EASEL_AGENT_RUNTIME": "codex",
     "CODEX_HOME": "/by/.codex",
-    "BYCLAW_EASEL_SOURCE_COMMIT": "5c12e42e9019d276368130b52385b770749ffa6f"
+    "BYCLAW_EASEL_SOURCE_COMMIT": "5c12e42e9019d276368130b52385b770749ffa6f",
+    "BYCLAW_APP_PORT": "8082"
   },
   "servicePort": 8080,
   "ports": [
@@ -29,6 +30,12 @@
     {
       "port": 8081,
       "instance": "vnc",
+      "protocol": "http",
+      "exposure": "public"
+    },
+    {
+      "port": 8082,
+      "instance": "web",
       "protocol": "http",
       "exposure": "public"
     }
@@ -62,11 +69,14 @@
       "templateKey": "easel-codex",
       "purpose": "easel-codex",
       "enabled": "true",
-      "imageTag": "D0.6.0_easel-codex-20261110-r3",
-      "description": "包含 Easel 完整源码、Codex CLI、Python/Node、FFmpeg、Playwright 和 Remotion；用于在 ByClaw 内调试、运行及验收 Easel。",
+      "imageTag": "D0.6.0_easel-codex-20261110-r4",
+      "description": "包含 Easel 完整源码、Codex CLI、Python/Node、FFmpeg、Playwright 和 Remotion；用于在 ByClaw 内调试、运行及验收 Easel。 应用预览：先读 /by/Easel/APP_PREVIEW.md，通过 sandbox-app 命令输出分享链接。",
       "capabilities": "[\"process.exec\",\"filesystem\",\"software.development\",\"media.render\",\"browser.automation\",\"agent.codex\"]",
       "operations": "{\"protocol\":\"ssh\",\"exposure\":\"private\"}",
       "display": "{\"available\":true,\"defaultExposure\":\"public\",\"auth\":\"byclaw-session\"}"
     }
+  },
+  "network": {
+    "allowPublicTraffic": true
   }
 }

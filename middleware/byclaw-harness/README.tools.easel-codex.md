@@ -1,5 +1,22 @@
 # Easel Codex 工具沙箱
 
+## 应用预览
+
+新版镜像在实例内以 `byclaw` 用户启动 Nginx（8082）。通过已有 `sandbox_exec`
+执行 `sandbox-app expose --name easel --port 7860 --sandbox-id <租约 sandboxId>`，
+从标准输出读取分享链接；没有新增平台工具或 `openUrl` 返回字段。
+完整操作说明随镜像提供于 `/etc/byclaw-tool-sandbox/APP_PREVIEW.md`，并补充到
+个人项目的 `/by/Easel/APP_PREVIEW.md`。路由存放于实例本地 `/run/byclaw-apps`。
+
+模板开启 `network.allowPublicTraffic=true`，云网关可直接访问其他监听端口；hash
+路径是应用标识，不是沙箱整体的鉴权边界。SSH 仍要求正确私钥。默认云域名可能
+下载 HTML，可绑定自定义域名，或配置 `BYCLAW_APP_PUBLIC_BASE` 使用已有平台 Nginx
+的 `/sandbox-apps/` 入口。后者需要更新部署 Nginx 配置，不需要新增服务或修改 Java
+后端；第一版不转发平台 Cookie/Authorization，不适用于依赖 Cookie 的应用登录。
+
+`sandbox-app remove --name easel` 只删除分享路由，停止应用需要另外结束进程。
+实例销毁后链接失效，任务结束是否保留实例沿用现有租约规则。
+
 用于在 ByClaw 中修改、运行和验收固定版本的 Easel。镜像继承 browser 工具镜像的 SSH、VNC、浏览器与执行通道，使用 `byclaw.tool-sandbox/v1`，purpose 为 `easel-codex`。源码版本和压缩包校验记录见 `tool-sandbox/easel-codex.source.json`。
 
 ## 镜像与个人工作区
