@@ -940,6 +940,8 @@ check the task's `turnStatus` and BE task execution logs to determine whether th
 
 平台管理员选择套餐创建租户后，BE 异步创建独立 OpenGauss 沙箱、校验数据库身份、发布 Redis 配置、启动 `tenant-data-node`，并向 Node 的 `/internal/v1/schema-tasks` 上传 JAR 内置的最新版本 baseline ZIP。Maven 构建时自动把 `byclaw-tenant-node/baseline/*__baseline.zip` 纳入 BE JAR；新增版本的 ZIP 无需修改 BE 路径或版本常量。需要覆盖内置制品时，可设置 `BYCLAW_TENANT_BASELINE_BUNDLE` 为 BE 容器内可读的 ZIP 绝对路径。Node 完成 baseline 后回报 `/internal/v1/tenantSchemaTaskReports`，BE 将 `tenant_schema_audit` 置为 `VERIFIED` 并发布 `READY`。失败可从租户管理的阶段进度弹窗重试；每次初始化尝试保留独立审计行。
 
+Schema 上传收到 HTTP 503 时，BE 在原命令租约内间隔 3 秒重试，最多提交 3 次。重试复用同一审计行、上传内容和幂等键。最终拒绝会记录 HTTP 状态和 Node 返回的结构化错误码（如有）。
+
 建表初始化与普通租户请求使用相同的 Redis 服务发现地址（`TENANT_DATA_<企业ID>`），不使用 ACS 公网网关 endpoint。初始化最多等待 90 秒，允许节点处于 `ADMIN_ONLY` 或 `READY`，但注册记录必须唯一且匹配企业 ID、generation 和数据库沙箱记录 ID；数据库健康响应还必须返回相同身份及 `dbWritable=true` 才上传 baseline。普通业务请求仍只接受 `READY`。BE 到注册节点仅携带租户内部令牌，不转发沙箱平台 API Key。
 
 数据库沙箱首次启动可能先报告端口就绪，再完成租户账号初始化并重启。BE 在第 2 阶段最多进行 40 次、间隔 5 秒的身份连接探测；最后一次失败才将阶段标记为失败。重试开通会复用仍在运行的数据库沙箱并继续后续阶段。 数据库与 Node 的复用和运行状态检查通过 provider-neutral 生命周期接口查询当前执行引擎，兼容 ACS，不再调用 OpenSandbox 专属详情接口。查询失败或返回身份/状态不完整时停止开通并保留现有资源，避免把“状态未核实”当作沙箱丢失。
@@ -957,6 +959,8 @@ check the task's `turnStatus` and BE task execution logs to determine whether th
 本地 OpenSandbox v0.1.9 在删除已停止容器时会错误地再次 `kill` 并返回 500。`deploy/middleware/opensandbox-server.Dockerfile` 在镜像构建时应用 `patch-local-opensandbox-tcp.py`，只对实际运行中的容器执行 `kill`，然后释放容器。修改补丁后从 `deploy/middleware` 运行 `podman compose --env-file ../../.env -f docker-compose.yml up -d --no-deps --build opensandbox-server`（本机使用额外的 rootful override 时保留对应 `-f` 参数），让正在运行的服务使用新镜像；不要仅替换容器内脚本。
 
 HACU 切换企业时，登录 Token 负责认证用户，当前企业保存在该用户的 HTTP 会话中。后续带同一用户 Token 的请求会沿用会话里的企业 ID，避免旧 Token 把切换结果覆盖；浏览器 Cookie 属于其他用户时仍以 Token 身份为准。BE 访问租户 Node 时校验服务注册记录与沙箱 ID，再通过容器网络的 `sandbox-<沙箱 ID>` 和注册端口直连，不依赖沙箱记录 endpoint 的存储格式。
+
+租户工作组转发恢复定时扫描工作和待投递记录。Node 就绪后仍可能因当前执行策略暂缓扫描。对于扫描接口明确返回的 `409 POLICY_EXECUTION_DISABLED` 或 `409 POLICY_NOT_EFFECTIVE`，BE 保留扫描游标，下一轮重新检查。其他响应错误仍保留恢复诊断。
 
 租户聊天继续使用现有 `/assiman/qryConversations` 和 `/assiman/getMessages` 协议。BE 根据租户上下文将会话精确查询、列表和历史消息转发到对应 Node；对尚无 `messageStruct` 的 worker 纯文本历史回答，在响应中投影为原有前端可渲染的回答片段，并将成对的 `<think>` 内容投影为思考片段。投影不改写租户数据库中的原始消息。个人空间沿用原处理链路。
 
@@ -1013,10 +1017,13 @@ does not change a saved model's enabled/default state. Only confirmed provider o
 model connection failures mark that model as failing; successful debugging still enables it.
 Access requires ownership of the uploaded file. Transcription delegates to the
 Harness plugin at `/api/byclaw/asr/transcribe`; the plugin chooses the enabled
-global default ASR model and the provider adapter. The sandbox instance defaults
-to the existing `openclaw` logical endpoint and can be configured with
-`asr.sandbox.instance`. The backend forwards the current shared Redis login token
-and runtime ingress credentials. A running, configured Harness instance is required.
+global default ASR model and the provider adapter. For the default ASR routing,
+the backend uses the current user's shared `byclaw-dsh` binding when present and
+otherwise resolves the exclusive `openclaw` endpoint. Deployments can select a
+different logical instance with `asr.sandbox.instance`. The backend forwards the
+current Redis login token and authenticates shared requests with the bound
+context's web cookie and provider ingress headers. A running, configured Harness
+instance is required.
 
 Model defaults are independent for every model type, including `ASR`, `TTS`, and
 future types. `GET /new/model/getDefaultModelId?modelType=ASR` resolves a type's default.

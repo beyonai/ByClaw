@@ -28,3 +28,9 @@
 ## 管理页面状态展示
 
 ByClaw TenantMgr 将 MANUAL_REQUIRED 显示为中英文“待人工处理 / Manual action required”，暂停轮询，进度按独立 command stage 定位并显示暂停原因。商业人工处理状态不显示、不调用旧“重试开通”入口。进度摘要与标题允许窄屏换行；补充 360px/1280px 组件场景测试源码，但未执行测试，也未验证 Android/iOS/HarmonyOS、微信/钉钉内置浏览器或任何真机。
+
+## 已完成重启的托管租户
+
+原开通命令暂停在 DB_CREATE / STARTED、结果未知时，租户重启可能已经完成数据库、Node 和 schema 准备。管理员从原命令检查资源。如果普通请求键校验失败，恢复服务可核对同一企业的两个当前记录。此路径要求两个远端资源均缺少请求键，分别与本地 RUNNING 记录的类型、归属、沙箱编号、recordId 和连接信息相符。其他请求键不能作为本次重启的证据。
+
+原请求 internal-{命令号} 必须有该数据库记录的当前 VERIFIED 初始化审计，并与 READY、generation 1 和持久配置相符。检查使用已存凭据读取数据库角色与库名，检查 Node 注册与业务就绪响应中的企业、generation、数据库记录。全部通过返回 ADOPT_EXISTING / RESTARTED_RESOURCES_VERIFIED，实时探测未通过返回 RESTARTED_RESOURCES_NOT_READY。管理员提交时重复检查，随后在同一事务核实原命令、操作槽、两条资源记录及原步骤版本，并登记数据库和 Node 的成功步骤。worker 重用这两条结果，继续探测和发布；用户侧最终状态仍以完成商业激活为准。

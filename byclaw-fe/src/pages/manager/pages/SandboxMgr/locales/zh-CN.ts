@@ -236,6 +236,8 @@ export default {
   'sandboxMgr.config.addTitle': '新增沙箱配置',
   'sandboxMgr.config.serviceKey': 'Service Key',
   'sandboxMgr.config.specJson': 'Spec JSON',
+  'sandboxMgr.config.rebuildSaved': '已保存 {serviceKey} 的服务规格，可在此重建模板或查看重建记录。',
+  'sandboxMgr.config.saveBeforeRebuild': '请先保存服务规格，再重建模板。',
   'sandboxMgr.config.templateJson': 'Template JSON',
   'sandboxMgr.config.autoStart': '登录自启动',
   'sandboxMgr.config.autoStartTip': '开启后，用户登录时会异步启动此沙箱服务；关闭后仍可手动或按需启动。',

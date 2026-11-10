@@ -1,0 +1,316 @@
+{
+  "byclaw": {
+    "hooks": {
+      "enabled": "${BYCLAW_HOOKS_ENABLED:false}",
+      "defaults": {
+        "connect-timeout": "2s",
+        "call-timeout": "15s"
+      },
+      "subscriptions": {
+        "hacu-tenant": {
+          "event": "tenant.created",
+          "event-version": 1,
+          "retry": {
+            "max-attempts": 5,
+            "delay": "5s",
+            "statuses": [
+              429,
+              500,
+              502,
+              503,
+              504
+            ],
+            "transport-errors": true
+          },
+          "http": {
+            "method": "POST",
+            "url": "${HACU_API_BASE_URL}/hacuService/api/v1/integrations/api-access/enterprise-registrations",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "auth": {
+              "type": "hmac-sha256",
+              "client-id": "byai-service",
+              "secret": "${HACU_API_HOOK_SECRET}",
+              "separator": "\n",
+              "canonical-fields": [
+                {
+                  "value": "hacu-api-access-v1"
+                },
+                {
+                  "from": "auth.clientId"
+                },
+                {
+                  "from": "request.method"
+                },
+                {
+                  "from": "request.path"
+                },
+                {
+                  "from": "request.query"
+                },
+                {
+                  "from": "request.timestamp"
+                },
+                {
+                  "from": "request.nonce"
+                },
+                {
+                  "from": "request.headers.Idempotency-Key"
+                },
+                {
+                  "from": "request.bodySha256"
+                }
+              ],
+              "headers": {
+                "X-Hacu-Client": {
+                  "from": "auth.clientId"
+                },
+                "X-Hacu-Timestamp": {
+                  "from": "request.timestamp"
+                },
+                "X-Hacu-Nonce": {
+                  "from": "request.nonce"
+                },
+                "X-Hacu-Signature": {
+                  "from": "signature"
+                }
+              }
+            },
+            "body": {
+              "eventId": {
+                "from": "event.id"
+              },
+              "occurredAt": {
+                "from": "event.occurredAtEpochSeconds"
+              },
+              "enterpriseId": {
+                "from": "data.enterpriseId"
+              },
+              "enterpriseName": {
+                "from": "data.enterpriseName"
+              },
+              "packageId": {
+                "from": "data.packageId"
+              },
+              "packageName": {
+                "from": "data.packageName"
+              },
+              "createdBy": {
+                "from": "data.createdBy"
+              },
+              "requestId": {
+                "from": "data.requestId"
+              },
+              "provisionState": {
+                "from": "data.provisionState"
+              }
+            }
+          }
+        },
+        "hacu-workgroup": {
+          "event": "workgroup.created",
+          "event-version": 1,
+          "required-data-fields": [
+            "enterpriseId"
+          ],
+          "retry": {
+            "max-attempts": 5,
+            "delay": "5s",
+            "statuses": [
+              429,
+              500,
+              502,
+              503,
+              504
+            ],
+            "transport-errors": true
+          },
+          "http": {
+            "method": "POST",
+            "url": "${HACU_API_BASE_URL}/hacuService/api/v1/integrations/api-access/workgroups",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "auth": {
+              "type": "hmac-sha256",
+              "client-id": "byai-service",
+              "secret": "${HACU_API_HOOK_SECRET}",
+              "separator": "\n",
+              "canonical-fields": [
+                {
+                  "value": "hacu-api-access-v1"
+                },
+                {
+                  "from": "auth.clientId"
+                },
+                {
+                  "from": "request.method"
+                },
+                {
+                  "from": "request.path"
+                },
+                {
+                  "from": "request.query"
+                },
+                {
+                  "from": "request.timestamp"
+                },
+                {
+                  "from": "request.nonce"
+                },
+                {
+                  "from": "request.headers.Idempotency-Key"
+                },
+                {
+                  "from": "request.bodySha256"
+                }
+              ],
+              "headers": {
+                "X-Hacu-Client": {
+                  "from": "auth.clientId"
+                },
+                "X-Hacu-Timestamp": {
+                  "from": "request.timestamp"
+                },
+                "X-Hacu-Nonce": {
+                  "from": "request.nonce"
+                },
+                "X-Hacu-Signature": {
+                  "from": "signature"
+                }
+              }
+            },
+            "body": {
+              "eventId": {
+                "from": "event.id"
+              },
+              "occurredAt": {
+                "from": "event.occurredAtEpochSeconds"
+              },
+              "enterpriseId": {
+                "from": "data.enterpriseId"
+              },
+              "workgroupId": {
+                "from": "data.groupId"
+              },
+              "groupName": {
+                "from": "data.groupName"
+              },
+              "projectId": {
+                "from": "data.projectId"
+              },
+              "createdBy": {
+                "from": "data.createdBy"
+              },
+              "userId": {
+                "from": "data.userId"
+              },
+              "byaiSessionMemberId": {
+                "from": "data.byaiSessionMemberId"
+              }
+            }
+          }
+        },
+        "hacu-workgroup-member": {
+          "event": "workgroup.member.joined",
+          "event-version": 1,
+          "required-data-fields": [
+            "enterpriseId"
+          ],
+          "retry": {
+            "max-attempts": 12,
+            "delay": "10s",
+            "statuses": [
+              429,
+              500,
+              502,
+              503,
+              504
+            ],
+            "transport-errors": true
+          },
+          "http": {
+            "method": "POST",
+            "url": "${HACU_API_BASE_URL}/hacuService/api/v1/integrations/api-access/workgroups/members",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "auth": {
+              "type": "hmac-sha256",
+              "client-id": "byai-service",
+              "secret": "${HACU_API_HOOK_SECRET}",
+              "separator": "\n",
+              "canonical-fields": [
+                {
+                  "value": "hacu-api-access-v1"
+                },
+                {
+                  "from": "auth.clientId"
+                },
+                {
+                  "from": "request.method"
+                },
+                {
+                  "from": "request.path"
+                },
+                {
+                  "from": "request.query"
+                },
+                {
+                  "from": "request.timestamp"
+                },
+                {
+                  "from": "request.nonce"
+                },
+                {
+                  "from": "request.headers.Idempotency-Key"
+                },
+                {
+                  "from": "request.bodySha256"
+                }
+              ],
+              "headers": {
+                "X-Hacu-Client": {
+                  "from": "auth.clientId"
+                },
+                "X-Hacu-Timestamp": {
+                  "from": "request.timestamp"
+                },
+                "X-Hacu-Nonce": {
+                  "from": "request.nonce"
+                },
+                "X-Hacu-Signature": {
+                  "from": "signature"
+                }
+              }
+            },
+            "body": {
+              "eventId": {
+                "from": "event.id"
+              },
+              "occurredAt": {
+                "from": "event.occurredAtEpochSeconds"
+              },
+              "enterpriseId": {
+                "from": "data.enterpriseId"
+              },
+              "workgroupId": {
+                "from": "data.groupId"
+              },
+              "userId": {
+                "from": "data.userId"
+              },
+              "byaiSessionMemberId": {
+                "from": "data.byaiSessionMemberId"
+              },
+              "invitedBy": {
+                "from": "data.invitedBy"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

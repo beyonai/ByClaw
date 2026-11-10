@@ -1198,6 +1198,8 @@ export default {
   'chatResource.projectFile': '项目文件',
   'chatResource.processFile': '过程文件',
   'chatResource.localSharedFile': '本地共享',
+  'chatResource.personalStorageUsage': '个人存储用量',
+  'chatResource.storageUsage': '存储用量',
   'chatResource.projectCloudDrive': '项目云盘',
   'projectSpace.projectDrive.save': '保存到项目云盘',
   'projectSpace.projectDrive.loadFailed': '项目云盘目录加载失败',

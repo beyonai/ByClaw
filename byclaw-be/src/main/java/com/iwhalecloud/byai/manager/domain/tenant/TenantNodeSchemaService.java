@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.zip.ZipInputStream;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -34,6 +35,8 @@ import org.springframework.stereotype.Service;
 public class TenantNodeSchemaService {
 
     private static final String BUNDLED_BASELINES = "classpath*:tenant/baseline/*__baseline.zip";
+    private static final int SCHEMA_SUBMIT_ATTEMPTS = 3;
+    private static final Duration SCHEMA_SUBMIT_RETRY_DELAY = Duration.ofSeconds(3);
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -118,10 +121,10 @@ public class TenantNodeSchemaService {
 
     /**
      * Persist dispatch intent under the durable worker's current command fence before sending to Node.
-     * @param auditTransaction short transaction that checks and locks the original command lease
+     * @param auditTransaction short transaction that checks the original command lease at audit creation and submission
      */
     public void initialize(long enterpriseId, long generation, long dbRecordId, TenantSandboxView node,
-                           String requestId, long fencingToken, java.util.function.Consumer<Runnable> auditTransaction)
+                           String requestId, long fencingToken, Consumer<Runnable> auditTransaction)
             throws Exception {
         if (fencingToken <= 0) throw new IllegalArgumentException("schema fencing token must be positive");
         if (internalToken == null || internalToken.isBlank()) {
@@ -167,12 +170,9 @@ public class TenantNodeSchemaService {
             URI base = waitForDatabase(enterpriseId, generation, dbRecordId);
             String boundary = "byclaw-" + auditId;
             byte[] upload = multipart(boundary, objectMapper.writeValueAsBytes(task), bundle);
-            HttpResponse<byte[]> accepted = send(base.resolve(base.getRawPath() + "/internal/v1/schema-tasks"),
-                "POST", upload, "multipart/form-data; boundary=" + boundary, enterpriseId, generation,
-                Map.of("Idempotency-Key", auditId + ":" + attemptNo));
-            if (accepted.statusCode() != 202) {
-                throw new IllegalStateException("tenant Node rejected schema initialization: HTTP " + accepted.statusCode());
-            }
+            URI submissions = base.resolve(base.getRawPath() + "/internal/v1/schema-tasks");
+            submitSchemaTask(submissions, upload, boundary, auditId + ":" + attemptNo,
+                enterpriseId, generation, auditTransaction);
             Instant deadline = Instant.now().plus(Duration.ofMinutes(8));
             URI taskUrl = base.resolve(base.getRawPath() + "/internal/v1/schema-tasks/" + auditId);
             while (Instant.now().isBefore(deadline)) {
@@ -199,6 +199,35 @@ public class TenantNodeSchemaService {
                     + "failure_reason=?,finished_at=? WHERE audit_id=? AND status='PENDING'",
                 reason.substring(0, Math.min(reason.length(), 500)), java.sql.Timestamp.from(Instant.now()), auditId);
             throw e;
+        }
+    }
+
+    private void submitSchemaTask(URI endpoint, byte[] upload, String boundary, String idempotencyKey,
+                                  long enterpriseId, long generation, Consumer<Runnable> auditTransaction)
+        throws IOException, InterruptedException {
+        for (int attempt = 1; ; attempt++) {
+            // The health probe and retry delay run outside the lease transaction.
+            auditTransaction.accept(() -> {});
+            HttpResponse<byte[]> response = send(endpoint, "POST", upload, "multipart/form-data; boundary=" + boundary,
+                enterpriseId, generation, Map.of("Idempotency-Key", idempotencyKey));
+            if (response.statusCode() == 202) return;
+            if (response.statusCode() != 503 || attempt == SCHEMA_SUBMIT_ATTEMPTS) {
+                String code = schemaRejectionCode(response.body());
+                throw new IllegalStateException("tenant Node rejected schema initialization: HTTP "
+                    + response.statusCode() + (code.isEmpty() ? "" : " (" + code + ")"));
+            }
+            // Node deduplicates by audit and attempt. Replay exactly the same upload and idempotency key.
+            Thread.sleep(SCHEMA_SUBMIT_RETRY_DELAY);
+        }
+    }
+
+    private String schemaRejectionCode(byte[] response) {
+        try {
+            JsonNode body = objectMapper.readTree(response);
+            String code = body == null ? "" : body.path("error").path("code").asText();
+            return code.matches("[A-Z][A-Z0-9_]{0,63}") ? code : "";
+        } catch (IOException malformedResponse) {
+            return "";
         }
     }
 

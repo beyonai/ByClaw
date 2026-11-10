@@ -14,7 +14,7 @@ WebSocket 在原连接上发送 `SWITCH_TENANT` 消息，payload 带 `enterprise
 
 租户数据库与 Node 的镜像及默认档位分别读取 Platform 的 `sandbox_service_spec` / `sandbox_service_profile`；创建时仅冻结技术资源 `profileKey` 和 `nodeProfileKey`，重试沿用快照，商业限额读取 HACU 发布的共享 Redis。Redis 复用公共 Spring Redis 配置；仅 Node 回调 BE 的内网入口需配置 `BYCLAW_TENANT_BE_INTERNAL_URL`。基线使用内置 ZIP，数据库连接使用 Provider 地址，Node 使用 Pod IP 注册。租户开通进度由 HACU 轮询原任务和 runtime，不再发送持久租户事件；通用 best-effort Hook 仍由 hooks 配置管理。
 
-外部系统的持久化开通任务在 `DB_CREATE` 或 `NODE_CREATE` 收到 Platform 的 `SANDBOX_TEMPLATE_PREPARING` 时，会先结束本次未绑定实例的沙箱记录，再将原任务置为 `RETRY_WAIT`。5 秒后可重新领取，沿用原任务、步骤和 provider 请求标识。已确认成功的步骤复用持久化结果，结果不明的 provider 调用仍需人工恢复。
+外部系统的持久化开通任务在 `DB_CREATE` 或 `NODE_CREATE` 收到 Platform 的 `SANDBOX_TEMPLATE_PREPARING` 时，会保留未绑定实例的沙箱记录为 `STARTING`，并将原任务置为 `RETRY_WAIT`。5 秒后可重新领取，沿用原任务、步骤、provider 请求标识和沙箱记录。模板等待标记通过记录版本校验领取，启动前清除。已确认成功的步骤复用持久化结果，结果不明的 provider 调用仍需人工恢复。
 
 # 管理端租户创建
 

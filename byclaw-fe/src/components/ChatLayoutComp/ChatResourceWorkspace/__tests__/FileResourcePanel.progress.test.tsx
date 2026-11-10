@@ -1,14 +1,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { ensureFolder, listFiles, uploadFiles } from '@/service/fileBrowser';
+import { ensureFolder, getPersonalStorageQuota, listFiles, uploadFiles } from '@/service/fileBrowser';
 import { uploadFiles as uploadKnowledgeFiles } from '@/service/knowledgeCenter';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
 import { getLocaleIntl } from '@/testUtils/localeIntl';
 import FileResourcePanel from '../FileResourcePanel';
 
-const mockIntl = getLocaleIntl();
+let mockIntl = getLocaleIntl();
 const mockUser = { userCode: 'user-a', userId: '1', enterpriseId: '1' };
 jest.mock('@umijs/max', () => ({
-  getLocale: () => 'zh-CN',
+  getLocale: () => mockIntl.locale,
   useIntl: () => mockIntl,
   useSelector: (selector: any) => selector({ user: { userInfo: mockUser } }),
 }));
@@ -16,7 +16,12 @@ jest.mock('@/hooks/useGlobal', () => ({
   __esModule: true,
   default: () => ({ uploadFileConfig: { maxFileSize: 512, maxFileCount: 5 }, EventEmitter: { emit: jest.fn() } }),
 }));
-jest.mock('@/service/fileBrowser', () => ({ ensureFolder: jest.fn(), listFiles: jest.fn(), uploadFiles: jest.fn() }));
+jest.mock('@/service/fileBrowser', () => ({
+  ensureFolder: jest.fn(),
+  getPersonalStorageQuota: jest.fn(),
+  listFiles: jest.fn(),
+  uploadFiles: jest.fn(),
+}));
 jest.mock('@/service/knowledgeCenter', () => ({ uploadFiles: jest.fn() }));
 jest.mock('@/service/devloop', () => ({ listProjectRepos: jest.fn() }));
 jest.mock('@/service/file', () => ({ downloadResourceFile: jest.fn() }));
@@ -52,8 +57,10 @@ let attempts: Attempt[];
 beforeEach(() => {
   jest.clearAllMocks();
   attempts = [];
+  mockIntl = getLocaleIntl();
   mockUser.enterpriseId = '1';
   jest.mocked(ensureFolder).mockResolvedValue(undefined);
+  jest.mocked(getPersonalStorageQuota).mockResolvedValue({ enabled: false });
   jest.mocked(listFiles).mockResolvedValue([{ name: 'reports', path: '/by/.shared/project_-1/reports/', isDir: true }]);
   jest
     .mocked(queryProjectCloudDrive)
@@ -102,6 +109,21 @@ async function selectFiles(container: HTMLElement, names = ['a.txt', 'b.txt']) {
   });
   await act(async () => fireEvent.change(input, { target: { files } }));
 }
+
+it('shows the personal storage quota with English labels', async () => {
+  mockIntl = getLocaleIntl('en-US');
+  jest.mocked(getPersonalStorageQuota).mockResolvedValueOnce({
+    enabled: true,
+    quotaBytes: 10 * 1024 ** 3,
+    usedBytes: 2 * 1024 ** 3,
+  });
+
+  render(panel());
+
+  const usage = await screen.findByLabelText('Personal storage usage');
+  expect(within(usage).getByText('Storage usage')).toBeInTheDocument();
+  expect(within(usage).getByText('2.00 / 10 GB')).toBeInTheDocument();
+});
 
 it('renders the real shared project tree toolbar and isolates each file progress, failure and retry', async () => {
   const { container } = render(panel());

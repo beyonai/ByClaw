@@ -19,7 +19,8 @@ class WorkgroupMessageEventsTest {
     void factsContainOnlyIdentifiersAndNeverDeviceOrMessageContent() {
         HookPublisher publisher = mock(HookPublisher.class);
         var events = new WorkgroupMessageEvents(publisher);
-        var event = new JSONObject(Map.of("event", "MESSAGE_CREATED", "sessionId", "30", "messageId", "9007199254740993",
+        var event = new JSONObject();
+        event.putAll(Map.of("event", "MESSAGE_CREATED", "sessionId", "30", "messageId", "9007199254740993",
             "creatorId", "22", "speaker", Map.of("type", "USER"), "content", "private", "token", "private"));
         events.committed(7, event, List.of(22L, 23L, 23L));
         @SuppressWarnings("unchecked")

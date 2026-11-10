@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.sandbox.support;
 
+import java.net.URI;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -23,6 +24,25 @@ public final class SandboxEndpointRecordSupport {
     };
 
     private SandboxEndpointRecordSupport() {
+    }
+
+    /** Managed openGauss uses the private HTTPS proxy on the published PostgreSQL port. */
+    public static boolean isPrivateDatabaseEndpoint(URI uri) {
+        return "https".equals(uri.getScheme()) && uri.getHost()!=null
+            && uri.getHost().matches("15432-[a-z0-9-]+\\.[a-z0-9-]+-vpc\\.sandbox\\.aliyuncs\\.com")
+            && (uri.getPort()==-1 || uri.getPort()==443) && uri.getUserInfo()==null
+            && uri.getQuery()==null && uri.getFragment()==null && (uri.getPath().isEmpty() || "/".equals(uri.getPath()));
+    }
+
+    public static boolean supportsDatabaseRecovery(String endpoint, String sandboxId) {
+        if (endpoint == null) return false;
+        if (endpoint.startsWith("tcp://")) return true;
+        if (sandboxId == null || !sandboxId.startsWith("microvm--")) return false;
+        try {
+            return isPrivateDatabaseEndpoint(URI.create(endpoint));
+        } catch (IllegalArgumentException malformed) {
+            return false;
+        }
     }
 
     public static Map<String, String> parseInstanceEndpoints(String endpointField) {

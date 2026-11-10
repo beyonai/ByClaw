@@ -202,6 +202,12 @@ public class TenantNodeClient {
         }
         catch (Exception e) {
             if (recoveryScan) {
+                if ("requestNodeOperation".equals(step) && e instanceof NodeRejection rejection
+                        && rejection.nodeStatus() == 409
+                        && ("POLICY_EXECUTION_DISABLED".equals(rejection.code())
+                            || "POLICY_NOT_EFFECTIVE".equals(rejection.code()))) {
+                    throw new ForwardScanPausedException(rejection);
+                }
                 // 恢复线程统一记录租户和扫描类别，在异常链中保留实际失败阶段。
                 String detail = "Tenant forward scan failed, step=" + step + ", diagnostics=" + diagnostics;
                 if (e instanceof NodeRejection rejection) {
@@ -429,6 +435,13 @@ public class TenantNodeClient {
             throw e;
         }
     }
+    /** A healthy Node declined background discovery until its execution policy allows it. */
+    public static final class ForwardScanPausedException extends RuntimeException {
+        private ForwardScanPausedException(NodeRejection cause) {
+            super(cause);
+        }
+    }
+
     /** Preserve the Node rejection for typed adapters without changing generic HTTP error mapping. */
     static final class NodeRejection extends ResponseStatusException {
         private final int nodeStatus;

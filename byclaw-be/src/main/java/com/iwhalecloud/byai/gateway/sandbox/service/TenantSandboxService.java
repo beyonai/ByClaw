@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
+import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -143,7 +144,7 @@ public class TenantSandboxService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.launch.incomplete");
         }
         SsSandboxRecord active = recordMapper.selectActiveTenantByResourceAndType(enterpriseId, NODE_TYPE);
-        if (active != null) {
+        if (active != null && !isWaitingForTemplate(active, profileKey, providerRequestKey)) {
             if (isRunning(active)) {
                 return new TenantSandboxView(active.getId(), active.getSandboxId(), active.getEndpoint());
             }
@@ -151,6 +152,7 @@ public class TenantSandboxService {
                     "tenant Node sandbox is no longer reachable", new Date(), active.getLockVersion()) != 1) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.launch.inProgress");
             }
+            active = null;
         }
         SandboxServiceSpec spec = specRepository.findByServiceKeyAndProfile(NODE_TYPE, profileKey)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.spec.unavailable"));
@@ -158,26 +160,8 @@ public class TenantSandboxService {
             || spec.getResourceLimits().isEmpty()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.profile.unavailable");
         }
-        Date now = new Date();
-        SsSandboxRecord record = new SsSandboxRecord();
-        record.setOwnerScope("TENANT");
-        record.setEnterpriseId(enterpriseId);
-        record.setResourceId(enterpriseId);
-        record.setUserCode("tenant-node-" + enterpriseId);
-        record.setSandboxType(NODE_TYPE);
-        record.setServiceType(NODE_TYPE);
-        record.setProfileKey(profileKey);
-        record.setResourceRequests(toJson(spec.getResourceRequests()));
-        record.setResourceLimits(toJson(spec.getResourceLimits()));
-        record.setStatus("STARTING");
-        record.setAutoRelease(0);
-        record.setLeasePolicy("MANUAL");
-        record.setVersion(0);
-        record.setLockVersion(0);
-        record.setCreateTime(now);
-        record.setUpdateTime(now);
-        record.setLastAccessTime(now);
-        recordMapper.insert(record);
+        SsSandboxRecord record = beginTenantLaunch(active, spec, enterpriseId, NODE_TYPE, profileKey,
+            providerRequestKey);
         SandboxLaunchRequest request = new SandboxLaunchRequest();
         request.setUserCode(record.getUserCode());
         request.setSandboxType(NODE_TYPE);
@@ -218,7 +202,7 @@ public class TenantSandboxService {
         SandboxLaunchData data = response.getData();
         if (recordMapper.updateLaunchSuccess(record.getId(), data.getSandboxId(), data.getEndpoint(),
                 data.getGatewayToken(), data.getTimeoutSeconds(), data.getRemoteExpiresAt(), null, null,
-                new Date(), 0) != 1) {
+                new Date(), record.getLockVersion()) != 1) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.node.changedDuringLaunch");
         }
         return new TenantSandboxView(record.getId(), data.getSandboxId(), data.getEndpoint());
@@ -384,7 +368,7 @@ public class TenantSandboxService {
         }
 
         SsSandboxRecord active = recordMapper.selectActiveTenantByResourceAndType(enterpriseId, DB_TYPE);
-        if (active != null) {
+        if (active != null && !isWaitingForTemplate(active, profileKey, providerRequestKey)) {
             if (isReusable(active)) {
                 return new TenantSandboxView(active.getId(), active.getSandboxId(), active.getEndpoint());
             }
@@ -392,6 +376,7 @@ public class TenantSandboxService {
                     "tenant database sandbox is no longer reachable", new Date(), active.getLockVersion()) != 1) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.database.launch.inProgress");
             }
+            active = null;
         }
         SandboxServiceSpec spec = specRepository.findByServiceKeyAndProfile(DB_TYPE, profileKey)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "tenant.database.spec.unavailable"));
@@ -408,28 +393,8 @@ public class TenantSandboxService {
                 && "persistent".equals(volume.getType()) && volume.getHostPath() == null);
         if (!providerStorage) prepareEntrypoint(enterpriseId);
 
-        Date now = new Date();
-        SsSandboxRecord record = new SsSandboxRecord();
-        record.setOwnerScope("TENANT");
-        record.setEnterpriseId(enterpriseId);
-        record.setResourceId(enterpriseId);
-        // OpenSandbox uses userCode in a volume name, which accepts lowercase DNS labels only.
-        record.setUserCode("tenant-" + enterpriseId);
-        record.setSandboxType(DB_TYPE);
-        record.setServiceType(DB_TYPE);
-        record.setProfileKey(profileKey);
-        record.setResourceRequests(toJson(spec.getResourceRequests()));
-        record.setResourceLimits(toJson(spec.getResourceLimits()));
-        record.setStatus("STARTING");
-        record.setAutoRelease(0);
-        record.setLeasePolicy("MANUAL");
-        record.setVersion(0);
-        record.setLockVersion(0);
-        record.setCreateTime(now);
-        record.setUpdateTime(now);
-        record.setLastAccessTime(now);
-        recordMapper.insert(record);
-
+        SsSandboxRecord record = beginTenantLaunch(active, spec, enterpriseId, DB_TYPE, profileKey,
+            providerRequestKey);
         SandboxLaunchRequest request = new SandboxLaunchRequest();
         request.setUserCode(record.getUserCode());
         request.setSandboxType(DB_TYPE);
@@ -457,23 +422,72 @@ public class TenantSandboxService {
         }
         SandboxLaunchData data = response.getData();
         int updated = recordMapper.updateLaunchSuccess(record.getId(), data.getSandboxId(), data.getEndpoint(),
-            data.getGatewayToken(), data.getTimeoutSeconds(), data.getRemoteExpiresAt(), null, null, new Date(), 0);
+            data.getGatewayToken(), data.getTimeoutSeconds(), data.getRemoteExpiresAt(), null, null, new Date(), record.getLockVersion());
         if (updated != 1) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.changedDuringLaunch");
         }
         return new TenantSandboxView(record.getId(), data.getSandboxId(), data.getEndpoint());
     }
 
+    private boolean isWaitingForTemplate(SsSandboxRecord record, String profileKey, String providerRequestKey) {
+        return providerRequestKey != null && "STARTING".equals(record.getStatus()) && record.getSandboxId() == null
+            && profileKey.equals(record.getProfileKey())
+            && templateWaitMarker(providerRequestKey).equals(record.getReleaseReason());
+    }
+
+    private SsSandboxRecord beginTenantLaunch(SsSandboxRecord waiting, SandboxServiceSpec spec, long enterpriseId,
+                                              String sandboxType, String profileKey, String providerRequestKey) {
+        Date now = new Date();
+        if (waiting != null) {
+            // Consume the wait marker before calling Platform. A concurrent or uncertain launch cannot reuse it.
+            if (recordMapper.updateTenantTemplateWait(waiting.getId(), templateWaitMarker(providerRequestKey),
+                    null, now, waiting.getLockVersion()) != 1) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.changedDuringLaunch");
+            }
+            waiting.setReleaseReason(null);
+            waiting.setLockVersion(waiting.getLockVersion() + 1);
+            return waiting;
+        }
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setOwnerScope("TENANT");
+        record.setEnterpriseId(enterpriseId);
+        record.setResourceId(enterpriseId);
+        // OpenSandbox uses userCode in a volume name, which accepts lowercase DNS labels only.
+        record.setUserCode((DB_TYPE.equals(sandboxType) ? "tenant-" : "tenant-node-") + enterpriseId);
+        record.setSandboxType(sandboxType);
+        record.setServiceType(sandboxType);
+        record.setProfileKey(profileKey);
+        record.setResourceRequests(toJson(spec.getResourceRequests()));
+        record.setResourceLimits(toJson(spec.getResourceLimits()));
+        record.setStatus("STARTING");
+        record.setAutoRelease(0);
+        record.setLeasePolicy("MANUAL");
+        record.setVersion(0);
+        record.setLockVersion(0);
+        record.setCreateTime(now);
+        record.setUpdateTime(now);
+        record.setLastAccessTime(now);
+        recordMapper.insert(record);
+        return record;
+    }
+
     private ResponseStatusException recordLaunchFailure(SsSandboxRecord record, SandboxResponse<?> response,
                                                          String reason, String providerRequestKey) {
-        int updated = recordMapper.updateStatusToFailed(record.getId(), reason, new Date(), 0);
         // Platform returns this exact response during template resolution, before it can create a sandbox.
-        if (updated == 1 && providerRequestKey != null && response != null
-                && response.getCode() == SandboxResponse.RESPONSE_ERROR && response.getData() == null
-                && TemplatePreparingException.CODE.equals(response.getMessage())) {
-            return new TemplatePreparingException();
+        if (providerRequestKey != null && response != null && response.getCode() == SandboxResponse.RESPONSE_ERROR
+                && response.getData() == null && TemplatePreparingException.CODE.equals(response.getMessage())) {
+            if (recordMapper.updateTenantTemplateWait(record.getId(), null, templateWaitMarker(providerRequestKey),
+                    new Date(), record.getLockVersion()) == 1) {
+                return new TemplatePreparingException();
+            }
+            return new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.changedDuringLaunch");
         }
+        recordMapper.updateStatusToFailed(record.getId(), reason, new Date(), record.getLockVersion());
         return new ResponseStatusException(HttpStatus.BAD_GATEWAY, reason);
+    }
+
+    private static String templateWaitMarker(String providerRequestKey) {
+        return TemplatePreparingException.CODE + ":" + providerRequestKey;
     }
 
     public static final class TemplatePreparingException extends ResponseStatusException {
@@ -486,6 +500,18 @@ public class TenantSandboxService {
 
     /** Only a complete provider inventory and exact ownership can authorize command recovery. */
     public RecoveryResource inspectRecovery(long enterpriseId, String step, String providerRequestKey) {
+        return inspectResource(enterpriseId, step, providerRequestKey, null);
+    }
+
+    /** A restart candidate needs independent command, audit and readiness proof before adoption. */
+    public RecoveryResource inspectRestartRecord(long enterpriseId, String step, String recordId) {
+        if (recordId == null || !recordId.matches("[1-9][0-9]{0,18}")) {
+            return new RecoveryResource("RESOURCE_IDENTITY_MISMATCH", null, null);
+        }
+        return inspectResource(enterpriseId, step, null, recordId);
+    }
+
+    private RecoveryResource inspectResource(long enterpriseId, String step, String providerRequestKey, String restartRecordId) {
         if ("whale-agent".equalsIgnoreCase(recoveryStorageType)) return new RecoveryResource("PROVIDER_RECOVERY_QUERY_UNSUPPORTED", null, null);
         String type = "DB_CREATE".equals(step) ? DB_TYPE : NODE_TYPE;
         List<SandboxDetail> resources;
@@ -515,7 +541,11 @@ public class TenantSandboxService {
         }
         if (candidates.size() != 1) return new RecoveryResource("MULTIPLE_PROVIDER_RESOURCES", null, null);
         SandboxDetail candidate = candidates.getFirst();
-        if (!providerRequestKey.equals(candidate.getMetadata().get("providerRequestKey"))) {
+        boolean identified = restartRecordId == null
+            ? providerRequestKey != null && providerRequestKey.equals(candidate.getMetadata().get("providerRequestKey"))
+            : !candidate.getMetadata().containsKey("providerRequestKey")
+                && restartRecordId.equals(candidate.getMetadata().get("recordId"));
+        if (!identified) {
             return new RecoveryResource("RESOURCE_IDENTITY_MISMATCH", null, null);
         }
         if (active == null || !"TENANT".equals(active.getOwnerScope()) || !Long.valueOf(enterpriseId).equals(active.getEnterpriseId())
@@ -523,7 +553,7 @@ public class TenantSandboxService {
             || !type.equals(active.getServiceType()) || !candidate.getId().equals(active.getSandboxId())
             || !Long.toString(active.getId()).equals(candidate.getMetadata().get("recordId"))
             || active.getLockVersion() == null || !"RUNNING".equals(active.getStatus()) || active.getEndpoint() == null || active.getEndpoint().isBlank()
-            || (DB_TYPE.equals(type) && !active.getEndpoint().startsWith("tcp://"))) {
+            || (DB_TYPE.equals(type) && !SandboxEndpointRecordSupport.supportsDatabaseRecovery(active.getEndpoint(), active.getSandboxId()))) {
             return new RecoveryResource("RESOURCE_CONNECTION_DATA_UNAVAILABLE", null, null);
         }
         if (candidate.getStatus() == null || !"Running".equalsIgnoreCase(candidate.getStatus().getState())) {

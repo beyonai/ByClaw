@@ -1431,27 +1431,30 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
             {storageQuota?.enabled &&
               Number.isFinite(storageQuota.usedBytes) &&
               (Number.isFinite(storageQuota.quotaBytes) || Number.isFinite(storageQuota.quotaGiB)) && (
-                <div style={{ padding: '0 12px 8px' }} aria-label="个人存储用量">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                    <span>存储用量</span>
-                    <span>
-                      {(storageQuota.usedBytes! / 1024 ** 3 || 0).toFixed(2)} /{' '}
-                      {(storageQuota.quotaBytes ? storageQuota.quotaBytes / 1024 ** 3 : storageQuota.quotaGiB!).toFixed(
-                        0
-                      )}{' '}
-                      GB
-                    </span>
-                  </div>
-                  <Progress
-                    percent={Math.min(
-                      100,
-                      (storageQuota.usedBytes! / (storageQuota.quotaBytes || storageQuota.quotaGiB! * 1024 ** 3)) * 100
-                    )}
-                    size="small"
-                    showInfo={false}
-                  />
+              <div
+                style={{ padding: '0 12px 8px' }}
+                aria-label={intl.formatMessage({ id: 'chatResource.personalStorageUsage' })}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                  <span>{intl.formatMessage({ id: 'chatResource.storageUsage' })}</span>
+                  <span>
+                    {(storageQuota.usedBytes! / 1024 ** 3 || 0).toFixed(2)} /{' '}
+                    {(storageQuota.quotaBytes ? storageQuota.quotaBytes / 1024 ** 3 : storageQuota.quotaGiB!).toFixed(
+                      0
+                    )}{' '}
+                    GB
+                  </span>
                 </div>
-              )}
+                <Progress
+                  percent={Math.min(
+                    100,
+                    (storageQuota.usedBytes! / (storageQuota.quotaBytes || storageQuota.quotaGiB! * 1024 ** 3)) * 100
+                  )}
+                  size="small"
+                  showInfo={false}
+                />
+              </div>
+            )}
             <UnfinishedUploads
               onCancelQueued={fileTransfers.cancelQueued}
               ownerKey={transferContext.ownerKey}
