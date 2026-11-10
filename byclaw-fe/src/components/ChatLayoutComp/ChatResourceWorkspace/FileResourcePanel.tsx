@@ -165,7 +165,12 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const [loadedDirectoryKeys, setLoadedDirectoryKeys] = useState<Key[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   const [loading, setLoading] = useState(false);
-  const [storageQuota, setStorageQuota] = useState<{ enabled: boolean; quotaBytes?: number; usedBytes?: number }>();
+  const [storageQuota, setStorageQuota] = useState<{
+    enabled: boolean;
+    quotaBytes?: number;
+    quotaGiB?: number;
+    usedBytes?: number;
+  }>();
   const [loadError, setLoadError] = useState<string>();
   const [renameTarget, setRenameTarget] = useState<FileBrowserItem | null>(null);
   const [renameLoading, setRenameLoading] = useState(false);
@@ -1424,23 +1429,29 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         contentBefore={
           <>
             {storageQuota?.enabled &&
-              Number.isFinite(storageQuota.quotaBytes) &&
-              Number.isFinite(storageQuota.usedBytes) && (
-              <div style={{ padding: '0 12px 8px' }} aria-label="个人存储用量">
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                  <span>存储用量</span>
-                  <span>
-                    {(storageQuota.usedBytes! / 1024 ** 3 || 0).toFixed(2)} /{' '}
-                    {(storageQuota.quotaBytes! / 1024 ** 3).toFixed(0)} GB
-                  </span>
+              Number.isFinite(storageQuota.usedBytes) &&
+              (Number.isFinite(storageQuota.quotaBytes) || Number.isFinite(storageQuota.quotaGiB)) && (
+                <div style={{ padding: '0 12px 8px' }} aria-label="个人存储用量">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                    <span>存储用量</span>
+                    <span>
+                      {(storageQuota.usedBytes! / 1024 ** 3 || 0).toFixed(2)} /{' '}
+                      {(storageQuota.quotaBytes ? storageQuota.quotaBytes / 1024 ** 3 : storageQuota.quotaGiB!).toFixed(
+                        0
+                      )}{' '}
+                      GB
+                    </span>
+                  </div>
+                  <Progress
+                    percent={Math.min(
+                      100,
+                      (storageQuota.usedBytes! / (storageQuota.quotaBytes || storageQuota.quotaGiB! * 1024 ** 3)) * 100
+                    )}
+                    size="small"
+                    showInfo={false}
+                  />
                 </div>
-                <Progress
-                  percent={Math.min(100, (storageQuota.usedBytes! / storageQuota.quotaBytes!) * 100)}
-                  size="small"
-                  showInfo={false}
-                />
-              </div>
-            )}
+              )}
             <UnfinishedUploads
               onCancelQueued={fileTransfers.cancelQueued}
               ownerKey={transferContext.ownerKey}

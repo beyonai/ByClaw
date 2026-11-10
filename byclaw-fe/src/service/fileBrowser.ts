@@ -6,6 +6,7 @@ import { hasDesktopLocalFiles } from '@/service/common/desktopLocal';
 export interface PersonalStorageQuota {
   enabled: boolean;
   quotaBytes?: number;
+  quotaGiB?: number;
   usedBytes?: number;
   usageObservedAt?: string;
 }
