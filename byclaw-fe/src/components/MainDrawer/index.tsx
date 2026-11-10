@@ -1,5 +1,5 @@
 import DesktopWorkspace from '@/components/DesktopWorkspace';
-import { updateDesktopOwner, useDesktopWorkspace } from '@/utils/desktopWorkspace';
+import { useDesktopWorkspace } from '@/utils/desktopWorkspace';
 import { ArrowsAltOutlined, CloseOutlined } from '@ant-design/icons';
 import React, { lazy, Suspense, useMemo, useRef } from 'react';
 import { Drawer, Space } from 'antd';
@@ -165,10 +165,7 @@ function MainDrawer() {
     <MyDrawer
       open={!!drawerType}
       onClose={() => {
-        if (drawerType === 'desktop' && contentPayload.owner) {
-          updateDesktopOwner(contentPayload.owner, { handled: true });
-          useDesktopWorkspace.setState({ visible: false });
-        }
+        if (drawerType === 'desktop') useDesktopWorkspace.setState({ visible: false });
         driverOpen('');
       }}
       drawerCfg={drawerCfg}

@@ -172,7 +172,7 @@ describe('chat remote computer entry', () => {
     expect(await screen.findByTitle('远程桌面')).toBeInTheDocument();
     expect(mockOpenVnc).not.toHaveBeenCalled();
   });
-  it('uses only the latest employee answer in the current session to show the entry', async () => {
+  it('keeps the entry from older replies only in the owning session', async () => {
     mockMessages = [employeeMessage('answer-1', true)];
     const view = render(renderChat());
     expect(await screen.findByTitle('远程桌面')).toBeInTheDocument();
@@ -180,7 +180,7 @@ describe('chat remote computer entry', () => {
     expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
     mockMessages = [...mockMessages, employeeMessage('answer-2')];
     view.rerender(renderChat());
-    expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
+    expect(await screen.findByTitle('远程桌面')).toBeInTheDocument();
     expect(mockOpenVnc).not.toHaveBeenCalled();
   });
   it('accepts numeric session IDs and preserves the manual entry when another panel is open', async () => {

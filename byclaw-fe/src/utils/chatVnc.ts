@@ -1,5 +1,6 @@
 import { IObjectType, SSEMessageType } from '@/constants/message';
 import type { IMessage, IMessageListItem } from '@/typescript/message';
+import { mergeInstanceRefs } from '@/utils/desktopInstances';
 import { isSameSessionId, type SessionIdInput } from '@/utils/sessionId';
 
 const legacyScripts = new Set([
@@ -267,17 +268,28 @@ export function hasVncActivity(message?: Partial<IMessage> | null): boolean {
   );
 }
 
+const isDigitalEmployeeReply = (message: IMessage) =>
+  message.fromBeyond && (message.usage === undefined || String(message.usage) === '2');
+
+export function getDesktopMessageTargets(messages: IMessage[], sessionId: SessionIdInput) {
+  const replies = messages.filter(
+    (message) => isDigitalEmployeeReply(message) && isSameSessionId(message.sessionId, sessionId)
+  );
+  const refs = replies.flatMap((message) =>
+    [...(message.thinkList || []), ...(message.messageList || [])]
+      .filter((item) => allowsDesktopEntry(item.content?.substance))
+      .flatMap((item) => item.content?.instanceRefs || [])
+  );
+  return { refs: mergeInstanceRefs([], refs), legacy: replies.some(hasVncActivity) };
+}
+
 export function getLatestDigitalEmployeeMessage(
   messages: IMessage[],
   sessionId?: SessionIdInput
 ): IMessage | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (
-      message.fromBeyond &&
-      (sessionId === undefined || isSameSessionId(message.sessionId, sessionId)) &&
-      (message.usage === undefined || String(message.usage) === '2')
-    ) {
+    if (isDigitalEmployeeReply(message) && (sessionId === undefined || isSameSessionId(message.sessionId, sessionId))) {
       return message;
     }
   }
