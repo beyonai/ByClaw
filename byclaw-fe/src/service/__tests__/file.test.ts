@@ -81,3 +81,20 @@ describe('File Service', () => {
     });
   });
 });
+
+test('chat attachments forward their own upload progress callback without changing the request boundary', async () => {
+  const onUploadProgress = jest.fn();
+  const data = new FormData();
+  data.append('files', new File(['content'], 'first.txt'));
+  mockPOST.mockResolvedValue({ uploadItems: [{ fileId: 'file-1' }] } as any);
+  await uploadFiles(data, onUploadProgress);
+  expect(mockPOST).toHaveBeenCalledWith(
+    '/byaiService/chat/uploadFiles',
+    data,
+    expect.objectContaining({
+      onUploadProgress,
+      responseCfg: { hideErrorTips: true },
+      timeout: 480000,
+    })
+  );
+});

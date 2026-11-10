@@ -163,6 +163,8 @@ docker build -f Dockerfile \
 
 Dockerfile 的 `EXPOSE 8081` 只声明端口，不会自动发布到宿主机。运行容器时需使用 `-p 8081:8081`，或让托管平台/Sandbox proxy 转发并鉴权该端口。容器内正常而宿主 TCP 超时属于部署层未发布，browserd 代码无法自行放通。
 
+HTTP 与尚未完成的 viewer 握手保留 30 秒 socket 空闲超时；只有完整的上游 `101` 响应头（最多 16 KiB，且 WebSocket accept 匹配）通过后，才取消该通道两端的空闲计时，静止桌面不会因此断开。会话移除、goal 恢复和网关关闭仍会显式断开对应连接。部署须包含重新构建的 `lib/viewer-gateway.js` 并启动新的所属运行时；仅更新 HTML 或刷新页面不会替换 browserd 已加载的代码。监督进程将 browserd 退出视为运行时失败，应受控重启运行时或重建本次 QA VM，不单独杀掉该子进程。
+
 重建 Linux 镜像后，旧的隔离 `novnc` 模式可运行真实双会话 RFB 验收：`BYCLAW_RUN_VNC_INTEGRATION=1 node /opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-browser-use/scripts/vnc-isolation-integration.mjs`。该测试会打开两个独立桌面，经各自 VNC WebSocket 输入不同内容，关闭其中一个 session，并确认另一个仍保持连接且内容不受影响。
 
 ## 防绕过边界

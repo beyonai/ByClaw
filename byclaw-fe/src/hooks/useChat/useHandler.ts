@@ -1,3 +1,4 @@
+import { registerDesktops } from '@/utils/desktopWorkspace';
 import { showNasQuotaError } from '@/utils/nasQuota';
 import { useCallback, useEffect, useRef } from 'react';
 
@@ -8,7 +9,7 @@ import { assign, get, isPlainObject, isString, last, set, isNil, pick } from 'lo
 import { IMessageState, SSEEventStatus, SSEMessageType } from '@/constants/message';
 
 import { initAnswerMessage, initQueryMessage } from '@/utils/messgae';
-import { isVncToolMessage } from '@/utils/chatVnc';
+import { isDesktopOpeningToolMessage, isVncToolMessage } from '@/utils/chatVnc';
 import { isSameSessionId } from '@/utils/sessionId';
 import { isTextContentType } from '@/utils/messgae';
 
@@ -17,6 +18,7 @@ import { isSameUpdatableMessage, updateExistingMessage } from '@/utils/messageIt
 import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import { getFinalContent } from '@/utils/finalAnswer';
 import useGlobal from '@/hooks/useGlobal';
+import usePersistFn from '@/hooks/usePersistFn';
 import useVncOpener from '@/hooks/useVncOpener';
 
 import { IMessageListItem } from '@/typescript/message';
@@ -557,28 +559,42 @@ function useHandler(props: IProps) {
     [EventEmitter]
   );
 
-  const browserHandler = useCallback(
-    (onionsProps: IOnionsProps) => {
-      const { sseRes, newAnswerMsg } = onionsProps;
-      if (!isSameSessionId(newAnswerMsg?.sessionId, curSessioneRef.current)) return onionsProps;
-      const incomingMessage = sseRes?.message;
-      let mergedMessage: IMessageListItem | undefined;
-      if (`${incomingMessage?.contentType}` === `${SSEMessageType.toolCall}`) {
-        mergedMessage = [...(newAnswerMsg.thinkList || []), ...(newAnswerMsg.messageList || [])].find((item) =>
-          isSameUpdatableMessage(item, incomingMessage)
-        );
-      }
-      // Tool results omit input; the preceding message handler preserves it by orderId.
-      if (!isVncToolMessage(mergedMessage || incomingMessage)) return onionsProps;
-
-      const answerId = newAnswerMsg.messageId || newAnswerMsg.msgId;
-      const toolId = get(sseRes, 'message.content.orderId') || get(sseRes, 'message.uuid') || 'browser';
-      openVnc({ key: `${answerId}:${toolId}` });
-
+  // A registered stream retains this callback across the temporary-to-saved session transition.
+  const browserHandler = usePersistFn((onionsProps: IOnionsProps) => {
+    const { sseRes, newAnswerMsg } = onionsProps;
+    const incomingMessage = sseRes?.message;
+    if (newAnswerMsg?.sessionId && incomingMessage?.content?.instanceRefs)
+      registerDesktops(
+        JSON.stringify(['session', String(newAnswerMsg.sessionId)]),
+        incomingMessage.content.instanceRefs,
+        true
+      );
+    if (!isSameSessionId(newAnswerMsg?.sessionId, curSessioneRef.current)) return onionsProps;
+    let mergedMessage: IMessageListItem | undefined;
+    if (`${incomingMessage?.contentType}` === `${SSEMessageType.toolCall}`) {
+      mergedMessage = [...(newAnswerMsg.thinkList || []), ...(newAnswerMsg.messageList || [])].find((item) =>
+        isSameUpdatableMessage(item, incomingMessage)
+      );
+    }
+    // Tool results omit input; the preceding message handler preserves it by orderId.
+    const toolMessage = mergedMessage || incomingMessage;
+    // The legacy renderer can preserve input without merging the latest instance refs.
+    const instanceRefs = incomingMessage?.content?.instanceRefs ?? toolMessage?.content?.instanceRefs;
+    if (instanceRefs !== undefined) {
+      if (!instanceRefs.length || !isDesktopOpeningToolMessage(toolMessage)) return onionsProps;
+    } else if (!isVncToolMessage(toolMessage)) {
       return onionsProps;
-    },
-    [openVnc]
-  );
+    }
+
+    const answerId = newAnswerMsg.messageId || newAnswerMsg.msgId;
+    const toolId = get(sseRes, 'message.content.orderId') || get(sseRes, 'message.uuid') || 'browser';
+    openVnc({
+      key: `${answerId}:${toolId}`,
+      ...(instanceRefs !== undefined ? { instanceRefs } : {}),
+    });
+
+    return onionsProps;
+  });
 
   return {
     sessionInfoHandler,

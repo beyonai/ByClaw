@@ -1,57 +1,87 @@
 package com.iwhalecloud.byai.gateway.sandbox.shared;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
+
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
+@ExtendWith(MockitoExtension.class)
 class SharedSandboxPolicyTest {
+    @Mock
+    private ByaiSystemConfigService byaiSystemConfigService;
+
+    @InjectMocks
+    private SharedSandboxPolicy policy;
+
     @Test
-    void userNasRequiresExactEnabledFlagAndEligibleDshUser() {
-        var config=mock(ByaiSystemConfigService.class);
-        var policy=new SharedSandboxPolicy(config);
-        assertThat(policy.userNasEnabled("alice", "byclaw-dsh")).isFalse();
-        verify(config,never()).getDcSystemConfigValueByCode(SharedSandboxPolicy.ALL);
-        when(config.getDcSystemConfigValueByCode(SharedSandboxPolicy.USER_NAS)).thenReturn("1");
-        assertThat(policy.userNasEnabled("alice", "byclaw-dsh")).isFalse();
-        when(config.getDcSystemConfigValueByCode(SharedSandboxPolicy.USERS)).thenReturn("alice");
-        assertThat(policy.userNasEnabled("alice", "byclaw-dsh")).isTrue();
-        assertThat(policy.userNasEnabled("alice", "openclaw")).isFalse();
+    void jsonMapsToPolicyObjectFields() {
+        SharedSandboxPolicyConfig policy = com.alibaba.fastjson.JSON.parseObject(
+            "{\"defaultMode\":\"shared\",\"excludedUsers\":[\"adminvip\",\"zte\"]}", SharedSandboxPolicyConfig.class);
+        assertThat(policy.getDefaultMode()).isEqualTo(SharedSandboxPolicyConfig.SHARED);
+        assertThat(policy.getExcludedUsers()).containsExactlyInAnyOrder("adminvip", "zte");
     }
 
     @Test
-    void exactWhitelistAndAllSwitchAreIndependentOfPoolScope() {
-        var config = mock(ByaiSystemConfigService.class);
-        var policy = new SharedSandboxPolicy(config);
+    void policyIsParsedAndRereadOnEveryDecision() {
         assertThat(policy.eligible("alice")).isFalse();
-        when(config.getDcSystemConfigValueByCode("BYCLAW_SHARED_DSH_HOST_USERS")).thenReturn("alice; alice bob");
-        assertThat(policy.eligible("alice")).isTrue();
-        assertThat(policy.eligible("ali")).isFalse();
-        assertThat(policy.byTenant()).isFalse();
-        when(config.getDcSystemConfigValueByCode("BYCLAW_SANDBOX_SHARED_BY_TENANT")).thenReturn("1");
-        assertThat(policy.byTenant()).isTrue();
-        assertThat(policy.eligible("charlie")).isFalse();
-        when(config.getDcSystemConfigValueByCode("BYCLAW_SANDBOX_SHARED_ALL")).thenReturn("1");
-        assertThat(policy.eligible("charlie")).isTrue();
+        when(byaiSystemConfigService.getDcSystemConfigValueByCode(SharedSandboxPolicy.POLICY))
+            .thenReturn("{\"defaultMode\":\"shared\",\"excludedUsers\":[\" alice \",\"alice\",\"bob\"]}");
+        assertThat(policy.eligible("alice")).isFalse();
+        assertThat(policy.eligible(" bob ")).isFalse();
+        assertThat(policy.eligible("ali")).isTrue();
+        assertThat(policy.eligible("Alice")).isTrue();
         assertThat(policy.eligible(" ")).isFalse();
+        when(byaiSystemConfigService.getDcSystemConfigValueByCode(SharedSandboxPolicy.POLICY))
+            .thenReturn("{\"defaultMode\":\"exclusive\",\"excludedUsers\":[\"alice\"]}");
+        assertThat(policy.eligible("alice")).isFalse();
+        assertThat(policy.eligible("charlie")).isFalse();
     }
 
     @Test
-    void wildcardAndInvalidSwitchDoNotAdmitEveryone() {
-        var config = mock(ByaiSystemConfigService.class);
-        var policy = new SharedSandboxPolicy(config);
-        when(config.getDcSystemConfigValueByCode("BYCLAW_SHARED_DSH_HOST_USERS")).thenReturn("*");
-        when(config.getDcSystemConfigValueByCode("BYCLAW_SANDBOX_SHARED_ALL")).thenReturn("true");
+    void emptyPolicyAndEmptyExclusionsHaveDifferentDefaults() {
+        when(byaiSystemConfigService.getDcSystemConfigValueByCode(SharedSandboxPolicy.POLICY))
+            .thenReturn("{\"defaultMode\":\"shared\"}");
+        assertThat(policy.eligible("alice")).isTrue();
+        when(byaiSystemConfigService.getDcSystemConfigValueByCode(SharedSandboxPolicy.POLICY)).thenReturn(" ");
+        assertThat(policy.eligible("alice")).isFalse();
+        when(byaiSystemConfigService.getDcSystemConfigValueByCode(SharedSandboxPolicy.POLICY))
+            .thenReturn("{\"defaultMode\":\"shared\",\"excludedUsers\":[]}");
+        assertThat(policy.eligible("alice")).isTrue();
+    }
+
+    @Test
+    void missingOrInvalidPolicyDoesNotGrantSharedAccess() {
+        for (String value : new String[] {"broken", "null", "[]", "{}",
+            "{\"defaultMode\":\"other\",\"excludedUsers\":[]}",
+            "{\"defaultMode\":\"shared\",\"excludedUsers\":null}"}) {
+            when(byaiSystemConfigService.getDcSystemConfigValueByCode(SharedSandboxPolicy.POLICY)).thenReturn(value);
+            assertThat(policy.eligible("alice")).isFalse();
+        }
+    }
+
+    @Test
+    void unreadablePolicyReturnsFalse() {
+        when(byaiSystemConfigService.getDcSystemConfigValueByCode(SharedSandboxPolicy.POLICY))
+            .thenThrow(new IllegalStateException("unavailable"));
         assertThat(policy.eligible("alice")).isFalse();
     }
 
     @Test
-    void unreadablePolicyDoesNotSilentlyAllocateAnExclusiveSandbox() {
-        var config = mock(ByaiSystemConfigService.class);
-        var policy = new SharedSandboxPolicy(config);
-        when(config.getDcSystemConfigValueByCode("BYCLAW_SANDBOX_SHARED_ALL"))
-            .thenThrow(new IllegalStateException("unavailable"));
-        assertThatThrownBy(() -> policy.eligible("alice")).hasMessageContaining("共享沙箱入口配置读取失败");
+    void nasAndTenantSwitchesRemainIndependent() {
+        assertThat(policy.userNasEnabled("alice", "byclaw-dsh")).isFalse();
+        when(byaiSystemConfigService.getDcSystemConfigValueByCode(SharedSandboxPolicy.USER_NAS)).thenReturn("1");
+        when(byaiSystemConfigService.getDcSystemConfigValueByCode(SharedSandboxPolicy.POLICY))
+            .thenReturn("{\"defaultMode\":\"shared\",\"excludedUsers\":[\"bob\"]}");
+        assertThat(policy.userNasEnabled("alice", "byclaw-dsh")).isTrue();
+        assertThat(policy.userNasEnabled("bob", "byclaw-dsh")).isFalse();
+        assertThat(policy.userNasEnabled("alice", "openclaw")).isFalse();
+        assertThat(policy.byTenant()).isFalse();
+        when(byaiSystemConfigService.getDcSystemConfigValueByCode(SharedSandboxPolicy.BY_TENANT)).thenReturn("1");
+        assertThat(policy.byTenant()).isTrue();
     }
 }

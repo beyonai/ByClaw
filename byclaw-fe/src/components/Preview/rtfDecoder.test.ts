@@ -60,7 +60,7 @@ describe('RTF real parser and isolated static output', () => {
   );
 
   it('bounds input bytes, nesting, control count and pathological font parameters', () => {
-    expect(() => validateRtf(new ArrayBuffer(MAX_RTF_BYTES + 1))).toThrow('limit');
+    expect(() => validateRtf(Object.defineProperty(new ArrayBuffer(1), 'byteLength', { value: MAX_RTF_BYTES + 1 }))).toThrow('limit');
     expect(() => validateRtf(bytes('{\\rtf1 ' + '{'.repeat(128) + 'text' + '}'.repeat(129)))).toThrow('limit');
     expect(() => validateRtf(rtf('\\b '.repeat(20_001)))).toThrow('limit');
     expect(() => validateRtf(rtf('\\f2147483647 text'))).toThrow('limit');

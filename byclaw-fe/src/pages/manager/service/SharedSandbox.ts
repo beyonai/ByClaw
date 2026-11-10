@@ -31,6 +31,7 @@ export interface SharedRecord {
   releaseReason?: string;
   releasePolicy?: 'HEARTBEAT' | 'NEVER' | 'SCHEDULED';
   releaseAt?: number;
+  plannedReleaseAt?: number | null;
 }
 
 export interface SharedMember {
@@ -52,6 +53,7 @@ export interface SharedMember {
 export interface SharedPage<T> {
   records: T[];
   total: number;
+  summary?: { onlineSandboxes: number; onlineUsers: number };
 }
 
 async function request<T>(operation: string, params: object = {}): Promise<T> {

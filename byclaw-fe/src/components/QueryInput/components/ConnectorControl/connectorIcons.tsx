@@ -9,6 +9,7 @@ import Icon, {
   MailOutlined,
   QqOutlined,
   ThunderboltOutlined,
+  VideoCameraFilled,
   WindowsFilled,
 } from '@ant-design/icons';
 import AntdIcon from '@/components/AntdIcon';
@@ -90,6 +91,7 @@ const connectorIconMap: Record<string, ReactNode> = {
   'deepseek-web-search': <Icon component={DeepSeekSvg} aria-hidden />,
   'image-generation-model': <Icon component={ImageGenerationSvg} aria-hidden />,
   'speech-generation-model': <Icon component={SpeechGenerationSvg} aria-hidden />,
+  'volcengine-digital-human': <VideoCameraFilled />,
 };
 
 export const getConnectorIcon = (connectorCode: string, connectorName?: string): ReactNode => {

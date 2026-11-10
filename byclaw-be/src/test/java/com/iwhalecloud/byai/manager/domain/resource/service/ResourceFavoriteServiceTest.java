@@ -118,7 +118,7 @@ class ResourceFavoriteServiceTest extends I18nTestSupport {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"DIG_EMPLOYEE", "SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT"})
+    @ValueSource(strings = {"DIG_EMPLOYEE", "SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "TOOL", "AGENT"})
     void favoritesSupportedResourceTypesWithoutGrantingUse(String type) {
         commercial();
         resource(type, "enterprise", 2);

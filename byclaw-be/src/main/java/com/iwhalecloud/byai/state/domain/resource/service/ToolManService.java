@@ -115,6 +115,9 @@ public class ToolManService {
     private com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncService enterpriseResourceSyncService;
 
     @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationService resourcePublicationService;
+
+    @Autowired
     private SsResExtToolService ssResExtToolService;
 
     @Autowired
@@ -256,7 +259,11 @@ public class ToolManService {
     /**
      * 阶段二：用户补全描述后保存入库
      */
+    @Transactional(rollbackFor = Exception.class)
     public void saveTool(ToolSaveRequest request) {
+        String ownerType = StringUtils.defaultIfBlank(request.getOwnerType(), "personal");
+        if (!java.util.Set.of("personal", "enterprise").contains(ownerType)) throw new IllegalArgumentException("无效资源归属");
+        if (request.getPublishScope() != null && !"enterprise".equals(ownerType)) throw new IllegalArgumentException("个人资源不设置组织范围");
         // 1. 用带描述的参数重新生成 OpenAPI JSON
         String openApiJson = CurlParser.toOpenApiJsonWithDesc(request.getResourceName(), request.getResourceDesc(),
             request.getMethod(), request.getUrl(), request.getBodyParams(), request.getQueryParams(),
@@ -270,6 +277,9 @@ public class ToolManService {
         // 3. 写入 ss_resource
         SsResource ssResource = new SsResource();
         ssResource.setResourceId(resourceId);
+        ssResource.setOwnerType(ownerType);
+        ssResource.setPublishScopeMode("enterprise".equals(ownerType) ? "NONE" : "LEGACY");
+        ssResource.setPublishScopeRevision(0L); ssResource.setPublishScopeController("BYAI");
         ssResource.setResourceName(request.getResourceName());
         ssResource.setResourceDesc(request.getResourceDesc());
         ssResource.setResourceBizType("TOOL");
@@ -300,6 +310,7 @@ public class ToolManService {
         authApplicationService.ensureCreatorDefaultPrivileges(ssResource);
         resourceArtifactStorageService.publishResourceJson(wrappedJson, "TOOL", resourceId);
         ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, "TOOL", "curl-tool-json");
+        if (request.getPublishScope() != null) resourcePublicationService.submitLocal(resourceId, request.getPublishScope());
     }
 
     /**
@@ -331,6 +342,7 @@ public class ToolManService {
         String resourceDesc = StringUtils.trimToEmpty(root.getString("resourceDesc"));
         String systemCode = StringUtils.trimToEmpty(root.getString("systemCode"));
         String version = StringUtils.trimToEmpty(root.getString("version"));
+        Long createBy = root.getLong("createBy");
 
         // 如果前端没有传implType，则默认为API （目前智能体调，后续其他传要明确传implType），回头告诉伟斌必传过来
         String implType = StringUtils.defaultIfBlank(StringUtils.trimToEmpty(root.getString("implType")),
@@ -355,7 +367,7 @@ public class ToolManService {
         // 6. 主表统一复用 SsResourceService：
         // 新增走 createResource，更新走 update。
         SsResource resource = saveOrUpdateToolJsonNewMain(existing, resourceSourcePkId, resourceBizType, resourceCode,
-            resourceName, resourceDesc, ownerType, systemCode, version, effectiveCatalogId, implType);
+            resourceName, resourceDesc, ownerType, systemCode, version, effectiveCatalogId, implType, createBy);
         boolean runtimeAvailable = ResourceLifecyclePolicy.isRuntimeAvailable(resource);
 
         // 7. 子表统一保留两份内容：
@@ -420,6 +432,7 @@ public class ToolManService {
             throw new IllegalArgumentException(I18nUtil.get("tool.json.resource.biz.type.missing"));
         }
         var request = com.iwhalecloud.byai.manager.dto.resource.EnterpriseResourceSyncRequest.parse(root);
+        normalizeSyncCreator(root);
         enterpriseResourceSyncService.validate(request);
         if ("SKILL".equals(resourceBizType)) enterpriseResourceSyncService.requireSyncPrincipal();
         Long effectiveCatalogId = resolveAddToolFromThirdCatalogId(root);
@@ -433,10 +446,20 @@ public class ToolManService {
         return executeWithOpenApiImportLoginContext(() ->
             com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext.execute(trusted,
                 systemCode, resourceBizType, resourceCode, () -> {
-            ssResourceService.lockSkillImport("THIRD_SYNC:" + CurrentUserHolder.getEnterpriseId() + ":"
-                + systemCode + ":" + resourceBizType + ":" + resourceCode);
-            enterpriseResourceSyncService.validateExisting(
-                ssResourceService.findByImportIdentity(systemCode, resourceBizType, resourceCode));
+            // Match the global import identity so enterprise metadata cannot split synchronization locks.
+            ssResourceService.lockSkillImport("THIRD_SYNC:" + systemCode + ":" + resourceBizType + ":" + resourceCode);
+            SsResource existing = ssResourceService.findByImportIdentity(systemCode, resourceBizType, resourceCode);
+            boolean knowledge = StringUtils.startsWith(resourceBizType, "KG_");
+            boolean localKnowledge = knowledge && datasetApplicationService.isOwnershipManagedLocally(existing);
+            // Knowledge import decides ownership from persisted provenance. Whale Agent may also change
+            // ownership of externally managed knowledge; do not reject that transition before importing.
+            boolean knowledgeOwnsScope = localKnowledge || (knowledge
+                && SystemCode.WHAGE_AGENT.getCode().equalsIgnoreCase(systemCode));
+            if (!knowledgeOwnsScope) {
+                enterpriseResourceSyncService.validateExisting(existing);
+            } else if (existing != null && Objects.equals(existing.getResourceStatus(), -1)) {
+                throw new IllegalArgumentException(I18nUtil.get("resource.lifecycle.status.invalid"));
+            }
             Map<String, Object> result;
             boolean packageChanged = false;
             if ("SKILL".equals(resourceBizType)) {
@@ -450,8 +473,13 @@ public class ToolManService {
                 // Refresh existing employee bindings without changing their authorization or association intent.
                 packageChanged = true;
             }
-            enterpriseResourceSyncService.completeImport(Long.valueOf(result.get("resourceId").toString()),
-                request, packageChanged, result);
+            // Locally managed personal knowledge carries no enterprise authorization semantics.
+            if (!localKnowledge || OwnerType.ENTERPRISE.equals(existing.getOwnerType())) {
+                enterpriseResourceSyncService.completeImport(Long.valueOf(result.get("resourceId").toString()),
+                    request, packageChanged, result);
+                result.put("publication", resourcePublicationService.synchronize(
+                    Long.valueOf(result.get("resourceId").toString()), request.publishScope(), existing == null));
+            }
             return result;
         }));
     }
@@ -462,6 +490,23 @@ public class ToolManService {
     private Long resolveAddToolFromThirdCatalogId(JSONObject root) {
         Long bodyCatalogId = root.getLong("catalogId");
         return bodyCatalogId != null ? bodyCatalogId : 0L;
+    }
+
+    /** Accept numeric and string IDs, without silently truncating malformed creator values. */
+    private void normalizeSyncCreator(JSONObject root) {
+        Object value = root.get("createBy");
+        if (value == null) return;
+        String text = value.toString();
+        try {
+            if (!(value instanceof Number || value instanceof String) || !text.matches("[0-9]+")) {
+                throw new NumberFormatException();
+            }
+            long creator = Long.parseLong(text);
+            if (creator <= 0) throw new NumberFormatException();
+            root.put("createBy", creator);
+        } catch (NumberFormatException error) {
+            throw new IllegalArgumentException(I18nUtil.get("resource.sync.creator.invalid"), error);
+        }
     }
 
     /**
@@ -1614,7 +1659,7 @@ public class ToolManService {
      */
     private SsResource saveOrUpdateToolJsonNewMain(SsResource existing, Long resourceSourcePkId, String resourceBizType,
         String resourceCode, String resourceName, String resourceDesc, String ownerType, String systemCode,
-        String version, Long catalogId, String implType) {
+        String version, Long catalogId, String implType, Long createBy) {
 
         if (existing == null) {
             SsResource myResource = new SsResource();
@@ -1628,6 +1673,10 @@ public class ToolManService {
             myResource.setSystemCode(systemCode);
             myResource.setResourceVersionId(version);
             myResource.setCatalogId(catalogId);
+
+            if (createBy != null && com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext.isImporting(myResource)) {
+                myResource.setCreateBy(createBy);
+            }
 
             resourceRuntimeInfoResolver.fillResource(myResource,
                 resourceRuntimeInfoResolver.resolveToolJson(resourceBizType, implType));
@@ -1651,6 +1700,9 @@ public class ToolManService {
         existing.setSystemCode(effectiveSystemCode);
         existing.setCatalogId(effectiveCatalogId);
         existing.setResourceVersionId(version);
+        if (createBy != null && com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext.isImporting(existing)) {
+            existing.setCreateBy(createBy);
+        }
         existing.setUpdateBy(userId);
         existing.setUpdateTime(now);
         existing.setPublishTime(now);

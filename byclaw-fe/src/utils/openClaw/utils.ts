@@ -41,7 +41,10 @@ export interface UploadFileToOpenClawResult {
  * 使用全局 openclaw WebSocket 的同一 host，通过 fetch 上传 FormData 到 /upload-file。
  * 仅当响应码为 200 时视为成功，成功时响应 JSON 格式为 { paths: string[] }。
  */
-export async function uploadFileToOpenClaw(rawFile: File): Promise<Partial<IQueryFile>> {
+export async function uploadFileToOpenClaw(
+  rawFile: File,
+  onProgress?: (event: { loaded: number; total?: number }) => void
+): Promise<Partial<IQueryFile>> {
   const formData = new FormData();
   formData.append('file', rawFile);
 
@@ -51,14 +54,33 @@ export async function uploadFileToOpenClaw(rawFile: File): Promise<Partial<IQuer
     throw new Error('OpenClaw WebSocket 未初始化，无法获取上传地址');
   }
 
-  const res = await fetch(uploadUrl, {
-    method: 'POST',
-    body: formData,
-  });
-  if (res.status !== 200) {
-    throw new Error(`上传失败: ${res.status} ${res.statusText}`);
+  let json: UploadFileToOpenClawResult;
+  if (onProgress) {
+    json = await new Promise<UploadFileToOpenClawResult>((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.open('POST', uploadUrl);
+      request.upload.onprogress = (event) =>
+        onProgress({ loaded: event.loaded, total: event.lengthComputable ? event.total : undefined });
+      request.onerror = () => reject(new Error('OpenClaw upload network error'));
+      request.onabort = () => reject(new Error('OpenClaw upload cancelled'));
+      request.onload = () => {
+        if (request.status !== 200) {
+          reject(new Error(`上传失败: ${request.status} ${request.statusText}`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(request.responseText));
+        } catch {
+          reject(new Error('上传响应格式异常'));
+        }
+      };
+      request.send(formData);
+    });
+  } else {
+    const res = await fetch(uploadUrl, { method: 'POST', body: formData });
+    if (res.status !== 200) throw new Error(`上传失败: ${res.status} ${res.statusText}`);
+    json = (await res.json()) as UploadFileToOpenClawResult;
   }
-  const json = (await res.json()) as UploadFileToOpenClawResult;
   if (!json || !Array.isArray(json.paths)) {
     throw new Error('上传响应格式异常');
   }

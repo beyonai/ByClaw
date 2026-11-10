@@ -69,8 +69,10 @@ if [ -z "${novnc_dir}" ]; then
 fi
 
 novnc_index_src="/usr/local/share/openclaw/novnc-index.html"
-if [ -f "${novnc_index_src}" ]; then
+novnc_bridge_src="$(dirname "${novnc_index_src}")/connection-bridge.js"
+if [ -f "${novnc_index_src}" ] && [ -f "${novnc_bridge_src}" ]; then
   cp "${novnc_index_src}" "${novnc_dir}/index.html"
+  cp "${novnc_bridge_src}" "${novnc_dir}/connection-bridge.js"
   log "installed minimal noVNC UI at ${novnc_dir}/index.html"
 fi
 

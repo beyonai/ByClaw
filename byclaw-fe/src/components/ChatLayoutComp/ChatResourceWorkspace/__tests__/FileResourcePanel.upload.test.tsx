@@ -1,13 +1,16 @@
-import type { ReactNode } from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
-import { message } from 'antd';
+import { isValidElement, type ComponentProps, type ReactNode } from 'react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { message, type MenuProps } from 'antd';
 import { queryProjectCloudDrive } from '@/components/ProjectCloudDrive';
+import MessageFilePreviewPanel from '@/components/MessageList/components/FileRender/components/Previewer/MessageFilePreviewPanel';
 import type { IAgentFileUploadConf } from '@/hooks/useAgentUploadFileConfig';
-import { ensureFolder, listFiles, uploadFiles, type FileBrowserItem } from '@/service/fileBrowser';
+import { downloadFile, ensureFolder, listFiles, uploadFiles, type FileBrowserItem } from '@/service/fileBrowser';
+import { downloadResourceFile } from '@/service/file';
 import { uploadFiles as uploadKnowledgeFiles } from '@/service/knowledgeCenter';
 import { getLocaleIntl } from '@/testUtils/localeIntl';
 import { getProject } from '@/pages/projectSpace/service';
 import FileResourcePanel from '../FileResourcePanel';
+import useResourceAttachmentPreview from '../useResourceAttachmentPreview';
 
 const MB = 1024 * 1024;
 const mockIntl = getLocaleIntl();
@@ -27,13 +30,18 @@ jest.mock('antd', () => {
 jest.mock('@umijs/max', () => ({
   getLocale: () => 'zh-CN',
   useIntl: () => mockIntl,
-  useSelector: () => mockSessions,
+  useSelector: (selector: any) => selector({ user: { userInfo: { userCode: 'user-a' } } }),
 }));
 jest.mock('@/hooks/useGlobal', () => ({
   __esModule: true,
   default: () => ({ uploadFileConfig: mockConfig }),
 }));
-jest.mock('@/service/fileBrowser', () => ({ ensureFolder: jest.fn(), listFiles: jest.fn(), uploadFiles: jest.fn() }));
+jest.mock('@/service/fileBrowser', () => ({
+  downloadFile: jest.fn(),
+  ensureFolder: jest.fn(),
+  listFiles: jest.fn(),
+  uploadFiles: jest.fn(),
+}));
 jest.mock('@/service/knowledgeCenter', () => ({ uploadFiles: jest.fn() }));
 jest.mock('@/service/devloop', () => ({ listProjectRepos: jest.fn() }));
 jest.mock('@/service/file', () => ({ downloadResourceFile: jest.fn() }));
@@ -67,6 +75,7 @@ jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', 
     onLoadData,
     onNodeClick,
     getDisplayName,
+    getActionItems,
   }: {
     contentBefore: ReactNode;
     items: FileBrowserItem[];
@@ -76,6 +85,7 @@ jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', 
     onLoadData: (item: FileBrowserItem) => Promise<void>;
     onNodeClick: (event: React.MouseEvent, item: FileBrowserItem) => void;
     getDisplayName?: (item: FileBrowserItem) => string;
+    getActionItems: (item: FileBrowserItem) => MenuProps['items'];
   }) {
     mockExpandAction = expandAction;
     return (
@@ -93,6 +103,17 @@ jest.mock('@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock', 
             Open {getDisplayName?.(item) || item.name}
           </button>
         ))}
+        {items
+          .filter((item) => getActionItems(item)?.some((action) => action?.key === 'preview'))
+          .map((item) => (
+            <button
+              key={`preview-${item.path}`}
+              type="button"
+              onClick={() => onAction('preview', item)}
+            >
+              Preview {item.name}
+            </button>
+          ))}
         {items.map((item) => (
           <button key={item.path} type="button" onClick={() => onAction('upload', item)}>
             Upload to {item.name}
@@ -138,21 +159,27 @@ it('navigates from the DSH project directory to shared root and uploads into the
     );
   });
   expect(listFiles).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/by/.shared/project_12/' }));
-  expect(ensureFolder).toHaveBeenCalledWith({ resourceId: '42', path: '/by/.shared/project_12/' });
-  expect(jest.mocked(ensureFolder).mock.invocationCallOrder[0]).toBeLessThan(
-    jest.mocked(listFiles).mock.invocationCallOrder[0]
-  );
+  expect(ensureFolder).not.toHaveBeenCalled();
   expect(screen.getByText('测试项目')).toBeInTheDocument();
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: '本地共享' }));
   });
   expect(listFiles).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/by/.shared/' }));
-  expect(ensureFolder).toHaveBeenCalledTimes(1);
+  expect(ensureFolder).not.toHaveBeenCalled();
   const input = screen
     .getByRole('region', { name: 'File space' })
     .querySelector<HTMLInputElement>('input[type="file"]');
   await chooseFiles(input!, [createFile('root.pdf', 1)]);
-  expect(uploadFiles).toHaveBeenCalledWith('42', '/by/.shared/', expect.any(Array));
+  expect(ensureFolder).toHaveBeenCalledTimes(1);
+  expect(ensureFolder).toHaveBeenCalledWith({ resourceId: '42', path: '/by/.shared/' });
+  expect(uploadFiles).toHaveBeenCalledWith(
+    '42',
+    '/by/.shared/',
+    expect.any(Array),
+    expect.any(Function),
+    undefined,
+    expect.objectContaining({ ownerKey: 'user-a' })
+  );
 });
 
 it('resolves project folder labels after returning to shared root and preserves physical paths when entering', async () => {
@@ -193,20 +220,24 @@ it('resolves project folder labels after returning to shared root and preserves 
 });
 
 it('opens the current session directly when clicking the virtual sessions directory', async () => {
-  jest.mocked(listFiles).mockImplementation(async ({ path }) =>
-    path === '/by/.sessions/' ? [{ name: '8798', path: '/by/.sessions/8798/', isDir: true }] : []
-  );
+  jest
+    .mocked(listFiles)
+    .mockImplementation(async ({ path }) =>
+      path === '/by/.sessions/' ? [{ name: '8798', path: '/by/.sessions/8798/', isDir: true }] : []
+    );
   await act(async () => {
     render(
       <FileResourcePanel
         scope="shared"
         sessionId="8798"
         projectId={-1}
-        project={{
-          projectId: '-1',
-          projectName: '默认项目',
-          sessions: [{ sessionId: '8798', sessionName: '你好' }],
-        } as any}
+        project={
+          {
+            projectId: '-1',
+            projectName: '默认项目',
+            sessions: [{ sessionId: '8798', sessionName: '你好' }],
+          } as any
+        }
         runtimeType="dsh"
         resourceId="42"
         onOpenDetail={jest.fn()}
@@ -246,7 +277,7 @@ it('returns from the virtual sessions directory to the DSH project root', async 
     fireEvent.click(screen.getByRole('button', { name: '默认项目' }));
   });
 
-  expect(ensureFolder).toHaveBeenCalledTimes(2);
+  expect(ensureFolder).not.toHaveBeenCalled();
   expect(listFiles).toHaveBeenLastCalledWith(expect.objectContaining({ path: '/by/.shared/project_-1/' }));
   expect(screen.getByRole('button', { name: 'Open 过程文件' })).toBeInTheDocument();
 });
@@ -282,19 +313,23 @@ it('expands process files directly from the current session directory', async ()
 });
 
 it('does not reload the current session directory when live session names update', async () => {
-  jest.mocked(listFiles).mockImplementation(async ({ path }) =>
-    path === '/by/.sessions/' ? [{ name: '8798', path: '/by/.sessions/8798/', isDir: true }] : []
-  );
+  jest
+    .mocked(listFiles)
+    .mockImplementation(async ({ path }) =>
+      path === '/by/.sessions/' ? [{ name: '8798', path: '/by/.sessions/8798/', isDir: true }] : []
+    );
   const panel = () => (
     <FileResourcePanel
       scope="shared"
       sessionId="8798"
       projectId={-1}
-      project={{
-        projectId: '-1',
-        projectName: '默认项目',
-        sessions: [{ sessionId: '8798', sessionName: '' }],
-      } as any}
+      project={
+        {
+          projectId: '-1',
+          projectName: '默认项目',
+          sessions: [{ sessionId: '8798', sessionName: '' }],
+        } as any
+      }
       runtimeType="dsh"
       resourceId="42"
       onOpenDetail={jest.fn()}
@@ -328,11 +363,13 @@ it('does not ensure or reload the DSH project root when only live session names 
       scope="shared"
       sessionId="8798"
       projectId={-1}
-      project={{
-        projectId: '-1',
-        projectName: '默认项目',
-        sessions: [{ sessionId: '8798', sessionName: '' }],
-      } as any}
+      project={
+        {
+          projectId: '-1',
+          projectName: '默认项目',
+          sessions: [{ sessionId: '8798', sessionName: '' }],
+        } as any
+      }
       runtimeType="dsh"
       resourceId="42"
       onOpenDetail={jest.fn()}
@@ -342,7 +379,7 @@ it('does not ensure or reload the DSH project root when only live session names 
   await act(async () => {
     view = render(panel());
   });
-  expect(ensureFolder).toHaveBeenCalledTimes(1);
+  expect(ensureFolder).not.toHaveBeenCalled();
   expect(listFiles).toHaveBeenCalledTimes(1);
 
   mockSessions = [{ sessionId: '8798', sessionName: '你好' }];
@@ -350,7 +387,7 @@ it('does not ensure or reload the DSH project root when only live session names 
     view.rerender(panel());
   });
 
-  expect(ensureFolder).toHaveBeenCalledTimes(1);
+  expect(ensureFolder).not.toHaveBeenCalled();
   expect(listFiles).toHaveBeenCalledTimes(1);
 });
 
@@ -422,14 +459,14 @@ async function chooseFiles(input: HTMLInputElement, files: File[]) {
 
 function getUploadedRequest(scope: 'shared' | 'project') {
   if (scope === 'shared') {
-    const [resourceId, directoryPath, files] = jest.mocked(uploadFiles).mock.calls[0];
-    return { resourceId, directoryPath, files };
+    const [resourceId, directoryPath] = jest.mocked(uploadFiles).mock.calls[0];
+    return { resourceId, directoryPath, files: jest.mocked(uploadFiles).mock.calls.flatMap((call) => call[2]) };
   }
   const [formData] = jest.mocked(uploadKnowledgeFiles).mock.calls[0];
   return {
     resourceId: formData.get('resourceId'),
     directoryPath: formData.get('directoryPath'),
-    files: formData.getAll('files'),
+    files: jest.mocked(uploadKnowledgeFiles).mock.calls.flatMap(([form]) => form.getAll('files')),
   };
 }
 
@@ -449,6 +486,78 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.restoreAllMocks();
+});
+
+it.each([
+  ['project', 390, 'Open'],
+  ['project', 1440, 'Preview'],
+  ['shared', 390, 'Open'],
+  ['shared', 1440, 'Preview'],
+] as const)('%s 在 %i 像素视口下通过 %s 将超过 2 MiB 的 HTML 交给附件页签', async (scope, width, action) => {
+  const originalWidth = window.innerWidth;
+  const onOpenDetail = jest.fn();
+  const resourceId = scope === 'project' ? '42' : '43';
+  const sessionRoot = '/by/.sessions/7';
+  const isProcessFile = scope === 'shared' && action === 'Preview';
+  const sharedRoot = isProcessFile ? sessionRoot : '/by/.shared';
+  const directory = scope === 'project' ? '/reports' : `${sharedRoot}/reports`;
+  const path = `${directory}/report.html`;
+  const file = new Blob([new Uint8Array(3_100_000)], { type: 'text/html' });
+  const items = [{ path, name: 'report.html', size: file.size, isDir: false }];
+  jest.mocked(queryProjectCloudDrive).mockResolvedValue(items);
+  jest.mocked(listFiles).mockResolvedValue(items);
+  jest.mocked(downloadResourceFile).mockResolvedValue({ fileName: 'report.html', file });
+  jest.mocked(downloadFile).mockResolvedValue({ fileName: 'report.html', file });
+
+  function ResourcePreview() {
+    const onPreviewFile = useResourceAttachmentPreview(scope, resourceId, onOpenDetail);
+    return (
+      <FileResourcePanel
+        scope={scope}
+        sessionId="7"
+        resourceId={resourceId}
+        onOpenDetail={onOpenDetail}
+        canPreviewItem={(item) => !item.isDir}
+        onPreviewFile={onPreviewFile}
+      />
+    );
+  }
+
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+  try {
+    render(<ResourcePreview />);
+    fireEvent.click(await screen.findByRole('button', { name: `${action} report.html` }));
+    await waitFor(() => expect(onOpenDetail).toHaveBeenCalledTimes(1));
+
+    const [panel, options] = onOpenDetail.mock.calls[0];
+    expect(options).toEqual({ tabKey: `${scope}-file:${resourceId}:${path}`, title: 'report.html' });
+    if (!isValidElement<ComponentProps<typeof MessageFilePreviewPanel>>(panel)) throw new Error('Missing preview panel');
+    expect(panel.type).toBe(MessageFilePreviewPanel);
+    expect(panel.props.fileType).toBe('html');
+    await expect(panel.props.fileItem.downloadRequest?.()).resolves.toEqual({ file, fileName: 'report.html' });
+    await panel.props.fileItem.resolvePreviewResource?.('images/chart.svg');
+    const imagePath = `${directory}/images/chart.svg`;
+    if (scope === 'project') {
+      expect(downloadResourceFile).toHaveBeenNthCalledWith(1, { resourceId, directoryPath: path });
+      expect(downloadResourceFile).toHaveBeenNthCalledWith(2, { resourceId, directoryPath: imagePath });
+      expect(downloadFile).not.toHaveBeenCalled();
+    } else {
+      expect(downloadFile).toHaveBeenNthCalledWith(1, resourceId, path);
+      expect(downloadFile).toHaveBeenNthCalledWith(2, resourceId, imagePath);
+      expect(downloadResourceFile).not.toHaveBeenCalled();
+    }
+    if (isProcessFile) {
+      await panel.props.fileItem.resolvePreviewResource?.('../../root.svg');
+      expect(downloadFile).toHaveBeenLastCalledWith(resourceId, `${sessionRoot}/root.svg`);
+    }
+    panel.props.onOpenRelativeFile?.('details.html');
+    expect(onOpenDetail).toHaveBeenLastCalledWith(expect.anything(), {
+      tabKey: `${scope}-file:${resourceId}:${directory}/details.html`,
+      title: 'details.html',
+    });
+  } finally {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth });
+  }
 });
 
 describe.each(['shared', 'project'] as const)('%s file upload size validation', (scope) => {
@@ -531,4 +640,40 @@ describe('project cloud upload count validation', () => {
     expect(getUploadedRequest('shared').files).toEqual(files);
     expect(uploadKnowledgeFiles).not.toHaveBeenCalled();
   });
+});
+
+it('refreshes shared project files with one list request and no directory initialization', async () => {
+  jest.mocked(listFiles).mockResolvedValue([]);
+  const props = {
+    scope: 'shared' as const,
+    sessionId: '7',
+    projectId: 12,
+    project: { projectId: 12, projectName: '测试项目' } as any,
+    runtimeType: 'dsh' as const,
+    resourceId: '42',
+    onOpenDetail: jest.fn(),
+  };
+  const view = render(<FileResourcePanel {...props} refreshKey={1} />);
+  await act(async () => {});
+  expect(listFiles).toHaveBeenCalledTimes(1);
+  expect(ensureFolder).not.toHaveBeenCalled();
+  jest.mocked(listFiles).mockClear();
+  view.rerender(<FileResourcePanel {...props} refreshKey={2} />);
+  await act(async () => {});
+  expect(listFiles).toHaveBeenCalledTimes(1);
+  expect(listFiles).toHaveBeenCalledWith({ resourceId: '42', path: '/by/.shared/project_12/', language: 'zh-CN' });
+  expect(ensureFolder).not.toHaveBeenCalled();
+});
+
+it('reports explicit write initialization failures without uploading or treating access failure as an empty directory', async () => {
+  jest.mocked(listFiles).mockResolvedValue([]);
+  jest.mocked(ensureFolder).mockRejectedValueOnce(new Error('Forbidden'));
+  const view = render(<FileResourcePanel scope="shared" sessionId="7" resourceId="42" onOpenDetail={jest.fn()} />);
+  await act(async () => {});
+  expect(ensureFolder).not.toHaveBeenCalled();
+  await chooseFiles(view.container.querySelector('input[type="file"]')!, [createFile('report.pdf', MB)]);
+  expect(ensureFolder).toHaveBeenCalledTimes(1);
+  expect(uploadFiles).not.toHaveBeenCalled();
+  expect(message.error).toHaveBeenCalledWith('Forbidden');
+  expect(listFiles).toHaveBeenCalledTimes(1);
 });

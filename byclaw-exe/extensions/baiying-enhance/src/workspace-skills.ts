@@ -277,6 +277,13 @@ export async function mergeWorkspaceSkillsIntoManagedAgents<T extends AgentWithS
     : [];
   const pluginSkills = await scanSkillRoot(resolvePluginSkillsDir());
   const hubSkills = await scanSkillRoot(path.join(resolveStateDir(), SKILLS_DIR_NAME));
+  // OpenClaw registers one entry per frontmatter name. Do not enable a name whose Hub package is ambiguous.
+  const seenHubNames = new Set<string>();
+  const conflictingHubNames = new Set<string>();
+  for (const skill of hubSkills) {
+    if (seenHubNames.has(skill.skillName)) conflictingHubNames.add(skill.skillName);
+    seenHubNames.add(skill.skillName);
+  }
 
   const out: T[] = [];
   for (const agent of params.managed) {
@@ -285,7 +292,8 @@ export async function mergeWorkspaceSkillsIntoManagedAgents<T extends AgentWithS
     const baseSkills = resolveSkillNamesFromRoots(agent.listEntry.skills ?? [], [...pluginSkills, ...hubSkills]);
     const extraSkills = await scanWorkspaceSkillNamesByPaths(workspaceDir, agent.extraSkillPaths);
     const agentSkills = await scanWorkspaceSkillNames(workspaceDir);
-    const skills = mergeSkillNames(CORE_BUNDLED_SKILLS, baseSkills, extraSkills, agentSkills, sharedSkills);
+    const skills = mergeSkillNames(CORE_BUNDLED_SKILLS, baseSkills, extraSkills, agentSkills, sharedSkills)
+      .filter(name => !conflictingHubNames.has(name));
     out.push({
       ...agent,
       listEntry: {

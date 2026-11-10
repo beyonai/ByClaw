@@ -460,6 +460,8 @@
   </div>
   <script type="module">
     import RFB from './core/rfb.js';
+    import { createConnectionBridge } from './connection-bridge.js';
+    const connectionBridge = createConnectionBridge(window);
 
     const screenEl = document.getElementById('screen');
     const overlay = document.getElementById('overlay');
@@ -599,6 +601,7 @@
     }
 
     function connect() {
+      const attempt = connectionBridge.begin();
       closePanels();
       if (rfb) {
         try { rfb.disconnect(); } catch (_) { /* ignore */ }
@@ -615,6 +618,8 @@
         applySettings();
 
         rfb.addEventListener('connect', () => {
+          if (!connectionBridge.isCurrent(attempt)) return;
+          connectionBridge.update(attempt, 'connected');
           setStatus('connected', '已连接');
           hideOverlay();
           btnReconnect.disabled = false;
@@ -623,7 +628,9 @@
         });
 
         rfb.addEventListener('disconnect', (e) => {
+          if (!connectionBridge.isCurrent(attempt)) return;
           const clean = e.detail && e.detail.clean;
+          connectionBridge.update(attempt, 'disconnected', clean);
           setStatus('error', clean ? '已断开' : '连接中断');
           showOverlay(clean ? '连接已断开' : '连接中断，请点击重新连接');
           btnReconnect.disabled = false;
@@ -631,6 +638,7 @@
         });
 
         rfb.addEventListener('clipboard', (e) => {
+          if (!connectionBridge.isCurrent(attempt)) return;
           if (e.detail && e.detail.text) {
             clipboardText.value = e.detail.text;
           }

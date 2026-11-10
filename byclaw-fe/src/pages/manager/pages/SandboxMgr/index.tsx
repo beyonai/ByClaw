@@ -26,6 +26,7 @@ import {
 } from '@ant-design/icons';
 import { useDispatch, useIntl, useSelector } from '@umijs/max';
 import {
+  Alert,
   Button,
   Col,
   Drawer,
@@ -51,12 +52,24 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatWorkerLeaseTtl, getWorkerLivenessStatus } from './sandboxLivenessUtils';
 import {
   buildServiceSpecPayload,
+  buildServiceSpecEnabledPayload,
+  buildToolSandboxPayload,
+  getServiceSpecDimension,
+  getToolSandboxMetadata,
+  isServiceSpecEnabled,
+  isValidToolCover,
+  TOOL_SANDBOX_CONTRACT,
+  type ServiceSpecDimension,
   formatJsonIfValid,
   isServiceSpecAutoStartEnabled,
   type ServiceSpecConfig,
 } from './serviceSpecUtils';
 
 import EndpointLinks from './EndpointLinks';
+import SandboxLifetime from './SandboxLifetime';
+import ServiceSpecCatalog from './ServiceSpecCatalog';
+import ToolSandboxCover from './ToolSandboxCover';
+import { applyBuiltinToolSandboxPreset, BUILTIN_TOOL_SANDBOX_PRESETS } from './toolSandboxPresets';
 import RecoveryPanel from './RecoveryPanel';
 import SharedConfigPanel from './SharedConfig';
 import TemplateRebuildActions, { useTemplateRebuildSupport } from './TemplateRebuildActions';
@@ -297,8 +310,10 @@ const SandboxMgr = () => {
   tenantPermissionRef.current = canViewTenantResources;
   const [pageInfo, setPageInfo] = useState({ pageIndex: 1, pageSize: 20, total: 0, totalPage: 0 });
   const [keyword, setKeyword] = useState('');
-  const [status, setStatus] = useState('');
-  const [providerStatus, setProviderStatus] = useState('');
+  const [status, setStatus] = useState('RUNNING');
+  const [providerStatus, setProviderStatus] = useState('RUNNING');
+  const [sandboxType, setSandboxType] = useState('');
+  const [sandboxTypes, setSandboxTypes] = useState<string[]>([]);
   const [resourceScope, setOwnerScope] = useState<'USER' | 'TENANT'>(canViewTenantResources ? 'TENANT' : 'USER');
   const ownerScope = canViewTenantResources ? resourceScope : 'USER';
   const [enterpriseId, setEnterpriseId] = useState<string | undefined>();
@@ -322,6 +337,12 @@ const SandboxMgr = () => {
   const [maximizedField, setMaximizedField] = useState<'specJson' | 'templateJson' | null>(null);
   const [editingSpec, setEditingSpec] = useState<ServiceSpecItem | null>(null);
   const [specForm] = Form.useForm();
+  const [specDimension, setSpecDimension] = useState<ServiceSpecDimension>('USER');
+  const formDimension = Form.useWatch('dimension', specForm) as ServiceSpecDimension | undefined;
+  const formServiceKey = Form.useWatch('serviceKey', specForm);
+  const builtinToolPreset = BUILTIN_TOOL_SANDBOX_PRESETS.find(
+    (preset) => preset.serviceKey === formServiceKey || preset.aliases.includes(formServiceKey)
+  );
   const [savingSpec, setSavingSpec] = useState(false);
   const [updatingSpecKey, setUpdatingSpecKey] = useState<string | null>(null);
 
@@ -367,12 +388,18 @@ const SandboxMgr = () => {
     keyword?: string;
     status?: string;
     providerStatus?: string;
+    sandboxType?: string;
     ownerScope?: 'USER' | 'TENANT';
     enterpriseId?: string;
   }>({});
   const watchedProfileKey = Form.useWatch('profileKey', resizeForm);
   const watchedResizeType = Form.useWatch('resizeType', resizeForm) || 'IN_PLACE';
-  const targetProfile = profileList.find((item) => item.profileKey === watchedProfileKey);
+  const resizeServiceType =
+    selectedResizeRecord?.serviceType || selectedResizeRecord?.sandboxType || DEFAULT_SERVICE_TYPE;
+  const targetProfile = profileList.find(
+    (item) => item.serviceType === resizeServiceType && item.profileKey === watchedProfileKey
+  );
+  const watermarkServiceType = Form.useWatch('serviceType', watermarkForm) || DEFAULT_SERVICE_TYPE;
 
   const getResourceInfo = (requests?: string | null, limits?: string | null) => {
     const requestObj = parseJsonObject(requests);
@@ -537,7 +564,8 @@ const SandboxMgr = () => {
       silent?: boolean,
       scope = ownerScope,
       tenantId = enterpriseId,
-      liveStatus = providerStatus
+      liveStatus = providerStatus,
+      type = sandboxType
     ) => {
       const p = {
         pageIndex: myPageInfo.pageIndex,
@@ -545,6 +573,7 @@ const SandboxMgr = () => {
         keyword: kw,
         status: st,
         providerStatus: liveStatus || undefined,
+        sandboxType: type || undefined,
         ownerScope: canViewTenantResources ? scope : 'USER',
         enterpriseId: canViewTenantResources && scope === 'TENANT' ? tenantId : undefined,
       };
@@ -560,6 +589,7 @@ const SandboxMgr = () => {
           if (requestRevision !== getMultiTenancyRevision() || canViewTenantResources !== tenantPermissionRef.current)
             return;
           setList(data?.list || []);
+          setSandboxTypes(data?.sandboxTypes || []);
           setPageInfo((prev) => ({
             ...prev,
             pageIndex: data?.pageIndex || myPageInfo.pageIndex,
@@ -576,7 +606,7 @@ const SandboxMgr = () => {
         },
       });
     },
-    [dispatch, ownerScope, enterpriseId, canViewTenantResources, providerStatus]
+    [dispatch, ownerScope, enterpriseId, canViewTenantResources, providerStatus, sandboxType]
   );
 
   useEffect(() => {
@@ -762,11 +792,11 @@ const SandboxMgr = () => {
   }, [dispatch]);
 
   const loadProfileList = useCallback(
-    (serviceType = DEFAULT_SERVICE_TYPE, enabledOnly = false) => {
+    (serviceType?: string, enabledOnly = false) => {
       setProfileLoading(true);
       dispatch({
         type: 'sandboxMgr/listServiceProfiles',
-        payload: { serviceType, enabledOnly },
+        payload: { ...(serviceType ? { serviceType } : { allServiceTypes: true }), enabledOnly },
         success: (data: ServiceProfileItem[]) => {
           setProfileList(data || []);
           setProfileLoading(false);
@@ -856,25 +886,44 @@ const SandboxMgr = () => {
     setResizeRecords([]);
   }, [profileForm, resizeForm, specForm, watermarkForm]);
 
-  const handleAddSpec = useCallback(() => {
-    setEditingSpec(null);
-    specForm.setFieldsValue({
-      serviceKey: '',
-      specJson: '',
-      templateJson: '',
-      enabled: true,
-    });
-    setSpecFormVisible(true);
-  }, [specForm]);
+  const handleAddSpec = useCallback(
+    (dimension: ServiceSpecDimension = 'USER') => {
+      setEditingSpec(null);
+      specForm.resetFields();
+      specForm.setFieldsValue({
+        serviceKey: '',
+        displayName: '',
+        serviceType: '',
+        dimension,
+        specJson:
+          dimension === 'TOOL'
+            ? JSON.stringify({ runtimeOptions: { toolSandbox: { contract: TOOL_SANDBOX_CONTRACT } } }, null, 2)
+            : '',
+        templateJson: '',
+        enabled: true,
+        autoStart: true,
+        description: '',
+        capabilities: [],
+        coverImage: '',
+      });
+      setSpecFormVisible(true);
+    },
+    [specForm]
+  );
 
   const handleEditSpec = useCallback(
     (record: ServiceSpecItem) => {
       setEditingSpec(record);
       specForm.setFieldsValue({
         serviceKey: record.serviceKey,
+        displayName: record.displayName || '',
+        serviceType: record.serviceType || '',
+        dimension: getServiceSpecDimension(record),
+        ...getToolSandboxMetadata(record),
         specJson: formatJsonIfValid(record.specJson),
         templateJson: record.templateJson || '',
-        enabled: isServiceSpecAutoStartEnabled(record.enabled),
+        enabled: isServiceSpecEnabled(record),
+        autoStart: isServiceSpecAutoStartEnabled(record),
       });
       setSpecFormVisible(true);
     },
@@ -895,39 +944,81 @@ const SandboxMgr = () => {
   );
 
   const handleSaveSpec = useCallback(() => {
-    specForm.validateFields().then((values) => {
-      setSavingSpec(true);
-      dispatch({
-        type: 'sandboxMgr/saveServiceSpec',
-        payload: {
+    specForm
+      .validateFields()
+      .then((values) => {
+        const spec: ServiceSpecItem = {
+          ...editingSpec,
           serviceKey: values.serviceKey,
+          displayName: values.displayName,
+          serviceType: values.serviceType,
+          ownerScope: values.dimension === 'TOOL' ? editingSpec?.ownerScope || 'USER' : values.dimension,
           specJson: values.specJson,
           templateJson: values.templateJson,
           enabled: values.enabled === false ? 0 : 1,
-        },
+        };
+        let payload = spec;
+        if (values.dimension === 'USER') payload = buildServiceSpecPayload(spec, values.autoStart !== false);
+        if (values.dimension === 'TOOL')
+          payload = buildToolSandboxPayload(spec, {
+            description: values.description,
+            capabilities: values.capabilities,
+            coverImage: values.coverImage,
+            enabled: values.enabled !== false,
+          });
+        setSavingSpec(true);
+        dispatch({
+          type: 'sandboxMgr/saveServiceSpec',
+          payload,
+          success: () => {
+            setSavingSpec(false);
+            setSpecFormVisible(false);
+            specForm.resetFields();
+            loadSpecList();
+          },
+          fail: () => {
+            setSavingSpec(false);
+          },
+        });
+      })
+      .catch(() => {
+        // Validation errors are displayed beside the form fields.
+      });
+  }, [dispatch, specForm, loadSpecList, editingSpec]);
+
+  const handleSpecEnabledChange = useCallback(
+    (record: ServiceSpecItem, checked: boolean) => {
+      const payload = buildServiceSpecEnabledPayload(record, checked);
+      setUpdatingSpecKey(record.serviceKey);
+      setSpecList((current) => current.map((item) => (item.serviceKey === record.serviceKey ? payload : item)));
+      dispatch({
+        type: 'sandboxMgr/saveServiceSpec',
+        payload,
         success: () => {
-          setSavingSpec(false);
-          setSpecFormVisible(false);
-          specForm.resetFields();
-          loadSpecList();
+          setUpdatingSpecKey(null);
+          message.success(intl.formatMessage({ id: 'sandboxMgr.market.enabledSaveSuccess' }));
         },
         fail: () => {
-          setSavingSpec(false);
+          setUpdatingSpecKey(null);
+          setSpecList((current) => current.map((item) => (item.serviceKey === record.serviceKey ? record : item)));
+          message.error(intl.formatMessage({ id: 'sandboxMgr.market.enabledSaveFailed' }));
         },
       });
-    });
-  }, [dispatch, specForm, loadSpecList]);
+    },
+    [dispatch, intl]
+  );
 
   const handleSpecAutoStartChange = useCallback(
     (record: ServiceSpecItem, checked: boolean) => {
-      const previousEnabled = record.enabled;
+      const previousSpecJson = record.specJson;
+      const payload = buildServiceSpecPayload(record, checked);
       setUpdatingSpecKey(record.serviceKey);
       setSpecList((current) =>
-        current.map((item) => (item.serviceKey === record.serviceKey ? { ...item, enabled: checked ? 1 : 0 } : item))
+        current.map((item) => (item.serviceKey === record.serviceKey ? { ...item, specJson: payload.specJson } : item))
       );
       dispatch({
         type: 'sandboxMgr/saveServiceSpec',
-        payload: buildServiceSpecPayload(record, checked),
+        payload,
         success: () => {
           setUpdatingSpecKey(null);
           message.success(intl.formatMessage({ id: 'sandboxMgr.config.autoStartSaveSuccess' }));
@@ -936,7 +1027,7 @@ const SandboxMgr = () => {
           setUpdatingSpecKey(null);
           setSpecList((current) =>
             current.map((item) =>
-              item.serviceKey === record.serviceKey ? { ...item, enabled: previousEnabled } : item
+              item.serviceKey === record.serviceKey ? { ...item, specJson: previousSpecJson } : item
             )
           );
           message.error(intl.formatMessage({ id: 'sandboxMgr.config.autoStartSaveFailed' }));
@@ -1584,6 +1675,13 @@ const SandboxMgr = () => {
       render: (value: string | number) => formatTimestamp(value),
     },
     {
+      title: intl.formatMessage({ id: 'sandboxMgr.table.lifetime' }),
+      dataIndex: 'lifetime',
+      align: 'center' as const,
+      width: 180,
+      render: (_: unknown, record: SsSandboxRecord) => <SandboxLifetime record={record} />,
+    },
+    {
       title: intl.formatMessage({ id: 'sandboxMgr.table.lastAccessTime' }),
       dataIndex: 'lastAccessTime',
       align: 'center' as const,
@@ -2047,7 +2145,9 @@ const SandboxMgr = () => {
         (PROFILE_ORDER[(a.profileKey || '').toLowerCase()] || a.sortOrder || 999) -
         (PROFILE_ORDER[(b.profileKey || '').toLowerCase()] || b.sortOrder || 999)
     );
-  const enabledProfileList = sortedProfileList.filter((item) => item.enabled !== 0 && item.resizeEnabled !== 0);
+  const enabledProfileList = sortedProfileList.filter(
+    (item) => item.serviceType === resizeServiceType && item.enabled !== 0 && item.resizeEnabled !== 0
+  );
   const tenantColumnKeys = new Set([
     'id',
     'enterpriseId',
@@ -2057,6 +2157,7 @@ const SandboxMgr = () => {
     'status',
     'providerStatus',
     'createTime',
+    'lifetime',
     'releaseTime',
     'releaseReason',
     'action',
@@ -2113,7 +2214,7 @@ const SandboxMgr = () => {
       {scopeTabs}
       <Row gutter={16} align="middle">
         <Col flex="auto">
-          <Space size="middle">
+          <Space size="middle" wrap>
             <Input.Search
               placeholder={
                 ownerScope === 'TENANT'
@@ -2160,6 +2261,31 @@ const SandboxMgr = () => {
                 </Option>
               ))}
             </Select>
+            <Select
+              aria-label={intl.formatMessage({ id: 'sandboxMgr.filter.sandboxType' })}
+              value={sandboxType}
+              showSearch
+              style={{ width: 180 }}
+              onChange={(value: string) => {
+                setSandboxType(value);
+                loadData(
+                  { ...pageInfo, pageIndex: 1 },
+                  keyword,
+                  status,
+                  false,
+                  ownerScope,
+                  enterpriseId,
+                  providerStatus,
+                  value
+                );
+              }}
+              options={[
+                { value: '', label: intl.formatMessage({ id: 'sandboxMgr.filter.allTypes' }) },
+                ...[
+                  ...new Set([...sandboxTypes, ...['openclaw', 'byclaw-dsh', 'byclaw-sandbox', 'tenant-opengauss']]),
+                ].map((value) => ({ value, label: value })),
+              ]}
+            />
             {ownerScope === 'TENANT' && (
               <Select
                 allowClear
@@ -2245,7 +2371,7 @@ const SandboxMgr = () => {
         title={intl.formatMessage({ id: 'sandboxMgr.config.title' })}
         open={specDrawerOpen}
         onClose={handleCloseSpecDrawer}
-        width={960}
+        width={1040}
         destroyOnClose
       >
         <Tabs
@@ -2258,80 +2384,22 @@ const SandboxMgr = () => {
               children: (
                 <div className={styles.specDrawerContent}>
                   {templateRebuild.error && <Typography.Text type="warning">{templateRebuild.error}</Typography.Text>}
-                  <Row justify="end" style={{ marginBottom: 16 }}>
-                    <Button type="primary" icon={<PlusOutlined />} onClick={handleAddSpec}>
-                      {intl.formatMessage({ id: 'sandboxMgr.config.add' })}
-                    </Button>
-                  </Row>
-                  <Table<ServiceSpecItem>
-                    rowKey="serviceKey"
-                    dataSource={specList}
+                  <ServiceSpecCatalog
+                    specs={specList}
                     loading={specLoading}
-                    pagination={false}
-                    columns={[
-                      {
-                        title: intl.formatMessage({ id: 'sandboxMgr.config.serviceKey' }),
-                        dataIndex: 'serviceKey',
-                        width: 200,
-                        ellipsis: true,
-                      },
-                      {
-                        title: intl.formatMessage({ id: 'sandboxMgr.config.specJson' }),
-                        dataIndex: 'specJson',
-                        ellipsis: true,
-                        render: (value: string) => (
-                          <Typography.Paragraph ellipsis={{ rows: 2 }} style={{ margin: 0 }}>
-                            {value}
-                          </Typography.Paragraph>
-                        ),
-                      },
-                      {
-                        title: intl.formatMessage({ id: 'sandboxMgr.config.autoStart' }),
-                        dataIndex: 'enabled',
-                        width: 100,
-                        align: 'center',
-                        render: (value: ServiceSpecItem['enabled'], record: ServiceSpecItem) => (
-                          <Tooltip title={intl.formatMessage({ id: 'sandboxMgr.config.autoStartTip' })}>
-                            <Switch
-                              size="small"
-                              checked={isServiceSpecAutoStartEnabled(value)}
-                              loading={updatingSpecKey === record.serviceKey}
-                              disabled={updatingSpecKey !== null}
-                              onChange={(checked) => handleSpecAutoStartChange(record, checked)}
-                            />
-                          </Tooltip>
-                        ),
-                      },
-                      {
-                        title: intl.formatMessage({ id: 'sandboxMgr.table.action' }),
-                        width: templateRebuild.supported ? 390 : 150,
-                        align: 'center',
-                        render: (_: any, record: ServiceSpecItem) => (
-                          <Space size="small">
-                            <TemplateRebuildActions
-                              serviceKey={record.serviceKey}
-                              supported={templateRebuild.supported}
-                            />
-                            <Button
-                              size="small"
-                              type="link"
-                              icon={<EditOutlined />}
-                              onClick={() => handleEditSpec(record)}
-                            >
-                              {intl.formatMessage({ id: 'SystemParams.params.edit' })}
-                            </Button>
-                            <Popconfirm
-                              title={intl.formatMessage({ id: 'sandboxMgr.config.deleteConfirm' })}
-                              onConfirm={() => handleDeleteSpec(record)}
-                            >
-                              <Button size="small" type="link" danger icon={<DeleteOutlined />}>
-                                {intl.formatMessage({ id: 'SystemParams.params.delete' })}
-                              </Button>
-                            </Popconfirm>
-                          </Space>
-                        ),
-                      },
-                    ]}
+                    dimension={specDimension}
+                    onDimensionChange={setSpecDimension}
+                    updatingKey={updatingSpecKey}
+                    onAdd={handleAddSpec}
+                    onEdit={handleEditSpec}
+                    onDelete={handleDeleteSpec}
+                    onEnabledChange={handleSpecEnabledChange}
+                    onAutoStartChange={handleSpecAutoStartChange}
+                    renderRebuildActions={
+                      templateRebuild.supported
+                        ? (record) => <TemplateRebuildActions serviceKey={record.serviceKey} supported />
+                        : undefined
+                    }
                   />
                 </div>
               ),
@@ -2741,6 +2809,16 @@ const SandboxMgr = () => {
         width={720}
       >
         <Form form={specForm} layout="vertical" preserve={false}>
+          <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.dimension.label' })} name="dimension">
+            <Select
+              disabled
+              options={(['USER', 'TENANT', 'SHARED', 'TOOL'] as ServiceSpecDimension[]).map((dimension) => ({
+                value: dimension,
+                label: intl.formatMessage({ id: `sandboxMgr.dimension.${dimension}` }),
+              }))}
+            />
+          </Form.Item>
+
           <Form.Item
             label={intl.formatMessage({ id: 'sandboxMgr.config.serviceKey' })}
             name="serviceKey"
@@ -2752,14 +2830,116 @@ const SandboxMgr = () => {
             />
           </Form.Item>
 
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.market.displayName' })} name="displayName">
+                <Input maxLength={128} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.market.serviceType' })} name="serviceType">
+                <Input maxLength={64} />
+              </Form.Item>
+            </Col>
+          </Row>
+          {builtinToolPreset && (
+            <Form.Item>
+              <Alert
+                type="info"
+                showIcon
+                message={intl.formatMessage(
+                  { id: 'sandboxMgr.market.presetResources' },
+                  { cpu: builtinToolPreset.resources.limits.cpu, memory: builtinToolPreset.resources.limits.memory }
+                )}
+                description={
+                  <Space direction="vertical">
+                    <span>{builtinToolPreset.resources.guidance}</span>
+                    <span>{intl.formatMessage({ id: 'sandboxMgr.market.presetResourcesTip' })}</span>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        try {
+                          const current = specForm.getFieldsValue();
+                          const updated = applyBuiltinToolSandboxPreset(
+                            {
+                              ...editingSpec,
+                              serviceKey: current.serviceKey,
+                              specJson: current.specJson,
+                              enabled: current.enabled === false ? 0 : 1,
+                            },
+                            window.publicPath || '/'
+                          );
+                          specForm.setFieldsValue({
+                            dimension: 'TOOL',
+                            displayName: updated.displayName,
+                            ...getToolSandboxMetadata(updated),
+                            specJson: formatJsonIfValid(updated.specJson),
+                          });
+                        } catch {
+                          message.error(intl.formatMessage({ id: 'sandboxMgr.market.invalidSpec' }));
+                        }
+                      }}
+                    >
+                      {intl.formatMessage({ id: 'sandboxMgr.market.applyPreset' })}
+                    </Button>
+                  </Space>
+                }
+              />
+            </Form.Item>
+          )}
+          {formDimension === 'TOOL' && (
+            <>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.market.description' })} name="description">
+                <Input.TextArea
+                  rows={3}
+                  maxLength={2000}
+                  showCount
+                  placeholder={intl.formatMessage({ id: 'sandboxMgr.market.descriptionPlaceholder' })}
+                />
+              </Form.Item>
+              <Form.Item label={intl.formatMessage({ id: 'sandboxMgr.market.capabilities' })} name="capabilities">
+                <Select
+                  mode="tags"
+                  tokenSeparators={[',', '，']}
+                  placeholder={intl.formatMessage({ id: 'sandboxMgr.market.capabilitiesPlaceholder' })}
+                />
+              </Form.Item>
+              <Form.Item
+                label={intl.formatMessage({ id: 'sandboxMgr.market.cover' })}
+                name="coverImage"
+                extra={intl.formatMessage({ id: 'sandboxMgr.market.coverTip' })}
+                rules={[
+                  {
+                    validator: (_rule, value) =>
+                      !value || isValidToolCover(value)
+                        ? Promise.resolve()
+                        : Promise.reject(new Error(intl.formatMessage({ id: 'sandboxMgr.market.coverInvalid' }))),
+                  },
+                ]}
+              >
+                <ToolSandboxCover />
+              </Form.Item>
+            </>
+          )}
+
           <Form.Item
-            label={intl.formatMessage({ id: 'sandboxMgr.config.autoStart' })}
+            label={intl.formatMessage({ id: 'sandboxMgr.profile.enabled' })}
             name="enabled"
             valuePropName="checked"
-            tooltip={intl.formatMessage({ id: 'sandboxMgr.config.autoStartTip' })}
           >
             <Switch />
           </Form.Item>
+
+          {formDimension === 'USER' && (
+            <Form.Item
+              label={intl.formatMessage({ id: 'sandboxMgr.config.autoStart' })}
+              name="autoStart"
+              valuePropName="checked"
+              tooltip={intl.formatMessage({ id: 'sandboxMgr.config.autoStartTip' })}
+            >
+              <Switch />
+            </Form.Item>
+          )}
 
           <Form.Item
             label={
@@ -2817,7 +2997,10 @@ const SandboxMgr = () => {
                 validator: (_, value) => {
                   if (!value) return Promise.resolve();
                   try {
-                    JSON.parse(value);
+                    const parsed = JSON.parse(value);
+                    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                      return Promise.reject(new Error(intl.formatMessage({ id: 'sandboxMgr.market.invalidSpec' })));
+                    }
                     return Promise.resolve();
                   } catch (e) {
                     return Promise.reject(new Error(intl.formatMessage({ id: 'sandboxMgr.config.invalidJson' })));
@@ -3119,15 +3302,17 @@ const SandboxMgr = () => {
                   placeholder={intl.formatMessage({ id: 'sandboxMgr.health.profileKeyPlaceholder' })}
                   optionLabelProp="label"
                 >
-                  {sortedProfileList.map((item) => (
-                    <Option
-                      key={`${item.serviceType}-${item.profileKey}`}
-                      value={item.profileKey}
-                      label={getProfileLabel(item.profileKey, item.serviceType)}
-                    >
-                      {renderProfileOption(item)}
-                    </Option>
-                  ))}
+                  {sortedProfileList
+                    .filter((item) => item.serviceType === watermarkServiceType)
+                    .map((item) => (
+                      <Option
+                        key={`${item.serviceType}-${item.profileKey}`}
+                        value={item.profileKey}
+                        label={getProfileLabel(item.profileKey, item.serviceType)}
+                      >
+                        {renderProfileOption(item)}
+                      </Option>
+                    ))}
                 </Select>
               </Form.Item>
             </Col>

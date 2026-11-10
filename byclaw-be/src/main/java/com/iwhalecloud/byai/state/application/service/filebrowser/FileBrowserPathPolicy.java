@@ -32,6 +32,7 @@ public final class FileBrowserPathPolicy {
 
     static boolean isProtected(String path) {
         String normalized = normalize(path);
+        if (java.util.Arrays.asList(normalized.split("/")).contains(".byclaw-uploads")) return true;
         return PROTECTED_ROOTS.stream()
             .anyMatch(root -> normalized.equals(root) || normalized.startsWith(root + "/"));
     }

@@ -19,6 +19,7 @@ function setup() {
     })),
     member: vi.fn(async () => ({ memObjId: "20", userRole: "MEMBER" })),
     groupMemberApiKey: vi.fn(async () => null),
+    groupMemberId: vi.fn(async () => null),
     members: vi.fn(async () => []),
     acknowledgements: vi.fn(async () => []),
     extensions: vi.fn(async () => []),
@@ -44,6 +45,22 @@ const message = (overrides: Row = {}) => ({
   ...overrides,
 });
 describe("tenant history use cases", () => {
+  it("returns only the authorized active membership ID when BE will read its Redis credential", async () => {
+    const { repo, service } = setup();
+    vi.mocked(repo.groupMemberId).mockResolvedValue("9007199254740993");
+    expect(await service.groupMemberApiKey("20", "30", true)).toEqual({
+      byaiSessionMemberId: "9007199254740993",
+      api_key: null,
+    });
+    expect(repo.groupMemberId).toHaveBeenCalledExactlyOnceWith("30", "20");
+    expect(repo.groupMemberApiKey).not.toHaveBeenCalled();
+    vi.mocked(repo.member).mockResolvedValue(null);
+    await expect(service.groupMemberApiKey("21", "30", true)).rejects.toThrow(
+      "RESOURCE_NOT_ACCESSIBLE",
+    );
+    expect(repo.groupMemberId).toHaveBeenCalledTimes(1);
+  });
+
   it("reads only the authorized actor's group credential through the private endpoint use case", async () => {
     const { repo, service } = setup();
     const credential = vi.fn(async () => "tenant-member-key");
@@ -150,10 +167,12 @@ describe("tenant history use cases", () => {
   });
   it("accepts Chinese names under the BE character limit", async () => {
     const { service } = setup();
-    await expect(service.groupNameCheck('20', '中'.repeat(50))).resolves.toEqual({
+    await expect(service.groupNameCheck("20", "中".repeat(50))).resolves.toEqual({
       exists: false,
     });
-    await expect(service.groupNameCheck('20', '中'.repeat(51))).rejects.toThrow('INVALID_SESSION_NAME');
+    await expect(service.groupNameCheck("20", "中".repeat(51))).rejects.toThrow(
+      "INVALID_SESSION_NAME",
+    );
   });
   it("normalizes group names and preserves active-name conflicts", async () => {
     const { repo, service } = setup();

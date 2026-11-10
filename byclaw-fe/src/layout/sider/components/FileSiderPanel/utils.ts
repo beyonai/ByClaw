@@ -31,7 +31,8 @@ export function isDirectory(item: FileBrowserItem) {
 }
 
 export function canPreviewFile(item: FileBrowserItem) {
-  return !isDirectory(item) && canPreviewName(item.name, item.size);
+  // 列表大小仅作展示，渲染器用实际读取的文件大小校验。
+  return !isDirectory(item) && canPreviewName(item.name);
 }
 
 export function unwrapListResponse<T>(res: any): T[] {

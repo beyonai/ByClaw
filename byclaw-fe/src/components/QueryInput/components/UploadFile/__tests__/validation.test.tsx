@@ -122,28 +122,39 @@ describe('chat attachment validation and upload errors', () => {
     ['文件大小超出限制，最大允许:10MB,当前文件大小:20.215MB', '文件大小超出限制，最大允许:10MB,当前文件大小:20.215MB'],
     [new Error('Network Error'), 'Network Error'],
     [undefined, 'upload.failed'],
-  ])('shows an upload rejection to the user and removes every failed attachment: %p', async (error, expected) => {
+  ])('shows an upload rejection and keeps each failed attachment available for retry: %p', async (error, expected) => {
     mockUploadFiles.mockRejectedValue(error);
     const { input, onCreate, onUpdate, onRemove, setSessionId } = renderUploader();
     fireEvent.change(input, {
       target: { files: [createFile('first.pdf', 100), createFile('second.pdf', 100)] },
     });
 
-    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect((await screen.findAllByText(expected)).length).toBeGreaterThan(0);
     expect(onCreate).toHaveBeenCalledTimes(2);
-    expect(onRemove).toHaveBeenCalledTimes(2);
-    onCreate.mock.calls.forEach(([payload]) => expect(onRemove).toHaveBeenCalledWith(payload));
-    expect(onUpdate).not.toHaveBeenCalled();
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(2));
+    expect(onRemove).not.toHaveBeenCalled();
+    onCreate.mock.calls.forEach(([payload]) =>
+      expect(onUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          uid: payload.uid,
+          status: 'error',
+          uploadError: expected,
+          retryUpload: expect.any(Function),
+        })
+      )
+    );
     expect(setSessionId).not.toHaveBeenCalled();
   });
 
-  it('cleans up an empty upload result instead of leaving the attachment uploading indefinitely', async () => {
+  it('retains an empty upload result as a retryable failed attachment', async () => {
     mockUploadFiles.mockResolvedValue({ uploadItems: [] });
     const { input, onUpdate, onRemove } = renderUploader();
     fireEvent.change(input, { target: { files: [createFile('document.pdf', 100)] } });
 
     expect(await screen.findByText('upload.failed')).toBeInTheDocument();
-    expect(onRemove).toHaveBeenCalledTimes(1);
-    expect(onUpdate).not.toHaveBeenCalled();
+    expect(onRemove).not.toHaveBeenCalled();
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'error', retryUpload: expect.any(Function) })
+    );
   });
 });

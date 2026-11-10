@@ -21,6 +21,10 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.web.server.ResponseStatusException;
 
 class AggregatedGroupChatServiceTest {
@@ -59,6 +63,59 @@ class AggregatedGroupChatServiceTest {
         assertThat(result.items().getFirst().getEnterpriseId()).isEqualTo(11L);
         assertThat(result.failedTenants()).singleElement().extracting("enterpriseId").isEqualTo("12");
         assertThat(result.partial()).isTrue();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "2026-11-03T11:52:51.416Z, 1793706771416",
+        "2026-11-03T19:52:51.416+08:00, 1793706771416",
+        "2026-11-03 19:52:51, 1793706771000"
+    })
+    void nodeDatesPreserveTheInstantAndPublicTimeFormat(String timestamp, long expectedMillis) throws Exception {
+        login(7L);
+        when(memberships.selectAvailableForUser(7L)).thenReturn(List.of(tenant("11", "企业")));
+        when(node.request(any(TenantRequestContext.class), eq("GET"),
+            eq("/internal/v1/group-chats?pageNum=1&pageSize=20"), eq(null), any()))
+            .thenReturn(Map.of("list", List.of(Map.of("sessionId", "1101", "latestMessageTime", timestamp))));
+
+        var result = service.list(20, null);
+
+        assertThat(result.failedTenants()).isEmpty();
+        assertThat(result.partial()).isFalse();
+        assertThat(result.items()).singleElement().satisfies(item ->
+            assertThat(item.getLatestMessageTime().getTime()).isEqualTo(expectedMillis));
+        // 对外继续使用北京时间且精确到秒，内部排序仍保留 Node 时间的毫秒精度。
+        ObjectMapper mapper = new ObjectMapper();
+        var json = mapper.readTree(mapper.writeValueAsString(result));
+        assertThat(json.path("items").get(0).path("latestMessageTime").asText())
+            .isEqualTo("2026-11-03 19:52:51");
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"invalid-time", "2026-99-03T11:52:51Z"})
+    void missingNodeDateRemainsNullAndInvalidDateFailsOnlyItsTenant(String timestamp) {
+        login(7L);
+        when(memberships.selectAvailableForUser(7L)).thenReturn(List.of(tenant("11", "企业")));
+        Map<String, Object> row = new java.util.HashMap<>();
+        row.put("sessionId", "1101");
+        row.put("latestMessageTime", timestamp);
+        when(node.request(any(TenantRequestContext.class), eq("GET"),
+            eq("/internal/v1/group-chats?pageNum=1&pageSize=20"), eq(null), any()))
+            .thenReturn(Map.of("list", List.of(row)));
+
+        var result = service.list(20, null);
+
+        if (timestamp == null) {
+            assertThat(result.failedTenants()).isEmpty();
+            assertThat(result.items()).singleElement().satisfies(item ->
+                assertThat(item.getLatestMessageTime()).isNull());
+        } else {
+            assertThat(result.items()).isEmpty();
+            assertThat(result.partial()).isTrue();
+            assertThat(result.failedTenants()).singleElement().extracting("reason")
+                .isEqualTo("TENANT_QUERY_FAILED");
+        }
     }
 
     @Test

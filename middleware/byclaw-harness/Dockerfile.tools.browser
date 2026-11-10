@@ -1,6 +1,23 @@
-# Build from the repository root; preserve the self-owned SSH/helper/PTC core.
-ARG TOOLS_IMAGE
-FROM ${TOOLS_IMAGE}
+# Repository-root context. Business dependencies are separate from the slim base.
+ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_base_slim
+ARG BROWSER_DONOR_IMAGE
+ARG INSTALLED_BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
+# Update runtime scripts and viewer assets in an already validated browser image.
+# Pin INSTALLED_BROWSER_IMAGE by digest; the default final target below is a full build.
+FROM ${INSTALLED_BROWSER_IMAGE} AS browser-runtime-update
+USER root
+COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
+COPY --chmod=0644 middleware/byclaw-harness/browser/novnc-index.html /opt/byclaw/novnc/index.html
+COPY --chmod=0644 middleware/builtin/runtime-tools/browser-viewer/connection-bridge.mjs /opt/byclaw/novnc/connection-bridge.js
+RUN test -x /usr/local/bin/byclaw-tool-slim-entrypoint \
+    && node -e 'if(require("/etc/byclaw-tool-sandbox/capabilities.json").purpose!=="browser")process.exit(1)'
+
+FROM ${BROWSER_DONOR_IMAGE} AS browser-runtime
+USER root
+COPY middleware/byclaw-harness/tool-sandbox/collect-browser-runtime.mjs /tmp/collect-browser-runtime.mjs
+RUN node /tmp/collect-browser-runtime.mjs /browser-payload
+
+FROM ${TOOLS_IMAGE} AS browser
 USER root
 ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     npm_config_registry=https://registry.npmmirror.com \
@@ -17,11 +34,58 @@ ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     HYPERFRAMES_BROWSER_PATH=/usr/local/bin/byclaw-playwright-chromium \
     HYPERFRAMES_FFMPEG_PATH=/usr/bin/ffmpeg \
     HYPERFRAMES_FFPROBE_PATH=/usr/bin/ffprobe
+COPY --from=browser-runtime /browser-payload/ /
+COPY --from=browser-runtime /ms-playwright/ /ms-playwright/
+COPY --from=browser-runtime /opt/nvm/current/lib/node_modules/playwright/ /opt/nvm/current/lib/node_modules/playwright/
+COPY --from=browser-runtime /opt/nvm/current/lib/node_modules/@sovovs/bycli/ /opt/nvm/current/lib/node_modules/@sovovs/bycli/
+COPY --from=browser-runtime /opt/byclaw/novnc/ /opt/byclaw/novnc/
+COPY --chmod=0644 middleware/byclaw-harness/browser/novnc-index.html /opt/byclaw/novnc/index.html
+COPY --chmod=0644 middleware/builtin/runtime-tools/browser-viewer/connection-bridge.mjs /opt/byclaw/novnc/connection-bridge.js
+COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-bycli-managed.py /usr/local/bin/byclaw-bycli-managed
+COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
+COPY --chmod=0755 middleware/byclaw-harness/scripts/tool-slim-entrypoint.sh /usr/local/bin/byclaw-tool-slim-entrypoint
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    BYCLAW_BROWSER_EXECUTABLE_PATH=/usr/local/bin/byclaw-playwright-chromium \
+    BYCLAW_BROWSER_NOVNC_DIR=/opt/byclaw/novnc \
+    BYCLAW_BROWSER_SOCKET=/run/byclaw-browser/browserd.sock \
+    BYCLAW_BROWSER_DOWNLOAD_ROOT=/run/byclaw-browser/downloads \
+    BYCLAW_BROWSER_SCREENSHOT_ROOT=/run/byclaw-browser/screenshots \
+    BYCLAW_BROWSER_SESSION_RUNTIME_ROOT=/run/byclaw-browser/sessions \
+    BYCLAW_BROWSER_USER_DATA_DIR=/by/.bycli/browser/user-data \
+    BYCLAW_BROWSER_EXTENSIONS=/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension \
+    BYCLAW_BROWSER_STARTUP=on-demand BYCLAW_BROWSER_VIEWER=shared-novnc \
+    BYCLAW_BYCLI_ENABLED=true BYCLAW_BROWSER_ON_TOOL_ENV=0 \
+    BYCLAW_BROWSER_IDLE_MS=30000 BYCLI_BROWSER_IDLE_TIMEOUT=900 BYCLI_DAEMON_HOST=0.0.0.0 \
+    BYCLAW_BROWSER_XVFB_SCREEN=1365x768x24 \
+    BYCLAW_BROWSER_DISPLAY_RANGE=100-199 BYCLAW_BROWSER_RFB_PORT_RANGE=5901-6000 \
+    BYCLAW_BROWSER_WEBSOCKIFY_PORT_RANGE=6101-6200 \
+    BYCLAW_BROWSER_VNC_WEB_PORT=8081 BYCLAW_BROWSER_VNC_WEB_LISTEN_ADDRESS=0.0.0.0
 COPY middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh /tmp/configure-cn-sources.sh
-RUN bash /tmp/configure-cn-sources.sh && rm /tmp/configure-cn-sources.sh
+RUN set -eux; \
+    ln -s ../lib/node_modules/playwright/cli.js /opt/nvm/current/bin/playwright; \
+    ln -s /usr/local/bin/byclaw-bycli-managed /opt/nvm/current/bin/bycli; \
+    bash /tmp/configure-cn-sources.sh; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        xvfb xauth x11vnc fontconfig fonts-liberation fonts-noto-cjk; \
+    python3 -m pip install --no-cache-dir websockify==0.13.0; \
+    playwright install-deps chromium; \
+    browser_path="$(node -e 'process.stdout.write(require("/opt/nvm/current/lib/node_modules/playwright").chromium.executablePath())')"; \
+    test -x "${browser_path}"; \
+    ln -s "${browser_path}" /usr/local/bin/byclaw-playwright-chromium; \
+    ln -s "${browser_path}" /usr/local/bin/chromium; \
+    ln -sfn /usr/local/bin/byclaw-tool-slim-entrypoint /usr/local/bin/byclaw-dsh-entrypoint; \
+    rm -rf /var/lib/apt/lists/* /root/.npm /root/.cache /tmp/configure-cn-sources.sh; \
+    chmod -R a+rX /ms-playwright; \
+    su -s /bin/sh byclaw -c 'node --input-type=module -e '\''await import("/opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-browser-use/lib/owned-runtime.js"); await import("/opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-browser-use/lib/browserd.js")'\'''; \
+    env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env; \
+    chmod 0644 /etc/byclaw-tool-env.session-env
 COPY middleware/byclaw-harness/tool-sandbox/browser.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
 RUN test -x /usr/local/bin/byclaw-tool-env-sshd \
     && /usr/local/bin/byclaw-playwright-chromium --version \
     && node -e 'const m=require("/etc/byclaw-tool-sandbox/capabilities.json"); if(m.purpose!=="browser") process.exit(1)'
 LABEL io.byclaw.tool-sandbox.contract="byclaw.tool-sandbox/v1" \
       io.byclaw.tool-sandbox.purpose="browser"
+EXPOSE 22 8022 8081 19825
+ENTRYPOINT ["/usr/local/bin/byclaw-tool-slim-entrypoint"]
+CMD ["tools"]

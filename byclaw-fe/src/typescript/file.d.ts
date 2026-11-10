@@ -176,7 +176,12 @@ export type IFile = {
   /** 预览 HTML、Markdown 时，按当前文件目录加载相对路径资源。 */
   resolvePreviewResource?: (resourcePath: string) => Promise<string | Blob>;
   imgUrl?: string;
-  status: string; // 'uploading' | 'done';
+  status: string; // 'uploading' | 'done' | 'error';
+  /** This attachment's transport progress; completion still waits for the server response. */
+  uploadProgress?: number;
+  uploadPhase?: 'uploading' | 'processing';
+  uploadError?: string;
+  retryUpload?: () => void;
   fileType: 'image' | 'file';
   queryFile?: Partial<IQueryFile>;
 } & Partial<WisdomPenIFile>;

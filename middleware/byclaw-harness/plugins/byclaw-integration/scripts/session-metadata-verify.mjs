@@ -87,11 +87,57 @@ assert.equal(store.resolveRootSessionId(requested.externalSessionId,requested.bi
 await assert.rejects(store.ensureRoot(requested.externalSessionId,{...requested,groupCoordination:{...directScope,allowedAgentIds:['20010801','other']}}),/cannot change/)
 assert.deepEqual((await store.ensureRoot(requested.externalSessionId,requested)).groupCoordination,directScope)
 
-const routedScope = { ...directScope, effectiveWorkerAgentTypes: { helper: 'BYCLAW_DSH_u', '20010801': 'BYCLAW_DSH_u' } }
+const routedScope = { ...directScope, effectiveWorkerAgentTypes: {
+  helper: 'BYCLAW_DSH_SHARED_ctx_test_365',
+  '20010801': 'BYCLAW_DSH_SHARED_ctx_test_365',
+} }
 const routedUpgrade = await store.ensureRoot(requested.externalSessionId, { ...requested, groupCoordination: routedScope })
 assert.deepEqual(routedUpgrade.groupCoordination, routedScope)
 assert.deepEqual(routedUpgrade.identity, created.identity)
-await assert.rejects(store.ensureRoot(requested.externalSessionId, { ...requested, groupCoordination: { ...routedScope, effectiveWorkerAgentTypes: { ...routedScope.effectiveWorkerAgentTypes, '20010801': 'BYCLAW_EXE_u' } } }), /cannot change/)
+const refreshedRoutedScope = {
+  ...routedScope,
+  effectiveWorkerAgentTypes: {
+    helper: 'BYCLAW_DSH_SHARED_ctx_test_366',
+    '20010801': 'BYCLAW_DSH_SHARED_ctx_test_366',
+  },
+}
+const refreshedRoute = await store.ensureRoot(requested.externalSessionId, {
+  ...requested,
+  groupCoordination: refreshedRoutedScope,
+})
+assert.deepEqual(refreshedRoute.groupCoordination, refreshedRoutedScope,
+  'an authoritative worker route refresh must not change the immutable group authorization scope')
+const omittedRoute = await store.ensureRoot(requested.externalSessionId, {
+  ...requested,
+  groupCoordination: directScope,
+})
+assert.deepEqual(omittedRoute.groupCoordination, refreshedRoutedScope,
+  'a request without effective worker routes must preserve the last authoritative routes')
+await assert.rejects(store.ensureRoot(requested.externalSessionId, {
+  ...requested,
+  groupCoordination: { ...refreshedRoutedScope, coordinatorAgentId: 'another' },
+}), /cannot change/)
+await assert.rejects(store.ensureRoot(requested.externalSessionId, {
+  ...requested,
+  groupCoordination: {
+    ...refreshedRoutedScope,
+    effectiveWorkerAgentTypes: { ...refreshedRoutedScope.effectiveWorkerAgentTypes, '20010801': 'BYCLAW_EXE_u' },
+  },
+}), /cannot change/)
+await assert.rejects(store.ensureRoot(requested.externalSessionId, {
+  ...requested,
+  groupCoordination: {
+    ...refreshedRoutedScope,
+    effectiveWorkerAgentTypes: {
+      helper: 'BYCLAW_DSH_SHARED_ctx_other_367',
+      '20010801': 'BYCLAW_DSH_SHARED_ctx_other_367',
+    },
+  },
+}), /cannot change/)
+await assert.rejects(store.ensureRoot(requested.externalSessionId, {
+  ...requested,
+  groupCoordination: routedScope,
+}), /cannot change/)
 
 const replaced = await store.ensureRoot(
   '350860623218590448',

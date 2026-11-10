@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.interfaces.controller.resource;
 
+import com.iwhalecloud.byai.common.constants.resource.RetiredConversationResources;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -125,6 +126,9 @@ public class ToolManController {
     private com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncService enterpriseResourceSyncService;
 
     @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationImportSupport publicationImports;
+
+    @Autowired
     private com.iwhalecloud.byai.manager.mapper.resource.ResourceSyncJobMapper resourceSyncJobMapper;
 
     @Autowired
@@ -235,17 +239,19 @@ public class ToolManController {
         @Parameter(description = "资源 JSON 文件", required = true) @RequestParam("file") MultipartFile[] file,
         @Parameter(description = "所属目录 ID，可选") @RequestParam(value = "catalogId", required = false) Long catalogId,
         @Parameter(description = "资源归属类型：enterprise-企业，personal-个人",
-            required = false) @RequestParam(value = "ownerType", required = false) String ownerType) {
+            required = false) @RequestParam(value = "ownerType", required = false) String ownerType,
+        @RequestParam(value = "publishScope", required = false) String publishScope) {
+        var selectedScope = publicationImports.validate(ownerType, publishScope);
         if (isBatchImport(file)) {
             return ResponseUtil.successResponse(I18nUtil.get("tool.resource.import.success"),
-                importToolJsonBatch(file, catalogId, ownerType));
+                publicationImports.finish(importToolJsonBatch(file, catalogId, ownerType), selectedScope));
         }
         try {
             // 新入口只负责接收上传文件和目录/归属参数，
             // 具体的 JSON 校验、主表新增或更新、子表落库、FTP 同步，都统一下沉到 service。
             Map<String, Object> data = toolManService.importToolJsonNewFromMultipart(file[0], catalogId, ownerType);
             return ResponseUtil.successResponse(I18nUtil.get("tool.resource.import.success"),
-                buildToolJsonSuccessResult(file[0], data));
+                publicationImports.finish(buildToolJsonSuccessResult(file[0], data), selectedScope));
         }
         catch (IllegalArgumentException e) {
             // 参数缺失、JSON结构不合法、resourceBizType 不支持等可预期错误，
@@ -499,10 +505,12 @@ public class ToolManController {
         @Parameter(description = "技能 zip 文件", required = true) @RequestParam("file") MultipartFile[] file,
         @Parameter(description = "所属目录 ID，可选") @RequestParam(value = "catalogId", required = false) Long catalogId,
         @Parameter(description = "资源归属类型：enterprise-企业，personal-个人",
-            required = false) @RequestParam(value = "ownerType", required = false) String ownerType) {
+            required = false) @RequestParam(value = "ownerType", required = false) String ownerType,
+        @RequestParam(value = "publishScope", required = false) String publishScope) {
+        var selectedScope = publicationImports.validate(ownerType, publishScope);
         try {
             ObjectZipImportResult data = toolManService.importSkillZipFromMultipart(file, catalogId, ownerType);
-            return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.upload.success"), data);
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.upload.success"), publicationImports.finish(data, selectedScope));
         }
         catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
@@ -518,12 +526,14 @@ public class ToolManController {
     }
 
     /** 将个人技能复制成独立企业资源，权限与事务统一由应用服务处理。 */
+    public record SkillPublishRequest(Long resourceId, com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope publishScope) { }
+
     @PostMapping("/publishSkillToEnterprise")
     public ResponseUtil<ByClawSkillResourceApplicationService.EnterpriseSkillPublishResult> publishSkillToEnterprise(
-        @RequestBody ResourceIdDto request) {
+        @RequestBody SkillPublishRequest request) {
         try {
             return ResponseUtil.success(byClawSkillResourceApplicationService.publishSkillToEnterprise(
-                request == null ? null : request.getResourceId()));
+                request == null ? null : request.resourceId(), request == null ? null : request.publishScope()));
         }
         catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
@@ -1458,11 +1468,8 @@ public class ToolManController {
             String resolvedUserCode = StringUtils.isNotBlank(userCode) ? userCode
                 : CurrentUserHolder.getCurrentUserCode();
             List<MultipartFile> uploadFiles = resolveSkillUploadFiles(file, files);
-            byClawSkillResourceApplicationService.validateChatUploadedSkillImportPermission(resourceId, uploadFiles);
-            List<ByClawSkillDto> data = byClawSkillUploadApplicationService.uploadSkillZips(resolvedUserCode,
-                resourceId, uploadFiles);
-            byClawSkillResourceApplicationService.registerChatUploadedSkills(resolvedUserCode, resourceId, uploadFiles,
-                data);
+            List<ByClawSkillDto> data = byClawSkillResourceApplicationService.uploadAndRegisterChatSkills(
+                resolvedUserCode, resourceId, uploadFiles);
             return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.upload.success"), data);
         }
         catch (IllegalArgumentException e) {
@@ -1888,7 +1895,10 @@ public class ToolManController {
         if (resource == null && identity.matches("[0-9]+")) resource = ssResourceService.findByIdOrCode(null, identity);
         boolean controlled = resource != null && (Boolean.TRUE.equals(resource.getUseAuthControlled())
             || Boolean.TRUE.equals(resource.getViewAuthControlled()));
-        boolean allowed = !controlled || authApplicationService.hasResourceUsePermission(resource);
+        boolean allowed = resource != null && (!controlled || authApplicationService.hasResourceUsePermission(resource));
+        if (allowed && resource != null && RetiredConversationResources.isRetired(resource.getResourceBizType())) {
+            return ResponseUtil.success(Map.of("controlled", controlled, "allowed", false, "reason", RetiredConversationResources.REASON));
+        }
         return ResponseUtil.success(Map.of("controlled", controlled, "allowed", allowed));
     }
 
@@ -1919,6 +1929,7 @@ public class ToolManController {
             || Boolean.TRUE.equals(resource.getUseAuthControlled())) && !authApplicationService.hasResourceAccessPermission(resource)) {
             throw new IllegalArgumentException(I18nUtil.get("resource.content.use.denied"));
         }
+        if (resource != null) RetiredConversationResources.requireAvailable(resource.getResourceBizType());
     }
 
 }

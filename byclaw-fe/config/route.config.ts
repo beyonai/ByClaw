@@ -14,10 +14,6 @@ export default [
     component: '@/layout/commonLayout',
     routes: [
       {
-        path: '/sandbox/market',
-        component: './sandbox/market',
-      },
-      {
         path: '/manager',
         component: '@/pages/manager/layout',
         routes: [
@@ -260,6 +256,10 @@ export default [
             path: '/digitalEmployeesCreate',
             name: 'digitalEmployeesCreate',
             component: './manager/pages/digitalEmployeeMgr/EmployeeDetail',
+          },
+          {
+            path: '/employeeVersionCompare',
+            component: './employeeVersionCompare',
           },
           {
             path: '/achievementSpace',

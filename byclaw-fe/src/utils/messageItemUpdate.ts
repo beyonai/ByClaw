@@ -1,3 +1,4 @@
+import { mergeInstanceRefs } from './desktopInstances';
 import { get, isPlainObject, set } from 'lodash';
 
 import { SSEMessageType } from '@/constants/message';
@@ -30,7 +31,12 @@ export const mergeUpdatableMessage = (target: IMessageListItem, incoming: IMessa
   const mergeSubstance = inPlaceUpdateStrategies.get(`${target.contentType}`);
   if (!mergeSubstance) return target;
   const substance = mergeSubstance(get(target, 'content.substance'), get(incoming, 'content.substance'));
-  set(target, 'content', { ...incoming.content, ...target.content, substance });
+  const refs =
+    Object.prototype.hasOwnProperty.call(target.content, 'instanceRefs') ||
+    Object.prototype.hasOwnProperty.call(incoming.content, 'instanceRefs')
+      ? { instanceRefs: mergeInstanceRefs(target.content.instanceRefs, incoming.content.instanceRefs) }
+      : {};
+  set(target, 'content', { ...incoming.content, ...target.content, substance, ...refs });
   if (incoming.status !== undefined) target.status = incoming.status;
   return target;
 };

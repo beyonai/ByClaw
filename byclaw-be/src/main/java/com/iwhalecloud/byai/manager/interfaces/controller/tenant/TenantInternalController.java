@@ -66,6 +66,13 @@ public class TenantInternalController {
         visible(principal,store.find(identifier(id)));
         return ResponseEntity.accepted().body(ResponseUtil.success(recoveries.recover(identifier(id),body)));
     }
+    /** Owning services may request a safe schema continuation without an administrator impersonation. */
+    @PostMapping("/commands/{id}/safe-resume")
+    public ResponseEntity<?> safeResume(HttpServletRequest http,@PathVariable String id,@RequestBody JsonNode body) {
+        var principal=InternalServicePrincipal.require(http);principal.requireScope("tenant:provision");
+        visible(principal,store.find(identifier(id)));
+        return ResponseEntity.ok(ResponseUtil.success(recoveries.safeResume(identifier(id),body)));
+    }
     @GetMapping("/commands/{id}/recovery-requests/{requestId}")
     public ResponseUtil<?> recoveryReceipt(HttpServletRequest http,@PathVariable String id,@PathVariable String requestId) {
         var principal=InternalServicePrincipal.require(http);principal.requireScope("tenant:read");

@@ -51,6 +51,8 @@ public class SsSandboxRecord {
     /** 沙箱访问端点地址 */
     private String endpoint;
 
+    private String instanceContextSnapshot;
+
     /** Runtime returned sandbox id. */
     private String sandboxId;
 

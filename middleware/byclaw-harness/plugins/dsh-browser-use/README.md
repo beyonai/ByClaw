@@ -225,6 +225,8 @@ Inside the rebuilt Linux image, the legacy isolated `novnc` mode can run its rea
 
 The viewer gateway is unauthenticated by default. Restrict port 8081 to a trusted network or an authenticated Sandbox proxy. The custom HTML preserves the proxy path and optional token, supports optional `sessionId`, `hideHeader`, reconnect, scaling, input, and view-only controls. Every passwordless raw VNC and internal websockify target listens only on loopback and must not be published.
 
+HTTP and pending viewer handshakes retain the 30-second socket idle timeout. Only after a complete upstream `101` response (at most 16 KiB of headers, with matching WebSocket accept) does the gateway remove that timeout from the established tunnel; a quiet desktop can remain connected. Session removal, goal resume and gateway shutdown still close their viewers explicitly. Deploy the rebuilt `lib/viewer-gateway.js` and start a new owning runtime: copying HTML or reconnecting to an existing browserd does not replace its loaded code. The supervisor treats browserd exit as runtime failure, so use a controlled runtime restart or recreate the affected QA VM rather than restarting that child independently.
+
 ## Browser-command policy and its boundary
 
 When `@byclaw/dsh-bash-provider` is installed, known direct `playwright`, `browser-use`, Chrome/Chromium, CDP, remote-debugging, package-runner, and script-loader command shapes are rejected with `DIRECT_BROWSER_ACCESS_DENIED`. Normal project commands and tests that merely mention browser-related filenames remain allowed.

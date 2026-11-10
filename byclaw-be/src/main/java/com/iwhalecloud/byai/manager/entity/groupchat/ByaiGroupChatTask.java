@@ -15,6 +15,9 @@ import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 @Data
 @TableName("byai_group_chat_task")
 public class ByaiGroupChatTask {
+    /** Identifies which runtime owns task execution; legacy persisted tasks are remote. */
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private String executionBackend = "REMOTE";
     @com.baomidou.mybatisplus.annotation.TableField(exist = false)
     private Map<String, Object> groupCoordination;
     @TableId(value = "task_session_id", type = IdType.INPUT)

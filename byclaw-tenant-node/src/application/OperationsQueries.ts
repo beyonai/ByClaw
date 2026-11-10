@@ -58,8 +58,8 @@ export default class OperationsQueries {
     const parameters = [this.enterpriseId, query.keyword, query.status];
     const where = `g.enterprise_id=$1 AND g.session_type='hs_as'
       AND COALESCE(g.state,'ACTIVE') IN ('ACTIVE','GROUP_DISSOLVED')
-      AND POSITION(LOWER($2) IN LOWER(COALESCE(g.session_name,'')))>0
-      AND ($3='' OR COALESCE(g.state,'ACTIVE')=$3)`;
+      AND (COALESCE(LENGTH($2::text),0)=0 OR POSITION(LOWER($2) IN LOWER(COALESCE(g.session_name,'')))>0)
+      AND (COALESCE(LENGTH($3::text),0)=0 OR COALESCE(g.state,'ACTIVE')=$3)`;
     const [count] = await this.db.query(
       `SELECT COUNT(*) AS total FROM byai.byai_session g WHERE ${where}`,
       parameters,

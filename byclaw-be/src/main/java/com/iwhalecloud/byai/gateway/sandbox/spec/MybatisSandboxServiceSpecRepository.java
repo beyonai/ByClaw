@@ -71,6 +71,7 @@ public class MybatisSandboxServiceSpecRepository implements SandboxServiceSpecRe
                 specJson = mergeJson(specJson, profile.getTemplatePatchJson());
             }
             SandboxServiceSpec sandboxServiceSpec = objectMapper.readValue(specJson, SandboxServiceSpec.class);
+            if (!sandboxServiceSpec.isToolSandboxEnabled()) return null;
             sandboxServiceSpec.setTemplateJson(entity.getTemplateJson());
             sandboxServiceSpec.setServiceType(serviceType);
             sandboxServiceSpec.setOwnerScope(entity.getOwnerScope());

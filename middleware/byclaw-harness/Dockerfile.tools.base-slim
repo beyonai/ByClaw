@@ -1,0 +1,99 @@
+# Repository-root context. Supply immutable, controlled image references.
+# The transport donor must match the Harness (A) that will use this base (B).
+ARG TOOLS_IMAGE
+ARG RUNTIME_IMAGE
+FROM ${TOOLS_IMAGE} AS transport
+USER root
+RUN set -eux; \
+    test "$(uname -m)" = x86_64; \
+    mkdir -p /transport/node/bin /transport/node/lib/node_modules /transport/etc; \
+    cp -L /opt/nvm/current/bin/node /transport/node/bin/node; \
+    cp -a /opt/nvm/current/lib/node_modules/npm /transport/node/lib/node_modules/npm; \
+    node -p process.execPath >/transport/etc/node-exec-path; \
+    sha256sum /workspace/packages/ssh/ssh/lib/helper.js \
+        /workspace/packages/ptc-runtime/ptc-runtime-node/lib/process.js \
+        /workspace/packages/ptc-runtime/ptc-runtime-node/lib/persistent-process.js \
+        /workspace/packages/ptc-runtime/ptc-runtime-node/lib/index.js \
+        >/transport/etc/helper.sha256; \
+    sha256sum "$(cat /transport/etc/node-exec-path)" >>/transport/etc/helper.sha256
+
+FROM ${RUNTIME_IMAGE} AS tools-base-slim
+USER root
+ARG TARGETARCH
+RUN test "${TARGETARCH}" = amd64 \
+    && . /etc/os-release && test "$ID" = debian && test "$VERSION_ID" = 13
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+    PATH=/opt/nvm/current/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple PIP_EXTRA_INDEX_URL= \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    npm_config_registry=https://registry.npmmirror.com \
+    COREPACK_NPM_REGISTRY=https://registry.npmmirror.com \
+    NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node/ \
+    UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple UV_EXTRA_INDEX_URL= UV_PYTHON_DOWNLOADS=never \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright \
+    PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright \
+    PLAYWRIGHT_FIREFOX_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright \
+    PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright \
+    PUPPETEER_SKIP_DOWNLOAD=1 PUPPETEER_FIREFOX_SKIP_DOWNLOAD=1 \
+    PUPPETEER_CHROME_DOWNLOAD_BASE_URL=https://npmmirror.com/mirrors/chrome-for-testing \
+    PUPPETEER_CHROME_HEADLESS_SHELL_DOWNLOAD_BASE_URL=https://npmmirror.com/mirrors/chrome-for-testing \
+    MAVEN_ARGS="--settings /etc/byclaw-tool-sandbox/maven-settings.xml" \
+    BYCLAW_DATA_ROOT=/by BYCLAW_TOOL_ENV_USER=byclaw
+COPY --from=transport /transport/node/ /opt/nvm/current/
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /opt/nvm/current/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /opt/nvm/current/bin/npx \
+    && ln -s /opt/nvm/current/bin/node /usr/local/bin/node
+COPY middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh /tmp/configure-cn-sources.sh
+RUN set -eux; \
+    bash /tmp/configure-cn-sources.sh; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        bash ca-certificates curl git jq openssh-client openssh-server sudo systemd systemd-sysv \
+        procps util-linux rsync unzip zip libstdc++6 libatomic1 bubblewrap; \
+    python3 -m pip install --no-cache-dir websockets==15.0.1; \
+    python3 -m pip check; \
+    groupadd --gid 1001 byclaw; \
+    useradd --uid 1001 --gid byclaw --create-home --shell /bin/bash byclaw; \
+    install -d -o byclaw -g byclaw /by /home/byclaw/.dsh; \
+    rm -rf /var/lib/apt/lists/* /root/.npm /root/.cache /etc/ssh/ssh_host_*; \
+    rm /tmp/configure-cn-sources.sh
+# The existing tool image already contains the resolved transport-only closure.
+# Copying it preserves Node symlinks, native PTY/FFI payloads and helper digests.
+COPY --from=transport /workspace/ /workspace/
+COPY --from=transport /transport/etc/helper.sha256 /etc/byclaw-tool-sandbox/helper.sha256
+COPY --from=transport /transport/etc/node-exec-path /etc/byclaw-tool-sandbox/node-exec-path
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh /usr/local/bin/byclaw-tool-env-sshd
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ws-bridge.py /usr/local/bin/byclaw-tool-env-ws-bridge
+COPY middleware/byclaw-harness/plugins/dsh-tool-env/docker/trace-*.mjs /tmp/transport-check/
+RUN set -eux; \
+    donor_node="$(cat /etc/byclaw-tool-sandbox/node-exec-path)"; \
+    case "${donor_node}" in /opt/nvm/versions/node/*/bin/node) ;; *) echo 'Unexpected donor Node path' >&2; exit 1 ;; esac; \
+    mkdir -p "$(dirname "${donor_node}")"; \
+    ln -s /opt/nvm/current/bin/node "${donor_node}"; \
+    ln -s /opt/nvm/current/bin/npm /usr/local/bin/npm; \
+    ln -s /opt/nvm/current/bin/npx /usr/local/bin/npx; \
+    mkdir -p /opt/byclaw/dsh-managed/profiles/web/node_modules/@deepseek-ai; \
+    ln -s /workspace/packages/ssh/ssh /opt/byclaw/dsh-managed/profiles/web/node_modules/@deepseek-ai/dsh-ssh; \
+    ln -s /usr/local/bin/byclaw-tool-env-sshd /usr/local/bin/byclaw-tool-base-entrypoint; \
+    ln -s /usr/local/bin/byclaw-tool-env-sshd /usr/local/bin/byclaw-dsh-entrypoint; \
+    sha256sum -c /etc/byclaw-tool-sandbox/helper.sha256; \
+    su -s /bin/sh byclaw -c 'TRACE_OUT=/tmp/helper-imports.txt TRACE_HOOK=/tmp/transport-check/trace-hook.mjs node /tmp/transport-check/trace-main.mjs'; \
+    test -s /tmp/helper-imports.txt; \
+    node --version; npm --version; python3 --version; \
+    test -x /bin/bash; test -x /usr/sbin/sshd; \
+    test -f /etc/passwd; test ! -L /etc/passwd; test -w /etc/passwd; \
+    test -f /etc/group; test ! -L /etc/group; test -w /etc/group; \
+    env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env; \
+    chmod 0644 /etc/byclaw-tool-env.session-env; \
+    rm -rf /tmp/transport-check /tmp/helper-imports.txt
+WORKDIR /by
+EXPOSE 22 8022
+LABEL io.byclaw.harness.variant="tools-base-slim" \
+      io.byclaw.tool-sandbox.base="transport-only" \
+      io.byclaw.tool-sandbox.transport="ssh-helper-ptc"
+ENTRYPOINT ["/usr/local/bin/byclaw-tool-base-entrypoint"]
+CMD ["tools"]

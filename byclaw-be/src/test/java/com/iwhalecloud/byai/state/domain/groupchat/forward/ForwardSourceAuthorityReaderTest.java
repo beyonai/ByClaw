@@ -44,10 +44,10 @@ class ForwardSourceAuthorityReaderTest {
     @Test void nodeFailureNeverReadsSharedMessageStore() {
         var legacy=mock(LegacyForwardSourceAuthorityReader.class);var node=mock(TenantForwardSourceAuthorityReader.class);
         var tenants=mock(TenantAdminTenantMapper.class);var memberships=mock(TenantMembershipMapper.class);
-        var reader=new ForwardSourceAuthorityRouter(legacy,node,tenants,memberships);
-        // Default tenant routing still uses the actual configured backend; tenant 1 never means unrestricted.
-        when(tenants.selectConfig(1L,"NODE_SANDBOX_RECORD_ID")).thenReturn("configured");
-        var actor=new ForwardActor(20,1);when(node.readMessage(actor,30,31)).thenThrow(new IllegalArgumentException("RESOURCE_NOT_ACCESSIBLE"));
+        var reader=new ForwardSourceAuthorityRouter(legacy,node,new com.iwhalecloud.byai.manager.domain.tenant.TenantModeService(tenants),memberships);
+        // 标准租户的 Node 失败必须保留错误，不能改读公共库。
+        when(memberships.selectActiveMembership(20L, 10L)).thenReturn(new com.iwhalecloud.byai.manager.mapper.tenant.TenantMembershipRow());
+        var actor=new ForwardActor(20,10);when(node.readMessage(actor,30,31)).thenThrow(new IllegalArgumentException("RESOURCE_NOT_ACCESSIBLE"));
         assertThatThrownBy(() -> reader.readMessage(actor,30,31)).hasMessage("RESOURCE_NOT_ACCESSIBLE");
         verifyNoInteractions(legacy);
     }
@@ -67,7 +67,7 @@ class ForwardSourceAuthorityReaderTest {
         var legacy = mock(LegacyForwardSourceAuthorityReader.class);
         var node = mock(TenantForwardSourceAuthorityReader.class);
         var tenants = mock(TenantAdminTenantMapper.class);
-        var router = new ForwardSourceAuthorityRouter(legacy, node, tenants, mock(TenantMembershipMapper.class));
+        var router = new ForwardSourceAuthorityRouter(legacy, node, new com.iwhalecloud.byai.manager.domain.tenant.TenantModeService(tenants), mock(TenantMembershipMapper.class));
         com.iwhalecloud.byai.state.domain.groupchat.forward.port.ForwardSourceAuthorityReader owner = backend == ForwardBackend.LEGACY ? legacy : node;
         com.iwhalecloud.byai.state.domain.groupchat.forward.port.ForwardSourceAuthorityReader other = backend == ForwardBackend.LEGACY ? node : legacy;
         var actor = new ForwardActor(20, 1);
@@ -91,7 +91,7 @@ class ForwardSourceAuthorityReaderTest {
         var legacy = mock(LegacyForwardSourceAuthorityReader.class);
         var node = mock(TenantForwardSourceAuthorityReader.class);
         var tenants = mock(TenantAdminTenantMapper.class);
-        var router = new ForwardSourceAuthorityRouter(legacy, node, tenants, mock(TenantMembershipMapper.class));
+        var router = new ForwardSourceAuthorityRouter(legacy, node, new com.iwhalecloud.byai.manager.domain.tenant.TenantModeService(tenants), mock(TenantMembershipMapper.class));
         com.iwhalecloud.byai.state.domain.groupchat.forward.port.ForwardSourceAuthorityReader owner = backend == ForwardBackend.LEGACY ? legacy : node;
         com.iwhalecloud.byai.state.domain.groupchat.forward.port.ForwardSourceAuthorityReader other = backend == ForwardBackend.LEGACY ? node : legacy;
         var actor = new ForwardActor(20, 1);

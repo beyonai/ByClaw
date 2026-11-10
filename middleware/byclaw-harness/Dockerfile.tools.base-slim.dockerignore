@@ -1,0 +1,12 @@
+**
+!middleware/
+!middleware/byclaw-harness/
+!middleware/byclaw-harness/tool-sandbox/
+!middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh
+!middleware/byclaw-harness/plugins/
+!middleware/byclaw-harness/plugins/dsh-tool-env/
+!middleware/byclaw-harness/plugins/dsh-tool-env/scripts/
+!middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh
+!middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ws-bridge.py
+!middleware/byclaw-harness/plugins/dsh-tool-env/docker/
+!middleware/byclaw-harness/plugins/dsh-tool-env/docker/trace-*.mjs

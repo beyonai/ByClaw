@@ -6,6 +6,23 @@ import lombok.Data;
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class PortSpec {
+    private java.util.Map<String, String> presentation;
+    public void setPresentation(Object value) {
+        presentation = null;
+        if (!(value instanceof java.util.Map)) {
+            if (value != null) org.slf4j.LoggerFactory.getLogger(PortSpec.class).warn("Invalid optional instance presentation; viewer disabled");
+            return;
+        }
+        java.util.Map<?, ?> raw = (java.util.Map<?, ?>) value;
+        if (!(raw.get("viewer") instanceof String)) {
+            org.slf4j.LoggerFactory.getLogger(PortSpec.class).warn("Invalid optional instance viewer; viewer disabled");
+            return;
+        }
+        presentation = new java.util.LinkedHashMap<>();
+        presentation.put("viewer", (String) raw.get("viewer"));
+        if (raw.get("label") instanceof String) presentation.put("label", (String) raw.get("label"));
+    }
+
     private Integer port;
 
     /**

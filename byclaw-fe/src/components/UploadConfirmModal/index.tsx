@@ -1,10 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Button, Modal, Space, Switch, Typography } from 'antd';
+import { Alert, Button, Modal, Progress, Space, Switch, Typography } from 'antd';
 import { useIntl } from '@umijs/max';
 
 export interface UploadConfirmFile {
   name: string;
   size?: number;
+}
+
+export interface UploadProgressRow {
+  id: string;
+  name: string;
+  percent: number;
+  status: 'pending' | 'uploading' | 'success' | 'failed';
+  label: string;
+  hint?: string;
 }
 
 interface UploadConfirmModalProps {
@@ -17,6 +26,9 @@ interface UploadConfirmModalProps {
   okText?: string;
   directoryActionText?: string;
   onDirectoryAction?: () => void;
+  progress?: { percent: number; label: string; failed?: boolean; hint?: string };
+  fileProgress?: UploadProgressRow[];
+  onRetryFile?: (id: string) => void;
   onOk: (processFrontMatter: boolean) => void;
   onCancel: () => void;
 }
@@ -38,6 +50,9 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
   okText,
   directoryActionText,
   onDirectoryAction,
+  progress,
+  fileProgress = [],
+  onRetryFile,
   onOk,
   onCancel,
 }) => {
@@ -65,7 +80,7 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
       confirmLoading={loading}
       onOk={() => onOk(processFrontMatter)}
       onCancel={onCancel}
-      destroyOnClose
+      destroyOnHidden
       width="50vw"
       style={{ minWidth: 640, maxWidth: 960, top: 32 }}
       styles={{
@@ -146,33 +161,67 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
                   overflowY: 'auto',
                 }}
               >
-                {files.map((file, index) => (
-                  <div
-                    key={`${file.name}-${file.size || 0}-${index}`}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 12,
-                      padding: '8px 10px',
-                      borderRadius: 8,
-                      background: '#f7f8fa',
-                    }}
-                  >
-                    <Typography.Text ellipsis style={{ flex: 1, maxWidth: '100%' }}>
-                      {file.name}
-                    </Typography.Text>
-                    {file.size !== undefined && (
-                      <Typography.Text type="secondary" style={{ flex: 'none', fontSize: 12 }}>
-                        {formatFileSize(file.size)}
-                      </Typography.Text>
+                {fileProgress.map((row) => (
+                  <div key={row.id} data-upload-id={row.id}>
+                    <Space style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography.Text>{row.name}</Typography.Text>
+                      {row.status === 'failed' && onRetryFile && (
+                        <Button size="small" onClick={() => onRetryFile(row.id)}>
+                          {intl.formatMessage({ id: 'fileBrowser.upload.retryFile' })}
+                        </Button>
+                      )}
+                    </Space>
+                    <Typography.Text type="secondary">{row.label}</Typography.Text>
+                    <Progress
+                      percent={row.percent}
+                      status={row.status === 'failed' ? 'exception' : row.status === 'success' ? 'success' : 'active'}
+                    />
+                    {row.hint && <Typography.Text type="secondary">{row.hint}</Typography.Text>}
+                    {row.status === 'failed' && (
+                      <div>
+                        <Typography.Text type="secondary">
+                          {intl.formatMessage({ id: 'fileBrowser.upload.resumeHint' })}
+                        </Typography.Text>
+                      </div>
                     )}
                   </div>
                 ))}
+                {!fileProgress.length &&
+                  files.map((file, index) => (
+                    <div
+                      key={`${file.name}-${file.size || 0}-${index}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 12,
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        background: '#f7f8fa',
+                      }}
+                    >
+                      <Typography.Text ellipsis style={{ flex: 1, maxWidth: '100%' }}>
+                        {file.name}
+                      </Typography.Text>
+                      {file.size !== undefined && (
+                        <Typography.Text type="secondary" style={{ flex: 'none', fontSize: 12 }}>
+                          {formatFileSize(file.size)}
+                        </Typography.Text>
+                      )}
+                    </div>
+                  ))}
               </div>
             </div>
           </div>
         </div>
+
+        {progress && (
+          <div aria-live="polite">
+            <Typography.Text>{progress.label}</Typography.Text>
+            <Progress percent={progress.percent} status={progress.failed ? 'exception' : 'active'} />
+            {progress.hint && <Typography.Text type="secondary">{progress.hint}</Typography.Text>}
+          </div>
+        )}
 
         {hasConflicts && (
           <Alert

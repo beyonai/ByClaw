@@ -733,6 +733,7 @@ export function buildDirectCapabilityStub(params: {
 
   if (normalizedType === "doc") {
     const selected = selectedResourceContext(params.resourceContext);
+    if (normalizeResourceId(selected.resourceId) !== resourceId) return null;
     const capability = baseCapability({
       resourceId,
       resourceName: String(selected.resourceName ?? resourceId),
@@ -748,6 +749,7 @@ export function buildDirectCapabilityStub(params: {
 
   if (normalizedType === "agent") {
     const rootAgent = rootAgentContext(params.resourceContext);
+    if (normalizeResourceId(rootAgent.resourceId) !== resourceId) return null;
     if (rootAgent.agentSseUrl || rootAgent.agentHomeUrl) {
       const capability = baseCapability({
         resourceId: rootAgent.resourceId ? String(rootAgent.resourceId) : resourceId,

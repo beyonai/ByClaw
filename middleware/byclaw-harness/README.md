@@ -172,7 +172,22 @@ The DSH launcher reads `.env` from its launch working directory. An already expo
 | `BYCLAW_BROWSER_STARTUP` | Optional; Docker Browser Use | Images default to `on-demand`; first use starts Chromium and byCLI. `eager` restores startup gating |
 | `BYCLAW_DSH_CLI_ENTRY` | Optional; container entrypoint | Defaults to compiled `apps/cli/lib/bin.js`; `apps/cli/src/bin.ts` is available for source-path regression comparisons |
 | `BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX` | Required for Redis dynamic-model mode | Decrypts ByClaw model authorization and remains process-only |
+| `BYCLAW_TOOL_ENV_IDLE_MS` | Optional; ByClaw-managed tool sandbox | Idle reclamation delay after the last session lease is returned or expires, in milliseconds; defaults to `300000` (5 minutes) |
 | `BYCLAW_LLM_IDLE_TIME` | Optional | Dynamic-model idle timeout in seconds; defaults to `600` |
+
+## Tool sandbox leases and idle reclamation
+
+`dsh-tool-env` uses Platform to coordinate leases across sessions and Harness processes. Sessions for the same user and service share a tool sandbox, while each session holds and returns its own lease. Other sessions with active leases keep the instance available.
+
+After the last lease is returned or expires, the sandbox is reclaimed after **5 minutes** of idle time by default. Configure the delay in milliseconds through the Harness environment:
+
+```sh
+BYCLAW_TOOL_ENV_IDLE_MS=300000
+```
+
+`sandbox_release` returns the caller's lease by default and starts the idle countdown when no leases remain. Only an explicit `destroy:true` requests immediate destruction, still subject to other active leases. Actual deletion follows Platform's maintenance scan and provider response, so it may complete shortly after the timeout.
+
+See the [tool environment plugin README](./plugins/dsh-tool-env/README.md) for coordination and lifecycle details.
 
 ## Profile configuration
 
@@ -235,6 +250,18 @@ docker run -d --name byclaw-multi-host --env-file host.env \
 The launcher's header comment lists its environment variables. Running the
 image's default `web` entrypoint as a non-root user fails with "root entrypoint
 required for private browser runtime"; that mode is for per-user sandboxes.
+
+The authenticated `POST /u/{context}/api/byclaw/tool-environment/bootstrap` route
+accepts only `{ "serviceKey": "<configured tool service>" }`. It returns the same
+persistent SSH public key and tool host private key used by that context's
+`dsh-tool-env` plugin, allowing BE connector commands to cold-start the tool
+sandbox before the Agent's first tool call. It does not return the SSH client
+private key, acquire a tool lease, or start compute. The user cookie, same-origin
+checks, current managed admission, and the instantiated plugin's exact service
+key govern access; responses use `Cache-Control: no-store` and failures omit key
+material. Publish this shared-host change before the matching BE change. An old
+host cannot provide bootstrap information; BE fails without creating a substitute
+identity. No Platform update or database migration is required.
 
 Shared hosts run the compiled DSH packages resolved from `BYCLAW_DSH_INSTALL_ANCHOR`,
 without `tsx` source aliases. Mixing workspace sources with installed plugins

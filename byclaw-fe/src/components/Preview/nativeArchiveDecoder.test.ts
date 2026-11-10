@@ -3,7 +3,8 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { libarchiveWasm, type LibarchiveWasm } from 'libarchive-wasm';
 import { openNativeArchive, validateNativeArchive, MAX_ARCHIVE_EXPANDED_BYTES } from './nativeArchiveDecoder';
-import { MAX_ARCHIVE_ENTRIES, MAX_ARCHIVE_TEXT_BYTES, MAX_BINARY_PREVIEW_BYTES } from './binaryPreview';
+import { MAX_ARCHIVE_ENTRIES, MAX_ARCHIVE_ENTRY_BYTES } from './binaryPreview';
+import { MAX_ARCHIVE_PREVIEW_BYTES } from './previewSize';
 import { tarFixture } from './fixtures/native-archive/tarFixture';
 
 const fixture = (name: string) => new Uint8Array(readFileSync(join(__dirname, 'fixtures/native-archive', name))).buffer;
@@ -154,14 +155,14 @@ describe('native archive boundaries', () => {
       expect(() => openNativeArchive(signature(), '7z', fakeLibrary(entries).lib)).toThrow();
   });
   it('bounds actual bytes even when the declared size lies, and releases scratch allocations', async () => {
-    const { lib, mocks } = fakeLibrary([{ name: 'a.txt', size: 1, bytes: MAX_ARCHIVE_TEXT_BYTES + 1 }]);
+    const { lib, mocks } = fakeLibrary([{ name: 'a.txt', size: 1, bytes: MAX_ARCHIVE_ENTRY_BYTES + 1 }]);
     const archive = openNativeArchive(signature(), '7z', lib);
     await expect(archive.extract('a.txt')).rejects.toMatchObject({ code: 'limit' });
     expect(mocks.read_free).toHaveBeenCalledTimes(2);
     expect(mocks.module._free).toHaveBeenCalledTimes(3);
   });
   it('rejects oversized declared files before reading and mismatched actual size afterward', async () => {
-    const large = fakeLibrary([{ name: 'a.txt', size: MAX_ARCHIVE_TEXT_BYTES + 1 }]);
+    const large = fakeLibrary([{ name: 'a.txt', size: MAX_ARCHIVE_ENTRY_BYTES + 1 }]);
     await expect(openNativeArchive(signature(), '7z', large.lib).extract('a.txt')).rejects.toMatchObject({
       code: 'limit',
     });
@@ -176,7 +177,7 @@ describe('native archive boundaries', () => {
   });
   it('checks signature, input size and RAR volume flags before loading WASM', () => {
     expect(() => validateNativeArchive(new ArrayBuffer(8), '7z')).toThrow('invalid');
-    expect(() => validateNativeArchive(new ArrayBuffer(MAX_BINARY_PREVIEW_BYTES + 1), 'rar')).toThrow('limit');
+    expect(() => validateNativeArchive(Object.defineProperty(new ArrayBuffer(1), 'byteLength', { value: MAX_ARCHIVE_PREVIEW_BYTES + 1 }), 'rar')).toThrow('limit');
     const rar4 = fixture('v4.rar');
     new Uint8Array(rar4)[10] |= 1;
     expect(() => validateNativeArchive(rar4, 'rar')).toThrow('unsupported');

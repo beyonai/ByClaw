@@ -1,3 +1,5 @@
+import { choosePublishScope } from '@/components/ResourcePublication/ScopeSelector';
+import { openResourcePublication } from '@/components/ResourcePublication/PublicationPanel';
 import { useEffect, useRef, useState } from 'react';
 import { Button, message, Modal } from 'antd';
 import { useIntl } from '@umijs/max';
@@ -92,7 +94,11 @@ export const useEnterpriseSkillPublication = ({
         const key = `publish-enterprise-${resourceId}`;
         message.loading({ key, content: intl.formatMessage({ id: 'common.processing' }), duration: 0 });
         try {
-          const result = await publishSkillToEnterprise(resourceId);
+          message.destroy(key);
+          const publishScope = await choosePublishScope();
+          if (!publishScope) return;
+          const result = await publishSkillToEnterprise(resourceId, publishScope);
+          openResourcePublication({ resourceId: result.resource.resourceId });
           updatePublication(resourceId, result.resource);
           setFailedIds((previous) => ({ ...previous, [resourceId]: false }));
           if (result.personalDependencies?.length) {
@@ -117,11 +123,13 @@ export const useEnterpriseSkillPublication = ({
               <span>
                 {intl.formatMessage({
                   id:
-                    result.resource.resourceStatus === 4
-                      ? 'resource.enterpriseSkillPending'
-                      : result.alreadyExists
-                        ? 'resource.enterpriseSkillExists'
-                        : 'resource.publishToEnterpriseSuccess',
+                    result.resource.publishScopeMode && result.resource.publishScopeMode !== 'LEGACY'
+                      ? 'rp.copySaved'
+                      : result.resource.resourceStatus === 4
+                        ? 'resource.enterpriseSkillPending'
+                        : result.alreadyExists
+                          ? 'resource.enterpriseSkillExists'
+                          : 'resource.publishToEnterpriseSuccess',
                 })}
                 {result.resource.resourceStatus === 2 && (
                   <Button type="link" onClick={() => onDetail(result.resource)}>

@@ -133,7 +133,7 @@
 
     <insert id="insertBatch" parameterType="java.util.List">
         INSERT INTO byai_message (
-        id, session_id, task_id, access_terminal, metadata, "role", "usage", creator_id,
+        id, session_id, task_id, access_terminal, metadata, "role", "usage", creator_id, creator_name,
         message_id, message_struct, create_time, belong_date, message_content, final_content, related_resources,
         call_logs, infer_log, msg_status, project_id, res_com_ids, is_complete, archived_at, update_time
         )
@@ -148,6 +148,7 @@
             #{item.role,jdbcType=VARCHAR},
             #{item.usage,jdbcType=INTEGER},
             #{item.creatorId,jdbcType=BIGINT},
+            #{item.creatorName,jdbcType=VARCHAR},
             #{item.messageId,jdbcType=BIGINT},
             #{item.messageStruct,jdbcType=VARCHAR},
             #{item.createTime,jdbcType=TIMESTAMP},

@@ -56,6 +56,23 @@ public class PlatformRemoteGateway {
         try {
             return call.get();
         } catch (feign.FeignException failure) {
+            if(failure.status()==429) {
+                try {
+                    JsonNode body=json.readTree(failure.contentUTF8());
+                    if(body!=null && "upload_admission_full".equals(body.path("data").path("errorType").asText()))
+                        throw new com.iwhalecloud.byai.state.common.exception.StorageUploadAdmissionException(retryAfter(failure));
+                } catch(java.io.IOException invalid) { /* Unverified 429 remains an upstream failure. */ }
+            }
+            if(failure.status()==423||failure.status()==409) {
+                try {
+                    JsonNode error=json.readTree(failure.contentUTF8());
+                    String code=error.path("data").path("errorType").asText();
+                    if((failure.status()==423&&"file_write_in_progress".equals(code))
+                            ||(failure.status()==409&&"file_write_conflict".equals(code)))
+                        throw new com.iwhalecloud.byai.state.common.exception.StorageWriteConflictException(failure.status(),code,retryAfter(failure));
+                }catch(java.io.IOException invalid){/* Preserve non-conflict error handling. */}
+            }
+
             if(failure.status()==409) {
                 try {
                     JsonNode body=json.readTree(failure.contentUTF8());
@@ -71,6 +88,20 @@ public class PlatformRemoteGateway {
         }
     }
 
+    private static String retryAfter(feign.FeignException failure) {
+        if(failure.responseHeaders()==null)return "1";
+        for (var header : failure.responseHeaders().entrySet()) {
+            if (!"Retry-After".equalsIgnoreCase(header.getKey()) || header.getValue()==null) continue;
+            for (String value : header.getValue()) {
+                if (value!=null && value.matches("[0-9]{1,10}")) {
+                    long seconds=Long.parseLong(value);
+                    if(seconds<=3600)return Long.toString(seconds);
+                }
+            }
+        }
+        return "1";
+    }
+
     public Map<String, Object> envelope(String area, String operation, Object params) {
         return safe(() -> client.getObject().call(area, operation, params));
     }
@@ -79,6 +110,16 @@ public class PlatformRemoteGateway {
         // Only the optional business preflight is bypassed. Real storage calls and failures stay intact.
         if (!personalStorageAdmissionEnabled && "storage".equals(area)
             && Set.of("quota-check", "quota-rejected").contains(operation)) return null;
+        if ("storage".equals(area) && operation.startsWith("uploads/")) {
+            try {
+                return data(client.getObject().call(area, operation, params));
+            } catch (feign.FeignException failure) {
+                // A durable transfer lease expiring is recoverable by creating a new upload ID.
+                if (failure.status() == 410) return Map.of("state", "EXPIRED");
+                if (failure.status() == 404 && "uploads/status".equals(operation)) return Map.of("state", "NOT_FOUND");
+                return safe(() -> { throw failure; });
+            }
+        }
         return data(envelope(area, operation, params));
     }
 
@@ -142,6 +183,24 @@ public class PlatformRemoteGateway {
             catch (IllegalStateException unavailable) { /* 保留可复用分支；确需创建时由平台检查原业务地址。 */ }
         }
         return call("sandbox", "business/" + operation, params);
+    }
+
+    /** Tool conversation identity must not be replaced by the browser login session. */
+    public Object toolLease(String operation, Map<String, Object> request) {
+        Map<String, Object> params = new LinkedHashMap<>(request);
+        Object conversation = params.remove("sessionId");
+        if (!params.containsKey("toolSessionId") && conversation != null) params.put("toolSessionId", conversation);
+        params.put("operatorUserCode", CurrentUserHolder.getCurrentUserCode());
+        if (CurrentUserHolder.getLoginInfo() != null) {
+            params.put("userInfo", json.convertValue(CurrentUserHolder.getLoginInfo(), Map.class));
+            params.put("loginSessionId", CurrentUserHolder.getLoginInfo().getSessionId());
+            params.put("enterpriseId", CurrentUserHolder.getLoginInfo().getEnterpriseId());
+        }
+        if (businessEndpoint != null) {
+            try { params.put("businessBaseUrl", businessEndpoint.getBaseUrl()); }
+            catch (IllegalStateException unavailable) { /* Reuse needs no business endpoint. */ }
+        }
+        return call("sandbox", "tool-leases/" + operation, params);
     }
 
     public Map<String, Object> params(Object... pairs) {

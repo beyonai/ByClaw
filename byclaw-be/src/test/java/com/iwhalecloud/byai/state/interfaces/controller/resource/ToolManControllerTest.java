@@ -72,6 +72,26 @@ class ToolManControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
     }
 
     @Test
+    void runtimeUseRejectsMissingAndRetiredResourcesWithoutChangingNormalTools() {
+        var resources = org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService.class);
+        var auth = org.mockito.Mockito.mock(com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService.class);
+        var controller = new ToolManController();
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "ssResourceService", resources);
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "authApplicationService", auth);
+        assertThat(controller.checkResourceUse(java.util.Map.of("resourceId", "999")).getData()).containsEntry("allowed", false);
+        var resource = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
+        resource.setResourceId(10L);
+        org.mockito.Mockito.when(resources.findById(10L)).thenReturn(resource);
+        for (String type : java.util.List.of("OBJECT", "view", "ONTOLOGY_BASE", "SCENE")) {
+            resource.setResourceBizType(type);
+            assertThat(controller.checkResourceUse(java.util.Map.of("resourceId", "10")).getData())
+                .containsEntry("allowed", false).containsEntry("reason", "RESOURCE_TYPE_RETIRED");
+        }
+        resource.setResourceBizType("TOOL");
+        assertThat(controller.checkResourceUse(java.util.Map.of("resourceId", "10")).getData()).containsEntry("allowed", true);
+    }
+
+    @Test
     void resourceSyncJobRequiresAuthenticatedTenantIdentity() {
         var controller = new ToolManController();
         var sync = org.mockito.Mockito.mock(
@@ -179,17 +199,16 @@ class ToolManControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
             var service = org.mockito.Mockito.mock(
                 com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService.class);
             org.springframework.test.util.ReflectionTestUtils.setField(controller, "byClawSkillResourceApplicationService", service);
-            var request = new com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto();
-            request.setResourceId(10L);
+            var request = new ToolManController.SkillPublishRequest(10L, null);
             var target = new com.iwhalecloud.byai.manager.entity.resource.SsResource();
             target.setResourceId(11L);
             var result = new com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService
                 .EnterpriseSkillPublishResult(target, false);
-            org.mockito.Mockito.when(service.publishSkillToEnterprise(10L)).thenReturn(result);
+            org.mockito.Mockito.when(service.publishSkillToEnterprise(10L, null)).thenReturn(result);
             var response = controller.publishSkillToEnterprise(request);
             assertThat(response.getCode()).isZero();
             assertThat(response.getData().resource().getResourceId()).isEqualTo(11L);
-            org.mockito.Mockito.when(service.publishSkillToEnterprise(10L))
+            org.mockito.Mockito.when(service.publishSkillToEnterprise(10L, null))
                 .thenThrow(new IllegalArgumentException("Permission denied"));
             assertThat(controller.publishSkillToEnterprise(request).getCode()).isEqualTo(-1);
             assertThat(controller.publishSkillToEnterprise(request).getMsg()).isEqualTo("Permission denied");
@@ -202,10 +221,9 @@ class ToolManControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
         var service = org.mockito.Mockito.mock(
             com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService.class);
         org.springframework.test.util.ReflectionTestUtils.setField(controller, "byClawSkillResourceApplicationService", service);
-        var request = new com.iwhalecloud.byai.manager.dto.resource.ResourceIdDto();
-        request.setResourceId(10L);
+        var request = new ToolManController.SkillPublishRequest(10L, null);
         String reason = "无法发布到企业：个人工具「订单查询」（ID：2001）；个人知识「产品资料」（ID：3001）。";
-        org.mockito.Mockito.when(service.publishSkillToEnterprise(10L)).thenThrow(new IllegalArgumentException(reason));
+        org.mockito.Mockito.when(service.publishSkillToEnterprise(10L, null)).thenThrow(new IllegalArgumentException(reason));
 
         var response = controller.publishSkillToEnterprise(request);
 

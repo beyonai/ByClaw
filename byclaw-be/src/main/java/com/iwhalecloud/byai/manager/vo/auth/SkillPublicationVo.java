@@ -13,4 +13,5 @@ public class SkillPublicationVo {
     private Long resourceId;
     private String resourceName;
     private Integer resourceStatus;
+    private String publishScopeMode;
 }

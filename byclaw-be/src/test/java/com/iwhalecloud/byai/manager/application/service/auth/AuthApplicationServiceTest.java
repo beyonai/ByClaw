@@ -1257,8 +1257,13 @@ class AuthApplicationServiceTest {
         order.verify(service).handleAuth(memberAuth);
         verify(grants, times(GrantType.FORCE_USE.equals(grantType) ? 2 : 0))
             .update(any(PrivilegeGrant.class), any(LambdaUpdateWrapper.class));
-        verify((DigitalEmployeeResourceAuthorizationService) ReflectionTestUtils.getField(service,
-            "employeeResourceAuthorizationService")).synchronize(any(), eq(null));
+        var synchronization = (DigitalEmployeeResourceAuthorizationService) ReflectionTestUtils.getField(service,
+            "employeeResourceAuthorizationService");
+        if (GrantType.ALLOW_MANAGE.equals(grantType)) {
+            verify(synchronization).synchronize(any(), eq(null));
+        } else {
+            verify(synchronization).synchronizeForDirectUseAuthorization(any());
+        }
     }
 
     /** 企业员工组的内部成员使用授权继续同步，个人成员仍不可从独立授权接口直接授权。 */
@@ -2462,14 +2467,16 @@ class AuthApplicationServiceTest {
         InOrder order = inOrder(boundResources, service);
         order.verify(boundResources).lockForAuthorization(employee);
         order.verify(service).handleAuth(any());
-        order.verify(boundResources).synchronize(employee, null);
+        order.verify(boundResources).synchronizeForDirectUseAuthorization(employee);
     }
 
-    /** 使用真实事务代理及独立连接检查：资源授权失败不能留下员工授权或部分资源授权。 */
+    /** 无权补齐关联资源时员工授权仍提交；真正的写入失败仍回滚整个事务。 */
     @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    void employeeAndBoundResourceGrantsCommitTogetherOrRollBackTogether(boolean fail,
+    @ValueSource(strings = {"success", "writeFailure", "missingResourceGrantPermission", "employeePermissionDenied"})
+    void employeeAndBoundResourceGrantsCommitTogetherOrRollBackTogether(String outcome,
         @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) {
+        boolean fail = "writeFailure".equals(outcome);
+        boolean skipSkill = "missingResourceGrantPermission".equals(outcome);
         String url = "jdbc:sqlite:" + directory.resolve("employee-resource-auth.sqlite");
         var dataSource = new org.apache.ibatis.datasource.unpooled.UnpooledDataSource("org.sqlite.JDBC", url, null, null);
         var jdbc = new org.springframework.jdbc.core.JdbcTemplate(dataSource);
@@ -2514,6 +2521,11 @@ class AuthApplicationServiceTest {
         doReturn(true).when(service).hasResourceUsePermission(eq(employee), any(Long.class));
         doReturn(false).when(service).hasResourceUsePermission(eq(skill), any(Long.class));
         doReturn(false).when(service).hasResourceUsePermission(eq(knowledge), any(Long.class));
+        doReturn(!skipSkill).when(service).hasResourceUseSettingPermission(skill);
+        if ("employeePermissionDenied".equals(outcome)) {
+            doReturn(false).when(service).hasResourceUseSettingPermission(employee);
+            mockI18n();
+        }
         doNothing().when(service).validateDigitalEmployeeResourceUseGrant(any(), any());
         org.mockito.Mockito.doAnswer(call -> {
             AuthRedBlackDTO dto = call.getArgument(0);
@@ -2537,16 +2549,24 @@ class AuthApplicationServiceTest {
         AuthApplicationService transactional = (AuthApplicationService) factory.getProxy();
         AuthDTO target = new AuthDTO(); target.setGrantToObjType("USER"); target.setGrantToObjId(3L);
         ResourceMemberSettingQo request = new ResourceMemberSettingQo(); request.setResourceId(100L); request.setRedList(List.of(target));
-        if (fail) {
+        if ("employeePermissionDenied".equals(outcome)) {
+            assertThatThrownBy(() -> transactional.setResourceUsers(request)).isInstanceOf(BaseException.class);
+            assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants", Integer.class)).isEqualTo(1);
+            verifyNoInteractions(cache);
+        } else if (fail) {
             assertThatThrownBy(() -> transactional.setResourceUsers(request)).hasMessage("resource grant failed");
             assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants", Integer.class)).isEqualTo(1);
             verifyNoInteractions(cache);
         } else {
             transactional.setResourceUsers(request);
-            assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants", Integer.class)).isEqualTo(6);
+            assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants", Integer.class)).isEqualTo(skipSkill ? 4 : 6);
             assertThat(committed.queryForList("SELECT resource_id FROM grants WHERE user_id=3 ORDER BY resource_id", Long.class))
-                .containsExactly(100L, 200L, 201L);
+                .containsExactlyElementsOf(skipSkill ? List.of(100L, 201L) : List.of(100L, 200L, 201L));
             verify(cache).asyncSyncAuthChangedUsers(Set.of(1L, 3L), GrantType.FORCE_USE);
+            if (skipSkill) {
+                verify(service, never()).validateDigitalEmployeeResourceUseGrant(eq(skill), any());
+                verify(service, never()).appendDigitalEmployeeResourceUsePrivileges(eq(skill), any());
+            }
         }
         assertThat(committed.queryForObject("SELECT COUNT(*) FROM grants WHERE user_id=999", Integer.class)).isEqualTo(1);
     }

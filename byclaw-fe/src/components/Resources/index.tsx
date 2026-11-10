@@ -29,6 +29,7 @@ import {
 import type { SkillGroup } from '@/pages/manager/service/resources';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 import ResourceEdit from './components/ResourceEdit';
+import { AudienceFilter } from '@/components/ResourcePublication/ScopeSelector';
 import ResourceImport from './components/ResourceImport';
 import SkillGroupCreateModal from './components/SkillGroupCreateModal';
 import ResourceDetail from './components/ResourceDetail';
@@ -438,11 +439,9 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
     if (activeTab !== 'enterprise') {
       return true;
     }
-    // 商用版官方技能对所有用户开放；其他版本按角色控制，等待版本加载后再展示入口。
+    // 企业技能导入与后端固定入口能力保持一致；普通用户通过个人技能发布审核。
     if (resourceType === 'SKILL') {
-      return (
-        brandVersionLoaded && (brandVersion === 'commercial' || fixedEntryCapability?.canImportEnterpriseSkill === true)
-      );
+      return brandVersionLoaded && fixedEntryCapability?.canImportEnterpriseSkill === true;
     }
     if (!fixedEntryCapability) {
       return false;
@@ -1031,6 +1030,12 @@ const Resources: React.FC<Props> = ({ resourceType, myResourcesOnly = false, onM
           value={dropdownParam}
           resourceBizTypeFilter={resourceType === 'TOOL' || resourceType === 'KG_DOC'}
           onChange={(param) => setDropdownParam((previous: IOnOkParams) => ({ ...previous, ...param }))}
+        />
+      )}
+      {activeTab === 'enterprise' && ['KG_DOC', 'TOOL', 'SKILL'].includes(resourceType) && (
+        <AudienceFilter
+          value={dropdownParam}
+          onChange={(param) => setDropdownParam((previous) => ({ ...previous, ...param }))}
         />
       )}
       {/* 管理页沿用浏览页的按钮样式，类型、归属和状态共用筛选行并保留原查询值。 */}

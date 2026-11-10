@@ -22,20 +22,64 @@ import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class TenantGroupTaskRoutingAspectTest {
     private final TenantNodeClient node = mock(TenantNodeClient.class);
     private final ByaiGroupChatTaskMapper legacyTasks = mock(ByaiGroupChatTaskMapper.class);
     private final ByaiGroupChatMentionMapper legacyMembership = mock(ByaiGroupChatMentionMapper.class);
     private final GroupChatTaskDeliveryService delivery = mock(GroupChatTaskDeliveryService.class);
+    private final TenantModeService tenantModes = mock(TenantModeService.class);
     private final TenantGroupTaskRoutingAspect aspect = new TenantGroupTaskRoutingAspect(node, legacyTasks,
-        legacyMembership, delivery);
+        legacyMembership, delivery, tenantModes);
     private final TenantRequestContext tenant = new TenantRequestContext(57L, 11222473L, "MEMBER");
 
     @AfterEach
     void clear() {
         TenantRequestContextHolder.clear();
         com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.clearLoginInfo();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "1,pending", "1,deliveryStatus", "1,detail", "1,prepare", "1,complete", "1,cancel",
+        "456,pending", "456,deliveryStatus", "456,detail", "456,prepare", "456,complete", "456,cancel"
+    })
+    void sharedDataTaskOperationsKeepControllerAuthorization(long enterpriseId, String method) throws Throwable {
+        TenantRequestContextHolder.set(new TenantRequestContext(57L, enterpriseId, "MEMBER"));
+        when(tenantModes.isSharedDataTenant(enterpriseId)).thenReturn(true);
+        ProceedingJoinPoint call = call(method, 33L);
+        Object result = new Object();
+        when(call.proceed()).thenReturn(result);
+
+        assertThat(aspect.route(call)).isSameAs(result);
+
+        verify(call).proceed();
+        verify(tenantModes).isSharedDataTenant(enterpriseId);
+        verifyNoInteractions(node, delivery, legacyTasks, legacyMembership);
+    }
+
+    @Test
+    void headerlessSharedDataTaskKeepsValidatedOwnerAndUsesController() throws Throwable {
+        var projections = mock(com.iwhalecloud.byai.state.domain.chat.service.TenantScopedSessionEventService.class);
+        var contexts = mock(TenantContextService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(aspect, "projections", projections);
+        org.springframework.test.util.ReflectionTestUtils.setField(aspect, "contexts", contexts);
+        var user = new com.iwhalecloud.byai.common.login.bean.LoginInfo();
+        user.setUserId(57L);
+        com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.setLoginInfo(user);
+        Long taskId = 8011222473000000033L;
+        when(projections.registeredOwner(taskId)).thenReturn(tenant);
+        when(contexts.validate("11222473")).thenReturn(tenant);
+        when(tenantModes.isSharedDataTenant(tenant.enterpriseId())).thenReturn(true);
+        ProceedingJoinPoint call = call("pending", taskId);
+
+        aspect.route(call);
+
+        verify(contexts).validate("11222473");
+        verify(call).proceed();
+        verifyNoInteractions(node, delivery);
     }
 
     @Test
@@ -59,6 +103,8 @@ class TenantGroupTaskRoutingAspectTest {
     @Test
     void tenantDeliveryAuthorizesWithNodeBeforeReadingSignal() throws Throwable {
         TenantRequestContextHolder.set(tenant);
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/group-chat/tasks/33"), eq(null), any()))
+            .thenReturn(Map.<String, Object>of("status", "ACTIVE"));
         when(delivery.currentAuthorized(33L)).thenReturn(new GroupChatTaskDeliveryResponse("33", false));
 
         ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("deliveryStatus", 33L));
@@ -66,6 +112,18 @@ class TenantGroupTaskRoutingAspectTest {
         verify(node).request(eq(tenant), eq("GET"), eq("/internal/v1/group-chat/tasks/33"),
             eq(null), any());
         assertThat(response.getData()).isEqualTo(new GroupChatTaskDeliveryResponse("33", false));
+    }
+
+    @Test
+    void privateTenantTaskIsUndeliveredWithoutReadingSignal() throws Throwable {
+        TenantRequestContextHolder.set(tenant);
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/group-chat/tasks/33"), eq(null), any()))
+            .thenReturn(Map.<String, Object>of("status", "PRIVATE"));
+
+        ResponseUtil<?> response = (ResponseUtil<?>) aspect.route(call("deliveryStatus", 33L));
+
+        assertThat(response.getData()).isEqualTo(new GroupChatTaskDeliveryResponse("33", false));
+        verify(delivery, never()).currentAuthorized(33L);
     }
 
     @Test
@@ -139,5 +197,9 @@ class TenantGroupTaskRoutingAspectTest {
     private static class MethodNames {
         void pending(Long taskId) { }
         void deliveryStatus(Long taskId) { }
+        void detail(Long taskId) { }
+        void prepare(Long taskId) { }
+        void complete(Long taskId) { }
+        void cancel(Long taskId) { }
     }
 }

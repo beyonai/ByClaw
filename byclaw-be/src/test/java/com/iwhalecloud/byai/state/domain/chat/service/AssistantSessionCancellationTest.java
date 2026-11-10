@@ -20,6 +20,8 @@ class AssistantSessionCancellationTest {
         when(sequence.nextVal()).thenReturn(42L);
         ReflectionTestUtils.setField(service, "sequenceService", sequence);
         ReflectionTestUtils.setField(service, "tenantNodeClient", mock(TenantNodeClient.class));
+        ReflectionTestUtils.setField(service, "tenantModes",
+            mock(com.iwhalecloud.byai.manager.domain.tenant.TenantModeService.class));
         TenantRequestContextHolder.set(new TenantRequestContext(1, 123, "MEMBER"));
         AtomicLong bound = new AtomicLong();
         AssistantChatDto request = new AssistantChatDto();

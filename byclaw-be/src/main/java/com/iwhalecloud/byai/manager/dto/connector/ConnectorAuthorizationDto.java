@@ -4,6 +4,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.util.Date;
+import java.util.List;
 
 /** 连接器授权任务状态。 */
 @Getter
@@ -27,4 +28,9 @@ public class ConnectorAuthorizationDto {
     private String errorCode;
 
     private String errorMessage;
+    /** Result of the latest permission request, not a guarantee of every platform permission. */
+    private String permissionStatus;
+
+    private List<String> missingScopes = List.of();
+
 }

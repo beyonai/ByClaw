@@ -335,6 +335,10 @@ public class MessageContext {
                 answerDelta.setSeq(lastAnswerDelta.getSeq());
             }
             if (ifMerge) {
+                if (lastAnswerDelta.getInstanceRefs() != null || answerDelta.getInstanceRefs() != null) {
+                    lastAnswerDelta.setInstanceRefs(com.iwhalecloud.byai.state.common.dto.SandboxInstanceRef.merge(
+                        lastAnswerDelta.getInstanceRefs(), answerDelta.getInstanceRefs()));
+                }
                 // 判断类型是否一致一致则内容拼接
                 builder.append(answerDelta.getChoices().get(0).getDelta().getContent());
                 lastAnswerDelta.getChoices().get(0).getDelta().setContent(builder.toString());
@@ -372,7 +376,11 @@ public class MessageContext {
             String mergedContent = mergeSegmentContent(existing.getContentType(), extractContent(existing),
                 extractContent(incoming));
             existing.getChoices().get(0).getDelta().setContent(mergedContent);
-            existing.setStatus(incoming.getStatus());
+            if (incoming.getStatus() != null) existing.setStatus(incoming.getStatus());
+            if (existing.getInstanceRefs() != null || incoming.getInstanceRefs() != null) {
+                existing.setInstanceRefs(com.iwhalecloud.byai.state.common.dto.SandboxInstanceRef.merge(
+                    existing.getInstanceRefs(), incoming.getInstanceRefs()));
+            }
             while (textList.size() <= i) {
                 textList.add(new StringBuilder());
             }
@@ -472,6 +480,7 @@ public class MessageContext {
         try {
             JSONObject payload = JSONObject.parseObject(text);
             if (segment != null) {
+                if (segment.getInstanceRefs() != null) payload.put("instanceRefs", segment.getInstanceRefs());
                 payload.put("seq", segment.getSeq());
                 payload.put("eventType", eventType);
                 // The stream marker is emitted with the first visible delta so clients can

@@ -1,0 +1,10 @@
+{
+  "contract": "byclaw.tool-sandbox/v1",
+  "runtimeVersion": "D0.6.0_godot",
+  "purpose": "godot",
+  "os": "linux",
+  "operations": { "protocol": "ssh", "exposure": "private" },
+  "capabilities": ["process.exec", "filesystem", "browser.automation", "game.godot", "game.gdscript"],
+  "display": { "available": true, "defaultExposure": "public", "auth": "byclaw-session" },
+  "storageModes": ["agenticfs-subpath"]
+}

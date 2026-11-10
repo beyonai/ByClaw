@@ -42,6 +42,9 @@ export type IOnOkParams = {
   deptBelong?: IOrgCache[];
   resourceBizTypeList?: string[];
   digitalEmployeeType?: string;
+  audienceScopeMode?: 'ALL' | 'COMPANY' | 'ORGS';
+  audienceOrgIds?: string[];
+  audienceIncludeDescendants?: boolean;
   permission?: string;
   orgFilters?: Array<{
     type: string;

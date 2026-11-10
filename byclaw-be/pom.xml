@@ -103,7 +103,7 @@
         <xmlbeans.version>5.1.1</xmlbeans.version>
         <pagehelper-spring-boot-starter.version>1.4.7</pagehelper-spring-boot-starter.version>
         <pagehelper.version>5.3.3</pagehelper.version>
-        <gateway.sdk.version>0.2.10-SNAPSHOT</gateway.sdk.version>
+        <gateway.sdk.version>0.2.10</gateway.sdk.version>
         <!-- opentelemetry -->
         <opentelemetry.instrumentation.version>2.22.0</opentelemetry.instrumentation.version>
 
@@ -871,6 +871,12 @@
         </dependency>
 
         <!-- ==================== From byai-common ==================== -->
+        <!-- Tencent 官方服务端签名库；管理员 SecretKey 不下发给 App。 -->
+        <dependency>
+            <groupId>com.github.tencentyun</groupId>
+            <artifactId>tls-sig-api-v2</artifactId>
+            <version>2.0</version>
+        </dependency>
         <dependency>
             <groupId>io.opentelemetry.instrumentation</groupId>
             <artifactId>opentelemetry-instrumentation-annotations</artifactId>
@@ -1571,6 +1577,33 @@
                     <include>*__baseline.zip</include>
                 </includes>
             </resource>
+            <resource>
+                <directory>${project.basedir}/../middleware/byclaw-harness/browser</directory>
+                <targetPath>desktop-viewer/v1</targetPath>
+                <filtering>false</filtering>
+                <includes>
+                    <include>novnc-index.html</include>
+                </includes>
+            </resource>
+            <resource>
+                <directory>${project.basedir}/../middleware/builtin/runtime-tools/browser-viewer</directory>
+                <targetPath>desktop-viewer/v1</targetPath>
+                <filtering>false</filtering>
+                <includes>
+                    <include>connection-bridge.mjs</include>
+                </includes>
+            </resource>
+            <resource>
+                <directory>${project.basedir}/../middleware/byclaw-harness/browser/desktop-viewer/v1</directory>
+                <targetPath>desktop-viewer/v1</targetPath>
+                <filtering>false</filtering>
+                <includes>
+                    <include>core/**/*.js</include>
+                    <include>vendor/**/*.js</include>
+                    <include>manifest.json</include>
+                    <include>licenses/**</include>
+                </includes>
+            </resource>
         </resources>
 
         <pluginManagement>
@@ -1677,6 +1710,26 @@
                                     <dependencyConvergence/>
                                 </rules>
                                 <fail>false</fail>
+                            </configuration>
+                        </execution>
+                        <execution>
+                            <id>require-desktop-viewer-sources</id>
+                            <phase>validate</phase>
+                            <goals>
+                                <goal>enforce</goal>
+                            </goals>
+                            <configuration>
+                                <rules>
+                                    <requireFilesExist>
+                                        <message>Build the backend from a complete ByClaw checkout containing the canonical desktop viewer sources.</message>
+                                        <files>
+                                            <file>${project.basedir.parentFile.canonicalPath}/middleware/byclaw-harness/browser/novnc-index.html</file>
+                                            <file>${project.basedir.parentFile.canonicalPath}/middleware/builtin/runtime-tools/browser-viewer/connection-bridge.mjs</file>
+                                            <file>${project.basedir.parentFile.canonicalPath}/middleware/byclaw-harness/browser/desktop-viewer/v1/core/rfb.js</file>
+                                        </files>
+                                    </requireFilesExist>
+                                </rules>
+                                <fail>true</fail>
                             </configuration>
                         </execution>
                     </executions>

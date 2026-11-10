@@ -2,7 +2,7 @@
  * Tool environment (B) managed through ByClaw BE's sandbox API.
  *
  * A asks BE, as the user, for the sandbox of service key `serviceKey`
- * (`POST /sandbox/launchByUserCode`: get-or-create per user and sandbox type)
+ * (`POST /sandbox/toolLease/acquire`: coordinated get-or-create and session lease)
  * and reads B's sshd address from the `instanceEndpoints` entry named
  * `sshInstance`. A `tcp://host:port` value (spec port with `protocol: tcp`) is
  * dialled directly; an `http(s)://` or `ws(s)://` value, or a BE ingress path,
@@ -13,33 +13,28 @@
  * keys reach B through A's state directory, which the B spec mounts read-only
  * (see scripts/tool-env-sshd.sh).
  *
- * BE cannot pause a sandbox, so idling releases B (`pause()`); A's shutdown does
- * the same. What this process cannot see is left to BE's reclaim rule.
- *
- * The token is the user's JWT and expires (`JWT_TOKEN_EXPIRED_HOUR`); a context
- * that outlives it (a resident shared host) gets the current one through
- * `renewToken()` on every PUT BE sends for the user, and may be given a
- * `BeTokenSource` (the user's login state) to ask when BE rejects the token it
- * has. A launch BE refuses with 401 is reported as a rejected token, retried once
- * with a token from the source if that differs, otherwise not retried within the
- * launch window; the backoff it leaves behind is lifted when a new token arrives.
- * Idle and A-context disposal release only this user's configured tool service.
- * The next runtime operation obtains a new B through the same get-or-create API.
- *
- * The state directory remembers which tool service last ran for the user
- * (`tool-sandbox.json`). A process that dies without disposing its contexts (a host
- * restart) leaves that B running; when the user's next context serves a different
- * service (BE now assigns the user another tool sandbox), it releases the old one
- * before launching: both mount the user's tool home, and the old B would keep
- * holding what the new one needs (its browser profile lock, for one).
+ * Production uses exact-token leases: task-end/context disposal return this
+ * holder only, and Platform reclaims the final idle instance after300s by default.
+ * Legacy embedders without coordinatedLeases retain the original launch API.
+ * Credentials remain in the per-user, per-service persistent state directory.
  */
 import { maskUrl, waitForEndpoint, type ToolEnvBackend, type ToolEnvEndpoint } from './backend.ts'
 import { createHash } from 'node:crypto'
+import { ToolSessionLeases, type ToolLeaseData } from './session-leases.ts'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ToolEnvIdentity, ToolEnvKeys } from './identity.ts'
+import { legacyInstanceContext, type SandboxInstanceContext } from './instance-context.ts'
+import type { SandboxTemplate } from './catalog.ts'
 
 export interface ByClawBeBackendConfig {
+  /** Production defaults to coordinated leases; omitted only by legacy embedders. */
+  coordinatedLeases?: boolean
+  idleTimeoutSeconds?: number
+  parentContextId?: string
+  parentContextGeneration?: number
+  parentSandboxId?: string
+
   /** Bind bootstrap credentials to this create request, never user-global private parameters. */
   requestScopedKeys?: boolean
   /** Require the private MicroVM ingress; catalog runtimes never use a public fallback. */
@@ -84,8 +79,8 @@ export const PUBLISHED_KEY_PARAMS = { authorized: 'BYCLAW_TOOL_ENV_AUTHORIZED_KE
 interface PrivateParam { paramId?: number; key?: string; hasValue?: boolean; valueLast4?: string }
 
 interface Envelope { code?: number; msg?: string; data?: unknown }
-interface LaunchData { sandboxId?: string; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
-interface InfoEntry { sandboxType?: string; sandboxId?: string; status?: string; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
+interface LaunchData { instanceContext?: SandboxInstanceContext | null; sandboxId?: string; mappingId?: string | null; isShared?: boolean; endpoint?: string; endpoints?: string[]; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
+interface InfoEntry { instanceContext?: SandboxInstanceContext | null; sandboxType?: string; sandboxId?: string; mappingId?: string | null; isShared?: boolean; status?: string; instanceEndpoints?: Record<string, string>; endpointHeaders?: Record<string, string> }
 interface ReleaseConfirmation { releaseConfirmed?: boolean; sandboxId?: string; remoteAbsentConfirmed?: boolean }
 
 function confirmExactRelease(value: unknown, expectedSandboxId: string): void {
@@ -161,12 +156,12 @@ export class ByClawBeBackend implements ToolEnvBackend {
   lastRequestTimeoutMs = 0
   private currentId: string | undefined
 
+  instanceContext: SandboxInstanceContext | undefined
+
   get sandboxId(): string | undefined { return this.currentId }
   private ownsSandbox = false
-  /** Whether this process already looked for a B of another service left from an earlier spec. */
-  private previousChecked = false
-  private previousCleanupPending = false
-
+  private readonly leases: ToolSessionLeases<LaunchData & ToolLeaseData> | undefined
+  private readonly invalidationListeners = new Set<() => void>()
   constructor(
     private readonly config: ByClawBeBackendConfig,
     private readonly identity: ToolEnvIdentity,
@@ -178,6 +173,11 @@ export class ByClawBeBackend implements ToolEnvBackend {
     this.sleep = clock.sleep ?? (ms => new Promise(resolve => { setTimeout(resolve, ms).unref() }))
     this.launchRetryWindowMs = clock.launchRetryWindowMs ?? LAUNCH_RETRY.windowMs
     this.token = config.token
+    if (config.coordinatedLeases) this.leases = new ToolSessionLeases({ idleTimeoutSeconds: config.idleTimeoutSeconds ?? 300 },
+      async (operation, body) => this.leaseCall(operation, body), () => {
+        this.currentId = undefined
+        for (const listener of this.invalidationListeners) listener()
+      })
   }
 
   /**
@@ -196,6 +196,23 @@ export class ByClawBeBackend implements ToolEnvBackend {
     this.nextAttemptAt = 0
     this.lastFailure = ''
     this.log('Beyond-Token renewed after BE rejected the previous one; the next operation launches the tool environment again')
+  }
+
+  /** The central market owns availability and admitted capabilities, including custom templates. */
+  async catalogTemplates(): Promise<SandboxTemplate[]> {
+    let data: unknown
+    try { data = await this.call('/sandbox/toolTemplates/catalog', {}, 'POST', 15_000) }
+    catch (error) {
+      if (!isTokenRejected(error) || !await this.refreshRejectedToken(error)) throw error
+      data = await this.call('/sandbox/toolTemplates/catalog', {}, 'POST', 15_000)
+    }
+    if (!Array.isArray(data)) throw new Error('INVALID_TEMPLATE_CATALOG')
+    return data.map(value => {
+      const t = value as Partial<SandboxTemplate>
+      if (typeof t.templateKey !== 'string' || typeof t.serviceKey !== 'string' || typeof t.enabled !== 'boolean'
+        || !Array.isArray(t.capabilities) || !t.capabilities.every(c => typeof c === 'string')) throw new Error('INVALID_TEMPLATE_CATALOG')
+      return { templateKey: t.templateKey, serviceKey: t.serviceKey, enabled: t.enabled, capabilities: t.capabilities }
+    })
   }
 
   /**
@@ -250,30 +267,67 @@ export class ByClawBeBackend implements ToolEnvBackend {
     return true
   }
 
-  /**
-   * BE has no pause, so an idle B is released and the next operation starts a
-   * fresh one; user data lives on the shared volume, only B's own `/tmp` goes.
-   * BE's reclaim rule covers the cases this process cannot (it died, Redis blips).
-   */
-  pause(): Promise<void> {
+  runInSession<T>(sessionId: string, work: () => Promise<T>): Promise<T> { return this.leases?.runInSession(sessionId, work) ?? work() }
+  startSession(sessionId: string): void { this.leases?.startSession(sessionId) }
+  async acquireSession(sessionId: string): Promise<void> {
+    if (!this.leases) return
+    await this.leases.acquireSession(sessionId)
+    const id = this.leases.latest?.sandboxId
+    if (id && this.currentId && id !== this.currentId) for (const listener of this.invalidationListeners) listener()
+    // Refresh allocation identity before the catalog publishes trusted instance references.
+    await this.ensure()
+  }
+  async finishSession(sessionId: string, destroy = false): Promise<void> { await this.leases?.finishSession(sessionId, destroy) }
+  async beginUse(): Promise<() => Promise<void>> {
+    const finish = await this.leases?.beginUse() ?? (() => Promise.resolve())
+    const id = this.leases?.latest?.sandboxId
+    if (id && this.currentId && id !== this.currentId) for (const listener of this.invalidationListeners) listener()
+    return finish
+  }
+  onInvalidated(listener: () => void): () => void { this.invalidationListeners.add(listener); return () => { this.invalidationListeners.delete(listener) } }
+
+  /** Return this context's tokens; Platform owns the idle deadline across all Harness processes. */
+  async pause(): Promise<void> { await this.leases?.pause() }
+  async dispose(): Promise<void> { await this.leases?.dispose() }
+
+  private async leaseCall(operation: 'acquire' | 'renew' | 'release', body: Record<string, unknown>): Promise<unknown> {
+    const { userCode, serviceKey, parentContextId, parentContextGeneration, parentSandboxId } = this.config
+    const keys = operation === 'acquire' && this.config.coordinatedLeases ? await this.identity.keys() : undefined
+    const request = { ...body, userCode, serviceKey,
+      ...(parentContextId ? { parentContextId, parentContextGeneration, parentSandboxId } : {}),
+      ...(keys ? { toolEnvironmentKeys: { authorizedKey: keys.authorizedKey, hostPrivateKeyBase64: Buffer.from(keys.hostPrivateKey).toString('base64') } } : {}) }
+    const deadline = this.now() + this.launchRetryWindowMs
+    for (;;) {
+      try {
+        try { return await this.call(`/sandbox/toolLease/${operation}`, request, 'POST', operation === 'acquire' ? this.config.requestTimeoutMs : Math.min(10000, this.config.requestTimeoutMs)) }
+        catch (error) {
+          if (!isTokenRejected(error) || !await this.refreshRejectedToken(error)) throw error
+          return await this.call(`/sandbox/toolLease/${operation}`, request, 'POST', operation === 'acquire' ? this.config.requestTimeoutMs : Math.min(10000, this.config.requestTimeoutMs))
+        }
+      } catch (error) {
+        const remaining = deadline - this.now()
+        if (operation !== 'acquire' || remaining <= 0 || !retryableCoordinatedAcquire(error)) throw error
+        await this.sleep(Math.min(LAUNCH_RETRY.intervalMs, remaining))
+        if (this.now() >= deadline) throw error
+      }
+    }
+
+  }
+
+  /** Explicit tool/management release or failed admission; retain ownership until absence is confirmed. */
+  destroy(): Promise<void> {
     return this.serial(async () => {
-      if (this.previousCleanupPending) await this.releasePreviousService()
+      if (this.leases) { await this.leases.pause(true); this.currentId = undefined; return }
       if (!this.ownsSandbox) return
       await this.remove()
       this.currentId = undefined
     })
   }
 
-  async dispose(): Promise<void> { await this.pause() }
-
   private async ensureOnce(): Promise<ToolEnvEndpoint> {
     // B's sshd reads the keys from A's state directory, so they must exist before B starts.
     const keys = await this.identity.keys()
-    if (this.config.publishKeys) await this.publishKeys(keys)
-    if (!this.previousChecked) {
-      await this.releasePreviousService()
-      this.previousChecked = true
-    }
+    if (this.config.publishKeys && !this.leases) await this.publishKeys(keys)
     const first = await this.launchWithin(this.launchRetryWindowMs)
     try {
       await waitForEndpoint(first, this.config.readyTimeoutMs)
@@ -282,6 +336,10 @@ export class ByClawBeBackend implements ToolEnvBackend {
       // BE answers from its own record, which can outlive the remote sandbox.
       // Release that record once and launch again before giving up.
       this.log(`tool environment at ${describe(first)} is unreachable (${message(error)}); releasing it and launching again`)
+      if (this.leases) {
+        // A failed dial is not proof of remote absence. Never delete another session's compute.
+        throw error
+      }
       await this.remove()
       const second = await this.launchWithin(this.launchRetryWindowMs)
       await waitForEndpoint(second, this.config.readyTimeoutMs)
@@ -317,7 +375,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
   private async launch(timeoutMs = this.config.requestTimeoutMs): Promise<ToolEnvEndpoint> {
     const { userCode, serviceKey, sshInstance } = this.config
     const keys = this.config.requestScopedKeys ? await this.identity.keys() : undefined
-    const data = await this.call('/sandbox/launchByUserCode', { userCode, serviceKey, autoRelease: 1,
+    const data = this.leases ? await this.leases.ensure() : await this.call('/sandbox/launchByUserCode', { userCode, serviceKey, autoRelease: 0,
       ...(keys === undefined ? {} : { toolEnvironmentKeys: { authorizedKey: keys.authorizedKey, hostPrivateKeyBase64: Buffer.from(keys.hostPrivateKey).toString('base64') } }),
     }, 'POST', timeoutMs) as LaunchData | undefined
     const sandboxType = serviceKey
@@ -326,6 +384,8 @@ export class ByClawBeBackend implements ToolEnvBackend {
       this.currentId = data.sandboxId
       await this.writeLaunched({ serviceKey, sandboxId: data.sandboxId })
     }
+    this.instanceContext = data?.instanceContext ?? undefined
+    let displayAllocation: LaunchData | InfoEntry | undefined = data
     let sandboxId = data?.sandboxId
     let endpoint = this.sshEndpoint(data?.instanceEndpoints, data?.endpointHeaders)
     if (endpoint === undefined) {
@@ -333,6 +393,14 @@ export class ByClawBeBackend implements ToolEnvBackend {
       const entries = (await this.call('/sandbox/getSandboxInfo', { userCode, sandboxType }, 'POST', timeoutMs) as InfoEntry[] | undefined) ?? []
       const ofType = entries.filter(entry => entry.sandboxType === sandboxType)
       const entry = sandboxId === undefined ? ofType[0] : ofType.find(candidate => candidate.sandboxId === sandboxId)
+      // A legacy routing fallback may choose an entry for SSH, but it cannot
+      // establish a precise display identity without an exact allocation id.
+      if (sandboxId !== undefined) {
+        const exactEntry = ofType.find(candidate => candidate.sandboxId === sandboxId
+          && (candidate.mappingId ?? null) === (data?.mappingId ?? null))
+        this.instanceContext ??= exactEntry?.instanceContext ?? undefined
+        if (exactEntry) displayAllocation = { ...exactEntry, isShared: data?.isShared === true || exactEntry.isShared === true }
+      }
       sandboxId ??= entry?.sandboxId
       if (sandboxId !== undefined && sandboxId !== '') {
         this.ownsSandbox = true
@@ -349,6 +417,9 @@ export class ByClawBeBackend implements ToolEnvBackend {
       throw new Error(`ByClaw BE returned no "${sshInstance}" endpoint for sandbox type ${sandboxType}; its spec must declare B's sshd port with protocol "tcp" and instance "${sshInstance}", or set a host template`)
     }
     if (this.config.privateOnly && (endpoint.websocket === undefined || !new URL(endpoint.websocket).hostname.endsWith('-vpc.sandbox.aliyuncs.com'))) throw new Error('PRIVATE_SSH_REQUIRED')
+    // An absent contract is legacy; an explicitly empty contract must stay empty.
+    // Never use the legacy SSH routing fallback's arbitrary first record as a display identity.
+    this.instanceContext ??= legacyInstanceContext(displayAllocation)
     this.currentId = sandboxId !== undefined && sandboxId !== '' ? sandboxId : undefined
     this.log(`tool environment ${sandboxId ?? '(unknown id)'} from ByClaw BE: ${describe(endpoint)}`)
     this.ownsSandbox = true
@@ -369,35 +440,6 @@ export class ByClawBeBackend implements ToolEnvBackend {
     } catch (error) {
       this.log(`release of tool environment ${sandboxType} failed: ${message(error)}`)
       throw error
-    }
-  }
-
-  /**
-   * Release the B of another service that the last launch for this user left behind
-   * (see the module comment). A failed release is logged and the launch goes on: the
-   * user keeps their tools if the old B is already gone or its spec was removed.
-   */
-  private async releasePreviousService(): Promise<void> {
-    let previous: LaunchedRecord
-    try { previous = JSON.parse(await readFile(this.launchedFile, 'utf8')) as LaunchedRecord } catch { return }
-    const sandboxType = previous.serviceKey
-    if (typeof sandboxType !== 'string' || sandboxType === '' || sandboxType === this.config.serviceKey) return
-    try {
-      const expectedSandboxId = this.config.requestScopedKeys ? previous.sandboxId : undefined
-      if (this.config.requestScopedKeys && (typeof expectedSandboxId !== 'string' || expectedSandboxId === '')) throw new Error('RELEASE_UNCONFIRMED: previous allocation identity is missing')
-      const receipt = await this.call('/sandbox/removeSandbox', { userCode: this.config.userCode, sandboxType, ...(expectedSandboxId === undefined ? {} : { expectedSandboxId }) })
-      if (expectedSandboxId !== undefined) confirmExactRelease(receipt, expectedSandboxId)
-      const id = previous.sandboxId === undefined ? '' : ` ${previous.sandboxId}`
-      this.log(`released tool environment${id} of type ${sandboxType}: this user's tool sandbox is now ${this.config.serviceKey}`)
-      await rm(this.launchedFile, { force: true })
-      this.previousCleanupPending = false
-    } catch (error) {
-      if (this.config.requestScopedKeys) {
-        this.previousCleanupPending = true
-        this.log(`release of the earlier tool environment of type ${sandboxType} unconfirmed; ownership retained`)
-        throw error
-      }
-      this.log(`release of the earlier tool environment of type ${sandboxType} failed (${message(error)}); launching ${this.config.serviceKey} anyway`)
     }
   }
 
@@ -524,3 +566,12 @@ function describe(endpoint: ToolEnvEndpoint): string {
 }
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }
+
+/** Retry only contention/transport failures; identity, policy and admission errors are final. */
+function retryableCoordinatedAcquire(error: unknown): boolean {
+  if (isTokenRejected(error)) return false
+  const text = message(error)
+  const code = /\bTOOL_[A-Z_]+\b/u.exec(text)?.[0]
+  if (code) return code === 'TOOL_LEASE_BUSY' || code === 'TOOL_LEASE_UNAVAILABLE'
+  return /fetch failed|timed? ?out|timeout|(?:->|HTTP)\s*50[0-4]|platform\.request\.failed\s*50[0-4]/iu.test(text)
+}

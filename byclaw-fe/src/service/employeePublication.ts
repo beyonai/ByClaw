@@ -112,7 +112,12 @@ export const previewPublication = (publication: Pick<Publication, 'requestId' | 
 export const getCurrentPublication = (resourceId: string) =>
   GET<PublicationDetail | null>(`${base}/current`, { resourceId });
 export const listPublications = (review: boolean, page = 1) =>
-  GET<{ list: Publication[]; total: number }>(`${base}/list`, { review, page, size: 20 });
+  GET<{ list: Publication[]; total: number }>(
+    `${base}/list`,
+    { review, page, size: 20 },
+    // 列表由页面显示加载错误，后台跟踪失败不重复弹出全局错误对话框。
+    { timeout: 15000, responseCfg: { hideErrorTips: true } }
+  );
 export const publicationAction = (
   action: 'scope' | 'revise' | 'save' | 'submit' | 'approve' | 'reject' | 'withdraw' | 'refreshTarget',
   publication: Pick<Publication, 'requestId' | 'revision'>,

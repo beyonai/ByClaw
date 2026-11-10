@@ -346,7 +346,7 @@ class DigitalEmployeeBatchFindByIdsTest extends com.iwhalecloud.byai.common.i18n
     }
 
     @Test
-    @DisplayName("batchLoadTargetContent(VIEW, mapper 返回空) → 返回空 Map")
+    @DisplayName("停用 VIEW 不加载旧快照")
     void batchLoadTargetContent_viewEmptyResult_returnsEmptyMap() {
         List<Long> ids = Arrays.asList(501L, 502L);
         doReturn(Collections.emptyList()).when(viewMapper).findByIds(ids);
@@ -354,12 +354,12 @@ class DigitalEmployeeBatchFindByIdsTest extends com.iwhalecloud.byai.common.i18n
         Map<Long, String> result = appService.batchLoadTargetContent("VIEW", ids);
 
         assertThat(result).isEmpty();
-        verify(viewMapper, times(1)).findByIds(ids);
+        verify(viewMapper, never()).findByIds(ids);
         verify(viewMapper, never()).selectById(org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test
-    @DisplayName("batchLoadTargetContent(OBJECT) → Mapper.findByIds 调用 1 次（替换原循环 findById）")
+    @DisplayName("停用 OBJECT 不加载旧快照")
     void batchLoadTargetContent_object_callsFindByIdsOnceNotFindById() {
         List<Long> ids = Arrays.asList(601L, 602L);
         SsResExtObject o = new SsResExtObject();
@@ -369,8 +369,8 @@ class DigitalEmployeeBatchFindByIdsTest extends com.iwhalecloud.byai.common.i18n
 
         Map<Long, String> result = appService.batchLoadTargetContent("OBJECT", ids);
 
-        assertThat(result).hasSize(1).containsEntry(601L, "{\"object\":1}");
-        verify(objectMapper, times(1)).findByIds(ids);
+        assertThat(result).isEmpty();
+        verify(objectMapper, never()).findByIds(ids);
         verify(objectMapper, never()).selectById(org.mockito.ArgumentMatchers.anyLong());
     }
 

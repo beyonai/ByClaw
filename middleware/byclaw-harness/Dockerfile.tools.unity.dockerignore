@@ -1,0 +1,7 @@
+**
+!middleware/
+!middleware/byclaw-harness/
+!middleware/byclaw-harness/tool-sandbox/
+!middleware/byclaw-harness/tool-sandbox/unity.capabilities.json
+!middleware/byclaw-harness/scripts/
+!middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py

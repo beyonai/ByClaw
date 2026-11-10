@@ -150,5 +150,18 @@ public class SsResourceVersion implements Serializable {
      * 所属企业
      */
     private Long comAcctId;
+
+    /** 员工内递增版本号；旧资源版本为空，避免误认成完整员工快照。 */
+    private Long versionSeq;
+    private Long baseVersionId;
+    private Long sourceVersionId;
+    private Integer snapshotSchemaVersion;
+    private String contentHash;
+    private String versionSource;
+    private String changeNote;
+    private String saveRequestId;
+    /** 保存成功时的修订号，用于请求重试时拒绝覆盖后续编辑。 */
+    private Long savedRevision;
+
 }
 

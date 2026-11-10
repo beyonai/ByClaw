@@ -1,5 +1,5 @@
 import { getLocale } from '@umijs/max';
-import { GET, POST } from '@/service/common/request';
+import { GET, POST, type ConfigType } from '@/service/common/request';
 import type { IQueryFile } from '@/typescript/file';
 import { hasDesktopLocalFiles } from '@/service/common/desktopLocal';
 
@@ -51,7 +51,7 @@ export const uploadImage = (data: FormData) =>
     },
   });
 
-export const uploadFiles = async (data: FormData) => {
+export const uploadFiles = async (data: FormData, onUploadProgress?: ConfigType['onUploadProgress']) => {
   if (hasDesktopLocalFiles() && window.byclawDesktop?.files?.registerAttachments) {
     const files = data.getAll('files').filter((value): value is File => value instanceof File);
     const registered = await window.byclawDesktop.files.registerAttachments(files);
@@ -63,6 +63,7 @@ export const uploadFiles = async (data: FormData) => {
     return { ...res, rebuildFileList: res.uploadItems || [] };
   }
   return POST<any>('/byaiService/chat/uploadFiles', data, {
+    ...(onUploadProgress ? { onUploadProgress } : {}),
     responseCfg: { hideErrorTips: true },
     timeout: 480000,
     headers: {

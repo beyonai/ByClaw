@@ -434,6 +434,21 @@ describe('Service Common Request', () => {
     await expect(rejectWithResponseInterceptor(error)).rejects.toBe(error);
   });
 
+  it('preserves verified upload admission errors as an actionable typed failure', async () => {
+    await expect(
+      rejectWithResponseInterceptor({
+        status: 429,
+        config: { url: '/byaiService/fileBrowser/uploads/create' },
+        response: { status: 429, data: { data: { errorType: 'upload_admission_full', retryAfterMs: 1000 } } },
+      })
+    ).rejects.toMatchObject({
+      status: 429,
+      errorType: 'upload_admission_full',
+      retryAfterMs: 1000,
+      action: 'MANAGE_UNFINISHED_UPLOADS',
+    });
+  });
+
   it('continues to stringify HTTP 409 errors without the opt-in', async () => {
     await expect(
       rejectWithResponseInterceptor({

@@ -7,6 +7,8 @@ import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatMentionMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskDeliveryService;
+import com.iwhalecloud.byai.state.domain.groupchat.dto.GroupChatTaskDeliveryResponse;
+import java.util.Map;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -15,7 +17,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Routes private task reads to the database that owns the group task. */
+/** 群组任务路由：公共数据租户由原 Controller 校验并处理，标准租户转发所属 Node。 */
 @Aspect
 @Component
 public class TenantGroupTaskRoutingAspect {
@@ -31,18 +33,21 @@ public class TenantGroupTaskRoutingAspect {
     private final ByaiGroupChatTaskMapper legacyTasks;
     private final ByaiGroupChatMentionMapper legacyMembership;
     private final GroupChatTaskDeliveryService delivery;
+    private final TenantModeService tenantModes;
 
     public TenantGroupTaskRoutingAspect(TenantNodeClient node, ByaiGroupChatTaskMapper legacyTasks,
-        ByaiGroupChatMentionMapper legacyMembership, GroupChatTaskDeliveryService delivery) {
+        ByaiGroupChatMentionMapper legacyMembership, GroupChatTaskDeliveryService delivery,
+        TenantModeService tenantModes) {
         this.node = node;
         this.legacyTasks = legacyTasks;
         this.legacyMembership = legacyMembership;
         this.delivery = delivery;
+        this.tenantModes = tenantModes;
     }
 
     @Around("execution(* com.iwhalecloud.byai.state.domain.groupchat.interfaces.GroupChatTaskController.*(..))")
     /**
-     * 群组任务切面：根据任务所属租户把准备、完成、取消、查询和投递状态操作转发到 Node。
+     * 群组任务切面：公共库任务走原处理链，标准租户的各项任务操作才转发到 Node。
      * 每个 case 对应 GroupChatTaskController 的一个方法名，而不是随机字符串。
      */
     public Object route(ProceedingJoinPoint call) throws Throwable {
@@ -60,8 +65,9 @@ public class TenantGroupTaskRoutingAspect {
                 context = contexts.validate(Long.toString(registered.enterpriseId()));
             }
         }
-        // 无法恢复租户上下文时继续公共库旧逻辑，由原 Controller 自己处理。
-        if (context == null) return call.proceed();
+        // 默认企业和试用租户的数据在公共库，没有独立 Node；原业务继续校验任务和群成员权限。
+        // 在恢复上下文之后统一判断，兼顾带 Header 的请求和通过登记任务恢复身份的请求。
+        if (context == null || tenantModes.isSharedDataTenant(context.enterpriseId())) return call.proceed();
         if (args.length == 0 || !(args[0] instanceof Long taskId) || taskId <= 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.group.task.invalid");
         }
@@ -83,9 +89,12 @@ public class TenantGroupTaskRoutingAspect {
             case "pending" -> ResponseUtil.successResponse(node.request(context, "GET",
                 path + "/pending-publication", null, new TypeReference<Object>() { }));
             case "deliveryStatus" -> {
-                // deliveryStatus 先让 Node 校验群成员和任务发起人，再读取本地投递状态。
-                node.request(context, "GET", path, null, new TypeReference<Object>() { });
-                yield ResponseUtil.successResponse(delivery.currentAuthorized(taskId));
+                // deliveryStatus 先让 Node 校验群成员和任务发起人，再按任务状态决定是否读取投递状态。
+                Map<String, Object> task = node.request(context, "GET", path, null,
+                    new TypeReference<Map<String, Object>>() { });
+                yield ResponseUtil.successResponse("ACTIVE".equals(task.get("status"))
+                    ? delivery.currentAuthorized(taskId)
+                    : new GroupChatTaskDeliveryResponse(taskId.toString(), false));
             }
             default -> throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "i18n.status.tenant.group.task.operation.is.not.ready");

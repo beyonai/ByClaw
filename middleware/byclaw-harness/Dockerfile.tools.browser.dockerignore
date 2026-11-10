@@ -2,6 +2,17 @@
 **
 !middleware/
 !middleware/byclaw-harness/
+!middleware/byclaw-harness/browser/
+!middleware/byclaw-harness/browser/novnc-index.html
+!middleware/builtin/
+!middleware/builtin/runtime-tools/
+!middleware/builtin/runtime-tools/browser-viewer/
+!middleware/builtin/runtime-tools/browser-viewer/connection-bridge.mjs
 !middleware/byclaw-harness/tool-sandbox/
 !middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh
 !middleware/byclaw-harness/tool-sandbox/browser.capabilities.json
+!middleware/byclaw-harness/tool-sandbox/collect-browser-runtime.mjs
+!middleware/byclaw-harness/scripts/
+!middleware/byclaw-harness/scripts/byclaw-bycli-managed.py
+!middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py
+!middleware/byclaw-harness/scripts/tool-slim-entrypoint.sh

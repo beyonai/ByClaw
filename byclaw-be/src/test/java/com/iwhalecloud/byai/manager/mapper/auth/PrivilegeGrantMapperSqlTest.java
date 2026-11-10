@@ -170,7 +170,7 @@ class PrivilegeGrantMapperSqlTest {
                     params.put("excludeDeleted", true);
                     String sql = source.getBoundSql(params).getSql().replaceAll("\\s+", " ");
                     // 条件在 OR 组外，包含默认个人资源和全部状态时也不能返回注销数据。
-                    assertThat(sql).contains("WHERE a.resource_status != -1 and (");
+                    assertThat(sql).contains("and a.resource_status != -1 and (");
                     params.put("excludeDeleted", false);
                     assertThat(source.getBoundSql(params).getSql()).doesNotContain("a.resource_status != -1");
                 }
@@ -242,6 +242,28 @@ class PrivilegeGrantMapperSqlTest {
                     }
                 }
             }
+        }
+    }
+
+    @Test
+    void organizationPublicationFiltersBeforePaginationAndAvailableQueriesKeepUseAuthorization() throws Exception {
+        try (var input = getClass().getResourceAsStream("/com/iwhalecloud/byai/manager/mapper/auth/PrivilegeGrantMapper.xml")) {
+            String xml = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            int start = xml.indexOf("<select id=\"listResourceAuth\"");
+            String query = xml.substring(start, xml.indexOf("</select>", start));
+            var source = new XMLLanguageDriver().createSqlSource(new Configuration(), "<script>" + query.substring(query.indexOf('>') + 1) + "</script>", Map.class);
+            Map<String, Object> params = new HashMap<>(); params.put("userId", 2L); params.put("ownerType", "enterprise");
+            params.put("resourceBizTypeList", List.of("SKILL")); params.put("resourceStatus", "");
+            var catalog = new com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess.QueryContext(1L, true, false, List.of(100L,101L), List.of(100L), "ORGS", List.of(100L,101L));
+            params.put("publicationQuery", catalog);
+            String sql = source.getBoundSql(params).getSql().replaceAll("\\s+", " ");
+            assertThat(sql).contains("a.com_acct_id = ?", "and a.resource_status = 2", "a.publish_scope_mode = 'ORGS'", "from byai.resource_publish_scope ps", "from byai.resource_publish_scope pf");
+            assertThat(sql).doesNotContain("or true");
+            params.put("availableOnly", true);
+            params.put("publicationQuery", new com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess.QueryContext(1L, false, false, List.of(100L), List.of(100L), "ALL", List.of()));
+            sql = source.getBoundSql(params).getSql().replaceAll("\\s+", " ");
+            assertThat(sql).doesNotContain("from byai.resource_publish_scope ps", "from byai.resource_publish_scope pf");
+            assertThat(sql).contains("k.red_count > 0");
         }
     }
 }

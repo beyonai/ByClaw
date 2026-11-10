@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.constants.resource.RetiredConversationResources;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -201,7 +202,8 @@ public class EmployeePublicationResources {
                 dependency.setSkill(snapshot);
                 dependency.setTargetId(id);
                 dependency.setAction("COPY_SKILL");
-                dependency.setCopyName(EmployeePublicationNames.enterpriseName(resource.getResourceName(), null));
+                dependency.setCopyName(com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationNames
+                    .enterpriseName(resource.getResourceName()));
                 checkSkill(dependency, bytes, authorId, tenantId);
             } catch (Exception error) {
                 omit(dependency, error instanceof BaseException ? error.getMessage() : I18nUtil.get("employee.publication.skillReadFailed"));
@@ -455,6 +457,9 @@ public class EmployeePublicationResources {
             dependency.setResource(current);
             dependency.setTargetId(id);
             dependency.setResourceType(current.getResourceBizType());
+            if (RetiredConversationResources.isRetired(current.getResourceBizType())) {
+                omit(dependency, RetiredConversationResources.REASON); return;
+            }
             if (!Objects.equals(current.getResourceStatus(), 2)) { omit(dependency, I18nUtil.get("employee.publication.resourceInactive")); return; }
             if (isPersonal(current)) {
                 omit(dependency, "SKILL".equals(current.getResourceBizType()) ? StringUtils.defaultIfBlank(previousWarning, I18nUtil.get("employee.publication.skillNotCopied")) : I18nUtil.get("employee.publication.personalResourceExcluded"));

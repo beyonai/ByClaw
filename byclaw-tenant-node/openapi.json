@@ -230,6 +230,113 @@
         }
       }
     },
+    "/internal/v1/group-chats/{id}/direct-tasks": {
+      "post": {
+        "summary": "CREATE_DIRECT_TASK",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Rejected; sanitized error code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantCommand"
+              }
+            }
+          }
+        }
+      }
+    },
     "/internal/v1/group-chats/{id}/invitations": {
       "post": {
         "summary": "CREATE_INVITATION",
@@ -7904,6 +8011,16 @@
         "summary": "BE 内部读取当前 actor 在原群的有效成员模型凭据；不用于公开群详情。",
         "parameters": [
           {
+            "name": "identityOnly",
+            "in": "query",
+            "description": "为 true 时仅查询有效成员主键，供 BE 优先读取 HACU 共享 Redis；不查询数据库 api_key。",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
             "$ref": "#/components/parameters/enterprise"
           },
           {
@@ -7923,7 +8040,7 @@
         ],
         "responses": {
           "200": {
-            "description": "当前租户 USER 成员的 state=00A 凭据；缺失或空白为 null。",
+            "description": "当前租户 USER 成员的 state=00A 凭据；缺失或空白为 null。identityOnly=true 时另返回 byaiSessionMemberId，api_key 始终为 null。",
             "content": {
               "application/json": {
                 "schema": {
@@ -7931,6 +8048,10 @@
                   "required": ["api_key"],
                   "additionalProperties": false,
                   "properties": {
+                    "byaiSessionMemberId": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "api_key": {
                       "type": "string",
                       "nullable": true

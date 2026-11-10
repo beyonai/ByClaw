@@ -54,6 +54,7 @@ const ChatResourceWorkspace: React.FC<ChatResourceWorkspaceProps> = ({
   const resourcePanel = (
     <ResourcePanel
       key={sessionId}
+      onClose={onToggleList}
       sessionId={sessionId}
       projectId={projectId}
       cloudResourceId={cloudResourceId}
@@ -104,10 +105,20 @@ const ChatResourceWorkspace: React.FC<ChatResourceWorkspaceProps> = ({
                           items: [
                             { key: 'close', label: intl.formatMessage({ id: 'chatResource.closeTab' }) },
                             ...(hasOtherTabs
-                              ? [{ key: 'closeOthers', label: intl.formatMessage({ id: 'chatResource.closeOtherTabs' }) }]
+                              ? [
+                                {
+                                  key: 'closeOthers',
+                                  label: intl.formatMessage({ id: 'chatResource.closeOtherTabs' }),
+                                },
+                              ]
                               : []),
                             ...(hasRightTabs
-                              ? [{ key: 'closeRight', label: intl.formatMessage({ id: 'chatResource.closeRightTabs' }) }]
+                              ? [
+                                {
+                                  key: 'closeRight',
+                                  label: intl.formatMessage({ id: 'chatResource.closeRightTabs' }),
+                                },
+                              ]
                               : []),
                           ],
                           onClick: ({ key }) => {

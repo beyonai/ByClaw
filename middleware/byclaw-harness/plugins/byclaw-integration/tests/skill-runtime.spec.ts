@@ -66,6 +66,8 @@ async function fixture(options: {
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(SkillRegistry)
+  // DSH 0.2.1's native tool requires a working-directory provider before activation.
+  ctx.provide('workingDirectory', { ensure: async () => root } as typeof ctx.workingDirectory)
   ctx.skills.register({ name: 'unrelated-global', description: 'Unrelated global', source: 'runtime', content: 'Global body' })
   ctx.skills.register({ name: 'html-artifact', description: 'Wrong global shadow', source: 'runtime', content: 'Wrong body' })
   await ctx.plugin(toolSkill)
@@ -130,6 +132,39 @@ it('publishes builtins plus exact associations and retains the ordinary agent ca
   expect(JSON.stringify(await f.propose(f.a, '/html-artifact'))).toContain('Bound HTML body')
   f.runtime.dispose()
   expect((await list(f.a)).map(s => s.name)).toEqual(['html-artifact', 'unrelated-global'])
+})
+
+it('loads personal and enterprise names verbatim through the native tool and slash gesture, within scope', async () => {
+  const f = await fixture()
+  const personal = await skill(f.cache, 'report', 'Personal report', 'PERSONAL_REPORT')
+  const enterprise = await skill(f.cache, 'enterprise-skill-123', 'Enterprise report', 'ENTERPRISE_REPORT', 'report_企业')
+  const published = template('byclaw-employee-1', [personal, enterprise])
+  ;(await f.runtime.prepareGeneration([published, f.templates[1]!], f.cache, f.cache))()
+  expect((await f.ctx.skills.list({ scope: f.a })).map(s => s.name)).toContain('report_企业')
+  const personalResult = await f.call(f.a, 'report')
+  const enterpriseResult = await f.call(f.a, 'report_企业')
+  expect(personalResult.isError).toBe(false)
+  expect(JSON.stringify(personalResult)).toContain('PERSONAL_REPORT')
+  expect(enterpriseResult.isError).toBe(false)
+  expect(JSON.stringify(enterpriseResult)).toContain('ENTERPRISE_REPORT')
+  expect(JSON.stringify(enterpriseResult)).toContain(enterprise.path)
+  expect(JSON.stringify(enterpriseResult)).not.toContain('PERSONAL_REPORT')
+  expect(JSON.stringify(await f.propose(f.a, '/report_企业'))).toContain('ENTERPRISE_REPORT')
+  expect((await f.call(f.b, 'report_企业')).isError).toBe(true)
+  ;(await f.runtime.prepareGeneration([template(published.id, [personal]), f.templates[1]!], f.cache, f.cache))()
+  expect((await f.call(f.a, 'report_企业')).isError).toBe(true)
+  for (const name of ['../report_企业', 'report/企业', 'report\\企业', '<report>_企业', 'report\n_企业']) {
+    expect((await f.call(f.a, name)).isError).toBe(true)
+  }
+})
+
+it('preserves invocation controls for Unicode names registered in the native registry', async () => {
+  const f = await fixture()
+  f.ctx.skills.register({ name: '销售_分析_日报_企业', description: 'Explicitly invoked report', source: 'runtime',
+    content: 'USER_ONLY_REPORT', invocation: { modelInvocable: false, userInvocable: true } })
+  expect((await f.ctx.skills.get('销售_分析_日报_企业', { scope: f.main }))?.name).toBe('销售_分析_日报_企业')
+  expect((await f.call(f.main, '销售_分析_日报_企业')).isError).toBe(true)
+  expect(JSON.stringify(await f.propose(f.main, '/销售_分析_日报_企业'))).toContain('USER_ONLY_REPORT')
 })
 
 it('tells the model where a Skill directory is for its commands, keeping the Skill text', async () => {

@@ -20,7 +20,7 @@ import com.iwhalecloud.byai.state.domain.resource.converter.FileConverterContext
 @Service
 public class FilePreviewApplicationService {
 
-    public static final int MAX_FILE_SIZE = 20 * 1024 * 1024;
+    public static final int MAX_FILE_SIZE = 50_000_000;
 
     private static final Set<String> SUPPORTED_TYPES = Set.of("doc", "ppt");
 

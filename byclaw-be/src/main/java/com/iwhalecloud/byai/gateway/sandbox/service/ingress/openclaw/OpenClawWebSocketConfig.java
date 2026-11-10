@@ -40,6 +40,7 @@ public class OpenClawWebSocketConfig {
 
     @Bean
     public SimpleUrlHandlerMapping openClawWebSocketHandlerMapping(
+        @org.springframework.beans.factory.annotation.Qualifier("openClawWebSocketProxyHandler")
         OpenClawWebSocketProxyHandler proxyHandler,
         HandshakeHandler handshakeHandler) {
 

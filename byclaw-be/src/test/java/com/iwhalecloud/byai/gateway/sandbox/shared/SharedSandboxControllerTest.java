@@ -150,6 +150,20 @@ class SharedSandboxControllerTest {
     }
 
     @Test
+    void recordSearchResolvesNamesAndDiscardsForgedUserFiltersBeforePlatformPagination() {
+        Users alice = new Users(); alice.setUserCode("alice001"); alice.setUserName("Alice");
+        when(users.selectList(any(Wrapper.class))).thenReturn(List.of(alice));
+        try (var current = mockStatic(CurrentUserHolder.class)) {
+            current.when(CurrentUserHolder::isBusinessAdmin).thenReturn(true);
+            current.when(CurrentUserHolder::getEnterpriseId).thenReturn(7L);
+            controller.call("listRecords", Map.of("keyword", " Alice ", "userCodes", List.of("forged"), "pageIndex", 2));
+            verify(gateway).call(eq("listRecords"), argThat(p -> List.of("alice001").equals(p.get("userCodes"))
+                && !p.containsKey("keyword") && Long.valueOf(7).equals(p.get("tenantScope"))
+                && Integer.valueOf(2).equals(p.get("pageIndex")) && !p.containsKey("status")));
+        }
+    }
+
+    @Test
     void manualReleaseUsesOnlyMappingFenceAndTrustedPlatformPrivileges() {
         try (var current = mockStatic(CurrentUserHolder.class)) {
             current.when(CurrentUserHolder::isPlatformManager).thenReturn(true);

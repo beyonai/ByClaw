@@ -12,6 +12,8 @@ export const SNAPSHOT_PREFIX_BY_FOLDER: Record<string, readonly string[]> = {
   mcp: ["MCP"],
   object: ["OBJECT"],
   view: ["VIEW"],
+  ontology_base: ["ONTOLOGY_BASE"],
+  scene: ["SCENE"],
   doc: ["KG_DOC", "KG_DB", "KG_QA"],
 };
 

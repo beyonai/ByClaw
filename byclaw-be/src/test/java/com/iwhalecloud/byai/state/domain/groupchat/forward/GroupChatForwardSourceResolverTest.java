@@ -138,7 +138,7 @@ class GroupChatForwardSourceResolverTest {
         final TenantForwardSourceAuthorityReader node = mock(TenantForwardSourceAuthorityReader.class);
         final TenantAdminTenantMapper tenants = mock(TenantAdminTenantMapper.class);
         final TenantMembershipMapper memberships = mock(TenantMembershipMapper.class);
-        final ForwardSourceAuthorityRouter router = new ForwardSourceAuthorityRouter(legacy, node, tenants, memberships);
+        final ForwardSourceAuthorityRouter router = new ForwardSourceAuthorityRouter(legacy, node, new com.iwhalecloud.byai.manager.domain.tenant.TenantModeService(tenants), memberships);
         final ForwardSourceAuthorityReader owning;
         final ForwardSourceAuthorityReader other;
         final AuthoritativeForwardSourceResolver primary;
@@ -151,8 +151,8 @@ class GroupChatForwardSourceResolverTest {
             owning = backend == ForwardBackend.LEGACY ? legacy : node;
             other = backend == ForwardBackend.LEGACY ? node : legacy;
             when(memberships.selectActiveMembership(20L, 10L)).thenReturn(new TenantMembershipRow());
-            when(tenants.selectConfig(10L, "NODE_SANDBOX_RECORD_ID"))
-                .thenReturn(backend == ForwardBackend.TENANT ? "configured" : null);
+            when(tenants.selectConfig(10L, "TENANT_MODE"))
+                .thenReturn(backend == ForwardBackend.TENANT ? "STANDARD" : "TRIAL");
             var original = source();
             source = new SourceMessage(original.id(), original.timelineOrdinal(), original.content(), original.speaker(), original.createdAt(),
                 original.resourceList(), original.relatedResources(), original.metadata(), original.mergedItems(),
@@ -166,8 +166,8 @@ class GroupChatForwardSourceResolverTest {
             candidate = new ForwardSnapshotFactory().freeze(actor, 30, List.of(authorized)).candidates().getFirst();
             resolved = primary.resolve(actor, authorized, candidate);
             // The trusted configuration changes only after initial source resolution.
-            when(tenants.selectConfig(10L, "NODE_SANDBOX_RECORD_ID"))
-                .thenReturn(backend == ForwardBackend.LEGACY ? "configured" : null);
+            when(tenants.selectConfig(10L, "TENANT_MODE"))
+                .thenReturn(backend == ForwardBackend.LEGACY ? "STANDARD" : "TRIAL");
             clearInvocations(legacy, node, tenants, memberships, storage);
         }
     }

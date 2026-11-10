@@ -101,7 +101,7 @@ OpenClaw 适配器存在会话认证文件与 Header 占位符解析；DeepSeek 
 
 运行时查询示例请求：`{"queryType":"BY_RESOURCE_ID","resourceId":"实际ID"}`。响应 data 内含 schemaVersion/queryType，以及实际 allowed、resourceType、data 等结果；先核对 allowed，再读取资源内容。`allowed=true` 且资源 data 为空仍不能视为定义完整。
 
-当前运行时查询支持的资源映射为 DIG_EMPLOYEE、KG_DOC、OBJECT、VIEW、SCENE、ONTOLOGY_BASE；不要拿 TOOLKIT 等未支持类型反复请求该入口。`AUTHORIZED_RESOURCE_IDS` 返回的是该接口支持范围的授权资源，空列表不等于用户没有任何外部 API。`BY_MODEL_ID`/`BATCH_BY_MODEL_IDS` 使用平台 modelId，仅在当前业务确实需要相应模型时查询，不能批量收集模型凭据。
+当前运行时查询支持的资源映射为 DIG_EMPLOYEE、KG_DOC；OBJECT、VIEW、SCENE、ONTOLOGY_BASE 已停用，不得通过旧 ID、直接 Redis 或其他接口绕过；不要拿 TOOLKIT 等未支持类型反复请求该入口。`AUTHORIZED_RESOURCE_IDS` 返回的是该接口支持范围的授权资源，空列表不等于用户没有任何外部 API。`BY_MODEL_ID`/`BATCH_BY_MODEL_IDS` 使用平台 modelId，仅在当前业务确实需要相应模型时查询，不能批量收集模型凭据。
 
 ByClawSkillAPI 当前没有上述专用方法；需要直接调用时按 [API 契约](api-contracts.md) 的受控 Session 模式复用 base_url、认证和响应处理，设置超时，不编造 `get_resource_metadata()` 等已实现方法。403/allowed=false 等权限拒绝不能通过换用文件或底层 Redis 绕过。
 

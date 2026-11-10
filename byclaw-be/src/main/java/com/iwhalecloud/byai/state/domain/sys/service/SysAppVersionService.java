@@ -73,6 +73,9 @@ public class SysAppVersionService {
     @Autowired
     private FileIngressService fileIngressService;
 
+    @Autowired
+    private AppReleaseSnapshotPublisher appReleaseSnapshotPublisher;
+
     @Value("${server.servlet.context-path:}")
     private String contextPath;
 
@@ -173,6 +176,7 @@ public class SysAppVersionService {
         else {
             sysAppVersionMapper.updateById(entity);
         }
+        appReleaseSnapshotPublisher.publishAfterCommit();
         return entity;
     }
 
@@ -183,6 +187,7 @@ public class SysAppVersionService {
         entity.setReleaseStatus(RELEASE_PUBLISHED);
         entity.setPublishTime(new Date());
         touch(entity);
+        appReleaseSnapshotPublisher.publishAfterCommit();
         return entity;
     }
 
@@ -192,6 +197,7 @@ public class SysAppVersionService {
         SysAppVersion entity = requireVersion(versionId);
         entity.setReleaseStatus(RELEASE_OFFLINE);
         touch(entity);
+        appReleaseSnapshotPublisher.publishAfterCommit();
         return entity;
     }
 
@@ -200,6 +206,7 @@ public class SysAppVersionService {
         guard();
         requireVersion(versionId);
         sysAppVersionMapper.deleteById(versionId);
+        appReleaseSnapshotPublisher.publishAfterCommit();
     }
 
     /**

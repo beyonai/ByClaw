@@ -1,7 +1,7 @@
 # Build the reusable image first:
 #   docker build -f middleware/byclaw-harness/Dockerfile.base -t 192.168.0.81:8080/byclaw/dsh-base:0.2.1-rc.2 .
-# Then build this business-extension image:
-#   docker build -f middleware/byclaw-harness/Dockerfile.extensions -t byclaw/dsh:latest .
+# Then build this business image from the repository root:
+#   docker build -f middleware/byclaw-harness/Dockerfile -t byclaw/dsh:latest .
 # The base must come from this branch's Dockerfile.base (DSH 0.2.1-rc.2): the
 # plugins depend on 0.2.1 workspace packages that older bases do not contain.
 ARG BASE_IMAGE=192.168.0.81:8080/byclaw/dsh-base:0.2.1-rc.2
@@ -33,6 +33,7 @@ COPY middleware/byclaw-harness/scripts/docker-plugin-layout.mjs /workspace/scrip
 COPY middleware/byclaw-harness/scripts/docker-workspace-prepare.mjs /workspace/scripts/docker-workspace-prepare.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-model-routing-runtime.mjs /workspace/scripts/prepare-dsh-model-routing-runtime.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-startup-021.mjs /workspace/scripts/prepare-dsh-startup-021.mjs
+COPY middleware/byclaw-harness/scripts/prepare-dsh-skill-names-021.mjs /workspace/scripts/prepare-dsh-skill-names-021.mjs
 COPY middleware/byclaw-harness/scripts/prepare-dsh-lazy-021.mjs /workspace/scripts/prepare-dsh-lazy-021.mjs
 COPY middleware/byclaw-harness/scripts/bundle-dsh-startup-deps.mjs /workspace/scripts/bundle-dsh-startup-deps.mjs
 COPY middleware/byclaw-harness/scripts/verify-startup-bundles.mjs /workspace/scripts/verify-startup-bundles.mjs
@@ -53,6 +54,12 @@ RUN node scripts/prepare-by-framework.mjs \
     && node scripts/docker-workspace-prepare.mjs plugins \
     && pnpm install --no-frozen-lockfile \
     && node scripts/verify-by-framework-runtime.mjs plugins/byclaw-integration/package.json
+
+# Preserve the enterprise package name in both the registry and native skill tool.
+RUN node scripts/prepare-dsh-skill-names-021.mjs /workspace \
+    && pnpm exec tsc -b packages/skill/skill/tsconfig.json packages/skill/tool-skill/tsconfig.json \
+    && pnpm exec tsdown --env.DSH_BUILD_FACE host --filter packages/skill/skill --filter packages/skill/tool-skill \
+    && node --input-type=module -e "const {isSkillName}=await import('./packages/skill/skill/lib/index.js');if(!isSkillName('report_企业')||isSkillName('../report_企业'))throw new Error('DSH Skill name compatibility build is missing')"
 
 # Apply pinned startup and model-routing changes only in the build workspace.
 # Rebuild affected core packages before consumers; ship source and compiled output together.
@@ -90,6 +97,9 @@ RUN set -eux; \
     mkdir -p /tmp/byclaw-plugin-packs; \
     node scripts/docker-plugin-layout.mjs packages plugins >/tmp/byclaw-package-manifests; \
     node scripts/prepare-dsh-model-routing-runtime.mjs --workspace /workspace --manifests >>/tmp/byclaw-package-manifests; \
+    for skill_package in skill tool-skill; do \
+        printf '%s\n' "/workspace/packages/skill/${skill_package}/package.json" >>/tmp/byclaw-package-manifests; \
+    done; \
     # DSH's SSH provider family is outside the CLI installation table; pack it
     # from this workspace so @byclaw/dsh-tool-env installs the same build.
     for ssh_package in ssh fs-ssh subprocess-ssh sandbox-ssh; do \
@@ -142,7 +152,7 @@ FROM ${BASE_IMAGE} AS connector-tools
 USER root
 ARG NPM_REGISTRY
 ENV npm_config_registry=${NPM_REGISTRY}
-ARG WECOM_CLI_VERSION=0.1.9
+ARG WECOM_CLI_VERSION=1.3.4
 ARG LARKSUITE_CLI_VERSION=1.0.85
 COPY middleware/byclaw-harness/scripts/lark-mirror-first.mjs /tmp/lark-mirror-first.mjs
 # Shared connector Skills need these executables in the final image. Keep their
@@ -152,10 +162,10 @@ RUN set -eu; \
     node /tmp/lark-mirror-first.mjs "$(npm root -g)/@larksuite/cli/scripts/install.js"; \
     node "$(npm root -g)/@larksuite/cli/scripts/install.js"; \
     wecom_version="$(wecom-cli --version)"; \
-    test "${wecom_version}" = "wecom-cli ${WECOM_CLI_VERSION}"; \
+    printf '%s\n' "${wecom_version}" | awk -v expected="${WECOM_CLI_VERSION}" 'NR != 1 || $1 != "wecom-cli" || $2 != expected || (NF != 2 && $0 !~ /^wecom-cli [^ ]+ \(wecom [^()]+\)$/) { exit 1 }'; \
     lark_version="$(lark-cli --version)"; \
     test "${lark_version}" = "lark-cli version ${LARKSUITE_CLI_VERSION}"; \
-    su -s /bin/sh byclaw -c 'wecom-cli --help >/dev/null && lark-cli --help >/dev/null'; \
+    su -s /bin/sh byclaw -c 'wecom-cli --version >/dev/null && lark-cli --help >/dev/null'; \
     npm cache clean --force
 
 
@@ -186,10 +196,10 @@ ENV DSH_HOME=/home/byclaw/.dsh \
     BYCLAW_BROWSER_IDLE_MS=30000 \
     BYCLI_BROWSER_IDLE_TIMEOUT=900 \
     BYCLI_BRIDGE_BOOTSTRAP_SCRIPT=/opt/byclaw/builtin/skills/bycli/scripts/bridge-bootstrap.mjs \
-    BYCLAW_BROWSER_STARTUP=on-demand \
+    BYCLAW_BROWSER_STARTUP=eager \
     BYCLAW_BROWSER_VIEWER=shared-novnc \
     BYCLAW_BROWSER_USER_DATA_DIR=/home/byclaw/.dsh/browser/user-data \
-    BYCLAW_BROWSER_EXTENSIONS=/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension \
+    BYCLAW_BROWSER_EXTENSIONS=/opt/byclaw/bycli-extension \
     BYCLAW_BYCLI_ENABLED=true \
     BYCLAW_BROWSER_XVFB_SCREEN=1365x768x24 \
     BYCLAW_BROWSER_SESSION_RUNTIME_ROOT=/run/byclaw-browser/sessions \
@@ -225,6 +235,10 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent/lib/ /workspace/packages/core/agent/lib/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent-loop/src/ /workspace/packages/core/agent-loop/src/
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/core/agent-loop/lib/ /workspace/packages/core/agent-loop/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/skill/src/ /workspace/packages/skill/skill/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/skill/lib/ /workspace/packages/skill/skill/lib/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/tool-skill/src/ /workspace/packages/skill/tool-skill/src/
+COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/skill/tool-skill/lib/ /workspace/packages/skill/tool-skill/lib/
 COPY middleware/byclaw-harness/scripts/verify-by-framework-runtime.mjs /usr/local/lib/byclaw/verify-by-framework-runtime.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/prune-dsh-profile.mjs /tmp/prune-dsh-profile.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/link-dsh-installation-peers.mjs /tmp/link-dsh-installation-peers.mjs
@@ -274,6 +288,7 @@ RUN set -eux; \
     cd "${BYCLAW_DSH_MANAGED_HOME}/profiles/web"; \
     node /usr/local/lib/byclaw/verify-by-framework-runtime.mjs "$(node -p "require.resolve('@byclaw/dsh-integration/package.json')")"; \
     node --input-type=module -e "const {createRequire}=await import('node:module');const require=createRequire(import.meta.resolve('@byclaw/byclaw-model-router/dsh'));const runtime=await import(require.resolve('@deepseek-ai/dsh-agent-loop'));if(runtime.byclawRequestReassembly!==true)throw new Error('Profile resolved an unpatched DSH agent loop')"; \
+    node --input-type=module -e "const {createRequire}=await import('node:module');const require=createRequire(import.meta.resolve('@byclaw/dsh-integration'));const {isSkillName}=await import(require.resolve('@deepseek-ai/dsh-skill'));if(!isSkillName('report_企业')||isSkillName('../report_企业'))throw new Error('Profile resolved unpatched Skill names')"; \
     node -e "const pty=require('node-pty');if(typeof pty.spawn!=='function')process.exit(1)"; \
     cd /workspace; \
     node scripts/verify-shared-runtime.mjs /workspace "${BYCLAW_DSH_MANAGED_HOME}/profiles/web"; \
@@ -310,6 +325,7 @@ COPY --chmod=0755 middleware/byclaw-harness/scripts/browser-supervisor-verify.py
 COPY --chmod=0755 middleware/byclaw-harness/scripts/browser-download-permissions-verify.py /tmp/browser-download-permissions-verify.py
 COPY --chmod=0755 middleware/byclaw-harness/scripts/docker-entrypoint-fd-verify.py /tmp/docker-entrypoint-fd-verify.py
 COPY middleware/byclaw-harness/browser/novnc-index.html /usr/local/share/byclaw-browser/novnc-index.html
+COPY middleware/builtin/runtime-tools/browser-viewer/connection-bridge.mjs /usr/local/share/byclaw-browser/connection-bridge.js
 
 USER root
 
@@ -356,10 +372,13 @@ COPY --from=connector-tools /opt/nvm/current/lib/node_modules/@larksuite/ /opt/n
 RUN ln -sf ../lib/node_modules/@wecom/cli/bin/wecom.js /opt/nvm/current/bin/wecom-cli \
     && ln -sf ../lib/node_modules/@larksuite/cli/scripts/run.js /opt/nvm/current/bin/lark-cli
 
+COPY middleware/byclaw-harness/scripts/version-bycli-extension.mjs /usr/local/lib/byclaw/version-bycli-extension.mjs
 RUN npm install --global --ignore-scripts "@sovovs/bycli@${BYCLI_VERSION}" \
     && test "$(bycli --version)" = "${BYCLI_VERSION}" \
     && test -f /opt/nvm/current/lib/node_modules/@sovovs/bycli/extension/manifest.json \
     && node -e 'const manifest = require("/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension/manifest.json"); if (manifest.version !== process.argv[1] || !manifest.permissions?.includes("system.display")) process.exit(1)' "${BYCLI_EXTENSION_VERSION}" \
+    && extension_real_path="$(node /usr/local/lib/byclaw/version-bycli-extension.mjs /opt/nvm/current/lib/node_modules/@sovovs/bycli /opt/byclaw/bycli-extensions)" \
+    && ln -s "${extension_real_path}" /opt/byclaw/bycli-extension \
     && npm cache clean --force
 RUN ln -sf /usr/local/bin/byclaw-bycli-managed /opt/nvm/current/bin/bycli
 
@@ -372,6 +391,7 @@ RUN set -eux; \
     mkdir -p /opt/byclaw/novnc; \
     cp -a "${novnc_source}/." /opt/byclaw/novnc/; \
     cp /usr/local/share/byclaw-browser/novnc-index.html /opt/byclaw/novnc/index.html; \
+    cp /usr/local/share/byclaw-browser/connection-bridge.js /opt/byclaw/novnc/connection-bridge.js; \
     test -f /opt/byclaw/novnc/core/rfb.js; \
     browser_path="$(node -e "const { chromium } = require('/opt/nvm/current/lib/node_modules/playwright'); process.stdout.write(chromium.executablePath())")"; \
     test -x "${browser_path}"; \

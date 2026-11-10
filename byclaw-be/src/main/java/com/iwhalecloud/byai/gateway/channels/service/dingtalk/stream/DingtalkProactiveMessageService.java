@@ -69,14 +69,12 @@ public class DingtalkProactiveMessageService {
 
     private final ConnectorInfoService connectorInfoService;
 
-    private final ConnectorCliRunner connectorCliRunner;
-
     public DingtalkProactiveMessageService(ObjectMapper objectMapper, DingtalkTokenService dingtalkTokenService,
         DingtalkRobotConfigService dingtalkRobotConfigService, DingtalkUserService dingtalkUserService,
         UserService userService,
         com.iwhalecloud.byai.manager.domain.users.service.UserExternalSystemService userExternalSystemService,
         DwsAuthService dwsAuthService, DwsDingtalkAuthorizationProvider dwsAuthorizationProvider,
-        ConnectorInfoService connectorInfoService, ConnectorCliRunner connectorCliRunner) {
+        ConnectorInfoService connectorInfoService) {
         this.objectMapper = objectMapper;
         this.dingtalkTokenService = dingtalkTokenService;
         this.dingtalkRobotConfigService = dingtalkRobotConfigService;
@@ -86,7 +84,6 @@ public class DingtalkProactiveMessageService {
         this.dwsAuthService = dwsAuthService;
         this.dwsAuthorizationProvider = dwsAuthorizationProvider;
         this.connectorInfoService = connectorInfoService;
-        this.connectorCliRunner = connectorCliRunner;
     }
 
     /**
@@ -420,12 +417,6 @@ public class DingtalkProactiveMessageService {
             throw new IllegalStateException(I18nUtil.get("dingtalk.message.recipientMissing", String.valueOf(receiverUserId)));
         }
 
-        // 准备 dws 环境 (用发送人的授权)
-        Map<String, String> dwsEnv = new HashMap<>();
-        if (!dwsAuthService.applyUserDwsEnv(dwsEnv, senderUserId)) {
-            throw new IllegalStateException(I18nUtil.get("dingtalk.message.environmentFailed", String.valueOf(senderUserId)));
-        }
-
         // 方式1: 通过手机号查询 (首选)
         if (StringUtils.hasText(receiver.getPhone())) {
             try {
@@ -438,7 +429,7 @@ public class DingtalkProactiveMessageService {
                     logger.info("尝试通过手机号查询钉钉 staffId: receiverUserId={}, phone={}****", receiverUserId,
                         phone.substring(0, Math.min(3, phone.length())));
 
-                    String staffId = queryStaffIdByPhone(dwsEnv, phone);
+                    String staffId = queryStaffIdByPhone(senderUserId, phone);
                     if (StringUtils.hasText(staffId)) {
                         logger.info("通过手机号成功映射: userId={} → staffId={}", receiverUserId, staffId);
                         return staffId;
@@ -458,7 +449,7 @@ public class DingtalkProactiveMessageService {
             logger.info("尝试通过工号查询钉钉 staffId: receiverUserId={}, userNumber={}", receiverUserId,
                 receiver.getUserNumber());
 
-            String staffId = queryStaffIdByJobNumber(dwsEnv, receiver.getUserNumber());
+            String staffId = queryStaffIdByJobNumber(senderUserId, receiver.getUserNumber());
             if (StringUtils.hasText(staffId)) {
                 logger.info("通过工号成功映射: userId={} → staffId={}", receiverUserId, staffId);
                 return staffId;
@@ -472,24 +463,22 @@ public class DingtalkProactiveMessageService {
     /**
      * 通过 dws contact user search-mobile 查询钉钉 staffId。
      */
-    private String queryStaffIdByPhone(Map<String, String> dwsEnv, String phone) {
+    private String queryStaffIdByPhone(Long senderUserId, String phone) {
         List<String> command = List.of("dws", "contact", "user", "search-mobile", "--mobile", phone, "--format", "json");
 
-        // 调试日志：打印环境变量
-        logger.info("【调试】dws 环境变量: HOME={}, DWS_CONFIG_DIR={}",
-            dwsEnv.get("HOME"), dwsEnv.get("DWS_CONFIG_DIR"));
         logger.info("【调试】执行命令: {}", String.join(" ", command));
 
         try {
-            ConnectorCliRunner.CliResult result = connectorCliRunner.run(command, dwsEnv, null, java.time.Duration.ofSeconds(10));
+            ConnectorCliRunner.CliResult result = dwsAuthService.runCommand(
+                senderUserId, command, java.time.Duration.ofSeconds(10));
 
             // 调试日志：打印完整输出
             logger.info("【调试】dws 命令执行结果: exitCode={}, output={}, truncated={}",
                 result.exitCode(), result.output(), result.truncated());
 
-            if (result.exitCode() != 0) {
-                logger.warn("dws contact user search-mobile 命令执行失败: exitCode={}, output={}", result.exitCode(),
-                    result.output());
+            if (result.exitCode() != 0 || result.truncated()) {
+                logger.warn("dws contact user search-mobile 命令执行失败: exitCode={}, truncated={}, output={}",
+                    result.exitCode(), result.truncated(), result.output());
                 return null;
             }
 
@@ -528,15 +517,17 @@ public class DingtalkProactiveMessageService {
     /**
      * 通过 dws aisearch person 查询钉钉 staffId (注意: dimension=jobNumber 返回的是 userId,非实际工号)。
      */
-    private String queryStaffIdByJobNumber(Map<String, String> dwsEnv, String jobNumber) {
+    private String queryStaffIdByJobNumber(Long senderUserId, String jobNumber) {
         List<String> command = List.of("dws", "aisearch", "person", "--keyword", jobNumber, "--dimension", "jobNumber",
             "--format", "json");
 
         try {
-            ConnectorCliRunner.CliResult result = connectorCliRunner.run(command, dwsEnv, null, java.time.Duration.ofSeconds(10));
+            ConnectorCliRunner.CliResult result = dwsAuthService.runCommand(
+                senderUserId, command, java.time.Duration.ofSeconds(10));
 
-            if (result.exitCode() != 0) {
-                logger.warn("dws aisearch person 命令执行失败: exitCode={}, output={}", result.exitCode(), result.output());
+            if (result.exitCode() != 0 || result.truncated()) {
+                logger.warn("dws aisearch person 命令执行失败: exitCode={}, truncated={}, output={}",
+                    result.exitCode(), result.truncated(), result.output());
                 return null;
             }
 
@@ -578,19 +569,16 @@ public class DingtalkProactiveMessageService {
         List<String> command = List.of("dws", "chat", "message", "send", "--users", receiverStaffId, "--content",
             content, "--format", "json");
 
-        Map<String, String> dwsEnv = new HashMap<>();
-        if (!dwsAuthService.applyUserDwsEnv(dwsEnv, senderUserId)) {
-            throw new IllegalStateException(I18nUtil.get("dingtalk.message.environmentFailed", String.valueOf(senderUserId)));
-        }
-
         try {
-            ConnectorCliRunner.CliResult result = connectorCliRunner.run(command, dwsEnv, null, java.time.Duration.ofSeconds(15));
+            ConnectorCliRunner.CliResult result = dwsAuthService.runCommand(
+                senderUserId, command, java.time.Duration.ofSeconds(15));
 
-            if (result.exitCode() != 0) {
-                logger.error("dws chat message send 命令执行失败: exitCode={}, output={}", result.exitCode(),
-                    result.output());
+            if (result.exitCode() != 0 || result.truncated()) {
+                logger.error("dws chat message send 命令执行失败: exitCode={}, truncated={}, output={}",
+                    result.exitCode(), result.truncated(), result.output());
                 throw new IllegalStateException(
-                    "钉钉消息发送失败: exitCode=" + result.exitCode() + ", output=" + result.output());
+                    "钉钉消息发送失败: exitCode=" + result.exitCode() + ", truncated=" + result.truncated()
+                        + ", output=" + result.output());
             }
 
             logger.info("钉钉消息发送成功: senderUserId={}, receiverStaffId={}, output={}", senderUserId, receiverStaffId,

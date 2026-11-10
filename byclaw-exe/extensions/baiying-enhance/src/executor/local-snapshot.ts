@@ -1,3 +1,4 @@
+import { isRetiredResource, isRetiredResourceType } from "../retired-resources.js";
 import type { Capability, Dict, ResourceContext } from "./types.js";
 import { isRecord } from "./types.js";
 import { normalizeResourceId, snapshotPrefixesForFolder } from "./resource-type.js";
@@ -33,6 +34,11 @@ export async function loadCapabilityDetails(params: {
       const payload = await store.getJsonByKey(resourceRedisKey(prefix, rid));
       const data = isRecord(payload?.raw) ? (payload.raw as Dict) : null;
       if (!data) continue;
+      // Trust neither the caller's type hint nor the legacy snapshot shape.
+      if (isRetiredResourceType(prefix) || isRetiredResource(data)) {
+        return { id: rid, resource_type: isRetiredResourceType(prefix) ? prefix :
+          [data.resourceBizType, data.resourceType, data.resource_type].find(isRetiredResourceType), metadata: {} } as Capability;
+      }
 
       let capability: Dict = data;
       const looksLikeDetail =

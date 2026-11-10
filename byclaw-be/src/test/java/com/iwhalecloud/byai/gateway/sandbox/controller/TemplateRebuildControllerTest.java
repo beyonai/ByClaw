@@ -16,8 +16,8 @@ class TemplateRebuildControllerTest {
         PlatformRemoteGateway remote=mock(PlatformRemoteGateway.class);when(remote.isRemote()).thenReturn(true);
         LoginInfo login=new LoginInfo();login.setUserCode("realadmin");login.setUserName("真实管理员");
         UsersOrganization org=new UsersOrganization();org.setUserType("PLAT_MAN");login.setUsersOrganizations(List.of(org));CurrentUserHolder.setLoginInfo(login);
-        new TemplateRebuildController(remote).start(Map.of("serviceKey","byclaw-dsh","requestId","request-1234567890","actorName","伪造用户","actorCode","forged"));
-        verify(remote).controller(eq("templateRebuild/start"),argThat(p->"realadmin".equals(p.get("actorCode"))&&"真实管理员".equals(p.get("actorName"))));
+        new TemplateRebuildController(remote).start(Map.of("serviceKey","byclaw-dsh","requestId","request-1234567890","actorName","伪造用户","actorCode","forged","profileKey","m"));
+        verify(remote).controller(eq("templateRebuild/start"),argThat(p->"realadmin".equals(p.get("actorCode"))&&"真实管理员".equals(p.get("actorName"))&&"m".equals(p.get("profileKey"))));
     }
     @Test void ordinaryUsersCannotRebuildOrReadOperatorRecords(){
         PlatformRemoteGateway remote=mock(PlatformRemoteGateway.class);TemplateRebuildController controller=new TemplateRebuildController(remote);

@@ -1,0 +1,63 @@
+# Repository-root context; the browser parent is built from the minimal common base.
+ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
+# BuildKit overrides this empty stage with --build-context godot-assets=DIR.
+# Without that explicit context the COPY fails closed; no image/download fallback.
+FROM scratch AS godot-assets
+
+FROM ${BROWSER_IMAGE} AS godot-install
+USER root
+# Explicit, separately supplied local installation payload; never repository data.
+COPY --from=godot-assets /Godot_v4.6.3-stable_linux.x86_64.zip /tmp/godot-input/editor.zip
+COPY --from=godot-assets /Godot_v4.6.3-stable_export_templates.tpz /tmp/godot-input/templates.tpz
+RUN set -eux; \
+    printf '%s\n' \
+      'a035258da32b77f966a5376f9fa29c30a6adde826a85ba918e1605bd1fc9823eba7d85f1dd5e748956bd2ba72827c0025ffa11bb82aec91128c407a2e723c99c  /tmp/godot-input/editor.zip' \
+      'da606b61c10157844f8300172df374472665f95015495cb1a7cd132c40ede404faa96cc1016a4b9662db9909ddea69632c4948b2cd11163438dad4808881fb68  /tmp/godot-input/templates.tpz' \
+      | sha512sum -c -; \
+    mkdir -p /godot-output/bin /godot-output/export_templates/4.6.3.stable; \
+    unzip -p /tmp/godot-input/editor.zip Godot_v4.6.3-stable_linux.x86_64 >/godot-output/bin/godot; \
+    chmod 0755 /godot-output/bin/godot; \
+    test "$(unzip -p /tmp/godot-input/templates.tpz templates/version.txt)" = 4.6.3.stable; \
+    unzip -j /tmp/godot-input/templates.tpz \
+      'templates/web*.zip' 'templates/linux_*.x86_64' \
+      templates/icudt_godot.dat templates/version.txt \
+      -d /godot-output/export_templates/4.6.3.stable; \
+    chmod 0755 /godot-output/export_templates/4.6.3.stable/linux_*.x86_64
+
+FROM ${BROWSER_IMAGE} AS tools-godot
+USER root
+ARG TARGETARCH
+RUN test "${TARGETARCH}" = amd64
+ENV BYCLAW_GODOT_DESKTOP_ENABLED=1 \
+    BYCLAW_GODOT_HEADLESS=0 \
+    BYCLAW_GODOT_DESKTOP_PORT=8083 \
+    DISPLAY=:3
+RUN set -eux; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      libasound2t64 libpulse0 libgl1 libgl1-mesa-dri libvulkan1 mesa-vulkan-drivers \
+      libxcursor1 libxinerama1 libxrandr2 libxi6 libxrender1 libxkbcommon0 \
+      xvfb x11-utils x11vnc openbox; \
+    python3 -m pip install --no-cache-dir websockify==0.13.0; \
+    python3 -m pip check; \
+    rm -rf /var/lib/apt/lists/* /root/.cache
+COPY --from=godot-install /godot-output/ /opt/godot/
+COPY --chmod=0755 middleware/byclaw-harness/scripts/godot.sh /usr/local/bin/godot
+COPY --chmod=0755 middleware/byclaw-harness/scripts/godot-desktop.sh /usr/local/bin/byclaw-godot-desktop
+COPY --chmod=0755 middleware/byclaw-harness/scripts/godot-entrypoint.sh /usr/local/bin/byclaw-godot-entrypoint
+COPY --chmod=0755 middleware/byclaw-harness/scripts/godot-business-smoke.sh /usr/local/bin/byclaw-godot-business-smoke
+COPY middleware/byclaw-harness/tool-sandbox/godot.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
+# Security overlay is late so it does not invalidate the installed business assets.
+COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
+RUN set -eux; \
+    godot --headless --version | grep '^4\.6\.3\.stable'; \
+    test -f /opt/byclaw/novnc/vnc.html; \
+    for script in /usr/local/bin/godot /usr/local/bin/byclaw-godot-*; do bash -n "$script"; done; \
+    env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env; \
+    chmod 0644 /etc/byclaw-tool-env.session-env; \
+    rm -rf /root/.local/share/godot /root/.config/godot /root/.cache/godot
+EXPOSE 8083
+LABEL io.byclaw.tool-sandbox.contract="byclaw.tool-sandbox/v1" \
+      io.byclaw.tool-sandbox.purpose="godot"
+ENTRYPOINT ["/usr/local/bin/byclaw-godot-entrypoint"]
+CMD ["tools"]

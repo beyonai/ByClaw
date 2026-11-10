@@ -208,7 +208,7 @@ test('filters actual provider state independently of the persisted lifecycle', (
   expect(mockDispatch).toHaveBeenLastCalledWith(
     expect.objectContaining({
       type: 'sandboxMgr/listSandboxRecords',
-      payload: expect.objectContaining({ status: '', providerStatus: 'RUNNING', pageIndex: 1 }),
+      payload: expect.objectContaining({ status: 'RUNNING', providerStatus: 'RUNNING', pageIndex: 1 }),
     })
   );
 });
@@ -233,6 +233,44 @@ test('shows both states and permits releasing a remote instance whose record is 
     })
   );
   expect(screen.getByText('sandboxMgr.status.released')).toBeInTheDocument();
-  expect(screen.getByText('sandboxMgr.status.running')).toBeInTheDocument();
+  expect(screen.getAllByText('sandboxMgr.status.running').length).toBeGreaterThan(0);
   expect(screen.getByRole('button', { name: /sandboxMgr\.action\.delete/ })).toBeEnabled();
+});
+
+test('defaults both resource states to running and sends sandbox type before pagination', () => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' });
+  render(<SandboxMgr />);
+  expect(mockDispatch).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      payload: expect.objectContaining({ status: 'RUNNING', providerStatus: 'RUNNING' }),
+    })
+  );
+  act(() => mockDispatch.mock.calls[0][0].success({ list: [], sandboxTypes: ['custom-tools'] }));
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'sandboxMgr.filter.sandboxType' }));
+  expect(screen.getByTitle('custom-tools')).toBeInTheDocument();
+  fireEvent.click(screen.getByTitle('byclaw-dsh'));
+  expect(mockDispatch).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      payload: expect.objectContaining({
+        sandboxType: 'byclaw-dsh',
+        pageIndex: 1,
+        status: 'RUNNING',
+        providerStatus: 'RUNNING',
+      }),
+    })
+  );
+  fireEvent.click(screen.getByRole('tab', { name: '用户资源' }));
+  expect(mockDispatch).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      payload: expect.objectContaining({ ownerScope: 'USER', sandboxType: 'byclaw-dsh' }),
+    })
+  );
+});
+
+test('keeps the lifetime column in both tenant and user resources', () => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' });
+  render(<SandboxMgr />);
+  expect(screen.getByRole('columnheader', { name: 'sandboxMgr.table.lifetime' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: '用户资源' }));
+  expect(screen.getByRole('columnheader', { name: 'sandboxMgr.table.lifetime' })).toBeInTheDocument();
 });

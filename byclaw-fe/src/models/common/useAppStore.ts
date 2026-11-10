@@ -1,3 +1,5 @@
+import { withDesktopTimeout } from '@/utils/desktopInstances';
+import { desktopAuthEpoch } from '@/utils/desktopWorkspace';
 import { getContentFeedbackType } from '@/service/message';
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
@@ -51,6 +53,8 @@ export type ISandboxesInfo = {
   mappingId?: string;
   endpoints?: string[];
   instanceEndpoints?: Record<string, string>;
+  instanceDescriptors?: Record<string, { viewer: string; label?: string }>;
+  endpointHeaders?: Record<string, string>;
   token?: string;
   status?: string;
   workerId?: string;
@@ -95,7 +99,7 @@ export type IState = {
   setSuggestQuestions: (questions: ISuggestQuestionItem[]) => void;
 
   sandboxesInfo: ISandboxesInfoState;
-  getSandboxesInfoUrl: () => Promise<ISandboxesInfo>;
+  getSandboxesInfoUrl: () => Promise<ISandboxesInfo[]>;
 
   versionInfo: null | IVersionInfo;
   getVersionInfo: () => void;
@@ -103,6 +107,9 @@ export type IState = {
   versionNotification: null | IVersionNotification;
   getVersionNotification: () => Promise<IVersionNotification | null>;
 };
+
+let directoryEpoch: number | undefined;
+let pendingDirectory: Promise<ISandboxesInfo[]> | undefined;
 
 const useAppStore = create<IState>()(
   devtools(
@@ -207,22 +214,28 @@ const useAppStore = create<IState>()(
           suggestQuestions: [],
           setSuggestQuestions: (questions: ISuggestQuestionItem[]) => set({ suggestQuestions: questions }),
 
-          sandboxesInfo: {},
+          sandboxesInfo: [],
           getSandboxesInfoUrl() {
-            const sandboxesInfo = get().sandboxesInfo;
-            if (sandboxesInfo instanceof Promise) {
-              return sandboxesInfo;
-            }
+            const epoch = desktopAuthEpoch();
+            if (pendingDirectory && directoryEpoch === epoch) return pendingDirectory;
+            if (directoryEpoch !== undefined && directoryEpoch !== epoch) set({ sandboxesInfo: [] });
 
-            const sandboxesInfoPromise = getSandboxInfo({}).catch(() => ({}));
-
-            set({ sandboxesInfo: sandboxesInfoPromise });
-
-            sandboxesInfoPromise.then((nextSandboxesInfo) => {
-              if (get().sandboxesInfo === sandboxesInfoPromise) {
-                set({ sandboxesInfo: nextSandboxesInfo });
-              }
+            directoryEpoch = epoch;
+            const previousDirectory = get().sandboxesInfo;
+            const sandboxesInfoPromise = withDesktopTimeout(getSandboxInfo({}), 5000).then((rows) => {
+              if (desktopAuthEpoch() !== epoch) throw new Error('AUTH_CHANGED');
+              return Array.isArray(rows) ? rows : [];
             });
+
+            pendingDirectory = sandboxesInfoPromise;
+            const publishDirectory = (rows: ISandboxesInfo[]) => {
+              if (pendingDirectory !== sandboxesInfoPromise) return;
+              pendingDirectory = undefined;
+              if (desktopAuthEpoch() === epoch && get().sandboxesInfo === previousDirectory) {
+                set({ sandboxesInfo: rows });
+              }
+            };
+            sandboxesInfoPromise.then(publishDirectory, () => publishDirectory([]));
 
             return sandboxesInfoPromise;
           },
@@ -270,5 +283,14 @@ const useAppStore = create<IState>()(
     )
   )
 );
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('byclaw-auth-change', () => {
+    desktopAuthEpoch();
+    directoryEpoch = undefined;
+    pendingDirectory = undefined;
+    useAppStore.setState({ sandboxesInfo: [] });
+  });
+}
 
 export default useAppStore;

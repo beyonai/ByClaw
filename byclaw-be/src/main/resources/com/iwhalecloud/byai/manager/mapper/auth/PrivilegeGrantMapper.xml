@@ -470,6 +470,7 @@
              ) p
                 on a.resource_id = p.grant_obj_id
         <where>
+            AND COALESCE(UPPER(TRIM(a.resource_biz_type)), '') NOT IN ('OBJECT', 'VIEW', 'ONTOLOGY_BASE', 'SCENE')
             <if test="includeFavorites == true and favoriteTenantId != null">
                 and a.owner_type = 'enterprise' and a.resource_status = 2
                 and a.resource_biz_type != 'SKILL_GROUP'
@@ -577,7 +578,38 @@
             <if test="(catalogIds == null or catalogIds.size() == 0) and catalogId != null">
                 and a.catalog_id = #{catalogId}
             </if>
-            <if test="ownerType == 'enterprise' and publishOrgIds != null and publishOrgIds.size() > 0">
+            <if test="publicationQuery != null">
+                and (coalesce(a.owner_type, '') != 'enterprise' or a.resource_biz_type not in ('SKILL','TOOL','TOOLKIT','MCP','AGENT','KG_DOC','KG_DB','KG_QA','KG_TERM') or (
+                    a.com_acct_id = #{publicationQuery.tenantId}
+                    <if test="publicationQuery.catalog">
+                        and a.resource_status = 2
+                        and (coalesce(a.publish_scope_mode, 'LEGACY') = 'LEGACY'
+                            or (a.publish_scope_mode in ('COMPANY','ORGS') and exists (
+                                select 1 from byai.resource_publish_scope ps
+                                where ps.tenant_id = a.com_acct_id and ps.resource_id = a.resource_id
+                                  and (ps.org_id = -1
+                                    <if test="publicationQuery.administrator and publicationQuery.validOrgIds.size() > 0">
+                                      or ps.org_id in <foreach collection="publicationQuery.validOrgIds" item="org" open="(" separator="," close=")">#{org}</foreach>
+                                    </if>
+                                    <if test="publicationQuery.viewerOrgIds.size() > 0">
+                                      or ps.org_id in <foreach collection="publicationQuery.viewerOrgIds" item="org" open="(" separator="," close=")">#{org}</foreach>
+                                    </if>
+                                  )
+                            )))
+                    </if>
+                    <choose>
+                        <when test="publicationQuery.mode == 'COMPANY'">and a.publish_scope_mode = 'COMPANY'</when>
+                        <when test="publicationQuery.mode == 'UNSET'">and coalesce(a.publish_scope_mode,'LEGACY') = 'LEGACY'</when>
+                        <when test="publicationQuery.mode == 'ORGS'">
+                            and a.publish_scope_mode = 'ORGS' and exists (
+                                select 1 from byai.resource_publish_scope pf where pf.tenant_id = a.com_acct_id and pf.resource_id = a.resource_id
+                                and pf.org_id in <foreach collection="publicationQuery.filterOrgIds" item="org" open="(" separator="," close=")">#{org}</foreach>
+                            )
+                        </when>
+                    </choose>
+                ))
+            </if>
+            <if test="publicationQuery == null and ownerType == 'enterprise' and publishOrgIds != null and publishOrgIds.size() > 0">
                 and a.man_org_id in
                 <foreach collection="publishOrgIds" item="orgId" open="(" separator="," close=")">
                     #{orgId}

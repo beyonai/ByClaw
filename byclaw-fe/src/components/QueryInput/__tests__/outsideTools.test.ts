@@ -24,7 +24,8 @@ describe('query input outside toolbar visibility', () => {
         /<span\s+aria-label=\{getIntl\(\)\.formatMessage\(\{ id: 'queryInput.tools.skill' \}\)\}\s+data-query-input-tool="skill"/
       );
       expect(source.match(/data-query-input-tool=/g)).toHaveLength(2);
-      expect(source).toMatch(/this\.checkCanUploadFile\(\) && \(\s*<UploadFile/);
+      expect(source).toMatch(/<UploadFile[\s\S]*?hidden=\{!this\.checkCanUploadFile\(\)\}/);
+      expect(source).not.toMatch(/this\.checkCanUploadFile\(\) && \(\s*<UploadFile/);
     }
   );
 
@@ -34,6 +35,6 @@ describe('query input outside toolbar visibility', () => {
 
     expect(page).toMatch(/\s+cannotAt\s+disableInputDraft/);
     expect(employeeInput).toMatch(/!cannotAt && \(\s*<MentionPopover/);
-    expect(employeeInput).toMatch(/this\.checkCanUploadFile\(\) && \(\s*<UploadFile/);
+    expect(employeeInput).toMatch(/<UploadFile[\s\S]*?hidden=\{!this\.checkCanUploadFile\(\)\}/);
   });
 });

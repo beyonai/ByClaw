@@ -48,6 +48,38 @@ describe('manager/layout/sider/menuConfig', () => {
   });
 
   it.each([
+    { path: '/manager/ui-agent' },
+    { menuUrl: 'https://skills.example.com', menuNameCn: '自定义技能入口' },
+  ])('hides the UI skill menu by code for configuration %o', (entryConfig) => {
+    const uiSkillMenu = { ...entryConfig, menuCode: 'menu_ui_agent', menuOrder: 1 };
+    const orgMenu = { path: '/manager/org/orgMgr', menuCode: 'menu_org', menuOrder: 2 };
+    const menus = [orgMenu, uiSkillMenu];
+
+    expect(normalizeManagerMenuConfig(menus)).toMatchObject([orgMenu]);
+    expect(menus).toEqual([orgMenu, uiSkillMenu]);
+  });
+
+  it('keeps the UI skill entry hidden when loading and refreshing remote menus', async () => {
+    mockGetDcSystemConfig.mockResolvedValue({
+      data: {
+        paramValue: JSON.stringify([
+          { menuCode: 'menu_ui_agent', menuUrl: 'https://skills.example.com' },
+          { menuCode: 'menu_org', path: '/manager/org/orgMgr' },
+        ]),
+      },
+    });
+
+    const menus = await getManagerMenuConfig();
+    const cachedMenus = await getManagerMenuConfig();
+    const refreshedMenus = await getManagerMenuConfig({ refresh: true });
+
+    [menus, cachedMenus, refreshedMenus].forEach((items) => {
+      expect(items.map((item) => item.menuCode)).toEqual(['menu_org']);
+    });
+    expect(mockGetDcSystemConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
     ['zh-CN', '组织结构管理11'],
     ['en-US', 'Organization Structure 11'],
   ])('uses configured names instead of built-in translations for %s', (locale, expected) => {

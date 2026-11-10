@@ -70,6 +70,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
@@ -222,6 +223,20 @@ public class ByClawSkillResourceApplicationService {
         }
     }
 
+    /** Workspace files and resource registration share one failure boundary. */
+    @Transactional(rollbackFor = Exception.class)
+    public List<ByClawSkillDto> uploadAndRegisterChatSkills(String userCode, Long employeeId,
+        List<MultipartFile> files) {
+        byClawSkillUploadApplicationService.prepareTransactionRollback();
+        validateChatUploadedSkillImportPermission(employeeId, files);
+        // Reuse the resource import lock namespace; sorted keys avoid inverted batch lock order.
+        files.stream().map(file -> inspectSkillPackage(file).skillCode()).distinct().sorted()
+            .forEach(ssResourceService::lockSkillImport);
+        List<ByClawSkillDto> uploaded = byClawSkillUploadApplicationService.uploadSkillZips(userCode, employeeId, files);
+        registerChatUploadedSkills(userCode, employeeId, files, uploaded);
+        return uploaded;
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public void registerChatUploadedSkills(String userCode, Long digitalEmployeeResourceId,
         List<MultipartFile> uploadFiles, List<ByClawSkillDto> uploadedSkills) {
@@ -367,7 +382,8 @@ public class ByClawSkillResourceApplicationService {
         boolean changed = previous == null || !DigestUtils.sha256Hex(bytes).equals(previous.getSkillPackageHash());
         Integer previousStatus = existing == null ? null : existing.getResourceStatus();
         Date previousPublishTime = existing == null ? null : existing.getPublishTime();
-        SsResource resource = saveOrUpdateSkillResource(metadata, OwnerType.ENTERPRISE, catalogId, existing, systemCode);
+        SsResource resource = saveOrUpdateSkillResource(metadata, OwnerType.ENTERPRISE, catalogId, existing, systemCode,
+            root.getLong("createBy"));
         if (existing == null) {
             authApplicationService.ensureCreatorDefaultPrivileges(resource);
         } else {
@@ -405,6 +421,9 @@ public class ByClawSkillResourceApplicationService {
             try {
                 SkillPackageMetadata metadata = inspectSkillPackage(file);
                 SsResource existing = findExistingSkillByNaturalKey(metadata.skillCode());
+                if (existing == null) {
+                    assertNewSkillImportPermission(resolveOwnerType(ownerType));
+                }
                 if (existing != null) {
                     assertSkillManagePermission(existing);
                     ObjectZipImportItem item = new ObjectZipImportItem();
@@ -605,6 +624,7 @@ public class ByClawSkillResourceApplicationService {
             for (ZipEntryInfo entry : entries) {
                 ZipArchiveEntry target = new ZipArchiveEntry(entry.name());
                 target.setUnixMode(entry.unixMode());
+                target.setTime(0L);
                 zip.putArchiveEntry(target);
                 zip.write(documentName.equals(entry.name()) ? document : entry.content());
                 zip.closeArchiveEntry();
@@ -614,6 +634,17 @@ public class ByClawSkillResourceApplicationService {
         } catch (IOException e) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.read.failed"), e);
         }
+    }
+
+    /** Shared publication transform: keep scripts and permissions, change only the root skill identity. */
+    public byte[] renamePublishedSkillPackage(byte[] sourcePackage, String name) {
+        if (!com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationNames
+            .isRuntimeCompatible(name)) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.enterprise.name.invalid"));
+        }
+        String document = ByClawSkillDocParser.withSkillName(
+            new String(readCenterSkillDocument(sourcePackage), StandardCharsets.UTF_8), JSON.toJSONString(name));
+        return replaceCenterSkillDocument(sourcePackage, document.getBytes(StandardCharsets.UTF_8));
     }
 
     /** 调用方提供事务；目录同步不绑定员工，更新保留资源 ID、归属、目录及上下架状态。 */
@@ -630,6 +661,7 @@ public class ByClawSkillResourceApplicationService {
             skillName + ".zip", bytes.length);
         SsResource resource;
         if (existing == null) {
+            assertNewSkillImportPermission(ownerType);
             resource = saveOrUpdateSkillResource(metadata, ownerType, DEFAULT_SKILL_CATALOG_ID, null);
             authApplicationService.ensureCreatorDefaultPrivileges(resource);
         } else {
@@ -664,10 +696,18 @@ public class ByClawSkillResourceApplicationService {
 
     /**
      * 一次性复制个人技能快照。锁定源资源直到事务结束，重复请求复用已有副本；
-     * 企业副本拥有独立资源 ID 和编码，文件沿用源引用；先进入审核中，通过后才上架。
+     * 企业副本拥有独立资源 ID、编码和技能包；先进入审核中，通过后才上架。
      */
     @Transactional(rollbackFor = Exception.class)
     public EnterpriseSkillPublishResult publishSkillToEnterprise(Long sourceId) {
+        return publishSkillToEnterprise(sourceId, com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope.company());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public EnterpriseSkillPublishResult publishSkillToEnterprise(Long sourceId,
+        com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope publishScope) {
+        if (publishScope == null) publishScope = com.iwhalecloud.byai.manager.dto.resource.ResourcePublishScope.company();
+        publishScope.selectedIds();
         if (sourceId == null) {
             throw new IllegalArgumentException(I18nUtil.get("resource.resourceid.notnull"));
         }
@@ -676,8 +716,8 @@ public class ByClawSkillResourceApplicationService {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.enterprise.no.permission"));
         }
 
-        // 所有入口统一在写入副本和审核申请前校验包内声明，失败不产生发布数据。
-        validatePublicationResourceManifest(source);
+        // 沿用 D0.6.0 的发布依赖校验；同一次读取的原包用于创建独立企业副本。
+        byte[] sourcePackage = validatePublicationResourceManifest(source);
 
         // 注销副本不复活；为下一份快照使用新的编码。来源标记防止误认同名的手工导入资源。
         String baseCode = "enterprise-skill-" + sourceId;
@@ -696,7 +736,8 @@ public class ByClawSkillResourceApplicationService {
                 }
                 // 驳回后重新提交当前个人技能的快照，保留旧审核历史及被驳回副本。
                 if (!Objects.equals(candidate.getResourceStatus(), ResourceStatus.DELETE.getNum())
-                    && !Objects.equals(candidate.getResourceStatus(), ResourceStatus.AUDIT_REJECT.getNum())) {
+                    && !Objects.equals(candidate.getResourceStatus(), ResourceStatus.AUDIT_REJECT.getNum())
+                    && !skillPublicationService.canRetryWithNewSnapshot(candidate)) {
                     return new EnterpriseSkillPublishResult(candidate, true, personalPublicationDependencies(sourceId));
                 }
             }
@@ -704,22 +745,42 @@ public class ByClawSkillResourceApplicationService {
         }
 
         SsResExtSkill sourceExt = ssResExtSkillService.findById(sourceId);
-        // 校验读取原包；副本仍只复制数据库记录及文件引用，不重打包或上传文件。
-        String targetName = com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationNames
-            .enterpriseName(source.getResourceName(), null);
-        if (ssResourceService.existsEnterpriseSkillByName(targetName)) {
+        // 技能展示名、ZIP 文件名与包内名称一致；与数字员工的展示后缀分开维护。
+        String targetName = com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationNames
+            .enterpriseName(source.getResourceName());
+        if (!com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationNames
+            .isRuntimeCompatible(targetName)) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.enterprise.name.invalid"));
+        }
+        // 同时兼容历史未加企业后缀的名称。
+        if (ssResourceService.existsEnterpriseSkillByName(targetName)
+            || !Objects.equals(source.getResourceName(), targetName)
+                && ssResourceService.existsEnterpriseSkillByName(source.getResourceName())) {
             // 重名时标明本次上架人；仅调整企业副本名称，不改变个人技能或已有副本。
             String publisherName = StringUtils.defaultIfBlank(CurrentUserHolder.getCurrentUserName(),
                 CurrentUserHolder.getCurrentUserCode());
-            String baseName = targetName.replaceFirst("\\s*\\((企业|Enterprise)\\)$", "");
-            targetName = com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeePublicationNames
-                .enterpriseName(baseName + "（" + publisherName + "）", targetName);
+            String baseName = targetName;
+            targetName = com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationNames
+                .enterpriseName(baseName, publisherName);
+            // 归一化可能让不同原名重合；发布人也重名时继续加入来源标识。
+            for (int attempt = 1; ssResourceService.existsEnterpriseSkillByName(targetName); attempt++) {
+                targetName = com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationNames
+                    .enterpriseName(baseName, publisherName + "_" + sourceId + (attempt == 1 ? "" : "_" + attempt));
+            }
         }
+        // 包内名称与企业副本展示名保持一致；JSON 引号也是合法 YAML，避免名称中的冒号等破坏元数据。
+        byte[] targetPackage = renamePublishedSkillPackage(sourcePackage, targetName);
+        // ZIP 文件名与 SKILL.md 的 name 保持一致，不能沿用个人原包文件名。
+        String packageFilename = targetName + ".zip";
+        if (!packageFilename.equals(lastPathSegment(packageFilename))) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.file.invalid"));
+        }
+        inspectSkillPackage(new ByteArrayMultipartFile(packageFilename, targetPackage, PACKAGE_CONTENT_TYPE));
         SkillPackageMetadata metadata = new SkillPackageMetadata(targetName, targetCode,
-            source.getResourceDesc(), sourceExt == null ? null : sourceExt.getSkillOriginalFilename(),
-            sourceExt == null || sourceExt.getSkillPackageSize() == null ? 0 : sourceExt.getSkillPackageSize());
+            source.getResourceDesc(), packageFilename, targetPackage.length);
         SsResource target = saveOrUpdateSkillResource(metadata, OwnerType.ENTERPRISE, source.getCatalogId(), null);
         target.setResourceStatus(ResourceStatus.AUDIT.getNum());
+        target.setPublicationSourceId(sourceId);
         target.setAvatar(source.getAvatar());
         target.setTags(source.getTags());
         target.setSample(source.getSample());
@@ -736,10 +797,22 @@ public class ByClawSkillResourceApplicationService {
         }
         targetExt.setResourceId(target.getResourceId());
         targetExt.setSourceType(SOURCE_TYPE_ENTERPRISE_COPY);
-        // 继承源文件地址、版本和已有文件状态，不创建新的 PENDING 同步流程。
-        targetExt.setTargetContent(buildTargetContent(target, targetExt,
-            sourceExt == null ? null : extractString(sourceExt.getTargetContent(), "skillPath"),
-            sourceExt == null ? null : extractString(sourceExt.getTargetContent(), "skillDocObjectKey")));
+        // 按副本资源 ID 隔离存储，不能覆盖个人原包；后续下载、安装均读取改名后的独立 ZIP。
+        String packageDirectory = buildSkillHubDirectory(OwnerType.ENTERPRISE,
+            CurrentUserHolder.getCurrentUserCode()) + "/" + target.getResourceId();
+        resourceArtifactStorageService.uploadToSubdirectory(targetPackage, packageDirectory, packageFilename,
+            PACKAGE_CONTENT_TYPE);
+        targetExt.setSkillType(SsResExtSkillService.DEFAULT_SKILL_TYPE);
+        targetExt.setSkillUrl(normalizeResourceObjectKey(EXTERNAL_RESOURCE_ROOT + "/" + packageDirectory + "/"
+            + packageFilename));
+        targetExt.setSkillOriginalFilename(packageFilename);
+        targetExt.setSkillPackageFormat(SsResExtSkillService.DEFAULT_PACKAGE_FORMAT);
+        targetExt.setSkillPackageSize((long)targetPackage.length);
+        targetExt.setSkillPackageHash(DigestUtils.sha256Hex(targetPackage));
+        targetExt.setSyncStatus("SUCCESS");
+        targetExt.setSyncError(null);
+        targetExt.setLastSyncTime(LocalDateTime.now());
+        targetExt.setTargetContent(buildTargetContent(target, targetExt, null, null));
         Map<String, Object> content = JSON.parseObject(targetExt.getTargetContent());
         content.put("sourceResourceId", String.valueOf(sourceId));
         content.put("sourceCreatorId", source.getCreateBy() == null ? null : String.valueOf(source.getCreateBy()));
@@ -749,24 +822,26 @@ public class ByClawSkillResourceApplicationService {
         ssResExtSkillService.saveOrUpdate(targetExt);
         authApplicationService.ensureCreatorDefaultPrivileges(target);
         if (StringUtils.isNotBlank(targetExt.getSkillUrl())) {
-            // 文件关联也是数据库记录，沿用原引用，不写入不存在的新 ZIP 或标准 JSON 路径。
+            // 文件关联指向企业独立包，与扩展记录中的下载地址保持一致。
             ssResourceArtifactService.upsertArtifact(target.getResourceId(), ResourceBizTypeEnum.SKILL.name(),
                 ResourceArtifactTypeEnum.IMPORT_ZIP.name(), "minio", stripResourcePrefix(targetExt.getSkillUrl()),
-                "enterprise-skill-file-reference");
+                "enterprise-skill-package");
         }
         copyEnterpriseSkillRelations(sourceId, target.getResourceId());
-        skillPublicationService.submit(source, target);
+        skillPublicationService.submit(source, target, publishScope);
         logger.info("Submitted enterprise skill resource copy: sourceId={}, targetId={}, operatorId={}",
             sourceId, target.getResourceId(), CurrentUserHolder.getCurrentUserId());
         return new EnterpriseSkillPublishResult(target, false, personalPublicationDependencies(sourceId));
     }
 
     /** 包内声明是发布依赖的判断依据；数据库安装关系不能代替 references/resourceMate.json。 */
-    private void validatePublicationResourceManifest(SsResource source) {
+    private byte[] validatePublicationResourceManifest(SsResource source) {
+        byte[] packageBytes;
         List<ZipEntryInfo> entries;
         String skillRoot;
         try {
-            entries = readZipEntries(readCenterSkillPackage(source));
+            packageBytes = readCenterSkillPackage(source);
+            entries = readZipEntries(packageBytes);
             skillRoot = parentDirOf(findSkillDoc(entries).name());
         } catch (Exception e) {
             // 无法读取整个包时不能推断为“没有声明文件”。
@@ -774,12 +849,12 @@ public class ByClawSkillResourceApplicationService {
         }
         String manifestPath = (skillRoot.isEmpty() ? "" : skillRoot + "/") + PUBLICATION_RESOURCE_MANIFEST;
         List<ZipEntryInfo> manifests = entries.stream().filter(entry -> manifestPath.equals(entry.name())).toList();
-        if (manifests.isEmpty()) return;
+        if (manifests.isEmpty()) return packageBytes;
         if (manifests.size() != 1) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.publication.manifest.invalid"));
         }
         Map<Long, String> dependencies = parsePublicationResourceManifest(manifests.get(0).content());
-        if (dependencies.isEmpty()) return;
+        if (dependencies.isEmpty()) return packageBytes;
 
         Map<Long, SsResource> resources = ssResourceService.findByIdList(dependencies.keySet()).stream()
             .collect(Collectors.toMap(SsResource::getResourceId, resource -> resource));
@@ -817,6 +892,7 @@ public class ByClawSkillResourceApplicationService {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.publication.dependencies.blocked",
                 String.join("; ", failures)));
         }
+        return packageBytes;
     }
 
     /** 缺失文件或空数组允许发布；存在文件时必须提供完整且类型明确的资源声明。 */
@@ -899,12 +975,16 @@ public class ByClawSkillResourceApplicationService {
 
     @Transactional(rollbackFor = Exception.class)
     public SkillImportResult importSkillZip(MultipartFile file, Long catalogId, String ownerType, String sourceType) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            byClawSkillUploadApplicationService.prepareTransactionRollback();
+        }
         SkillPackageMetadata metadata = inspectSkillPackage(file);
         String resolvedOwnerType = resolveOwnerType(ownerType);
         Long resolvedCatalogId = catalogId == null ? DEFAULT_SKILL_CATALOG_ID : catalogId;
         ssResourceService.lockSkillImport(metadata.skillCode());
         List<SsResource> existingSkills = findExistingSkillsByNaturalKey(metadata.skillCode());
         if (CollectionUtils.isEmpty(existingSkills)) {
+            assertNewSkillImportPermission(resolvedOwnerType);
             return importNewSkillZip(file, metadata, resolvedOwnerType, resolvedCatalogId, sourceType);
         }
 
@@ -1140,8 +1220,14 @@ public class ByClawSkillResourceApplicationService {
 
     private SsResource saveOrUpdateSkillResource(SkillPackageMetadata metadata, String ownerType, Long catalogId,
         SsResource existing, String systemCode) {
+        return saveOrUpdateSkillResource(metadata, ownerType, catalogId, existing, systemCode, null);
+    }
+
+    private SsResource saveOrUpdateSkillResource(SkillPackageMetadata metadata, String ownerType, Long catalogId,
+        SsResource existing, String systemCode, Long createBy) {
         if (existing == null) {
             SsResource resource = new SsResource();
+            resource.setCreateBy(createBy);
             resource.setResourceBizType(ResourceBizTypeEnum.SKILL.name());
             resource.setSystemCode(systemCode);
             resource.setResourceType("ATOM");
@@ -1167,6 +1253,7 @@ public class ByClawSkillResourceApplicationService {
 
         assertSkillManagePermission(existing);
 
+        if (createBy != null) existing.setCreateBy(createBy);
         existing.setResourceName(metadata.skillName());
         existing.setResourceDesc(metadata.skillDesc());
         existing.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
@@ -1358,6 +1445,14 @@ public class ByClawSkillResourceApplicationService {
             .filter(item -> !OwnerType.PERSONAL.equals(ownerType) || Objects.equals(currentUserId, item.getCreateBy()))
             .findFirst()
             .orElse(null);
+    }
+
+    /** Direct enterprise creation follows the import capability; publication and trusted sync have separate gates. */
+    private void assertNewSkillImportPermission(String ownerType) {
+        if (OwnerType.ENTERPRISE.equals(ownerType)
+            && !CurrentUserHolder.isAdminVip() && !CurrentUserHolder.isPlatformManager()) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.enterprise.import.denied"));
+        }
     }
 
     void assertSkillManagePermission(SsResource skillResource) {
@@ -1759,7 +1854,8 @@ public class ByClawSkillResourceApplicationService {
         content.put("syncError", extSkill.getSyncError());
         content.put("lastSyncTime", extSkill.getLastSyncTime());
         // 更新企业副本仍保留来源追溯信息，重复发布不因更新元数据而失去幂等识别。
-        for (String key : List.of("sourceResourceId", "sourceCreatorId", "sourceVersion", "sourcePackageUrl")) {
+        for (String key : List.of("sourceResourceId", "sourceCreatorId", "sourceVersion", "sourcePackageUrl",
+            "sourcePackageHash")) {
             String value = extractString(extSkill.getTargetContent(), key);
             if (value != null) {
                 content.put(key, value);

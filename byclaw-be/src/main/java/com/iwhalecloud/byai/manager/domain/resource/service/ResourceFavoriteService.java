@@ -22,7 +22,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class ResourceFavoriteService {
     private static final long SCHEMA_RECHECK_MILLIS = 30_000L;
     private static final Set<String> SUPPORTED_TYPES = Set.of(
-        "DIG_EMPLOYEE", "SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT");
+        "DIG_EMPLOYEE", "SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "TOOL", "AGENT");
 
     private final ResourceFavoriteMapper mapper;
     private final ByaiSystemConfigService systemConfigService;

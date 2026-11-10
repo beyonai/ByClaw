@@ -1,4 +1,5 @@
-import type { Capability, CapabilityMcp, ResourceContext } from "./types.js";
+import { isRetiredResource, isRetiredResourceType } from "../retired-resources.js";
+import type { Capability, ResourceContext } from "./types.js";
 import { asString, isRecord } from "./types.js";
 import type { AuthContext } from "./auth.js";
 import { normalizeCustomHeaders, resolveCapabilityHeaderPlaceholdersInPlace } from "./auth.js";
@@ -9,7 +10,6 @@ import {
   extractOpenclawMcpForwardHeaders,
   mergeResourceContextIntoCapability,
 } from "./capability-builder.js";
-import { resolveDatacloudMcpServerUrl } from "./datacloud-mcp-url.js";
 import { refreshMcpCapability } from "./mcp-client.js";
 import {
   SNAPSHOT_FOLDERS,
@@ -83,10 +83,16 @@ export async function resolveCapability(params: {
   session?: string;
   fetchImpl?: FetchLike;
   logger?: BaiyingEnhanceLogger;
-}): Promise<{ capability: Capability | null; resolvedType: string | null }> {
+}): Promise<{ capability: Capability | null; resolvedType: string | null; retired?: boolean }> {
   const { capabilityId } = params;
   let resourceType = params.resourceType ?? null;
   const hintedType = normalizeResourceType(resourceType);
+  const selected = params.resourceContext.selected_resource;
+  const matchingSelected = isRecord(selected)
+    && normalizeResourceId(selected.resourceId) === normalizeResourceId(capabilityId);
+  if (isRetiredResourceType(resourceType) || (matchingSelected && isRetiredResource(selected))) {
+    return { capability: null, resolvedType: hintedType, retired: true };
+  }
 
   let capability: Capability | null = null;
   if (capabilityId) {
@@ -158,6 +164,9 @@ export async function resolveCapability(params: {
       }
     }
 
+    if (capability && isRetiredResource(capability)) {
+      return { capability: null, resolvedType: capability.resource_type, retired: true };
+    }
     if (capability) {
       capability = mergeResourceContextIntoCapability(capability, params.resourceContext);
       capability = await hydrateWhaleAgentDocFromSnapshotIfNeeded({
@@ -177,6 +186,9 @@ export async function resolveCapability(params: {
     }
   }
 
+  if (capability && isRetiredResource(capability)) {
+    return { capability: null, resolvedType: capability.resource_type, retired: true };
+  }
   if (capability) {
     await resolveCapabilityHeaderPlaceholdersInPlace({
       capability,
@@ -185,28 +197,7 @@ export async function resolveCapability(params: {
     });
 
     const capType = normalizeResourceType(capability.resource_type);
-    if (capType === "object" || capType === "view") {
-      // OBJECT / VIEW MCP lives on the datacloud-data-service, whose
-      // host:port is registered in Redis service discovery (key
-      // `byai_gateway:sd:instances:byclaw-datacloud`). The resource
-      // metadata often lacks a usable `mcpServerUrl`; even if a URL appears on
-      // `selected_resource`, the authoritative endpoint
-      // is always the one advertised via SD — so
-      // we override unconditionally, matching `byclaw-tool`'s behaviour
-      // in `mcp-server-url.ts::resolveMcpServerUrlForExecutorSync`.
-      const datacloudUrl = await resolveDatacloudMcpServerUrl();
-      if (datacloudUrl) {
-        const mcp: CapabilityMcp = isRecord(capability.mcp)
-          ? (capability.mcp as CapabilityMcp)
-          : {};
-        mcp.server_url = datacloudUrl;
-        if (!mcp.transfer_type) {
-          mcp.transfer_type = "streamable_http";
-        }
-        capability.mcp = mcp;
-      }
-    }
-    if (capType === "mcp" || capType === "object" || capType === "view") {
+    if (capType === "mcp") {
       const forward = extractOpenclawMcpForwardHeaders(params.resourceContext);
       capability = await refreshMcpCapability({
         capability,

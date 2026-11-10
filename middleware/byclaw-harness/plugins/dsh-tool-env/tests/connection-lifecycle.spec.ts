@@ -12,12 +12,14 @@ describe('tool environment idle lifecycle', () => {
   let ssh: ToolEnvConnection
   let inner: { request: ReturnType<typeof vi.fn>; connectStream: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn> }
   let backend: ToolEnvBackend
+  let invalidate: () => void
   let residual: () => Promise<ReadonlyArray<{ pid: number; comm: string }>>
 
   beforeEach(() => {
     vi.useFakeTimers()
     ctx = new Context()
     backend = {
+      onInvalidated: listener => { invalidate = listener; return () => {} },
       ensure: vi.fn().mockResolvedValue({ hostName: 'tool-b', port: 22 }),
       pause: vi.fn().mockResolvedValue(undefined),
       dispose: vi.fn().mockResolvedValue(undefined),
@@ -47,6 +49,41 @@ describe('tool environment idle lifecycle', () => {
     await (ssh as unknown as { close(): Promise<void> }).close()
     await ctx.fiber.dispose()
     vi.useRealTimers()
+  })
+
+  it('fences a pending SSH handshake when its Platform lease is invalidated', async () => {
+    const ready = Promise.withResolvers<unknown>()
+    const connector = ssh as unknown as { connect(): Promise<unknown> }
+    vi.mocked(connector.connect).mockResolvedValueOnce({
+      connection: { ...inner, ready: ready.promise }, fiber: { dispose() {} },
+    })
+    const request = ssh.request('spawn', {}, z.string())
+    const rejected = expect(request).rejects.toThrow('TOOL_LEASE_INVALIDATED')
+    await vi.advanceTimersByTimeAsync(0)
+    invalidate()
+    ready.resolve({})
+    await rejected
+    expect(inner.request).not.toHaveBeenCalled()
+    expect(ssh.connected).toBe(false)
+    expect(inner.dispose).toHaveBeenCalled()
+  })
+
+  it('holds coordinated IO through the full request and stream lifetime', async () => {
+    const finish = vi.fn(async () => {})
+    backend.beginUse = vi.fn(async () => finish)
+    const result = Promise.withResolvers<string>()
+    inner.request.mockReturnValueOnce(result.promise)
+    const request = ssh.request('spawn', {}, z.string())
+    await vi.advanceTimersByTimeAsync(0)
+    expect(finish).not.toHaveBeenCalled()
+    result.resolve('done'); await request
+    expect(finish).toHaveBeenCalledTimes(1)
+    const socket = new Socket()
+    inner.connectStream.mockResolvedValueOnce(socket)
+    await ssh.connectStream({} as never)
+    expect(finish).toHaveBeenCalledTimes(1)
+    socket.destroy(); await vi.advanceTimersByTimeAsync(0)
+    expect(finish).toHaveBeenCalledTimes(2)
   })
 
   it('releases an ensured environment after its first SSH handshake fails', async () => {

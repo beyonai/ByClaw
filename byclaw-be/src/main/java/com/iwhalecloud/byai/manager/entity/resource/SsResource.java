@@ -52,6 +52,18 @@ public class SsResource implements Serializable {
     /** 同步关联对账的资源版本。 */
     private Long thirdSyncRevision;
 
+    /** 企业目录发布范围，与查看、使用和管理授权独立。 */
+    @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)
+    private String publishScopeMode;
+
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)
+    private String publicationError;
+    @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)
+    private Long publishScopeRevision;
+    @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)
+    private String publishScopeController;
+
     /**
      * 存放智能体平台或BOT的resourceId
      */
@@ -267,5 +279,11 @@ public class SsResource implements Serializable {
     public void setWorkerAgentType(String workerAgentType) {
         this.workerAgentType = StringUtils.defaultString(workerAgentType);
     }
+
+
+    /** 配置保存序号、并发修订号与运行态同步任务。 */
+    private Long configVersionSeq;
+    private Long configRevision;
+    private Long pendingActivationId;
 
 }

@@ -189,6 +189,10 @@ def spawn(
     listen_fd: int | None = None,
 ) -> subprocess.Popen[bytes]:
     child_environment = dict(environment)
+    if account.pw_uid != 0:
+        # Only the root SSH child needs the per-instance transport credentials.
+        child_environment.pop("BYCLAW_TOOL_ENV_HOST_KEY", None)
+        child_environment.pop("BYCLAW_TOOL_ENV_AUTHORIZED_KEY", None)
     child_environment["HOME"] = account.pw_dir
     child_environment["USER"] = account.pw_name
     child_environment["LOGNAME"] = account.pw_name
@@ -226,6 +230,9 @@ def bycli_report(
     timeout: float,
 ) -> dict:
     child_environment = dict(environment)
+    if account.pw_uid != 0:
+        child_environment.pop("BYCLAW_TOOL_ENV_HOST_KEY", None)
+        child_environment.pop("BYCLAW_TOOL_ENV_AUTHORIZED_KEY", None)
     child_environment["HOME"] = account.pw_dir
     child_environment["USER"] = account.pw_name
     child_environment["LOGNAME"] = account.pw_name
@@ -462,6 +469,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise RuntimeError("browser-supervisor-invalid-viewer")
 
     base_environment = dict(os.environ)
+    # Chrome derives an unpacked extension ID from its canonical path. A build-versioned
+    # directory isolates its service-worker cache while keeping the user's profile intact.
+    if base_environment.get("BYCLAW_BROWSER_EXTENSIONS"):
+        base_environment["BYCLAW_BROWSER_EXTENSIONS"] = os.pathsep.join(
+            os.path.realpath(path.strip())
+            for path in base_environment["BYCLAW_BROWSER_EXTENSIONS"].split(os.pathsep)
+            if path.strip()
+        )
     base_environment.pop("BYCLAW_BROWSER_SECRET", None)
     base_environment.pop("BYCLAW_BROWSER_SECRET_FD", None)
     base_environment["BYCLAW_BROWSER_SOCKET"] = str(socket_path)

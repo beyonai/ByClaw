@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.dataset;
 
+import com.iwhalecloud.byai.manager.application.service.resource.EnterpriseResourceSyncContext;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -30,7 +32,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.FileBuildStatus;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbBuildResult;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
-import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileCount;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeStatus;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
@@ -55,6 +57,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileCountResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeStatusResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeMetadataSearchItem;
@@ -72,6 +75,7 @@ import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceLifecyclePolicy;
+import com.iwhalecloud.byai.manager.domain.resource.service.DatasetOwnershipMetadata;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceRuntimeInfoResolver;
 import com.iwhalecloud.byai.manager.domain.resource.service.ResourceTargetJsonBuilder;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDocService;
@@ -170,7 +174,17 @@ public class DatasetApplicationService {
     private static final int KNOWLEDGE_DIR_SEARCH_MAX_RESULT_SIZE = 500;
 
     @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationService resourcePublications;
+
+    @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess publicationAccess;
+
+    @Autowired
     private SsResourceService ssResourceService;
+
+    @Autowired private KnowledgeProviderService knowledgeProviders;
+    @Autowired private KnowledgeProvisionService knowledgeProvision;
+    @Autowired @org.springframework.context.annotation.Lazy private DatasetApplicationService transactionalSelf;
 
     @Autowired
     private SsResExtDocService ssResExtDocService;
@@ -237,7 +251,10 @@ public class DatasetApplicationService {
         boolean thirdPartyMode = StringUtils.isNotBlank(StringUtils.trimToEmpty(datasetSystem));
         KnowledgeCapabilityVo capabilityVo = new KnowledgeCapabilityVo();
         capabilityVo.setKnowledgeMode(thirdPartyMode ? "THIRD_PARTY" : "BYAI");
-        capabilityVo.setAllowKnowledgeBaseCreate(!thirdPartyMode);
+        var providers = thirdPartyMode && knowledgeProviders != null ? knowledgeProviders.options()
+            : java.util.List.<KnowledgeProviderService.Option>of();
+        capabilityVo.setCreationProviders(providers);
+        capabilityVo.setAllowKnowledgeBaseCreate(!thirdPartyMode || !providers.isEmpty());
         capabilityVo.setAllowKnowledgeBaseEdit(Boolean.TRUE);
         capabilityVo.setAllowKnowledgeBaseDelete(Boolean.TRUE);
         capabilityVo.setAllowKnowledgeImport(Boolean.TRUE);
@@ -251,19 +268,44 @@ public class DatasetApplicationService {
      * @return 新建记录主键 resource_id，未实现时返回 null
      */
     public SsResource createDataset(DatasetDto datasetDto) {
-        // 第三方知识库模式下禁止本系统创建库级知识库，防止绕过前端按钮直接调接口。
-        validateKnowledgeBaseCreationAllowed();
+        if (StringUtils.isNotBlank(datasetSystem) || StringUtils.isNotBlank(datasetDto.getProviderId())) {
+            if (StringUtils.isBlank(datasetDto.getProviderId())) {
+                validateKnowledgeBaseCreationAllowed();
+                throw new IllegalArgumentException("请选择知识服务提供方");
+            }
+            return knowledgeProvision.create(datasetDto);
+        }
 
         // 参数提取
-        String resourceBizType = datasetDto.getResourceBizType();
         String resourceName = datasetDto.getResourceName();
         String resourceDesc = datasetDto.getResourceDesc();
-        String type = datasetDto.getType();
         String ownerType = datasetDto.getOwnerType();
+
+        if (datasetDto.getPublishScope() != null) {
+            if (!OwnerType.ENTERPRISE.equals(ownerType)) throw new IllegalArgumentException("个人资源不设置组织发布范围");
+            publicationAccess.normalize(datasetDto.getPublishScope());
+        }
 
         // 同步创建知识库
         KnowledgeBaseInfo knowledgeBase = this.createKnowledgeBase(resourceName, resourceDesc);
 
+        SsResource myResource = transactionalSelf.saveCreatedLocalDataset(datasetDto, knowledgeBase);
+
+        if (datasetDto.getPublishScope() != null) {
+            try { resourcePublications.submitLocal(myResource.getResourceId(), datasetDto.getPublishScope()); }
+            catch (com.iwhalecloud.byai.common.exception.BaseException error) {
+                myResource.setPublicationError("知识库已创建，发布尚未提交，请从发布管理继续处理");
+            }
+        }
+        return myResource;
+    }
+
+    /** Local rows and extensions commit together before optional organization publication. */
+    @Transactional(rollbackFor = Exception.class)
+    public SsResource saveCreatedLocalDataset(DatasetDto datasetDto, KnowledgeBaseInfo knowledgeBase) {
+        String resourceBizType = datasetDto.getResourceBizType();
+        String resourceName = datasetDto.getResourceName(), resourceDesc = datasetDto.getResourceDesc();
+        String type = datasetDto.getType(), ownerType = datasetDto.getOwnerType();
         // 保存资源表
         String resourceCode = knowledgeBase.getKnCode();
 
@@ -366,13 +408,18 @@ public class DatasetApplicationService {
         String resourceName = datasetDto.getResourceName();
         String resourceDesc = datasetDto.getResourceDesc();
 
-        // 更新知识库
-        SsResource ssResource = ssResourceService.findByIdForUpdate(resourceId);
+        // 先读取身份，取得与同步共用的锁后再读取当前记录。
+        SsResource ssResource = ssResourceService.findById(resourceId);
+        validateDatasetManagePermission(ssResource);
+        lockDatasetIdentity(ssResource.getSystemCode(), ssResource.getResourceBizType(), ssResource.getResourceCode());
+        ssResource = ssResourceService.findByIdForUpdate(resourceId);
         validateDatasetManagePermission(ssResource);
         if (Objects.equals(ssResource.getResourceStatus(), ResourceStatus.DELETE.getNum())) {
             throw new IllegalArgumentException(I18nUtil.get("resource.lifecycle.status.invalid"));
         }
-        ssResource = ssResourceService.updateResource(resourceId, resourceName, resourceDesc);
+        // Reuse the post-lock record; updateResource would re-read a potentially cached pre-lock snapshot.
+        ssResource.setResourceName(resourceName);
+        ssResource.setResourceDesc(resourceDesc);
         if (datasetDto.getCatalogId() != null) {
             ssResource.setCatalogId(datasetDto.getCatalogId());
         }
@@ -385,6 +432,11 @@ public class DatasetApplicationService {
         // 不区分 type，也不改 sourceContent，避免影响导入链的原始内容语义。
         SsResExtDoc extDoc = ssResExtDocService.updateSsResExtDocTargetContent(ssResource.getResourceId(), type,
             resourceName, resourceDesc);
+        if (DatasetOwnershipMetadata.isLocal(extDoc)) {
+            extDoc.setTargetContent(DatasetOwnershipMetadata.applyScope(extDoc.getTargetContent(),
+                ssResource.getOwnerType(), ssResource.getCatalogId()));
+            ssResExtDocService.update(extDoc);
+        }
         // 页面更新知识库后，也按知识库导入的同一套规则把最新 targetContent 同步到开放资源目录。
         // 同步失败仅记日志，不影响主流程成功返回。
         // 下架知识仍可维护元信息，标准 JSON 和缓存只在上架状态发布。
@@ -401,6 +453,16 @@ public class DatasetApplicationService {
         PythonBuildResponse<Void> ret = feignPythonBuildService.updateKnowledgeBase(kbKnowledgeUpdate);
         logger.info("同步更新结果:{}", JSON.toJSONString(ret));
 
+    }
+
+    public boolean isOwnershipManagedLocally(SsResource resource) {
+        return resource != null && StringUtils.startsWith(resource.getResourceBizType(), "KG_")
+            && DatasetOwnershipMetadata.isLocal(ssResExtDocService.findById(resource.getResourceId()));
+    }
+
+    private void lockDatasetIdentity(String systemCode, String resourceBizType, String resourceCode) {
+        ssResourceService.lockSkillImport("THIRD_SYNC:" + StringUtils.trimToEmpty(systemCode) + ":"
+            + StringUtils.trimToEmpty(resourceBizType) + ":" + StringUtils.trimToEmpty(resourceCode));
     }
 
     private boolean isLocalDatasetType(String type) {
@@ -1559,17 +1621,35 @@ public class DatasetApplicationService {
     }
 
     /**
-     * 统计指定知识库所有层级的未删除文件数量。
+     * 通过 status 统计未删除文件，保留门户 fileCount 响应契约。
+     * @param knowledgeFileCountRequest 资源及可选的排除路径前缀
+     * @return 排除指定目录后的文件数量
      */
-    public KnowledgeFileCountResult fileCount(KnowledgeFileCountRequest request) {
-        SsResource resource = loadDatasetResource(request.getResourceId());
-        validateDatasetReadablePermission(resource);
-        KbKnowledgeFileCount qaRequest = new KbKnowledgeFileCount();
-        qaRequest.setKnCode(resource.getResourceCode());
-        PythonBuildResponse<KnowledgeFileCountResult> response =
-            feignPythonBuildService.fileCount(qaRequest, request.getResourceId());
-        assertPythonBuildSuccess(response, I18nUtil.get("dataset.operation.fileCount"));
-        return response.getResultObject();
+    public KnowledgeFileCountResult fileCount(KnowledgeFileCountRequest knowledgeFileCountRequest) {
+        SsResource ssResource = loadDatasetResource(knowledgeFileCountRequest.getResourceId());
+        validateDatasetReadablePermission(ssResource);
+        KbKnowledgeStatus kbKnowledgeStatus = new KbKnowledgeStatus();
+        kbKnowledgeStatus.setKnCodeList(Collections.singletonList(ssResource.getResourceCode()));
+        kbKnowledgeStatus.setExcludePathPrefixList(knowledgeFileCountRequest.getExcludePathPrefixList());
+        // 旧的知识服务 fileCount 不支持排除目录；复用已支持路由的批量 status 接口。
+        PythonBuildResponse<KnowledgeStatusResult> knowledgeStatusResponse =
+            feignPythonBuildService.knowledgeStatus(kbKnowledgeStatus);
+        assertPythonBuildSuccess(knowledgeStatusResponse, I18nUtil.get("dataset.operation.fileCount"));
+        KnowledgeStatusResult knowledgeStatusResult = knowledgeStatusResponse.getResultObject();
+        if (knowledgeStatusResult == null || knowledgeStatusResult.getData() == null
+                || knowledgeStatusResult.getData().size() != 1) {
+            throw new BaseException(I18nUtil.get("dataset.file.count.response.invalid"));
+        }
+        KnowledgeStatusResult.Item knowledgeStatusItem = knowledgeStatusResult.getData().get(0);
+        // 缺项、错误库编码及无效数量不能伪装成空云盘。
+        if (knowledgeStatusItem == null
+                || !Objects.equals(ssResource.getResourceCode(), knowledgeStatusItem.getKnCode())
+                || knowledgeStatusItem.getFileCount() == null || knowledgeStatusItem.getFileCount() < 0) {
+            throw new BaseException(I18nUtil.get("dataset.file.count.response.invalid"));
+        }
+        KnowledgeFileCountResult knowledgeFileCountResult = new KnowledgeFileCountResult();
+        knowledgeFileCountResult.setFileCount(knowledgeStatusItem.getFileCount());
+        return knowledgeFileCountResult;
     }
 
     /** 按 QA glob 单层通配规则匹配知识库文件或目录。 */
@@ -1838,17 +1918,23 @@ public class DatasetApplicationService {
     public Long importDatasetJson(String ownerType, Long catalogId, MultipartFile file) {
 
         // 校验上传文件
-        String rawJson = parseAndValidateFile(file);
+        String rawJson = DatasetOwnershipMetadata.stripLocalMarker(parseAndValidateFile(file));
 
         // 校验json文件参数
         DatasetImportDto dto = parseAndValidateDto(rawJson, ownerType);
         dto.setCatalogId(catalogId);
 
+        lockDatasetIdentity(dto.getSystemCode(), dto.getResourceBizType(), dto.getResourceCode());
         SsResource existing = ssResourceService.findByImportIdentity(dto.getSystemCode(), dto.getResourceBizType(),
             dto.getResourceCode());
         if (existing == null) {
             return createDatasetFromImport(dto, rawJson, ownerType);
         } else {
+            if (isOwnershipManagedLocally(existing)) {
+                ownerType = existing.getOwnerType();
+                dto.setOwnerType(ownerType);
+                dto.setCatalogId(existing.getCatalogId());
+            }
             ResourceImportOwnerTypeValidator.validate(existing, ownerType, dto.getResourceCode(), dto.getResourceName(),
                 dto.getResourceBizType(), dto.getSystemCode());
             validateDatasetImportUpdatePermission(existing, dto.getResourceCode());
@@ -1923,6 +2009,28 @@ public class DatasetApplicationService {
         return dto;
     }
 
+    /** Persists a confirmed external creation without calling create_kb again or trusting client provenance. */
+    @Transactional(rollbackFor = Exception.class)
+    public SsResource saveProvisionedDataset(DatasetDto request, KnowledgeProviderService.Provider provider, String code) {
+        JSONObject root = JSON.parseObject(DatasetOwnershipMetadata.stripLocalMarker(provider.description().toJSONString()));
+        root.put("resourceCode", code); root.put("resourceName", request.getResourceName());
+        root.put("resourceDesc", request.getResourceDesc()); root.put("ownerType", request.getOwnerType());
+        root.put("resourceBizType", "KG_DOC"); root.put("type", "external");
+        root.put("systemCode", provider.resource().getSystemCode());
+        root.remove("resourceId"); root.remove("createBy"); root.remove("resourceSourcePkId");
+        root.remove("viewAuth"); root.remove("authScope"); root.remove("autoAuthorize"); root.remove("publishScope");
+        DatasetImportDto dto = parseAndValidateDto(root.toJSONString(), request.getOwnerType());
+        dto.setCatalogId(request.getCatalogId());
+        lockDatasetIdentity(dto.getSystemCode(), dto.getResourceBizType(), code);
+        if (ssResourceService.findByImportIdentity(dto.getSystemCode(), dto.getResourceBizType(), code) != null)
+            throw new IllegalArgumentException("提供方返回的知识库编码已存在，请核对创建任务，禁止覆盖已有知识库");
+        Long id = createDatasetFromImport(dto, root.toJSONString(), request.getOwnerType());
+        SsResExtDoc document = ssResExtDocService.findById(id);
+        document.setSourceContent(DatasetOwnershipMetadata.markLocal(document.getSourceContent(), id));
+        ssResExtDocService.update(document);
+        return ssResourceService.findById(id);
+    }
+
     private Long createDatasetFromImport(DatasetImportDto datasetImportDto, String rawJson, String ownerType) {
 
         // 参数提取
@@ -1948,6 +2056,9 @@ public class DatasetApplicationService {
         myResource.setSystemCode(datasetImportDto.getSystemCode());
         myResource.setResourceVersionId(datasetImportDto.getVersion());
         myResource.setCatalogId(datasetImportDto.getCatalogId());
+        if (datasetImportDto.getCreateBy() != null && EnterpriseResourceSyncContext.isImporting(myResource)) {
+            myResource.setCreateBy(datasetImportDto.getCreateBy());
+        }
 
         fillKnowledgeResourceImplInfo(myResource);
 
@@ -1989,6 +2100,9 @@ public class DatasetApplicationService {
         existing.setResourceVersionId(dto.getVersion());
         existing.setOwnerType(StringUtils.trimToEmpty(ownerType));
         existing.setCatalogId(dto.getCatalogId());
+        if (dto.getCreateBy() != null && EnterpriseResourceSyncContext.isImporting(existing)) {
+            existing.setCreateBy(dto.getCreateBy());
+        }
         fillKnowledgeResourceImplInfo(existing);
 
         existing.setUpdateBy(CurrentUserHolder.getCurrentUserId());
@@ -2053,11 +2167,14 @@ public class DatasetApplicationService {
     }
 
     private void fillExtDoc(SsResExtDoc extDoc, DatasetImportDto dto, String rawJson, Long resourceId) {
+        boolean managedLocally = DatasetOwnershipMetadata.isLocal(extDoc);
         extDoc.setType(dto.getResourceType());
         extDoc.setResourceCatalogSub(dto.getResourceCatalogSub());
-        extDoc.setSourceContent(rawJson);
+        extDoc.setSourceContent(managedLocally ? DatasetOwnershipMetadata.markLocal(rawJson, resourceId) : rawJson);
         extDoc.setResourceAgentId(Long.valueOf(dto.getResourceCode()));
-        extDoc.setTargetContent(buildTargetContent(rawJson, resourceId));
+        String targetContent = buildTargetContent(rawJson, resourceId);
+        extDoc.setTargetContent(managedLocally
+            ? DatasetOwnershipMetadata.applyScope(targetContent, dto.getOwnerType(), dto.getCatalogId()) : targetContent);
     }
 
     private void validateResourceCodeCanMapToAgentId(String resourceCode) {

@@ -39,10 +39,10 @@ describe('FileSiderPanel project space paths', () => {
     expect(getPreviewFileType('.gitignore')).toBe('txt');
   });
 
-  it('rejects oversized text files while keeping binary files on their existing preview rules', () => {
+  it('uses the format to open a preview even when list size metadata is oversized', () => {
     expect(
       canPreviewFile({ name: '.gitignore', path: '/.gitignore', isDir: false, size: MAX_TEXT_PREVIEW_SIZE + 1 })
-    ).toBe(false);
+    ).toBe(true);
     expect(canPreviewFile({ name: 'archive.jar', path: '/archive.jar', isDir: false })).toBe(false);
   });
 

@@ -289,3 +289,123 @@ COMMENT ON COLUMN byai.po_enterprise_info.contact_phone IS '企业联系电话�
 COMMENT ON COLUMN byai.po_enterprise_info.contact_email IS '企业联系邮箱，选填；不从所有者或成员个人账号自动填充';
 COMMIT;
 -- END HACU ENTERPRISE CONTACT DETAILS
+
+-- RESOURCE_ORGANIZATION_PUBLICATION
+-- 企业资源发布范围独立于使用授权；存量数据保持历史可见性。
+ALTER TABLE byai.ss_resource ADD COLUMN publish_scope_mode VARCHAR(16) NOT NULL DEFAULT 'LEGACY'
+    CHECK (publish_scope_mode IN ('LEGACY','NONE','COMPANY','ORGS'));
+ALTER TABLE byai.ss_resource ADD COLUMN publish_scope_revision BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE byai.ss_resource ADD COLUMN publish_scope_controller VARCHAR(16) NOT NULL DEFAULT 'BYAI'
+    CHECK (publish_scope_controller IN ('BYAI','SYNC'));
+COMMENT ON COLUMN byai.ss_resource.publish_scope_mode IS '企业目录当前生效范围；历史未设置不推断为全公司';
+COMMENT ON COLUMN byai.ss_resource.publish_scope_revision IS '发布范围并发版本，修改范围和申请时以条件更新串行化';
+COMMENT ON COLUMN byai.ss_resource.publish_scope_controller IS '范围维护方：百应本地或同步来源';
+
+CREATE TABLE byai.resource_publication (
+    request_id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    resource_id BIGINT NOT NULL REFERENCES byai.ss_resource(resource_id) ON DELETE CASCADE,
+    source_resource_id BIGINT,
+    request_source VARCHAR(32) NOT NULL,
+    operation VARCHAR(32) NOT NULL CHECK (operation IN ('PUBLISH','ADD_SCOPE','REPLACE_SCOPE','RETRACT')),
+    applicant_id BIGINT NOT NULL,
+    applicant_name VARCHAR(255),
+    review_snapshot_json TEXT NOT NULL,
+    resource_fingerprint VARCHAR(64) NOT NULL,
+    before_scope_json TEXT NOT NULL,
+    requested_scope_json TEXT NOT NULL,
+    status VARCHAR(16) NOT NULL CHECK (status IN ('DRAFT','PENDING','CLOSED','WITHDRAWN','SUPERSEDED')),
+    revision BIGINT NOT NULL DEFAULT 0,
+    base_scope_revision BIGINT NOT NULL DEFAULT 0,
+    idempotency_key VARCHAR(128) NOT NULL,
+    comment VARCHAR(2000),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    submitted_at TIMESTAMP,
+    closed_at TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_resource_publication_key UNIQUE (tenant_id, resource_id, idempotency_key),
+    CONSTRAINT uq_resource_publication_tenant UNIQUE (tenant_id, request_id)
+);
+CREATE UNIQUE INDEX uq_resource_publication_active ON byai.resource_publication(tenant_id,resource_id)
+    WHERE status IN ('DRAFT','PENDING');
+CREATE INDEX ix_resource_publication_list ON byai.resource_publication(tenant_id,applicant_id,created_at);
+CREATE INDEX ix_resource_publication_resource ON byai.resource_publication(tenant_id,resource_id,created_at);
+COMMENT ON TABLE byai.resource_publication IS '知识工具技能的发布申请，不产生使用授权';
+
+CREATE TABLE byai.resource_publication_target (
+    target_id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    request_id BIGINT NOT NULL,
+    org_id BIGINT NOT NULL CHECK (org_id = -1 OR org_id > 0),
+    org_name_snapshot VARCHAR(255) NOT NULL,
+    status VARCHAR(16) NOT NULL CHECK (status IN ('PENDING','APPROVED','REJECTED','CANCELLED')),
+    revision BIGINT NOT NULL DEFAULT 0,
+    reviewer_id BIGINT,
+    reviewer_name VARCHAR(255),
+    reviewed_at TIMESTAMP,
+    applied_at TIMESTAMP,
+    comment VARCHAR(2000),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_resource_publication_target UNIQUE (tenant_id,request_id,org_id),
+    CONSTRAINT fk_resource_publication_target FOREIGN KEY (tenant_id,request_id)
+        REFERENCES byai.resource_publication(tenant_id,request_id) ON DELETE CASCADE
+);
+CREATE INDEX ix_resource_publication_inbox ON byai.resource_publication_target(tenant_id,org_id,status,request_id);
+COMMENT ON TABLE byai.resource_publication_target IS '逐组织审核结果，申请范围与生效范围分开存储';
+
+CREATE TABLE byai.resource_publish_scope (
+    scope_id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    resource_id BIGINT NOT NULL REFERENCES byai.ss_resource(resource_id) ON DELETE CASCADE,
+    org_id BIGINT NOT NULL CHECK (org_id = -1 OR org_id > 0),
+    request_id BIGINT NOT NULL,
+    effective_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_resource_publish_scope UNIQUE (tenant_id,resource_id,org_id),
+    CONSTRAINT fk_resource_publish_scope_request FOREIGN KEY (tenant_id,request_id)
+        REFERENCES byai.resource_publication(tenant_id,request_id) ON DELETE CASCADE
+);
+CREATE INDEX ix_resource_publish_scope_org ON byai.resource_publish_scope(tenant_id,org_id,resource_id);
+COMMENT ON TABLE byai.resource_publish_scope IS '企业目录已生效范围，不改变现有查看和使用授权';
+
+CREATE TABLE byai.knowledge_provision_task (
+    task_id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    resource_id BIGINT,
+    applicant_id BIGINT NOT NULL,
+    provider_id VARCHAR(128) NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL,
+    request_hash VARCHAR(64) NOT NULL,
+    request_json TEXT NOT NULL,
+    external_code VARCHAR(255),
+    status VARCHAR(16) NOT NULL CHECK (status IN ('PENDING','CREATING','SUCCEEDED','UNKNOWN','FAILED')),
+    error VARCHAR(2000),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_knowledge_provision_key UNIQUE(tenant_id,applicant_id,idempotency_key)
+);
+COMMENT ON TABLE byai.knowledge_provision_task IS '外部建库幂等任务，超时结果未知时不自动重复创建';
+-- END RESOURCE_ORGANIZATION_PUBLICATION
+
+-- Sandbox creation-time presentation metadata (independent of resource publication).
+ALTER TABLE ss_sandbox_record ADD COLUMN instance_context_snapshot TEXT;
+COMMENT ON COLUMN ss_sandbox_record.instance_context_snapshot IS 'Credential-free versioned instance bindings and presentation captured at runtime creation';
+
+-- BEGIN MOBILE PUSH
+-- Apply once before enabling byclaw.mobile-push; no Tencent credentials are stored in these tables.
+CREATE TABLE byai.byai_mobile_push_device (
+    installation_id varchar(128) PRIMARY KEY,
+    account_id bigint NOT NULL,
+    revision bigint NOT NULL CHECK (revision > 0 AND revision <= 9007199254740991),
+    registration_id varchar(256) NOT NULL,
+    platform varchar(16) NOT NULL CHECK (platform IN ('ios', 'android')),
+    language varchar(32) NOT NULL,
+    enabled boolean NOT NULL DEFAULT false,
+    updated_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX uk_mobile_push_registration ON byai.byai_mobile_push_device(registration_id)
+    WHERE enabled = true;
+CREATE INDEX idx_mobile_push_account ON byai.byai_mobile_push_device(account_id) WHERE enabled = true;
+COMMENT ON TABLE byai.byai_mobile_push_device IS '手机安装实例与当前认证账号的推送绑定；递增版本防止换号后迟到写入';
+COMMENT ON COLUMN byai.byai_mobile_push_device.revision IS '客户端按环境及服务器持久化递增；解绑保留版本墓碑';
+
+-- END MOBILE PUSH

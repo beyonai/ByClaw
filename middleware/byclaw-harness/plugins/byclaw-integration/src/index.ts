@@ -700,11 +700,11 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
     await settle(resourceWatch === undefined ? undefined : () => resourceWatch?.close() ?? Promise.resolve())
     await settle(() => resourceRuntime.close())
     await settle(() => generationLease.close())
-    await settle(() => sessionMetadata.close())
     await settle(() => refresh)
     await settle(worker === undefined ? undefined : () => worker?.close() ?? Promise.resolve())
     await settle(disposition === undefined ? undefined : () => disposition?.close() ?? Promise.resolve())
     await settle(sessions === undefined ? undefined : () => sessions?.close() ?? Promise.resolve())
+    await settle(() => sessionMetadata.close())
     await settle(sandboxBusy === undefined ? undefined : () => sandboxBusy?.close() ?? Promise.resolve())
     await settle(() => lazySkills.close())
     await settle(() => redis.quit())
@@ -1115,11 +1115,11 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       timeoutMs: config.groupChatDispositionTimeoutMs ?? 30_000,
       maxTokens: config.groupChatDispositionMaxTokens ?? 1_024,
       historyMaxBytes: config.groupChatDispositionHistoryMaxBytes ?? 65_536,
+      resolveModel: command => models.resolve(`group-chat-disposition:${userCode}:${command.header.sessionId}`),
       resolveConfiguredModel: connection => models.resolveGroupChatDispositionModel(connection),
-      // The session state and the group history are in the user tree. State goes through the queued
-      // view (every first turn writes it; a model-only turn must not start B); the history is written
-      // by the platform, so only the tool environment itself has it.
-      ...(userFiles === undefined ? {} : { files: userFiles, historyFiles: toolEnvironmentFiles(ctx) }),
+      // Classification needs persisted TASK/receipt state; an uncached queued view reports it missing.
+      // This adapter is used only by eligible group turns, never ordinary input or context boot.
+      ...(userFiles === undefined ? {} : { files: toolEnvironmentFiles(ctx), historyFiles: toolEnvironmentFiles(ctx) }),
     })
     sessions = new ByClawDshSessionRuntime(ctx, {
       workspace,
@@ -1137,6 +1137,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       emitter,
       interactionStore: new ByClawInteractionStore(redis),
       sessionMetadata,
+      waitForGroupChatDisposition: command => disposition?.waitFor(command),
       sessionOpening: (command, firstSession, signal) => ctx.serial('byclaw/session-opening', {
         command, firstSession, signal, host: sessionHost,
         resolveModel: () => models.resolve(`group-chat-disposition:${userCode}:${command.header.sessionId}`),

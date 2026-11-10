@@ -13,6 +13,70 @@ function fixture() {
   return { factory, runtimes, manager: new ToolSandboxManager(templates, factory) }
 }
 describe('tool sandbox catalog and independent leases', () => {
+  it('returns leases to idle by default and destroys only on an explicit request', async () => {
+    const f = fixture()
+    await f.manager.acquire('actor', 'browser', 'turn1')
+    await f.manager.releaseActor('actor')
+    expect(f.runtimes[0]!.release).toHaveBeenCalledWith(false)
+    await f.manager.acquire('actor', 'browser', 'turn2')
+    await f.manager.dispose()
+    expect(f.runtimes[1]!.release).toHaveBeenCalledWith(false)
+    const manual = fixture()
+    const lease = await manual.manager.acquire('actor', 'browser', 'manual')
+    await manual.manager.release('actor', lease.leaseId)
+    expect(manual.runtimes[0]!.release).toHaveBeenCalledWith(false)
+    const explicit = fixture()
+    const explicitLease = await explicit.manager.acquire('actor', 'browser', 'destroy-request')
+    await explicit.manager.release('actor', explicitLease.leaseId, 'tool', true)
+    expect(explicit.runtimes[0]!.release).toHaveBeenCalledWith(true)
+    const rejected = fixture()
+    const destroy = vi.fn(async () => {})
+    rejected.factory.mockImplementationOnce(async () => ({ handshake: async () => ({ contract: 'wrong' }), execute: async () => ({ exitCode: 0, stdout: '', stderr: '' }), release: destroy }))
+    await expect(rejected.manager.acquire('actor', 'browser', 'bad')).rejects.toThrow('CONTRACT_INCOMPATIBLE')
+    expect(destroy).toHaveBeenCalledWith(true)
+  })
+
+  it.each(['actor-end', 'dispose'])('cannot allocate after cleanup during pending catalog refresh: %s', async boundary => {
+    const f = fixture()
+    const gate = Promise.withResolvers<typeof templates>()
+    const manager = new ToolSandboxManager(templates, f.factory, () => {}, () => gate.promise)
+    const pending = manager.acquire('actor', 'browser', 'late')
+    const rejected = expect(pending).rejects.toThrow(boundary === 'dispose' ? 'MANAGER_DISPOSED' : 'ACTOR_RELEASING')
+    if (boundary === 'dispose') await manager.dispose()
+    else await manager.releaseActor('actor')
+    gate.resolve(templates)
+    await rejected
+    expect(f.factory).not.toHaveBeenCalled()
+    if (boundary === 'actor-end') {
+      await expect(manager.acquire('actor', 'browser', 'new-turn')).resolves.toMatchObject({ templateKey: 'browser' })
+      await manager.dispose()
+    }
+  })
+
+  it('refreshes independent availability before reuse and admits newly published templates', async () => {
+    const f = fixture()
+    let catalog = [...templates]
+    const manager = new ToolSandboxManager(templates, f.factory, () => {}, async () => catalog)
+    const lease = await manager.acquire('actor', 'browser', 'first')
+    catalog = templates.map(t => ({ ...t, enabled: t.templateKey !== 'browser' }))
+    await expect(manager.acquire('actor', 'browser', 'second')).rejects.toThrow('TEMPLATE_UNAVAILABLE')
+    await expect(manager.execute('actor', lease.leaseId, ['finish-running-work'])).resolves.toMatchObject({ exitCode: 0 })
+    catalog = [...templates, { templateKey: 'analysis', serviceKey: 'custom-analysis', capabilities: ['data.analysis'], enabled: true }]
+    await manager.refreshCatalog()
+    expect(manager.catalog().some(t => t.templateKey === 'analysis')).toBe(true)
+    await expect(manager.acquire('actor', 'analysis', 'third')).resolves.toMatchObject({ templateKey: 'analysis' })
+    await manager.dispose()
+  })
+
+  it('offers enabled cold templates for acquisition without claiming a verified runtime', () => {
+    const f = fixture()
+    expect(f.manager.catalog().map(t => ({ enabled: t.enabled, available: t.available, verification: t.verification })))
+      .toEqual([{ enabled: true, available: true, verification: 'not-yet-verified' }, { enabled: true, available: true, verification: 'not-yet-verified' }])
+    expect(f.factory).not.toHaveBeenCalled()
+    const disabled = new ToolSandboxManager([{ ...templates[0]!, enabled: false }], f.factory)
+    expect(disabled.catalog()[0]!.available).toBe(false)
+  })
+
   it('holds browser and media simultaneously without changing the other runtime', async () => {
     const f = fixture(); const a = await f.manager.acquire('actor', 'browser', 'first'); const b = await f.manager.acquire('actor', 'media', 'second')
     expect(a.handleId).not.toBe(b.handleId); expect(f.factory).toHaveBeenCalledTimes(2)
@@ -27,6 +91,21 @@ describe('tool sandbox catalog and independent leases', () => {
     const other = await f.manager.acquire('other', 'browser', 'two'); expect(f.factory).toHaveBeenCalledOnce()
     await f.manager.release('actor', a.leaseId); expect(f.runtimes[0]!.release).not.toHaveBeenCalled()
     await f.manager.release('other', other.leaseId); expect(f.runtimes[0]!.release).toHaveBeenCalledOnce()
+  })
+  it('keeps another session usable when an explicit destruction request returns only its own reference', async () => {
+    const f = fixture()
+    const a = await f.manager.acquire('session-a', 'browser', 'task-a')
+    const b = await f.manager.acquire('session-b', 'browser', 'task-b')
+    const remoteReturn = vi.fn(async () => {})
+    Object.assign(f.runtimes[0]!, { releaseLease: remoteReturn })
+    await expect(f.manager.release('session-a', a.leaseId, 'tool', true)).resolves.toEqual({ released: false, remainingReferences: 1 })
+    expect(remoteReturn).toHaveBeenCalledExactlyOnceWith(`session-a:${a.leaseId}`, true)
+    expect(f.runtimes[0]!.release).not.toHaveBeenCalled()
+    await expect(f.manager.execute('session-b', b.leaseId, ['continue-running'])).resolves.toMatchObject({ exitCode: 0 })
+    await f.manager.release('session-b', b.leaseId, 'tool', true)
+    expect(remoteReturn).toHaveBeenLastCalledWith(`session-b:${b.leaseId}`, true)
+    expect(f.runtimes[0]!.release).toHaveBeenCalledWith(false)
+    await f.manager.dispose()
   })
   it('denies cross-actor handles and unknown templates without allocating compute', async () => {
     const f = fixture(); await expect(f.manager.acquire('actor', 'unknown', 'one')).rejects.toThrow('TEMPLATE_UNAVAILABLE')
@@ -125,7 +204,7 @@ describe('tool sandbox catalog and independent leases', () => {
     f.factory.mockImplementationOnce(async () => ({ handshake: async () => { throw new Error('bad manifest') }, execute: async () => ({ exitCode: 0, stdout: '', stderr: '' }), release: cleanup }))
     await expect(f.manager.acquire('actor', 'media', 'one')).rejects.toThrow('bad manifest')
     await expect(f.manager.dispose()).rejects.toThrow('TOOL_SANDBOX_CLEANUP_RETAINED')
-    await expect(f.manager.acquire('actor', 'media', 'two')).rejects.toThrow('ALLOCATION_CLEANUP_REQUIRED')
+    await expect(f.manager.acquire('actor', 'media', 'two')).rejects.toThrow('MANAGER_DISPOSED')
     cleanup.mockImplementationOnce(async () => {})
     await expect(f.manager.dispose()).resolves.toBeUndefined()
     expect(cleanup).toHaveBeenCalledTimes(3)
@@ -133,6 +212,33 @@ describe('tool sandbox catalog and independent leases', () => {
   it('rejects mismatched SSH manifests and releases failed allocations', async () => {
     const f = fixture(); f.factory.mockImplementationOnce(async () => ({ handshake: async () => ({ contract: 'wrong' }), execute: async () => ({ exitCode: 0, stdout: '', stderr: '' }), release: vi.fn(async () => {}) }))
     await expect(f.manager.acquire('actor', 'browser', 'one')).rejects.toThrow('CONTRACT_INCOMPATIBLE')
-    expect(f.manager.catalog().every(t => t.available === false)).toBe(true)
+    expect(f.manager.catalog().find(t => t.templateKey === 'browser')).toMatchObject({ available: false, verification: 'failed' })
+    expect(f.manager.catalog().find(t => t.templateKey === 'media')).toMatchObject({ available: true, verification: 'not-yet-verified' })
+  })
+})
+
+
+describe('remote per-session lease coordination', () => {
+  it('returns each actor lease independently before dropping the shared local runtime', async () => {
+    const executed: string[] = []
+    const acquired: string[] = [], returned: Array<{ session: string; destroy: boolean }> = []
+    let detached = 0
+    const manager = new ToolSandboxManager([{ templateKey: 'tools', serviceKey: 'byclaw-dsh-tools', capabilities: [], enabled: true }], async () => ({
+      handshake: async () => ({ contract: 'byclaw.tool-sandbox/v1', purpose: 'tools', operations: { protocol: 'ssh', exposure: 'private' }, capabilities: [] }),
+      execute: async (_argv, _cwd, _signal, sessionId) => { executed.push(sessionId!); return { exitCode: 0, stdout: '', stderr: '' } },
+      acquireLease: async session => { acquired.push(session) },
+      releaseLease: async (session, destroy) => { returned.push({ session, destroy }) },
+      release: async () => { detached++ },
+    }))
+    const a = await manager.acquire('session-a', 'tools', 'task-a')
+    const b = await manager.acquire('session-b', 'tools', 'task-b')
+    expect(acquired).toEqual([`session-a:${a.leaseId}`, `session-b:${b.leaseId}`])
+    await manager.execute('session-b', b.leaseId, ['true'])
+    expect(executed).toEqual([`session-b:${b.leaseId}`])
+    await manager.releaseActor('session-a')
+    expect(returned).toEqual([{ session: `session-a:${a.leaseId}`, destroy: false }]); expect(detached).toBe(0)
+    await manager.release('session-b', b.leaseId)
+    expect(returned.at(-1)).toEqual({ session: `session-b:${b.leaseId}`, destroy: false }); expect(detached).toBe(1)
+    await manager.dispose()
   })
 })

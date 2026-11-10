@@ -9,6 +9,7 @@ import {
   addMembers,
 } from "../src/infrastructure/persistence/member-writer.js";
 import { changeTask } from "../src/infrastructure/persistence/task-writer.js";
+import { directTask } from "../src/infrastructure/persistence/group-management.js";
 import { command } from "./fixtures.js";
 import { SqlCommandTransactions } from "../src/infrastructure/persistence/command-repository.js";
 import type { ConnectionManager } from "../src/application/connection-manager.js";
@@ -76,6 +77,38 @@ function context(operation: any, payload: Record<string, any> = {}, role = "MEMB
   vi.spyOn(ctx, "member").mockResolvedValue({ userRole: role, memObjId: "20" });
   return { ctx, query };
 }
+describe("private chat task", () => {
+  it("creates a PRIVATE task row and returns it without task execution", async () => {
+    const { ctx, query } = context("CREATE_DIRECT_TASK", { agentId: "21" });
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes("mem_name")) return [{ name: "员工A" }] as any[];
+      if (sql.includes("MAX(message_id)")) return [{ id: "5" }] as any[];
+      if (sql.includes("nextval")) return [{ id: "1" }] as any[];
+      if (sql.startsWith("SELECT * FROM byai.byai_group_chat_task"))
+        return [
+          {
+            task_session_id: "30",
+            status: "PRIVATE",
+            turn_status: "PRIVATE",
+            task_name: "与员工A的私聊",
+          },
+        ] as any[];
+      return [] as any[];
+    });
+    expect(await directTask(ctx)).toMatchObject({
+      data: { status: "PRIVATE", taskName: "与员工A的私聊" },
+    });
+    expect(
+      query.mock.calls.some(
+        ([sql, args]) =>
+          sql.startsWith("INSERT INTO byai.byai_group_chat_task") &&
+          args[7] === "PRIVATE" &&
+          args[8] === "PRIVATE",
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("group write permission", () => {
   it("rejects nonmembers before mutation", async () => {
     const s = context("UPDATE_SESSION");

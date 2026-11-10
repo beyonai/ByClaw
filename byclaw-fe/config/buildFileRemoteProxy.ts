@@ -8,7 +8,7 @@
  *
  * 仅在同时满足以下条件时启用，避免影响远程/生产构建：
  *   1. FILE_STORAGE_TYPE=file
- *   2. 本地 BE（BE_HOST 为 127.0.0.1 / localhost / 未设置）
+ *   2. 主代理实际目标为本地 BE（hostname 为 127.0.0.1 / localhost）
  *   3. 存在远程后端地址（BYCLAW_REMOTE_BE_HOST，来自 .env 的 HOST），且不等于本地
  */
 
@@ -33,15 +33,16 @@ const REMOTE_FILE_PATH_PREFIXES = [
   'commonFile/download',
 ];
 
-const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '', undefined as unknown as string]);
+const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
 
 function normalizeHost(raw?: string): string {
   return (raw || '').trim();
 }
 
-export function buildFileRemoteProxy(routerBase: string): Record<string, ProxyEntry> {
+export function buildFileRemoteProxy(routerBase: string, backendTarget: string): Record<string, ProxyEntry> {
   const fileStorageType = normalizeHost(process.env.FILE_STORAGE_TYPE).toLowerCase();
-  const beHost = normalizeHost(process.env.BE_HOST);
+  // 以最终 target 为准，避免 BE_HOST 缺失或过期时覆盖已配置的线上代理。
+  const beHost = new URL(backendTarget).hostname;
   const remoteHost = normalizeHost(process.env.BYCLAW_REMOTE_BE_HOST);
   const bePort = normalizeHost(process.env.BE_SERVER_PORT) || '8086';
 
@@ -63,9 +64,7 @@ export function buildFileRemoteProxy(routerBase: string): Record<string, ProxyEn
   }
 
   // eslint-disable-next-line no-console
-  console.log(
-    `[proxy] file-remote enabled -> ${remoteTarget} for: ${REMOTE_FILE_PATH_PREFIXES.join(', ')}`,
-  );
+  console.log(`[proxy] file-remote enabled -> ${remoteTarget} for: ${REMOTE_FILE_PATH_PREFIXES.join(', ')}`);
 
   return proxy;
 }

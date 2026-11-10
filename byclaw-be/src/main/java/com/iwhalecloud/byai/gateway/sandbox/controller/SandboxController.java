@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.gateway.sandbox.controller;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -207,6 +208,8 @@ public class SandboxController {
         result.put("sandboxId", sandboxInfo.getSandboxId());
         result.put("endpoints", sandboxInfo.getEndpoints());
         result.put("instanceEndpoints", sandboxInfo.getInstanceEndpoints());
+        result.put("instanceContext", sandboxInfo.getInstanceContext());
+        result.put("instanceDescriptors", sandboxInfo.getInstanceDescriptors());
         result.put("token", sandboxInfo.getGatewayToken());
         result.put("remoteExpiresAt", sandboxInfo.getRemoteExpiresAt());
         result.put("lastHeartbeatTime", sandboxInfo.getLastHeartbeatTime());
@@ -255,7 +258,10 @@ public class SandboxController {
                     result.put("sandboxType", sandbox.getSandboxType());
                     result.put("sandboxId", sandbox.getSandboxId());
                     result.put("endpoints", sandbox.getEndpoints());
-                    result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
+                    result.put("instanceEndpoints", com.iwhalecloud.byai.gateway.sandbox.service.ingress.desktop.SandboxDesktopAccess
+                        .navigationEndpoints(sandbox, contextPath));
+                    result.put("instanceContext", sandbox.getInstanceContext());
+                    result.put("instanceDescriptors", sandbox.getInstanceDescriptors());
                     result.put("endpointHeaders", sandbox.getEndpointHeaders());
                     result.put("token", sandbox.getGatewayToken());
                     result.put("isShared", shared);
@@ -459,6 +465,8 @@ public class SandboxController {
             result.put("sandboxId", data.getSandboxId());
             result.put("endpoints", data.getEndpoints());
             result.put("instanceEndpoints", data.getInstanceEndpoints());
+            result.put("instanceContext", data.getInstanceContext());
+            result.put("instanceDescriptors", data.getInstanceDescriptors());
             result.put("endpointHeaders", data.getEndpointHeaders());
             return ResponseUtil.successResponse(result);
         } catch (Exception e) {
@@ -536,6 +544,7 @@ public class SandboxController {
             .map(Map.Entry::getKey).collect(Collectors.toList());
         Map<String, Object> query = new HashMap<>();
         query.put("keyword", keyword);
+        query.put("sandboxType", stringParam(params.get("sandboxType")));
         query.put("ownerScope", ownerScope);
         query.put("enterpriseId", enterpriseId);
         query.put("offset", (pageIndex - 1) * pageSize);
@@ -587,6 +596,10 @@ public class SandboxController {
         result.put("pageSize", pageSize);
         result.put("total", total);
         result.put("totalPage", totalPage);
+        Map<String, Object> typeQuery = new HashMap<>();
+        typeQuery.put("ownerScope", ownerScope);
+        typeQuery.put("enterpriseId", enterpriseId);
+        result.put("sandboxTypes", sandboxRecordMapper.selectInventoryTypes(typeQuery));
 
         return ResponseUtil.successResponse(result);
     }
@@ -842,8 +855,8 @@ public class SandboxController {
     public ResponseUtil listServiceProfiles(@RequestBody Map<String, Object> params) {
         if (platformRemote != null && platformRemote.isRemote())
             return platformRemote.controller("listServiceProfiles", params);
-        String serviceType = StringUtils.defaultIfBlank(stringParam(params.get("serviceType")),
-            SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
+        String serviceType = Boolean.parseBoolean(String.valueOf(params.get("allServiceTypes"))) ? null
+            : StringUtils.defaultIfBlank(stringParam(params.get("serviceType")), SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
         boolean enabledOnly = !"false".equalsIgnoreCase(String.valueOf(params.getOrDefault("enabledOnly", "true")));
         List<SandboxServiceProfileEntity> list =
             sandboxServiceProfileEntityMapper.selectProfiles(serviceType, enabledOnly);
@@ -950,6 +963,7 @@ public class SandboxController {
         List<Map<String, String>> result = list.stream().map(entity -> {
             Map<String, String> map = new HashMap<>();
             map.put("serviceKey", entity.getServiceKey());
+                                    map.put("ownerScope", entity.getOwnerScope());
             map.put("serviceType", entity.getServiceType());
             map.put("displayName", entity.getDisplayName());
             map.put("enabled", entity.getEnabled() == null ? null : String.valueOf(entity.getEnabled()));
@@ -985,6 +999,7 @@ public class SandboxController {
 
         Map<String, String> result = new HashMap<>();
         result.put("serviceKey", entity.getServiceKey());
+        result.put("ownerScope", entity.getOwnerScope());
         result.put("serviceType", entity.getServiceType());
         result.put("displayName", entity.getDisplayName());
         result.put("enabled", entity.getEnabled() == null ? null : String.valueOf(entity.getEnabled()));
@@ -1018,20 +1033,40 @@ public class SandboxController {
             return ResponseUtil.failI18n("i18n.error.sandbox.specJson.required");
         }
 
+        String validationError = com.iwhalecloud.byai.gateway.sandbox.spec.ToolSandboxMetadata.validationError(specJson);
+        if (validationError != null) return ResponseUtil.fail(validationError);
         String serviceKeyTrimmed = serviceKey.trim();
         String specJsonTrimmed = specJson.trim();
         String templateJsonTrimmed = (templateJson != null && !templateJson.trim().isEmpty()) ? templateJson.trim() : null;
 
+        String serviceType = stringParam(params.get("serviceType"));
+        String ownerScope = stringParam(params.get("ownerScope"));
+        String displayName = stringParam(params.get("displayName"));
+        if ((serviceType != null && !serviceType.matches("[a-z][a-z0-9-]{0,63}"))
+                || (ownerScope != null && !Arrays.asList("USER", "TENANT", "SHARED").contains(ownerScope))
+                || (displayName != null && (displayName.length() > 128
+                    || displayName.chars().anyMatch(c -> c < 32)))) {
+            return ResponseUtil.fail("Invalid service metadata");
+        }
+        boolean metadata = serviceType != null || ownerScope != null || displayName != null;
         // 检查是否已存在
         SandboxServiceSpecEntity existing = sandboxServiceSpecEntityMapper.selectById(serviceKeyTrimmed);
-        if (existing == null) {
+        if (metadata) {
+            if (existing == null) {
+                sandboxServiceSpecEntityMapper.insertSpecWithMetadata(serviceKeyTrimmed, specJsonTrimmed,
+                    templateJsonTrimmed, enabled, serviceType, ownerScope, displayName);
+            } else {
+                sandboxServiceSpecEntityMapper.updateSpecWithMetadata(serviceKeyTrimmed, specJsonTrimmed,
+                    templateJsonTrimmed, enabled, serviceType, ownerScope, displayName);
+            }
+        } else if (existing == null) {
             // 新增 - 使用自定义 SQL 处理 jsonb 类型
-            sandboxServiceSpecEntityMapper.insertSpec(serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed,
-                enabled);
+            sandboxServiceSpecEntityMapper.insertSpec(
+                    serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed, enabled);
         } else {
             // 更新 - 使用自定义 SQL 处理 jsonb 类型
-            sandboxServiceSpecEntityMapper.updateSpec(serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed,
-                enabled);
+            sandboxServiceSpecEntityMapper.updateSpec(
+                    serviceKeyTrimmed, specJsonTrimmed, templateJsonTrimmed, enabled);
         }
 
         return ResponseUtil.successResponse();

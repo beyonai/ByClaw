@@ -9,6 +9,7 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationSessionContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartContext;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStartResult;
@@ -25,6 +26,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.ManifestComma
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService.DwsCredentialOutcome;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService.DwsCredentialStatus;
+import com.iwhalecloud.byai.manager.domain.devloop.service.DwsCliExecution.WorkspaceUnavailableException;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 
 @Component
@@ -156,10 +158,14 @@ public class DwsDingtalkAuthorizationProvider
         if (numericUserId == null) {
             throw new IllegalArgumentException(INVALID_USER_MESSAGE);
         }
-        dwsAuthService.revokeCredential(
-            numericUserId,
-            DwsAuthorizationCommandPolicy.command(catalogFor(connector), "logout", 0, "reset")
-        );
+        try {
+            dwsAuthService.revokeCredential(
+                numericUserId,
+                DwsAuthorizationCommandPolicy.command(catalogFor(connector), "logout", 0, "reset")
+            );
+        } catch (WorkspaceUnavailableException e) {
+            throw new BaseException("connector.dingtalk.workspaceFailed", e);
+        }
     }
 
     private AuthorizationStartResult failedStart(String errorCode, String errorMessage) {

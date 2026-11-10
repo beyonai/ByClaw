@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useContext, useState } from 'react';
 import { get } from 'lodash';
 import classnames from 'classnames';
 import { useIntl } from '@umijs/max';
@@ -21,6 +21,8 @@ import {
 import type { MarkdownImageResolver } from '@/components/Preview/Md';
 
 import previewStyle from '@/components/MessageList/components/FileRender/components/Previewer/index.module.less';
+
+import ProjectSharedFileContext from '../ProjectSharedFileContext';
 import styles from './index.module.less';
 
 const getFileTypeFromUrl = (href?: string) => {
@@ -41,6 +43,8 @@ function ATag({ domNode, sessionId, messageId }: { domNode: any; sessionId?: str
   const name: string = get(domNode, 'children.0.data') || href || '';
 
   const { EventEmitter } = useGlobal();
+  const projectScope = useContext(ProjectSharedFileContext);
+  const sharedScope = projectScope?.sessionId === sessionId ? projectScope : undefined;
 
   const [previewing, setPreviewing] = useState(false);
 
@@ -87,14 +91,22 @@ function ATag({ domNode, sessionId, messageId }: { domNode: any; sessionId?: str
     setPreviewing(true);
     try {
       if (relativeFile) {
-        const { file, path } = await downloadRelativeChatFileArtifact({ href, sessionId, messageId });
+        const { file, path, loadResource } = await downloadRelativeChatFileArtifact({
+          href,
+          sessionId,
+          messageId,
+          sharedScope,
+        });
         if (!(file instanceof Blob) || !file.size) throw new Error('Empty file');
-        openOnDrawer({
-          blob: file,
-          resolvePreviewResource: createRelativePathResourceResolver(path, async (resourcePath) => {
+        const downloadResource =
+          loadResource ??
+          (async (resourcePath: string) => {
             if (!sessionId) throw new Error('Missing session');
             return (await downloadChatFileArtifact({ sessionId, path: resourcePath })).file;
-          }),
+          });
+        openOnDrawer({
+          blob: file,
+          resolvePreviewResource: createRelativePathResourceResolver(path, downloadResource),
         });
       } else {
         const url = getFileUrl(href);
@@ -119,7 +131,7 @@ function ATag({ domNode, sessionId, messageId }: { domNode: any; sessionId?: str
     }
     setPreviewing(true);
     try {
-      const { file, fileName } = await downloadRelativeChatFileArtifact({ href, sessionId, messageId });
+      const { file, fileName } = await downloadRelativeChatFileArtifact({ href, sessionId, messageId, sharedScope });
       if (!(file instanceof Blob) || !file.size) throw new Error('Empty file');
       downloadFile({ file, fileName: fileName || name });
     } catch {

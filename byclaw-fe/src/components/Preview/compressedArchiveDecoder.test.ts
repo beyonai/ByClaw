@@ -2,7 +2,8 @@
 import { gzipSync } from 'zlib';
 import { libarchiveWasm, type LibarchiveWasm } from 'libarchive-wasm';
 import { openCompressedArchive } from './compressedArchiveDecoder';
-import { MAX_ARCHIVE_TEXT_BYTES, MAX_BINARY_PREVIEW_BYTES } from './binaryPreview';
+import { MAX_ARCHIVE_ENTRY_BYTES } from './binaryPreview';
+import { MAX_ARCHIVE_PREVIEW_BYTES } from './previewSize';
 import { MAX_ARCHIVE_EXPANDED_BYTES } from './nativeArchiveDecoder';
 import { tarFixture } from './fixtures/native-archive/tarFixture';
 
@@ -85,10 +86,10 @@ describe('GZIP and TGZ previews', () => {
   });
   it('limits input and actual expanded text/TAR bytes', async () => {
     await expect(
-      openCompressedArchive(new ArrayBuffer(MAX_BINARY_PREVIEW_BYTES + 1), 'gz', undefined, jest.fn())
+      openCompressedArchive(Object.defineProperty(new ArrayBuffer(1), 'byteLength', { value: MAX_ARCHIVE_PREVIEW_BYTES + 1 }), 'gz', undefined, jest.fn())
     ).rejects.toMatchObject({ code: 'limit' });
     await expect(
-      openCompressedArchive(gzip('x'.repeat(MAX_ARCHIVE_TEXT_BYTES + 1)), 'gz', 'a.txt.gz', jest.fn())
+      openCompressedArchive(gzip('x'.repeat(MAX_ARCHIVE_ENTRY_BYTES + 1)), 'gz', 'a.txt.gz', jest.fn())
     ).rejects.toMatchObject({ code: 'limit' });
     await expect(
       openCompressedArchive(gzip(new ArrayBuffer(MAX_ARCHIVE_EXPANDED_BYTES + 1)), 'tgz', 'a.tgz', jest.fn())

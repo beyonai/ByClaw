@@ -134,3 +134,36 @@
 //     transition: all 0.3s ease-in-out;
 //   }
 // }
+
+.uploadPercent {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+
+  > span {
+    font-size: 8px;
+  }
+}
+
+.uploadRetry {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--beyond-color-primary, #1677ff);
+    outline-offset: 2px;
+  }
+}
+
+.fileItem .actionList.uploadActions {
+  top: 0;
+  right: 0;
+  width: auto;
+  height: auto;
+  padding: 2px;
+  border-radius: 50%;
+  background: transparent;
+}

@@ -46,5 +46,16 @@ export const buildDigitalEmployeeFilterParam = (
     ...(discoverSource && permission ? { permission } : {}),
     ...(type ? { type } : {}),
     ...employeeTypeParams,
+    ...(source === 'official' && filterParam?.audienceScopeMode && filterParam.audienceScopeMode !== 'ALL'
+      ? {
+        audienceScopeMode: filterParam.audienceScopeMode,
+        ...(filterParam.audienceScopeMode === 'ORGS'
+          ? {
+            audienceOrgIds: filterParam.audienceOrgIds || [],
+            audienceIncludeDescendants: filterParam.audienceIncludeDescendants !== false,
+          }
+          : {}),
+      }
+      : {}),
   };
 };

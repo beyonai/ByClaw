@@ -580,13 +580,21 @@
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+
+    // 面包屑列表按中心线对齐图标、分隔符和文字。
+    > ol {
+      align-items: center;
+    }
   }
 }
 
 .localSharedBreadcrumbButton {
+  display: inline-flex;
+  align-items: center;
   padding: 0;
   border: 0;
   color: #1677ff;
+  font: inherit;
   background: transparent;
   cursor: pointer;
 }
@@ -629,4 +637,37 @@
   max-height: min(60vh, 520px);
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.fileUploadProgress {
+  flex: none;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.fileUploadRow + .fileUploadRow {
+  margin-top: 8px;
+}
+
+.fileUploadTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.resourceCloseButton {
+  width: 32px;
+  height: 32px;
+  margin-left: 8px;
+  padding: 0;
+  color: var(--beyond-color-text-tertiary, #707680);
+
+  &:hover,
+  &:focus-visible {
+    color: var(--beyond-color-text, #14161a);
+    background: var(--beyond-color-fill-tertiary, #0000000a);
+  }
 }

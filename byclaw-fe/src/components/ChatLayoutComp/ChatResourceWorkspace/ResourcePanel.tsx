@@ -1,7 +1,7 @@
 import ProjectDataSources from '@/components/ProjectDataSources';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Empty, Spin, Tabs } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { CloseOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { getAgentChatAvatar } from '@/utils/agent';
 import Knowledge from '@/layout/sider/components/Knowledge';
@@ -9,6 +9,8 @@ import ModelSiderPanel from '@/layout/sider/components/ModelSiderPanel';
 import ResourceSiderPanel from '@/layout/sider/components/ResourceSiderPanel';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import type { DetailPanelOptions } from '@/layout/sider/siderContentContext';
+import { isDirectory } from '@/layout/sider/components/FileSiderPanel/utils';
+import type { FileBrowserItem } from '@/service/fileBrowser';
 import FileResourcePanel from './FileResourcePanel';
 // 暂停聊天右侧的项目空间模块，保留实现以便恢复。
 // import ProjectSpaceTab from '@/layout/sider/components/ProjectSpaceList/ProjectSpaceTab';
@@ -17,6 +19,7 @@ import { useChatResourceProject } from './useChatResourceProject';
 import { getSessionResourceTabKeys, getVisibleSessionFileTabKeys, type SessionFileTabKey } from './resourceTabUtils';
 import type { ChatRuntimeType } from '@/utils/chatRuntime';
 import { useChatRuntime } from '@/hooks/useChatRuntime';
+import useResourceAttachmentPreview from './useResourceAttachmentPreview';
 import styles from './index.module.less';
 
 type UpperScopeKey = 'session' | 'employee';
@@ -30,6 +33,7 @@ const SESSION_FILE_TAB_LABEL_IDS: Record<SessionFileTabKey, string> = {
 
 interface ResourcePanelProps {
   sessionId: string;
+  onClose?: () => void;
   projectId?: number;
   cloudResourceId?: string | number;
   onOpenDetail: (panel: React.ReactNode, options: DetailPanelOptions) => void;
@@ -40,7 +44,17 @@ const EMPTY_SECONDARY_STATE: SecondaryState = {
   employee: 'knowledge',
 };
 
-const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, cloudResourceId, onOpenDetail }) => {
+function canPreviewAttachment(item: FileBrowserItem) {
+  return !isDirectory(item);
+}
+
+const ResourcePanel: React.FC<ResourcePanelProps> = ({
+  sessionId,
+  projectId,
+  cloudResourceId,
+  onOpenDetail,
+  onClose,
+}) => {
   const intl = useIntl();
   const isEnglish = intl.locale.toLowerCase().startsWith('en');
   const activeEmployee = useActiveSiderAgent();
@@ -65,6 +79,8 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
   // 项目云盘只能使用项目知识库 ID；未初始化知识库时保留空值并展示对应空态。
   const rawProjectCloudResourceId = cloudResourceId ?? project?.cloudResourceId;
   const projectCloudResourceId = rawProjectCloudResourceId ? `${rawProjectCloudResourceId}` : undefined;
+  const openProjectFile = useResourceAttachmentPreview('project', projectCloudResourceId, onOpenDetail);
+  const openSharedFile = useResourceAttachmentPreview('shared', resourceId, onOpenDetail);
 
   // 禁用期间同步回退已选中的项目空间，避免保留不可见的活动页签。
   // const showCode = sessionResourceTabKeys.includes('code');
@@ -159,6 +175,8 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
             resourceId={projectCloudResourceId}
             refreshKey={sessionResourceRefreshKey}
             onOpenDetail={onOpenDetail}
+            canPreviewItem={openProjectFile ? canPreviewAttachment : undefined}
+            onPreviewFile={openProjectFile}
           />
         );
       }
@@ -175,6 +193,8 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
             resourceId={resourceId}
             refreshKey={sessionResourceRefreshKey}
             onOpenDetail={onOpenDetail}
+            canPreviewItem={openSharedFile ? canPreviewAttachment : undefined}
+            onPreviewFile={openSharedFile}
           />
         );
       }
@@ -210,6 +230,8 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
     activeEmployee.resourceId,
     empty,
     onOpenDetail,
+    openProjectFile,
+    openSharedFile,
     project,
     projectLoading,
     projectCloudResourceId,
@@ -233,6 +255,18 @@ const ResourcePanel: React.FC<ResourcePanelProps> = ({ sessionId, projectId, clo
         <Tabs
           className={styles.primaryTabs}
           size="small"
+          tabBarExtraContent={
+            onClose ? (
+              <Button
+                type="text"
+                className={styles.resourceCloseButton}
+                icon={<CloseOutlined />}
+                aria-label={intl.formatMessage({ id: 'chatResource.closeList' })}
+                title={intl.formatMessage({ id: 'chatResource.closeList' })}
+                onClick={onClose}
+              />
+            ) : undefined
+          }
           activeKey={upperScopeKey}
           onChange={(key) => setUpperScopeKey(key as UpperScopeKey)}
           items={[

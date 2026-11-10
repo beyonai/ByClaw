@@ -75,7 +75,7 @@ class HookAuthenticationIntegrationTest {
             assertThat(context).hasNotFailed();
             var publisher = context.getBean(HookPublisher.class);
             transactions.executeWithoutResult(status -> {
-                publisher.publish("workgroup.created", 1, Map.of("enterpriseId", "9007199254740993", "groupId", "9007199254740995", "groupName", "工作组", "projectId", "p1", "createdBy", "u1"));
+                publisher.publish("workgroup.created", 1, Map.of("enterpriseId", "9007199254740993", "groupId", "9007199254740995", "groupName", "工作组", "projectId", "p1", "createdBy", "u1", "userId", "u1", "byaiSessionMemberId", "9007199254740996"));
                 assertThat(deliveries).isEmpty();
             });
             Delivery first = deliveries.poll(5, TimeUnit.SECONDS);
@@ -87,7 +87,9 @@ class HookAuthenticationIntegrationTest {
             assertThat(workgroup.path("workgroupId").asText()).isEqualTo("9007199254740995");
             assertThat(workgroup.path("occurredAt").isIntegralNumber()).isTrue();
             assertThat(workgroup.path("eventId").asText()).isNotBlank();
-            assertThat(workgroup.fieldNames()).toIterable().containsExactlyInAnyOrder("enterpriseId", "workgroupId", "eventId", "occurredAt", "groupName", "projectId", "createdBy");
+            assertThat(workgroup.fieldNames()).toIterable().containsExactlyInAnyOrder("enterpriseId", "workgroupId", "eventId", "occurredAt", "groupName", "projectId", "createdBy", "userId", "byaiSessionMemberId");
+            assertThat(workgroup.path("userId").asText()).isEqualTo("u1");
+            assertThat(workgroup.path("byaiSessionMemberId").asText()).isEqualTo("9007199254740996");
             transactions.executeWithoutResult(status -> publisher.publish("tenant.created", 1, Map.of("enterpriseId", "9007199254740993", "enterpriseName", "企业", "packageId", "p1", "packageName", "套餐", "createdBy", "u1", "requestId", "r1", "provisionState", "RESERVED")));
             Delivery tenant = null;
             Delivery recovered = null;
@@ -169,7 +171,7 @@ class HookAuthenticationIntegrationTest {
             .run(context -> {
                 assertThat(context).hasNotFailed();
                 transactions.executeWithoutResult(status -> context.getBean(HookPublisher.class)
-                    .publish("workgroup.created", 1, Map.of("enterpriseId", "42", "groupId", "g42", "groupName", "工作组", "projectId", "p1", "createdBy", "u1")));
+                    .publish("workgroup.created", 1, Map.of("enterpriseId", "42", "groupId", "g42", "groupName", "工作组", "projectId", "p1", "createdBy", "u1", "userId", "u1", "byaiSessionMemberId", "9007199254740996")));
                 var first = deliveries.poll(5, TimeUnit.SECONDS);
                 var second = deliveries.poll(5, TimeUnit.SECONDS);
                 assertThat(first).isNotNull();
@@ -185,7 +187,7 @@ class HookAuthenticationIntegrationTest {
     @Test
     void anotherWebhookProtocolUsesOnlyConfiguredFieldsAndHeaders() throws Exception {
         enterpriseReady.set(true);
-        new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, TenantHookConfiguration.class)
+        new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, HookDatabaseTestSupport.class, TenantHookConfiguration.class)
             .withPropertyValues("byclaw.hooks.enabled=true",
                 "byclaw.hooks.subscriptions.other.event=tenant.created",
                 "byclaw.hooks.subscriptions.other.http.url=" + baseUrl + PREFIX + "/tenants",
@@ -236,7 +238,7 @@ class HookAuthenticationIntegrationTest {
     /** 加载待交付的同一份外置 YAML，只覆盖环境专用 URL、密钥与测试重试间隔。 */
     private ApplicationContextRunner configured() throws Exception {
         var sources = new YamlPropertySourceLoader().load("generic-hooks", new FileSystemResource("config/examples/hooks.yaml"));
-        return new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, TenantHookConfiguration.class, WorkgroupHooks.class, Metrics.class)
+        return new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, HookDatabaseTestSupport.class, TenantHookConfiguration.class, WorkgroupHooks.class, Metrics.class)
             .withInitializer(context -> sources.forEach(source -> context.getEnvironment().getPropertySources().addLast(source)))
             .withPropertyValues("BYCLAW_HOOKS_ENABLED=true",
                 "byclaw.hooks.subscriptions.registration-crm.enabled=false",

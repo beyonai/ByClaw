@@ -296,6 +296,16 @@ instance.interceptors.response.use(
       return Promise.resolve('登录失效');
     }
 
+    if (status === 429 && response?.data?.data?.errorType === 'upload_admission_full') {
+      const failure = Object.assign(new Error(getIntl().formatMessage({ id: 'fileBrowser.upload.admissionFull' })), {
+        status,
+        errorType: 'upload_admission_full',
+        retryAfterMs: response.data.data.retryAfterMs,
+        action: 'MANAGE_UNFINISHED_UPLOADS',
+      });
+      return Promise.reject(failure);
+    }
+
     // 请求报错，返回错误码信息通过useRequest的onError中去提示
     const errMsg = localizeErrorMessage(
       get(response, 'data.msg') || ERROR_CODE[status] || response?.statusText,

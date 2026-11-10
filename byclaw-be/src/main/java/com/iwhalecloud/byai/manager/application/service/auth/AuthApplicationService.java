@@ -130,6 +130,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 public class AuthApplicationService {
     @org.springframework.beans.factory.annotation.Autowired
     private com.iwhalecloud.byai.common.lock.TransactionalRedisLockService businessLocks;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.manager.application.service.digitemploy.EmployeeVersionAccess employeeVersionAccess;
 
 
     @Autowired
@@ -140,6 +142,9 @@ public class AuthApplicationService {
 
     @Autowired
     private com.iwhalecloud.byai.manager.application.service.resource.SkillPublicationService skillPublicationService;
+
+    @Autowired
+    private com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess publicationAccess;
 
 
     @Autowired
@@ -714,8 +719,10 @@ public class AuthApplicationService {
         //    避免"用户已被直接授权但仍显示在审核列表/我申请中"的脏数据，与 approveUseApply 行为一致。
         autoCancelPendingApplyForGrantedUsers(ssResource, qo);
 
-        // 名单写入后读取最终有效使用人，覆盖新授权以及历史遗漏的绑定资源权限。
-        synchronizeDigitalEmployeeResourceUsers(ssResource, null);
+        // 员工使用授权独立成立；仅为操作人有权授权的关联资源补齐使用权限。
+        if (isEnterpriseDigitalEmployee(ssResource)) {
+            employeeResourceAuthorizationService.synchronizeForDirectUseAuthorization(ssResource);
+        }
     }
 
     /**
@@ -1270,7 +1277,8 @@ public class AuthApplicationService {
     }
 
     private PrivilegeGrant pendingManageApplication(SsResource resource, Long applicant) {
-        return getActiveUserPrivilege(resource, applicant, GrantType.MANAGE_APPLY, Color.RED, USE_APPLY_PENDING_STATUS);
+        return getActiveUserPrivilege(resource, applicant, GrantType.MANAGE_APPLY, OperType.WRITE,
+            Color.RED, USE_APPLY_PENDING_STATUS);
     }
 
     private void applyEmployeeManage(SsResource resource) {
@@ -1744,7 +1752,8 @@ public class AuthApplicationService {
         if (hasResourceAccessPermission(resource)) return true;
         if (!synchronizedCapability) {
             if (isCurrentUserGlobalResourceManager() && Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return true;
-            if (!Boolean.TRUE.equals(resource.getViewAuthControlled())) return "enterprise".equals(resource.getOwnerType());
+            if (!Boolean.TRUE.equals(resource.getViewAuthControlled())) return "enterprise".equals(resource.getOwnerType())
+                && (publicationAccess == null || publicationAccess.inAudience(resource));
             if (!Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())) return false;
         }
         if (CurrentUserHolder.getCurrentUserId() == null) return false;
@@ -1895,18 +1904,18 @@ public class AuthApplicationService {
      * @date 2026-04-25 16:20:00
      */
     private boolean isCurrentUserUseBlacklisted(SsResource ssResource, Long currentUserId) {
-        return getActiveUserPrivilege(ssResource, currentUserId, GrantType.AVAILABLE_USE, Color.BLACK, "A") != null
-            || getActiveUserPrivilege(ssResource, currentUserId, GrantType.FORCE_USE, Color.BLACK, "A") != null;
+        return getActiveUserPrivilege(ssResource, currentUserId, GrantType.AVAILABLE_USE, OperType.READ, Color.BLACK, "A") != null
+            || getActiveUserPrivilege(ssResource, currentUserId, GrantType.FORCE_USE, OperType.READ, Color.BLACK, "A") != null;
     }
 
     /**
-     * 查询指定用户在资源上的单条授权记录。
+     * 查询指定用户在资源上的单条授权记录，管理申请使用 WRITE，使用申请和使用黑名单使用 READ。
      *
      * @author qin.guoquan
      * @date 2026-04-25 16:20:00
      */
-    private PrivilegeGrant getActiveUserPrivilege(SsResource ssResource, Long userId, String grantType, String color,
-                                                  String statusCd) {
+    private PrivilegeGrant getActiveUserPrivilege(SsResource ssResource, Long userId, String grantType, String operType,
+                                                  String color, String statusCd) {
         LambdaQueryWrapper<PrivilegeGrant> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(PrivilegeGrant::getGrantObjId, ssResource.getResourceId());
         queryWrapper.eq(PrivilegeGrant::getGrantObjType, ssResource.getResourceBizType());
@@ -1914,7 +1923,7 @@ public class AuthApplicationService {
         queryWrapper.eq(PrivilegeGrant::getGrantToObjType, GrantToObjType.USER);
         queryWrapper.eq(PrivilegeGrant::getGrantToObjId, userId);
         queryWrapper.eq(PrivilegeGrant::getGrantToType, color);
-        queryWrapper.eq(PrivilegeGrant::getOperType, OperType.READ);
+        queryWrapper.eq(PrivilegeGrant::getOperType, operType);
         queryWrapper.eq(PrivilegeGrant::getStatusCd, statusCd);
         queryWrapper.last("limit 1");
         return privilegeGrantMapper.selectOne(queryWrapper);
@@ -1947,7 +1956,7 @@ public class AuthApplicationService {
      * @date 2026-04-25 16:20:00
      */
     private PrivilegeGrant getPendingUseApplyPrivilege(SsResource ssResource, Long userId) {
-        return getActiveUserPrivilege(ssResource, userId, GrantType.AVAILABLE_USE, Color.RED,
+        return getActiveUserPrivilege(ssResource, userId, GrantType.AVAILABLE_USE, OperType.READ, Color.RED,
             USE_APPLY_PENDING_STATUS);
     }
 
@@ -3816,6 +3825,7 @@ public class AuthApplicationService {
         List<Long> personalSkillSourceIds = resources.stream().filter(this::isPersonalSkillPublishSource)
             .map(SsResource::getResourceId).collect(Collectors.toList());
         var skillPublications = ssResExtSkillService.findCurrentPublications(personalSkillSourceIds);
+        var publicationBatch = publicationAccess == null ? null : publicationAccess.loadBatch(resources);
         Map<Long, Boolean> employeePublishPermissions = employeeGovernance == null ? Collections.emptyMap()
             : employeeGovernance.canPublishBatch(resources);
         Map<Long, ResourceOperationPermissionsVo> result = new LinkedHashMap<>();
@@ -3835,10 +3845,12 @@ public class AuthApplicationService {
                     ? permission.isHasUsePermission() || viewPrivilegeIds.contains(resource.getResourceId())
                     : (permission.isCanViewDetail()
                     || !Boolean.TRUE.equals(resource.getViewAuthControlled()) && "enterprise".equals(resource.getOwnerType())
+                        && (publicationAccess == null || publicationAccess.inAudience(resource, publicationBatch))
                     || Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId())
                         && (viewPrivilegeIds.contains(resource.getResourceId()) || isCurrentUserGlobalResourceManager())));
             permission.setHasViewPermission(visible);
             permission.setCanViewBasicInfo(visible);
+            fillPublicationPermission(resource, permission, publicationBatch);
             populateManageApplyPermission(resource, permission, pendingManageIds);
             if (permission.isCanPublishToEnterprise()) {
                 permission.setSkillPublication(skillPublications.get(resource.getResourceId()));
@@ -3846,6 +3858,22 @@ public class AuthApplicationService {
         });
         populateEmployeePublicationStatuses(result);
         return result;
+    }
+
+    private void fillPublicationPermission(SsResource resource, ResourceOperationPermissionsVo permission) {
+        fillPublicationPermission(resource, permission, publicationAccess == null ? null : publicationAccess.loadBatch(List.of(resource)));
+    }
+    private void fillPublicationPermission(SsResource resource, ResourceOperationPermissionsVo permission,
+        com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess.Batch batch) {
+        if (publicationAccess == null || !com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess.supported(resource)) return;
+        permission.setPublishScopeMode(com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationAccess.mode(resource));
+        permission.setPublishScopeController(resource.getPublishScopeController());
+        permission.setPublishScopeRevision(resource.getPublishScopeRevision());
+        boolean sameTenant = Objects.equals(resource.getComAcctId(), CurrentUserHolder.getEnterpriseId());
+        permission.setCanManagePublishScope(sameTenant && !Objects.equals(resource.getResourceStatus(), -1)
+            && (permission.isHasManagePermission() || Objects.equals(resource.getCreateBy(), CurrentUserHolder.getCurrentUserId())
+                || isCurrentUserGlobalResourceManager()));
+        permission.setPublishedScope(sameTenant ? publicationAccess.labels(resource.getResourceId(), batch) : List.of());
     }
 
     private ResourceOperationPermissionsVo buildResourceOperationPermissions(SsResource ssResource,
@@ -4099,6 +4127,7 @@ public class AuthApplicationService {
             ? hasUsePermission : canManage || hasUsePermission));
         vo.setHasViewPermission(!isResourceRemoved && hasResourceViewPermission(ssResource));
         vo.setCanViewBasicInfo(vo.isHasViewPermission());
+        fillPublicationPermission(ssResource, vo);
         // 入口权限与发布资格一致，已有副本通过状态摘要切换为查看操作。
         vo.setCanPublishToEnterprise(canPublishSkillToEnterprise(ssResource));
         if (vo.isCanPublishToEnterprise()) {
@@ -4240,7 +4269,7 @@ public class AuthApplicationService {
         vo.setCanPublishEmployee(canPublishEmployee != null ? canPublishEmployee : employeeGovernance.canPublish(resource));
         if (official) {
             boolean admin = employeeGovernance.canAdministerOfficial(resource);
-            vo.setOfficialUpdateRequiresReview(!admin && employeeGovernance.canMaintainOfficial(resource));
+            vo.setOfficialUpdateRequiresReview(true);
             // 配置更新审核与日常授权、上下架分开判定，避免作者只有编辑入口却无法维护授权。
             vo.setCanEdit(employeeGovernance.canMaintainOfficial(resource));
             boolean canManage = vo.isHasManagePermission();
@@ -4265,6 +4294,10 @@ public class AuthApplicationService {
             vo.setCanOnShelf(false);
             vo.setCanOffShelf(false);
             vo.setCanDelete(false);
+        }
+        if (employeeVersionAccess != null
+            && com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeGovernanceService.isEmployee(resource)) {
+            vo.setCanEdit(employeeVersionAccess.canManage(resource));
         }
     }
 

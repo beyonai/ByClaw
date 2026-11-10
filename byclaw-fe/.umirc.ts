@@ -74,6 +74,12 @@ export default defineConfig({
       changeOrigin: true,
       ws: true,
     },
+    // 授权桌面代理的页面、静态资源与 WebSocket 共用前缀，须先于通用业务代理匹配。
+    '/byaiService/sandbox/desktop': {
+      target,
+      changeOrigin: false,
+      ws: true,
+    },
     [`${routerBase}byaiService/ws`]: {
       target: wsTarget,
       changeOrigin: true,
@@ -89,7 +95,7 @@ export default defineConfig({
     },
     // file 存储 + 本地 BE 时，读远程文件/文件夹的接口单独转发到远程后端（有 NFS）。
     // 必须放在通配的 byaiService 规则之前，否则会被它先吃掉、走本地空目录。
-    ...buildFileRemoteProxy(routerBase),
+    ...buildFileRemoteProxy(routerBase, target),
     [`${routerBase}byaiService`]: {
       target,
       changeOrigin: true,
@@ -110,12 +116,13 @@ export default defineConfig({
       .rule('archive-wasm-browser')
       .test(/libarchive-wasm[\\/]dist[\\/]libarchive\.js$/)
       .set('resolve', { alias: { fs: false, path: false, crypto: false } });
-    // RAW 依赖的 BigInt 字面量无法按现有 ES2015/Safari 12 目标压缩，局部转换其语法。
+
+    // pptx-preview 1.0.7 限制图片文件名前缀且缺少 SVG MIME，局部修正媒体加载。
     config.module
-      .rule('camera-raw-bigint-literals')
-      .test(/(?:@colorhythm[\\/]libraw-wasm[\\/]dist[\\/]libraw\.mjs|typed-cstruct[\\/]dist[\\/].*\.js)$/)
-      .use('raw-bigint-literals')
-      .loader(path.resolve(__dirname, 'config/loaders/raw-bigint-literals.js'));
+      .rule('pptx-preview-media')
+      .test(/pptx-preview[\\/]dist[\\/]pptx-preview\.es\.js$/)
+      .use('pptx-preview-media')
+      .loader(path.resolve(__dirname, 'config/loaders/pptx-preview-media.js'));
 
     // 配置 splitChunks，将 slate 和 katex 打包到同一个文件
     config.optimization.splitChunks.merge({

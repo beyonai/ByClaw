@@ -13,6 +13,16 @@ BE 与 Platform 在启动时读取此开关，前端在构建或开发服务启�
 [![Java](https://img.shields.io/badge/Java-21%2B-orange)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.x-brightgreen)](https://spring.io/projects/spring-boot)
 
+## AgenticFS 文件传输
+
+`POST /fileBrowser/uploads/list` 接收正数 `resourceId` 作为现有界面上下文，沿既有个人文件系统契约从登录身份派生 owner，查询该用户私有 workspace 已登记 binding 下可浏览路径内的未完成会话；`resourceId` 不构成独立的存储或授权边界。返回 uploadId、目录、文件名、大小、状态及进度；不返回内容 hash 或内部状态版本。status/abort 继续校验原目标身份；取消必须由用户明确选择，不自动删除历史会话。经验证的 `423/file_write_in_progress` 与 `429/upload_admission_full` 保留 HTTP 状态、结构化类型及有界重试提示。
+
+远程文件系统传输按当前登录用户的私有 bucket 查询 platform capabilities，分别判断断点上传和 Range 下载能力，不跨用户缓存。上传会话与分块由 platform/storage-node 持久化；明确不支持能力时使用原有接口，网络或协议错误继续报错。
+
+已确认的 `423/file_write_in_progress` 与 `409/file_write_conflict` 返回“文件写入中，请稍后再试”，保留 HTTP 状态、结构化 `errorType` 与 `Retry-After: 1`。普通文件上传、删除、重命名、移动等操作将这类冲突交给全局处理器；权限、配额和网络错误继续按各自类型处理。该提示只覆盖检测到的冲突，不能证明检测到所有 MicroVM/NAS 并发写入。
+
+Range 响应透传 `206`/`416`、`Content-Range` 和校验标识；不转发上游错误正文时返回零长度，流关闭时释放上游连接。
+
 ## 简介
 
 ByClaw-BE 是 BeyondAI 平台的后端服务，提供完整的 AI 应用开发和管理能力，包括：
@@ -103,6 +113,20 @@ Standalone 和 K3s 默认部署已移除 Super 服务及专用镜像、运行参
 和 `byclaw-super-runtime-env` ConfigMap。仅更新 Compose / apply 新清单不会自动删除旧资源。
 开关恢复为 `true` 时需自行部署兼容的 Super Worker，并接入同一套 by-framework Redis。
 
+## 知识库归属的来源管理
+
+百应创建的知识库（包括默认个人知识库）由本地管理归属和分类。创建时将内部来源元数据
+`_byclawKnowledgeOwnership` 写入现有 `ss_res_ext_doc.source_content` JSON 并绑定资源 ID，
+不新增数据库字段，也不要求外部服务透传标记。后续导入或同步可更新名称和接口配置，但保留本地归属与分类；重启后仍从持久记录读取来源。
+
+外部直接导入且没有本地来源记录的知识库，沿用对应入口的归属参数、来源校验与权限规则；Whale Agent 来源可按传入值更新归属。
+现有企业同步接口仍只接受企业载荷；个人导入入口的权限要求保持不变。
+导入时删除外部载荷中的同名来源标记，仅保留数据库中已有的本地标记；运行 JSON 不包含该标记。
+企业同步载荷命中本地个人库时，不改变归属，也不对该个人库执行企业授权同步；管理权限和已注销资源校验继续生效。
+
+回归覆盖本地创建、默认个人库、重新加载持久记录后重复同步、本地调整分类后同步、外部归属变更、伪造标记、无权限及注销状态。
+历史记录没有来源标记，仍沿用原有导入规则；本次不自动迁移历史数据，历史归属纠正需先核实具体资源。
+
 ## 技能导入并发与外部子会话恢复
 
 资源中心 ZIP 导入在查询同编码技能前，按技能编码取得 Spring Integration `RedisLockRegistry` 分布式锁；
@@ -166,6 +190,130 @@ Agent 回复和发布成果中的 `@` 只表示普通提及或结果署名，均
 Gateway 的 `groupContextSnapshot` 由服务端加载，客户端同名字段会被删除；Harness 将目标、必要群历史及依赖结果显式交给成员，
 不依赖默认 spawn 继承父会话。群历史仍受已有 60 条、30,000 字符预算限制，并携带截断信息。
 
+## 共享 Harness 用户的连接器工具沙箱
+
+共享 Harness 用户的 CLI 连接器可能在 Agent 尚未调用工具时先启动工具沙箱。
+对于声明 `byclaw.tool-sandbox/v1` 的 Platform 工具规格，后端先获取当前用户的共享上下文，
+通过带用户凭证的 `/u/{context}/api/byclaw/tool-environment/bootstrap` 接口读取该上下文已持久化的
+SSH 公钥及工具宿主密钥，再以请求级 `toolEnvironmentKeys` 交给原有 Platform 启动流程。
+这与 Agent 后续使用的身份一致；不生成替代密钥，不修改工具规格、用户首选项或连接器凭据路径。
+独立 OpenClaw、旧本地执行和未声明工具契约的规格仍走原路径。
+
+发布顺序为先更新共享 Harness 宿主，再更新后端；旧宿主没有此接口，无法完成该冷启动流程。
+云入口需要访问请求头时，BE 通过 Platform 内部 `shared/executionAccess` 获取当前映射的执行端点，
+携带用户身份、mappingId 和 generation；仅连接器服务端初始化链使用该结果，不放入普通共享查询响应。
+发布时先更新支持该内部操作的 Platform，再更新 BE；已包含初始化接口的 Harness 宿主无需再次重建。
+不需要数据库迁移。宿主不可用、服务键不匹配或初始化信息无效时停止启动，
+取消授权继续保留原绑定；钉钉返回“钉钉凭据工作区暂不可用，请稍后重试”，底层异常保留在服务端诊断链中。
+验收应覆盖工具沙箱尚未创建时的连接器操作，以及随后 Agent 使用同一工具实例的场景。
+
+## 飞书连接器执行沙箱
+
+飞书授权、凭证校验和取消授权通过统一的用户执行环境入口选择沙箱，无需配置连接器专用的沙箱类型。
+执行环境沿用用户现有运行时路由（包括 `ENABLE_DSH`、个人参数和首选规格），并保留规格的 profile。
+共享宿主用户使用已有工具沙箱配置及 `BYCLAW_TOOL_SANDBOX_BY_USER` 用户覆盖；共享用户上下文不能作为命令执行实例。
+目标沙箱须安装 `lark-cli`，并挂载该用户原来的 `/by/.connector-auth/.lark-cli` 持久化目录，供 `HOME` 和 `LARK_HOME` 使用。
+执行环境不可用时直接返回失败，不扫描其他服务或自动改用另一套凭证文件。
+取消授权必须先在沙箱中成功执行凭证清理，才会删除授权绑定；沙箱启动或命令执行失败时保留绑定。
+
+应用配置检查、初始化和登录使用相同的 HOME、CLI workspace 及 profile，继续复用已有应用与身份策略。
+仅当 `config show` 明确报告应用配置不存在时，才进入 `config init --new --force-init` 的应用配置流程；
+profile 选择错误、配置损坏或已有应用的密钥不可用均返回失败，不自动新建应用或覆盖凭证。
+不再执行固定来源的 `config bind --source openclaw`；历史 manifest 中额外的 `contextBind` 命令保持兼容但不会被调用。
+初始化失败、初始化结束仍未配置或后续登录失败会结束本次授权，不持续返回等待中或反复初始化。
+远程初始化进程的首次输出可以为空；后端按输出游标持续读取并拼接完整链接，
+轮询等待预算由 `byclaw.connector.lark.initialization-output-timeout` 控制，默认 `15s`；
+进行中的远程调用仍遵循底层接口超时。
+只有等待超时才返回 `APP_INIT_URL_MISSING`；进程异常退出、输出截断或进程丢失返回
+`APP_INIT_FAILED`，并清理本次初始化进程。收到初始化链接后仍需完成应用初始化和用户授权。
+平台的运行时路由仍负责规格解析、实例复用和共享宿主的工具沙箱选择，连接器不自行指定运行时类型。
+
+飞书首次用户授权优先读取 `lark-cli auth scopes --json` 返回的应用用户权限，再通过
+`auth login --domain all --scope <userScopes> --no-wait --json` 一次申请 CLI 领域权限与应用已开通用户权限的并集。
+命令仍以 Runtime Manifest 为唯一来源：`V0.6.0` DML 为内置默认登录模板补充 `scopesCheck` 和
+`loginWithScopes`，保留原 `login` 两步及自定义模板；先部署支持 `${userScopes}` 的 BE，再应用该迁移。
+只有明确标记为 `tokenType=user` 的权限可加入申请，未分类或应用身份权限不会混入。
+旧 Manifest 沿用原登录命令；查询权限失败时也继续原授权流程，但结果标记为 `unknown`。
+此流程不能自动开通飞书应用后台尚未启用的权限，也不能替代管理员审批。
+
+新授权必须等待本次 device-code 进程结束；默认 JSON 命令取得 `authorization_complete` 后核对用户身份与有效凭证，
+不能由旧 token 仍有效提前判定成功。完成输出按游标拼接并限制大小，只有退出码 0 或带明确缺项结果的 3
+可以进入凭证校验；沙箱将非零退出映射为 `FAILED` 时也遵循同一校验。已有自定义非 JSON 完成命令仍可在本次进程
+成功退出 0 后验证凭证，其权限摘要为 `unknown`；其他失败不会借用旧凭证报告新授权成功。
+接口的可选 `permissionStatus`（`complete`、`partial`、`unknown`）和 `missingScopes` 表示最近一次授权申请的核对结果，
+不是飞书全平台权限保证。已登录但部分权限未授予时保留可用连接，界面提示具体缺项。
+摘要复用已有加密绑定元数据，验证同步保留同账号的最近摘要，新授权结果覆盖旧摘要；token 始终留在沙箱。
+
+飞书、企业微信和钉钉授权 CLI 共用受限的用户身份执行入口：从用户 `/by` 挂载取得 UID/GID，
+准备当前连接器的私有目录，再以该身份执行 CLI，避免平台控制进程的 root 身份创建 Agent 无法读取的凭据。
+只修复固定目录和已知凭据文件的历史 root 属主，目录保持 `0700`、文件保持 `0600`；
+拒绝符号链接、文件硬链接和其他用户拥有的目标，不递归修改其他连接器，不重写密钥或替换锁文件。
+Linux 中飞书的配置位于私有 HOME 的 `.lark-cli`，密钥位于 `.local/share/lark-cli`。
+运行时自定义的 CLI 配置、数据或日志路径需与受管私有目录契约一致；越界覆盖会明确失败。
+平台普通命令和控制进程的执行身份保持不变。
+Linux root 隔离权限回归可运行 `python3 byclaw-be/src/test/python/test_connector_sandbox_identity.py`；
+该测试读取生产 launcher，在临时目录中验证降权、凭据内容和访问边界，非 Linux/root 环境会明确跳过。
+
+## 企业微信 CLI 执行位置
+
+远程 Platform 模式下，企业微信授权初始化、状态检查和撤销通过统一的用户执行环境入口选择沙箱，
+与 Agent 使用同一用户的 `/by/.connector-auth/.wecom-cli` 持久化目录。
+连接器不指定 OpenClaw、DSH 或 MicroVM；共享宿主沿用用户工具沙箱路由。
+一次扫码授权的进程、轮询和完成校验固定在同一沙箱，沙箱失败不能回退到 BE 本机凭据并报告已连接。
+CLI 子进程使用该目录作为 `HOME` 和 `WECOM_HOME`，显式指定 `WECOM_CLI_CONFIG_DIR`，
+并清空继承的 `WECOM_CLI_ACCESS_TOKEN`，避免其他身份覆盖当前用户的文件凭据。
+非远程的嵌入式模式保留 `ConnectorCliRunner` 本地执行方式，仍要求 BE 与业务运行时共享用户凭据挂载。
+
+主 BE、Harness 和 OpenClaw `Dockerfile`，以及 BE 的 `Dockerfile.arthas`、
+Harness 的 `Dockerfile.extensions` / `Dockerfile.tool_slim` 和 OpenClaw 的 `Dockerfile.byclaw`
+均固定 `@wecom/cli@1.3.4`。远程授权要求实际用户工具沙箱安装匹配的 CLI，
+只更新 BE 或共享 Agent 宿主镜像不能更新已经运行的工具沙箱及其中的技能。
+授权启动时，CLI 不支持命令或参数会返回 `PROVIDER_CLI_INCOMPATIBLE`，其他非零退出返回
+`PROVIDER_START_FAILED`；`PROVIDER_AUTH_URL_MISSING` 表示等待授权链接超时。
+错误响应不包含 CLI 的原始输出、凭据或授权链接。遇到版本不兼容，先在实际执行沙箱中检查
+`wecom-cli --version`，再核对该沙箱对应的服务规格、镜像摘要和模板，不能以 BE 中的 CLI 版本代替。
+
+升级前若授权仅保存在 BE 本机，部署此修复后需要在连接器里重新授权一次；不会自动复制或覆盖用户沙箱已有凭据。
+排查“页面已连接、Agent 未授权”时，应核对实际执行沙箱的凭据目录与技能来源，而不是仅查看数据库中的最近验证时间。
+通讯录技能若仍出现 `get_userlist` 和“超过 10 人停止”，需要检查旧镜像、同名关联技能或员工工作区技能，以及旧会话上下文。
+当前技能使用 `contact users search`，须提供真实关键词，一次最多 10 个关键词，并不支持全量导出通讯录。
+
+MicroVM 使用成功构建的云端模板快照。升级独立 Harness 沙箱时，从仓库根目录构建
+`middleware/byclaw-harness/Dockerfile`，使用新镜像标签更新对应服务规格并执行模板重建，
+确认新模板成功后再通过现有生命周期管理替换该用户的计算实例。
+更新必须覆盖实际执行沙箱的服务规格；例如更新 `byclaw-sandbox` 的镜像和模板，
+不会同时更新仍由 `byclaw-dsh` 规格创建的实例，也不会改变用户当前的执行环境路由。
+仅覆盖旧镜像标签或重启原实例不会更新已有模板。替换实例时保留用户 `/by` 及会话目录的持久化卷和 subPath，
+不要删除用户目录。部署后核对实际实例中的 CLI 版本、技能内容与凭据归属，再进行扫码及只读业务验收。
+
+消息 Skill 使用 `message aibot sessions list` 和 `message aibot send`，由智能体在用户要求查询或发送时执行；
+授权 Provider 和文档采集适配器不会发送消息。企业微信频道还有独立的 WebSocket 机器人通道，
+配置来自数字员工 `machineChannel`，由 `channel.stream.enabled` 控制，使用 BotID/Secret，不能由 CLI 授权成功推断已连接。
+
+## 钉钉 CLI 凭据与执行位置
+
+远程 Platform 模式下，钉钉 Device Flow、授权状态查询、撤销，以及群搜索、群消息扫描、待办扫描、
+以用户身份查询联系人和发送消息，统一通过 `DwsAuthService` 在对应用户沙箱执行。
+后台任务按扫描源创建者选择用户，主动消息按发送者选择用户；不会使用请求线程的其他身份或 BE 的旧登录态。
+原有钉钉机器人 SDK/Webhook 通道保持不变。
+
+CLI 子进程的 `HOME` / `DWS_HOME` 为 `/by/.connector-auth/.dws`，`DWS_CONFIG_DIR` 为其下的 `config`，
+`DWS_DISABLE_KEYCHAIN=1` 确保 Linux 文件密钥与 token 位于私有 HOME 的 `.local/share/dws-cli`。
+远程命令清空继承的 `DWS_CLIENT_ID` / `DWS_CLIENT_SECRET`，使用当前用户的 OAuth 凭据。
+沙箱解析、准备或命令执行失败时直接失败，不回退到 BE 本机文件；本地嵌入模式仍使用原来的用户 bucket，
+要求 BE 与业务运行时实际共享同一份用户存储。路径字符串相似并不代表 NFS 与 AgenticFS 之间会自动同步。
+本地模式沿用 BE 的 PATH 查找 CLI 可执行文件，并保留代理与自定义 CA 的传输环境变量；
+不会将共享的 DWS 应用凭据作为当前用户 OAuth 的替代身份。
+
+权限准备只遍历 DWS 的 `config` 和 `.local/share/dws-cli` 两个私有目录树，拒绝链接和其他用户属主，
+原地修正 root 创建的文件并保留密钥内容和锁文件 inode；目录 `0700`、文件 `0600`，新文件使用私有 umask。
+遍历限制为合计 10000 个条目、32 层目录，超过时明确失败，避免不受控遍历。
+不会扫描整个 `/by`、修改其他连接器内容，或自动复制旧 NFS 上的授权。
+
+部署后，原来仅在 BE 本地登录的用户需重新连接钉钉，让凭证写入实际用户存储。
+验收需在页面和 Agent 中分别执行授权状态查询，确认同一用户的凭据可见，并验证群搜索/扫描等只读调用。
+自动测试使用模拟进程及隔离临时目录，不会发送真实消息；线上扫码、业务接口及沙箱镜像仍需部署后验收。
+
 ## 邮箱连接器凭证存储
 
 `mail-form` 连接器（QQ、163、阿里邮箱、Fastmail、自定义 IMAP）按用户和连接器各保存一套账户配置。
@@ -207,6 +355,10 @@ macOS 兼容实现只放在测试源码中；生产环境不支持安全文件�
 - 前端用户资料卡及助手设置统一使用已有的 `GET /system/user/getUserSuas?userId=42`，不新增 `/assiman/getUserSuas` 接口。
 - `userId` 是必填的用户主键（Long），不是工号或姓名；前端附带的 `language` 参数不参与用户查询。用户不存在时返回 `{code: -1, msg: '用户不存在'}`。
 - 成功返回 `{code: 0, data: {...}}`，资料卡读取 `userId`、`userName`、`userCode`（工号）、`phone`（沿用解密脱敏规则）、`pathName`（部门路径）、`positionName`（职位）。保留现有超级助手字段，助手或岗位记录缺失不会导致空指针异常。
+
+## 普通聊天消息姓名持久化
+
+共享库消息新增及缺失补插时，`insertBatch` 将消息对象已有的 `creatorName` 写入 `byai_message.creator_name`，供 `getMessageOutline` 等查询读取。姓名来源沿用现有逻辑：普通用户及助手消息均使用生成消息时的登录用户名；未提供姓名时保存 `NULL`。本次仅补齐 INSERT，不改变已有消息更新、独立租户镜像或群聊写入逻辑，也不回填历史空值。
 
 ## 群列表消息摘要
 
@@ -909,7 +1061,7 @@ enabled model and restores its Redis entry. Missing, disabled, or invalid IDs re
 
 检查先验证必要配置，再由后端 OkHttp 按模型的服务地址、凭证、协议及自定义请求头发起真实 POST 请求（不执行 shell/curl）。LLM 输入固定为 `Reply OK`，使用与文本调试一致的流式请求模式（`stream: true`、`Accept: text/event-stream`）；Embedding 输入为 `ping`，Rerank 使用固定查询及单条文档，不携带用户聊天内容。LLM 要求成功的 HTTP 状态、SSE 响应类型和有效正文或推理文本增量，并消费后续事件，避免忽略正文之后的错误；Embedding 要求非空向量，Rerank 要求非空结果数组。HTTP 200 中的 `code != 0`、`success: false`、协议错误事件，以及空响应均不视为成功。不验证回答语义、业务效果或 Embedding 维度是否与知识库一致。前端说明这是检查时的基础可用性，未通过检查不一概表述为模型无法使用。
 
-LLM 基础检查最多输出 16 token、不自动重试；按协议及 `reasoningConfig.compatFormat` 关闭可关闭的额外思考，不修改保存的模型设置。无法关闭思考的模型返回有效推理文本同样证明真实调用可用，不要求一定生成最终答案；仍需消费整个流并排除后续错误。解析同时兼容标准多行 SSE 和缺少空行分隔的完整 JSON 数据行。接口失败事件返回 `UPSTREAM_ERROR`，无文本返回 `EMPTY_RESPONSE`，明确耗尽探测额度且无文本返回 `PROBE_OUTPUT_LIMIT`，不再一概归因于协议不匹配。仅 `INVALID_RESPONSE` 表示响应格式无法识别。手动调试成功直接覆盖同一模型的 Redis 旧失败记录，不追加探测，也不重置其他模型结果或 24 小时登录检查期限；已有缓存不会因更新解析规则自动触发额外模型调用，可通过调试或“重新检查”更新。
+模型基础检查通过 `@Value` 读取配置 `byclaw.model-health.connect-timeout-seconds`（默认 30 秒）、`byclaw.model-health.read-timeout-seconds`（默认 60 秒）和 `byclaw.model-health.call-timeout-seconds`（默认 120 秒，覆盖整个请求含流读取）。无需新增配置项即可使用默认值。LLM 基础检查最多输出 16 token、不自动重试；按协议及 `reasoningConfig.compatFormat` 关闭可关闭的额外思考，不修改保存的模型设置。无法关闭思考的模型返回有效推理文本同样证明真实调用可用，不要求一定生成最终答案；仍需消费整个流并排除后续错误。解析同时兼容标准多行 SSE 和缺少空行分隔的完整 JSON 数据行。接口失败事件返回 `UPSTREAM_ERROR`，无文本返回 `EMPTY_RESPONSE`，明确耗尽探测额度且无文本返回 `PROBE_OUTPUT_LIMIT`，不再一概归因于协议不匹配。仅 `INVALID_RESPONSE` 表示响应格式无法识别。手动调试成功直接覆盖同一模型的 Redis 旧失败记录，不追加探测，也不重置其他模型结果或 24 小时登录检查期限；已有缓存不会因更新解析规则自动触发额外模型调用，可通过调试或“重新检查”更新。
 
 个人和公共模型的手动调试结果也会按精确模型 ID 更新 Redis 缓存及页面异常标记，复用已有调用，不为同步状态额外发起检查、不延长登录检查的 24 小时有效期，也不自动弹窗或跳转。调试失败使用 `DEBUG_FAILED`，引导核对当前调试请求及模型配置，避免误报为认证失败；成功只清除该模型的异常。取消调试、账号切换、模型已删除或更新的保存检查均阻止旧调试结果覆盖缓存。旧自动检查也不能覆盖之后完成的调试失败。调试请求可在表单中自定义，自动检查仍只验证固定最小请求，不能代替对全部业务参数的验证。
 
@@ -960,12 +1112,25 @@ LLM 基础检查最多输出 16 token、不自动重试；按协议及 `reasonin
 不以创建者组织或 `manOrgId` 代替。仅返回查看者所属或管理范围匹配的组织，创建者、平台管理员和超管可看完整范围。
 `orgId=-1` 表示全公司，空数组表示未设置可展示的组织；待审或驳回范围不作为生效范围返回。
 
+该接口支持独立的所属组织筛选参数 `audienceScopeMode`：省略或 `ALL` 保持原查询，
+`COMPANY` 仅匹配卡片“全公司”，`ORGS` 搭配 `audienceOrgIds`（当前企业组织 ID 数组）筛选。
+`audienceIncludeDescendants` 默认 true，false 时只匹配所选组织本身；多个组织取并集，
+与关键词、类型、权限条件取交集。非法模式、空组织选择或跨企业组织会被拒绝。
+组织树复用员工发布的 `scopeOptions`；筛选上下文由后端生成，不能由客户端传入。
+
+筛选在 SQL 分页和计数前完成，不改变授权。直接创建员工的组织使用授权仍校验状态、
+生效/失效时间和同组织黑名单；发布副本仅读取已生效范围。全公司与具体组织互斥；
+祖先范围已在卡片折叠子组织时，不按隐藏子组织命中。普通成员只能按自己卡片可展示的组织命中，
+创建者和管理员遵循原有完整范围展示规则；“未设置组织”仅包含在全部结果中。
+
 使用与管理申请的列表、待办计数和审核动作采用相同的审核人规则：资源创建者、有效管理授权人、
 `adminvip`，或申请人所在组织的管理员（申请人必须属于其管理的本组织/下级组织，且员工已生效发布范围覆盖申请人）。
 平台管理员角色本身不获得使用/管理申请审核权；员工发布审核和技能上架审核沿用各自流程。
 企业员工申请通过后，仅为本次申请人补齐实际绑定资源的使用授权，不要求审核人另有这些资源的管理权；
 租户、资源状态、黑名单和外部同步控制范围仍保留，不扩大到其他员工使用人。失败时审批事务整体回滚。
 管理申请使用独立的 `MANAGE_APPLY` 待审记录，批准后才授予 `ALLOW_MANAGE`；条件更新避免重复处理。
+管理申请的查重、通过和驳回统一按 `MANAGE_APPLY / WRITE / P` 查询，与申请写入及审批列表一致；
+使用申请仍按 `AVAILABLE_USE / READ / P` 查询，使用黑名单仍按 `READ` 校验。已有合法待审记录可直接继续审批，无需重建申请或迁移数据。
 
 部署前请人工检查 `deploy/migrations/versions/V0.5.1/V0.5.1__ddl.sql` 和 `V0.5.1__dml.sql`，先 DDL 后 DML。
 迁移只登记已有企业发布副本的全公司历史范围，不扩大手工创建资源的授权。
@@ -981,6 +1146,17 @@ HAVING COUNT(*) > 1;
 ```
 
 本次查询没有增加行锁子句，并发依赖条件更新、事务及唯一约束。版本迁移不自动合并初始化 SQL。
+
+## 数字员工直接使用授权
+
+`POST /auth/privilegeGrant/setResourceUsers` 仍先校验操作人对数字员工的授权维护权限。
+授权普通企业数字员工时，仅补齐操作人有权授权的关联资源使用权；操作人无权授权某项技能、工具或知识资源时，
+跳过该项补授权，员工使用授权仍可保存。被跳过资源的现有授权保持不变，不因此新增使用或管理权限。
+`view_auth_controlled` 或 `use_auth_controlled` 为真的资源仍由原范围维护，不因员工直接授权扩大范围。
+
+其他可授权资源继续按原规则补齐正式使用授权，保留租户、资源状态和黑名单校验；数据库写入失败仍回滚事务。
+本次调整只作用于直接设置员工使用人员，不改变员工保存、申请审批、管理授权或员工组的既有处理流程，
+也不改变运行时资源权限检查。无需数据库迁移。
 
 ## 标准资源 JSON 的 Redis 副本
 
@@ -1035,6 +1211,37 @@ Redis 故障记录日志，不能把已成功提交的保存操作误报为回�
 也不会因此新增授权或自动关联；原有授权开关语义不变。关联资源 Redis 写入失败或缺少运行 JSON 时，
 不能发布员工的新快照或把同步标为全部生效。`VIEW`、`OBJECT` 和 `DIG_EMPLOYEE` 不属于此接口支持的同步类型。
 
+资源同步 `/tool/addToolFromThird` 在现有企业资源范围内统一读取顶层 `createBy`，支持正整数或数字字符串
+（例如 `1168`、`"1168"`）。技能、工具、MCP、智能体和知识库的新增、更新均写入 `ss_resource.create_by`。
+本改动不扩展开源接口的资源范围：个人资源和 `KG_CLOUD` 继续不支持。企业调用仍按实际调用方校验权限和租户，
+不切换为创建人身份；先校验原资源权限，再写创建人。省略 `createBy` 或显式传 `null` 时，新增沿用当前上下文，
+更新保留原创建人；非法、非正整数或超出 Long 范围的 ID 在导入前拒绝。普通页面导入保留原创建人规则。
+无需数据迁移；历史记录可携带正确的 `createBy` 再次同步修正。
+
+### 外部知识资源的同步校验
+
+Whale 等来源通过 `/tool/addToolFromThird` 同步 `KG_DOC`、`KG_DB`、`KG_QA`、`KG_TERM` 时，
+知识资源 JSON 写入前按声明的接口能力校验，兼容 OpenAPI 和旧版 `method/path/action` 格式：
+
+| 声明的生命周期接口 | 默认校验行为 |
+| --- | --- |
+| 同时提供 `create_kb`、`delete_kb` | 沿用创建临时知识库、成功后删除同一标识的闭环校验；接口失败仍阻断写入 |
+| 两者都未提供 | 校验 `resourceService` 与 OpenAPI `paths` 等基本结构，至少包含一个有效 HTTP 操作或旧格式接口；不调用远端接口，不因缺少生命周期接口拒绝同步 |
+| 只提供其中一个 | 在任何远端调用前报缺失接口，避免只创建不清理或单独执行删除 |
+
+生命周期接口继续按 `operationId`、旧格式 `action` 或既有路径关键字识别，支持分布在不同的服务条目中。
+未提供生命周期接口时，不自动选择查询/检索接口做探测；同步成功仅表示元数据通过该项校验，
+不代表远端连通性、检索、Embedding 或模型调用已验证。内部 `systemCode=dataset` 的既有跳过规则不变。
+`resource.json.connectivity-validation.enabled` 和 `fail-fast` 开关保持原语义；若显式关闭 fail-fast，
+校验失败仍按原配置告警并放行。此变更不新增接口字段，不改授权、租户成员或自动关联规则，无需数据库迁移。
+
+### 技能发布、同步与上传的一致性
+
+- 企业技能显示名、下载 ZIP 文件名（不含扩展名）与根 `SKILL.md.name` 统一为归一化后的 `原名_企业`；非法字符替换为下划线。独立发布重名时追加发布人、来源 ID；员工发布副本重名时追加申请 ID、来源技能 ID。个人原包不修改，脚本及文件权限保留。Harness 镜像需同步更新名称规则，历史包不会自动迁移。
+- 直接新建企业技能的 ZIP 导入、工作区同步共用 `adminvip` / 平台管理角色限制；普通用户先导入个人技能，再提交发布审核。已授权的覆盖更新与 Whale 的独立同步权限不变。
+- Whale 用户范围和固定个人助手查找兼容默认企业 `1` 下完全没有成员关系记录的历史活跃用户。任何已有成员记录（含禁用记录、仅属于其他企业的记录）均不走回退；其他企业始终要求相应 `ACTIVE` 成员关系。此兼容不写入或补齐数据库成员数据。
+- 员工技能上传在同一事务中注册资源与关联，按现有技能自然键分布式锁串行化；完整读取旧目录后才替换文件。写文件失败、后续注册或提交失败导致事务回滚时恢复原内容，并清理本次新增内容；同一事务的重复覆盖按逆序撤销。备份只在当前请求内存保留，进程崩溃或恢复期间对象存储持续不可用仍需人工恢复，日志会报告恢复失败，不能视作已成功回滚。
+
 ### 技能运行状态
 
 手工关联和资源同步自动关联共用事务提交后的运行配置发布及通知服务，保留各入口的权限与来源规则。`POST /digitalEmployeeController/querySkillRuntimeStatus` 和 `POST /digitalEmployeeController/prepareSkills` 接受 `{ "resourceId": "员工ID" }`，校验当前用户对员工及技能的使用权限，只查询或补准备已有关联。运行端回执按用户、员工、进程隔离并带有效期，数据库关联、员工快照或技能版本不一致时不会返回 READY；内置技能使用 BUILT_IN 标识。准备请求不创建关联或授权，不需要数据库迁移。协议和运行端排障见 [baiying-enhance README](../byclaw-exe/extensions/baiying-enhance/README.md#技能准备与运行端回执)。
@@ -1050,3 +1257,78 @@ Redis 故障记录日志，不能把已成功提交的保存操作误报为回�
 `PrivilegeGrantBatchTest` 使用 6001 条授权覆盖多个资源、500 条批次边界和不足一批的尾部，替代每次插入 45000 条的规模检查；事务回滚和写入数量校验仍保留。
 `KnowledgeImportContractTest` 保留真实本地 HTTP 请求、SDK 重试和拒绝/未知结果分类，但把测试客户端的退避间隔缩短至 1ms，不等待生产退避时间。
 这些改动不修改业务批次大小或生产 HTTP 重试配置。
+
+### 数字员工配置版本（V0.5.2）
+
+部署前执行 `deploy/migrations/versions/V0.5.2/V0.5.2__ddl.sql`，本功能不修改初始化 SQL。该脚本只增加字段、表和索引，不删除既有版本数据；不要重复执行。已有员工首次打开版本历史或维护配置时建立当前配置基线，不能恢复上线前没有记录的历史。
+
+`/digitalEmployeeVersions` 提供 history（POST）、detail（GET）、save/activate/retry（POST）。配置写入、企业发布生效与运行态同步共用按租户/员工隔离的 Redis 互斥锁，覆盖事务完成并自动续租；同时保留数据库修订号 CAS 校验，不使用查询行锁。保存请求必须携带 `expectedRevision` 和唯一 `requestId`；同一请求重试不能改变配置或生效方式。只有同租户创建者、有效 ALLOW_MANAGE 授权人、adminvip 可访问这些接口，角色为平台管理员或组织管理员本身不获得配置维护权。
+
+与 D0.6.0 的资源事务锁配合时，固定先获取 `resource:<员工ID>` 业务锁，再获取版本锁，避免不同入口反向等待。`EmployeeVersionRedisIntegrationTest` 使用显式配置的本地测试 Redis（`BYCLAW_TEST_REDIS_PORT` / `BYCLAW_TEST_REDIS_CLUSTER_PORT`），覆盖单机和真实 Cluster 的跨实例互斥、续租、释放及失锁回滚；未提供测试端口时跳过，不连接应用 Redis。
+
+快照只保存员工配置与资源绑定，排除授权、组织范围、用户私有记忆、机器人/连接凭证及运行镜像。依赖使用 CURRENT 策略，不随员工回退而恢复技能源码或知识内容。`resource_d_verid` 指向最近保存，`resource_r_verid` 指向数据库当前生效配置；运行态同步通过独立生效记录追踪，失败返回 SYNC_FAILED 并可重试当前生效版本，不能把已提交的配置误报为回滚。现有运行端的会话热更新行为沿用，不保证正在执行的会话切换至历史版本。外部系统同步员工仍由来源系统维护，不开放本地版本覆盖。
+
+企业副本回退/切换先建立不可编辑的固定版本审核草稿，需全部已发布组织通过后统一生效。版本内容、资源归属和审核目标版本不得由客户端改变。若审批落地需要将个人技能复制为企业技能，系统另存实际企业绑定版本，并以所审核版本为 base_version_id；原快照不覆盖。绑定不变时，切换或回退直接使用所选历史版本。固定版本存在不可发布的依赖时拒绝生效，要求保存修正后的新版本，不静默丢弃依赖。
+
+## 火山数字人连接器
+
+`V0.6.0` 提供 `volcengine-digital-human` 连接器模板，复用通用凭据表单，只填写
+`accessKeyId` 和 `secretAccessKey`。两个字段均使用密码输入框，保存到加密授权元数据中，
+不注入 Runtime Manifest 或环境变量、不回传前端。保存仅校验字段格式，未验证火山账号权限、
+真实模型调用或视频生成能力。
+
+授权启用后，后端在事务提交后将下列内容投影到用户私有 Sandbox 的
+`/by/.connector-auth/.model/video.json`，复用私有工作区和原子文件写入机制（本地文件权限 `0600`）。
+
+```json
+{
+  "schemaVersion": 1,
+  "connectorCode": "volcengine-digital-human",
+  "enabled": true,
+  "accessKeyId": "<access-key-id>",
+  "secretAccessKey": "<secret-access-key>"
+}
+```
+
+重新保存会更新投影，禁用或断开连接会删除该文件；启用授权有定时补偿同步。
+投影由独立的 `DigitalHumanConfigProjectionService` 管理，不使用图片/语音的模型 Endpoint 配置格式。
+此处的 `video.json` 专用于火山数字人 AK/SK，不表示通用文生视频模型已接入。
+
+前端沿用媒体连接器错误标记。当工具结果中包含
+`MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=volcengine-digital-human;` 时，
+本轮聊天结束后显示“需要配置火山数字人视频连接器”按钮，点击打开该连接器的配置界面；重复错误合并为一个按钮。
+本次不修改 DSH 插件，因此缺失配置的检测及上述错误标记须由调用方返回；前端不会主动读取私有凭据文件。
+
+
+## 本地启动与加密环境变量
+
+`ByaiServerApplication` 的 `.env` 加载器只读取键值，不会自动解密 `ENC(...)`。
+部署的 `compose-detect.sh` 会先调用 `deploy/env-decrypt.sh`；IDE 直接启动 Java 不经过该步骤。
+若 `JWT_TOKEN_EXPIRED_HOUR` 仍为密文，会在 `JwtService` 注入整数配置时启动失败。
+
+本地可从仓库根目录执行以下命令，将环境文件解密后再重启后端：
+
+```bash
+bash deploy/env-encrypt.sh --decrypt byclaw-be/.env
+```
+
+该命令原地写入明文，并备份原始密文到 `byclaw-be/.env.encrypted.bak`；两份文件均不得提交。
+密钥使用现有部署脚本的解析顺序（`BYCLAW_SM4_KEY`、`BYCLAW_SM4_KEY_FILE`、
+系统/用户密钥文件、兼容默认密钥），须与加密时一致，不要替换 JWT 或凭据业务密钥来绕过启动错误。
+解密入口使用单行 Base64 模式，支持 JWT 私钥和 JSON 等长配置。
+也可用 `env-decrypt.sh` 生成私有临时环境文件，再通过 JVM 参数 `-Denv.file=<临时文件绝对路径>`
+指定它；使用后删除临时明文文件，保留原始加密 `.env`。
+
+回归检查：`python3 deploy/tests/env-decrypt.test.py`。
+
+## 对话资源停用与收藏兼容（D0.6.0，#267 / #287）
+
+对话资源入口停用 `OBJECT`、`VIEW`、`ONTOLOGY_BASE`、`SCENE`，按实际业务类型判断并兼容大小写和首尾空白，不按名称关键词匹配。列表在数据库分页和计数前过滤；ID/code 详情在原权限检查后拒绝；Redis 授权列表、单个与批量读取遵守同一规则，已授权的停用读取返回 `RESOURCE_TYPE_RETIRED`。普通知识库、技能、工具、MCP、Agent 和模型读取保留原有权限语义。
+
+员工对外详情与内部完整关联分离。普通编辑保存保留隐藏的历史停用关联，不能新挂载停用资源；发布执行时不携带停用依赖。运行 JSON 导出、已有 targetContent 的同步和运行读取均过滤停用元数据。历史数据库记录、会话和用户手写提示内容不清理；独立对象管理不在本次变更范围。
+
+Redis 批量资源读取按原键逐个 GET，不拼接跨槽 MGET，不更改键名、前缀或 TTL。部署需同时更新后端和 baiying-enhance 插件构建及所有运行实例，再刷新员工运行配置和带托管标记的提示文件；旧缓存即使尚未刷新，更新后的执行器仍会拒绝四类能力。用户手工维护文件不覆盖。外部动态 TOOL/MCP/AGENT 包装的具体服务定义需在目标环境逐项核实，不能将普通 MCP 或整个数据服务一并停用。
+
+商业版收藏补齐 `TOOL` 原子工具，沿用已有收藏、取消、幂等计数、租户隔离、权限和排序逻辑；`SKILL_GROUP` 仍不参与。本次不新增迁移，实际部署仍需具备已有收藏表。
+
+自测入口：`ConversationResourceRetirementTest`、`RedisResourceRetirementIntegrationTest`、`ResourceFavorite*Test`、`DigitalEmployee*Test` 和 `*EmployeePublication*Test`。真实 Redis Cluster 测试通过 `BYCLAW_TEST_REDIS_CLUSTER_PORT` 指向仅绑定本机、可销毁的专用测试集群；不得指向应用 Redis。模块完整检查使用 `mvn -B -f byclaw-be/pom.xml verify`。本地回归不能代替部署后的权限、历史会话、实际模型调用及动态包装工具验收。

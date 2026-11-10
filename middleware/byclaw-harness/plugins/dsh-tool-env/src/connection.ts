@@ -24,6 +24,8 @@ type Hello = Awaited<SshConnection['ready']>
 
 /** Static coordinates shared by every inner connection. */
 export interface ToolEnvConnectionOptions {
+  /** Bound at construction for authenticated BE connector bootstrap; other backends leave it absent. */
+  serviceKey?: string
   /** Inner SshConnection configuration except the host alias, which the identity owns. */
   ssh: Omit<SshConfig, 'host'>
   /** Remote PTC invocation, valid because A and B run the same image. */
@@ -58,6 +60,8 @@ interface Lease {
 export class ToolEnvConnection extends Service {
   private current: Promise<Lease> | undefined
   private live: Lease | undefined
+  private readonly opening = new Set<Lease>()
+  private connectionEpoch = 0
   private inflight = 0
   private readonly streams = new Set<Socket>()
   private idleTimer: NodeJS.Timeout | undefined
@@ -80,12 +84,34 @@ export class ToolEnvConnection extends Service {
   ) {
     super(ctx, 'ssh')
     this.launchEnv = options.launchEnv ?? {}
-    ctx.effect(() => () => { void this.close() })
+    ctx.effect(() => () => this.close())
+    if (backend.onInvalidated) ctx.effect(() => backend.onInvalidated!(() => {
+      this.connectionEpoch++
+      for (const pending of this.opening) { pending.fiber.dispose(); void pending.connection.dispose().catch(() => {}) }
+      for (const socket of this.streams) socket.destroy()
+      void this.drop()
+    }))
   }
 
   /** Helper identity of the current lease; awaiting it leases the tool environment. */
   get ready(): Promise<Hello> {
-    return this.lease().then(lease => lease.connection.ready)
+    return this.use(lease => lease.connection.ready)
+  }
+
+  runInSession<T>(sessionId: string, work: () => Promise<T>): Promise<T> { return this.backend.runInSession?.(sessionId, work) ?? work() }
+  startSession(sessionId: string): void { this.backend.startSession?.(sessionId) }
+  async acquireSession(sessionId: string): Promise<void> { await this.backend.acquireSession?.(sessionId) }
+  async finishSession(sessionId: string, destroy = false): Promise<void> { await this.backend.finishSession?.(sessionId, destroy) }
+
+  /** Supply the same persistent identity used by normal tool leases, without starting compute or SSH. */
+  async bootstrapKeys(serviceKey: string): Promise<{ authorizedKey: string; hostPrivateKeyBase64: string }> {
+    if (this.closed || !this.options.serviceKey) throw new Error('tool bootstrap unavailable')
+    if (serviceKey !== this.options.serviceKey) {
+      throw Object.assign(new Error('tool bootstrap service does not match'), { code: 'TOOL_ENV_SERVICE_MISMATCH' })
+    }
+    const keys = await this.identity.keys()
+    if (this.closed) throw new Error('tool bootstrap unavailable')
+    return { authorizedKey: keys.authorizedKey, hostPrivateKeyBase64: Buffer.from(keys.hostPrivateKey).toString('base64') }
   }
 
   /**
@@ -167,10 +193,13 @@ export class ToolEnvConnection extends Service {
 
   async connectStream(endpoint: SshStreamEndpoint, signal?: AbortSignal): Promise<Socket> {
     this.noteStartReason('stream', endpoint)
-    const socket = await this.use(lease => lease.connection.connectStream(endpoint, signal), signal)
+    const finish = await this.backend.beginUse?.()
+    let socket: Socket
+    try { socket = await this.use(lease => lease.connection.connectStream(endpoint, signal), signal, false) }
+    catch (error) { await finish?.().catch(() => {}); throw error }
     this.streams.add(socket)
     this.touch()
-    socket.once('close', () => { this.streams.delete(socket); this.touch() })
+    socket.once('close', () => { this.streams.delete(socket); this.touch(); void finish?.().catch(() => {}) })
     return socket
   }
 
@@ -182,30 +211,35 @@ export class ToolEnvConnection extends Service {
     await this.drop()
   }
 
-  /** Release only this isolated runtime after its final execution lease is returned. */
-  async releaseOwned(): Promise<void> {
+  /** Detach this runtime after its final lease; only explicit release destroys compute. */
+  async releaseOwned(destroy = true): Promise<void> {
     // The catalog checks active executions before its last lease returns. Closing
     // this owned connection also closes residual SSH streams; stream teardown
-    // may lag process.wait and must not prevent the final compute release.
+    // may lag process.wait and must not prevent returning the final execution lease.
     if (this.inflight > 0) throw new Error('LEASE_BUSY')
     if (this.pausing !== undefined) return this.pausing
     if (this.idleTimer !== undefined) { clearTimeout(this.idleTimer); this.idleTimer = undefined }
     this.pausing = (async () => {
       await this.current?.catch(() => {})
       await this.drop()
-      await this.backend.pause()
+      if (destroy && this.backend.destroy) await this.backend.destroy()
+      else await this.backend.pause()
       this.backendPending = false
     })().finally(() => { this.pausing = undefined })
     return this.pausing
   }
 
-  private async use<T>(operation: (lease: Lease) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  private async use<T>(operation: (lease: Lease) => Promise<T>, signal?: AbortSignal, acquireUse = true): Promise<T> {
+    let finish: (() => Promise<void>) | undefined
     this.inflight++
     this.residualSince = undefined
     this.touch()
     try {
       signal?.throwIfAborted()
+      if (acquireUse) finish = await this.backend.beginUse?.()
+      const epoch = this.connectionEpoch
       const lease = await this.lease()
+      if (epoch !== this.connectionEpoch) throw new Error('TOOL_LEASE_INVALIDATED')
       try { return await operation(lease) } catch (error) {
         if (isBroken(lease.connection)) void this.drop(lease)
         throw error
@@ -213,6 +247,7 @@ export class ToolEnvConnection extends Service {
     } finally {
       this.inflight--
       this.touch()
+      await finish?.()
     }
   }
 
@@ -233,14 +268,21 @@ export class ToolEnvConnection extends Service {
 
   private async open(): Promise<Lease> {
     await this.pausing
+    const epoch = this.connectionEpoch
     this.backendPending = true
     const endpoint = await this.backend.ensure()
+    if (epoch !== this.connectionEpoch) throw new Error('TOOL_LEASE_INVALIDATED')
     await this.identity.writeClientConfig(endpoint)
     const lease = await this.connect()
-    try { await lease.connection.ready } catch (error) {
+    this.opening.add(lease)
+    try {
+      await lease.connection.ready
+      if (epoch !== this.connectionEpoch) throw new Error('TOOL_LEASE_INVALIDATED')
+    } catch (error) {
       lease.fiber.dispose()
+      await lease.connection.dispose().catch(() => {})
       throw error
-    }
+    } finally { this.opening.delete(lease) }
     if (this.closed) { lease.fiber.dispose(); throw new Error('Tool environment connection is closed') }
     this.live = lease
     this.ctx.logger('byclaw-tool-env').info(`tool environment connected: ${endpoint.hostName}:${String(endpoint.port)}`)
@@ -341,8 +383,8 @@ export class ToolEnvConnection extends Service {
     if (this.idleTimer !== undefined) clearTimeout(this.idleTimer)
     const wasLive = this.live !== undefined || this.backendPending
     await this.drop()
-    // A is going away (e.g. reclaimed while idle): stop paying for B too. The
-    // next A resumes it; if this does not finish in time, B's expiry still applies.
+    // Backends choose their shutdown policy: ByClaw BE retains manual compute;
+    // OpenSandbox still pauses. Explicit destruction uses releaseOwned(true).
     if (wasLive) await Promise.race([this.backend.pause().catch(() => {}), new Promise(resolve => setTimeout(resolve, 5000).unref())])
     await this.backend.dispose().catch(() => {})
   }

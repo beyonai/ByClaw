@@ -44,6 +44,10 @@ public class OpenClawWebSocketProxyHandler extends AbstractWebSocketHandler {
     private final OkHttpClient wsClient;
 
     public OpenClawWebSocketProxyHandler() {
+        this(true);
+    }
+
+    protected OpenClawWebSocketProxyHandler(boolean followRedirects) {
         // WebSocket 为长连接，不能设置 callTimeout / readTimeout，否则会被定时强杀。
         // pingInterval 维持连接活性。
         this.wsClient = new OkHttpClient.Builder()
@@ -51,15 +55,29 @@ public class OpenClawWebSocketProxyHandler extends AbstractWebSocketHandler {
             .readTimeout(java.time.Duration.ZERO)
             .writeTimeout(java.time.Duration.ofSeconds(30))
             .pingInterval(java.time.Duration.ofSeconds(30))
+            .followRedirects(followRedirects)
+            .followSslRedirects(followRedirects)
             .build();
     }
 
     @Override
     public void afterConnectionEstablished(WebSocketSession browserSession) {
+        Request upstreamRequest = buildUpstreamRequest(browserSession);
+        if (upstreamRequest == null) {
+            closeQuietly(browserSession, CloseStatus.POLICY_VIOLATION.withReason("missing authorized target"));
+            return;
+        }
+        WebSocket upstream = wsClient.newWebSocket(upstreamRequest,
+            new UpstreamListener(browserSession));
+        browserSession.getAttributes().put(UPSTREAM_ATTR, upstream);
+    }
+
+    /** Allows a separately authenticated scoped route to reuse the frame relay. */
+    protected Request buildUpstreamRequest(WebSocketSession browserSession) {
         URI uri = browserSession.getUri();
         if (uri == null) {
             closeQuietly(browserSession, CloseStatus.SERVER_ERROR.withReason("missing request uri"));
-            return;
+            return null;
         }
         // 整页代理下，WS 路径为 /byaiService/openclaw-ui/{ip}/{port}/<剩余>，
         // openclaw 控制台内部基于 location 自动推导出该地址（见 bundle zf()）。
@@ -67,7 +85,7 @@ public class OpenClawWebSocketProxyHandler extends AbstractWebSocketHandler {
         if (target == null) {
             log.warn("OpenClaw ws proxy rejected: cannot parse ip/port from path={}", uri.getRawPath());
             closeQuietly(browserSession, CloseStatus.BAD_DATA.withReason("missing ip/port in path"));
-            return;
+            return null;
         }
 
         log.debug("OpenClaw ws proxy connecting upstream: sessionId={}, target={}",
@@ -75,13 +93,10 @@ public class OpenClawWebSocketProxyHandler extends AbstractWebSocketHandler {
 
         // openclaw 网关握手时校验 Origin（不在白名单则返回 CONTROL_UI_ORIGIN_NOT_ALLOWED）。
         // 整页代理下浏览器带的是网关 Origin，这里改写成 openclaw 自身地址使其同源放行。
-        Request upstreamRequest = new Request.Builder()
+        return new Request.Builder()
             .url(target.url())
             .header("Origin", "http://" + target.ip() + ":" + target.port())
             .build();
-        WebSocket upstream = wsClient.newWebSocket(upstreamRequest,
-            new UpstreamListener(browserSession));
-        browserSession.getAttributes().put(UPSTREAM_ATTR, upstream);
     }
 
     @Override

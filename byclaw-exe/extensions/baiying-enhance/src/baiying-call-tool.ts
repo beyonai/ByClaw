@@ -1,3 +1,4 @@
+import { isRetiredResource, isRetiredResourceType, retiredResourceError } from "./retired-resources.js";
 import { Type } from "@sinclair/typebox";
 import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
 import type { AgentRegistryState } from "./agent-state.js";
@@ -233,7 +234,7 @@ export function buildBaiyingCallDescription(params: { agent: AdaptedManagedAgent
       `Pass agent_id = ${params.agent.sourceKey}, resource_id = ${params.agent.agentId} to \`baiying_call\``
     ].filter(Boolean).join("\n");
   }
-  const resources = params.agent.associatedResources ?? [];
+  const resources = (params.agent.associatedResources ?? []).filter((resource) => !isRetiredResource(resource));
   const summaryNames = resources
     .slice(0, 3)
     .map((resource) => resource.resourceName)
@@ -275,23 +276,22 @@ export function buildBaiyingCallDescription(params: { agent: AdaptedManagedAgent
       });
       descParts.push(line);
     }
-  } else if (params.agent.agentSseUrl) {
-    descParts.push("Available resources:");
+  }
+  if (params.agent.agentSseUrl || params.agent.agentHomeUrl) {
+    if (resources.length === 0) descParts.push("Available resources:");
     descParts.push(formatRootAgentLine(params.agent));
   }
 
   descParts.push(
-    "Use `resource_id` to choose a parent resource and `action` to choose a TOOLKIT/MCP child tool when needed; OBJECT/VIEW resources are dispatched through callAgent and usually do not need `action`.",
+    "Use `resource_id` to choose a parent resource and `action` to choose a TOOLKIT/MCP child tool when needed.",
   );
   descParts.push(
     "For DOC resources (`KG_DOC`/`KG_DB`/`KG_QA`), `agent_id` is required by executor. This plugin auto-populates `agent_id` from agent.json `resourceId` (current agent sourceKey) and forwards it in the top-level payload.",
   );
   descParts.push(
-    "Pass structured backend parameters in `arguments`; OBJECT and VIEW resources are dispatched to `BYCLAW_DATA` with the selected resource code in `call_object_ids` or `call_view_ids`, plus the selected resource id in `resource_ids`.",
+    "Pass structured backend parameters in `arguments` for the selected resource.",
   );
-  descParts.push(
-    "For OBJECT/VIEW calls with large payloads, backend may return `file_url` in response data; `file_url` is a local file path. Treat this local path as the authoritative payload reference and read it to process the full business data before producing final conclusions.",
-  );
+
   descParts.push(
     "When both inline summary fields and `file_url` exist, prefer the local-file content pointed to by `file_url` for detailed analysis, and clearly state any limitation if the local path cannot be accessed.",
   );
@@ -389,7 +389,7 @@ export function createBaiyingCallToolFactory(params: {
         ),
         resource_type: Type.Optional(
           Type.String({
-            description: "Resource type filter (for example KG_DOC, TOOLKIT, MCP, OBJECT, VIEW)",
+            description: "Resource type filter (for example KG_DOC, TOOLKIT, MCP, TOOL, AGENT)",
           }),
         ),
         resource_name: Type.Optional(
@@ -400,7 +400,7 @@ export function createBaiyingCallToolFactory(params: {
         action: Type.Optional(
           Type.String({
             description:
-              "Child action/tool name for TOOLKIT, MCP, OBJECT, or VIEW resources; optional for DOC/AGENT/TOOL. For DOC async, use `get_doc_async_result` then `compose_doc_async_answer`.",
+              "Child action/tool name for TOOLKIT or MCP resources; optional for DOC/AGENT/TOOL. For DOC async, use `get_doc_async_result` then `compose_doc_async_answer`.",
           }),
         ),
         arguments: Type.Optional(
@@ -409,7 +409,7 @@ export function createBaiyingCallToolFactory(params: {
             {
               additionalProperties: true,
               description:
-                "Structured backend arguments. Required for TOOLKIT / TOOL / MCP / OBJECT / VIEW child-tool execution.",
+                "Structured backend arguments. Required for TOOLKIT / TOOL / MCP child-tool execution.",
             },
           ),
         ),
@@ -423,6 +423,18 @@ export function createBaiyingCallToolFactory(params: {
           details?: Record<string, unknown>;
         }) => void,
       ) {
+        if (isRetiredResourceType(toolParams.resource_type)) return retiredResourceError();
+        const explicitId = normalizeText(toolParams.resource_id);
+        const explicitResource = (agent.associatedResources ?? []).find((resource) => resource.resourceId === explicitId);
+        if (explicitResource && isRetiredResource(explicitResource)) return retiredResourceError();
+        const explicitName = normalizeText(toolParams.resource_name);
+        const namedResource = (agent.associatedResources ?? []).find((resource) => resource.resourceName === explicitName);
+        const explicitRoot = !!(agent.agentSseUrl || agent.agentHomeUrl || isFromThirdPartyAgent)
+          && (explicitId === agent.sourceKey || explicitId === agent.agentId);
+        if (!explicitId && namedResource && isRetiredResource(namedResource)) return retiredResourceError();
+        if ((explicitId && !explicitRoot && !explicitResource) || (!explicitId && explicitName && !namedResource)) {
+          return { success: false, error_code: "CAPABILITY_NOT_FOUND", error: "Requested resource is not available" };
+        }
         const actionName = normalizeText(toolParams.action);
         const requesterSessionKey =
           normalizeText((ctx as any)?.sessionKey) ||
@@ -522,14 +534,19 @@ export function createBaiyingCallToolFactory(params: {
           };
         }
 
-        const resources = agent.associatedResources ?? [];
-        const requestedResourceId = normalizeText(toolParams.resource_id);
-        const hasRootAgentResource = !!(agent.agentSseUrl || agent.agentHomeUrl);
+        const resources = (agent.associatedResources ?? []).filter((resource) => !isRetiredResource(resource));
+        const requestedResourceId = explicitRoot ? agent.sourceKey : normalizeText(toolParams.resource_id);
+        const hasRootAgentResource = !!(agent.agentSseUrl || agent.agentHomeUrl || isFromThirdPartyAgent);
         const isRootAgentRequest = hasRootAgentResource && requestedResourceId === agent.sourceKey;
-        let selectedResource: BaiyingAssociatedResource | undefined =
-          (requestedResourceId && !isRootAgentRequest
-            ? resources.find((resource) => resource.resourceId === requestedResourceId)
-            : undefined) ?? resources[0];
+        const requestedName = normalizeText(toolParams.resource_name);
+        let selectedResource: BaiyingAssociatedResource | undefined = requestedResourceId
+          ? resources.find((resource) => resource.resourceId === requestedResourceId)
+          : requestedName
+            ? resources.find((resource) => resource.resourceName === requestedName)
+            : resources[0];
+        if ((requestedResourceId || requestedName) && !isRootAgentRequest && !selectedResource) {
+          return { success: false, error_code: "CAPABILITY_NOT_FOUND", error: "Requested resource is not available" };
+        }
         if (isRootAgentRequest) {
           selectedResource = undefined;
         }

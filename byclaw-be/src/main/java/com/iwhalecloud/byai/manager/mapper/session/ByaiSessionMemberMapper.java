@@ -16,6 +16,9 @@ import java.util.Map;
  */
 public interface ByaiSessionMemberMapper extends BaseMapper<ByaiSessionMember> {
 
+    /** 读取有效真人成员主键，用于定位 HACU 发布的 TokenSaver 凭据缓存。 */
+    Long findActiveUserMemberId(@Param("groupSessionId") Long groupSessionId, @Param("userId") Long userId);
+
     /** 只读取当前用户在原始群聊中的有效成员凭据，不将密钥加入公开成员响应。 */
     String findActiveUserApiKey(@Param("groupSessionId") Long groupSessionId, @Param("userId") Long userId);
 

@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.storage.AbstractFileIngressStorageService;
 import com.iwhalecloud.byai.common.storage.constants.StorageType;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
+import com.iwhalecloud.byai.common.storage.model.FileStat;
 import com.iwhalecloud.byai.common.storage.model.FileStorageContext;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.storage.model.StorageObject;
@@ -74,6 +75,34 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
     @Override
     protected Void createStorageClient() {
         return null;
+    }
+
+    @Override
+    public boolean supportsStat() {
+        return true;
+    }
+
+    @Override
+    public FileStat stat(StorageLocation location) {
+        Path target = resolve(location);
+        FileStat result = new FileStat();
+        try {
+            var attributes = Files.readAttributes(target, java.nio.file.attribute.BasicFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS);
+            if (attributes.isSymbolicLink()) {
+                throw new IllegalArgumentException("Symbolic links are not valid filesystem stat targets");
+            }
+            result.setExists(true);
+            result.setDirectory(attributes.isDirectory());
+            result.setSize(attributes.size());
+            result.setLastModified(attributes.lastModifiedTime().toInstant().toString());
+            return result;
+        } catch (java.nio.file.NoSuchFileException missing) {
+            result.setExists(false);
+            return result;
+        } catch (IOException error) {
+            throw new IllegalStateException("Local filesystem stat failed", error);
+        }
     }
 
     @Override

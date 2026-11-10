@@ -13,6 +13,7 @@ import { GET, POST } from '@/service/common/request';
 
 const mockGET = GET as jest.MockedFunction<typeof GET>;
 const mockPOST = POST as jest.MockedFunction<typeof POST>;
+const sharedScope = { resourceId: '42', rootPath: '/by/.shared/project_12/' };
 
 describe('chat file artifact service', () => {
   beforeEach(() => {
@@ -47,7 +48,12 @@ describe('chat file artifact service', () => {
     mockPOST.mockResolvedValueOnce([{ sourcePath: `/by${path}`, path, fileName: '故地重游-高考作文.txt' }]);
     mockGET.mockResolvedValueOnce({ file, fileName: '故地重游-高考作文.txt' });
     await expect(
-      downloadRelativeChatFileArtifact({ href: '故地重游-高考作文.txt', sessionId: '101', messageId: 'reply-1' })
+      downloadRelativeChatFileArtifact({
+        sharedScope,
+        href: '故地重游-高考作文.txt',
+        sessionId: '101',
+        messageId: 'reply-1',
+      })
     ).resolves.toEqual({ file, fileName: '故地重游-高考作文.txt', path });
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/chat/file-artifacts/resolve', {
       sessionId: '101',
@@ -61,6 +67,45 @@ describe('chat file artifact service', () => {
         responseType: 'blob',
       }
     );
+    expect(mockGET).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads relative preview resources from the same shared project and rejects escaping paths', async () => {
+    mockPOST.mockResolvedValueOnce([]);
+    const asset = new Blob(['说明']);
+    mockGET
+      .mockResolvedValueOnce({ file: new Blob(['# 报告']), fileName: 'report.md' })
+      .mockResolvedValueOnce({ file: asset, fileName: '说明.txt' });
+
+    const { loadResource } = await downloadRelativeChatFileArtifact({
+      sharedScope,
+      href: 'reports/report.md',
+      sessionId: '101',
+    });
+
+    expect(loadResource).toBeDefined();
+    await expect(loadResource?.(`${sharedScope.rootPath}reports/${encodeURIComponent('说明.txt')}`)).resolves.toBe(
+      asset
+    );
+    await expect(loadResource?.(`${sharedScope.rootPath}%2e%2e/report.md`)).rejects.toThrow(
+      'Resource outside project shared directory'
+    );
+    expect(mockGET).toHaveBeenCalledTimes(2);
+    expect(mockGET).toHaveBeenLastCalledWith(
+      '/byaiService/fileBrowser/download',
+      { resourceId: sharedScope.resourceId, path: `${sharedScope.rootPath}reports/说明.txt` },
+      { responseType: 'blob' }
+    );
+  });
+
+  it('preserves a session lookup error without trying another download source', async () => {
+    const error = new Error('Forbidden');
+    mockPOST.mockRejectedValueOnce(error);
+
+    await expect(downloadRelativeChatFileArtifact({ sharedScope, href: 'report.md', sessionId: '101' })).rejects.toBe(
+      error
+    );
+    expect(mockGET).not.toHaveBeenCalled();
   });
 
   it.each([

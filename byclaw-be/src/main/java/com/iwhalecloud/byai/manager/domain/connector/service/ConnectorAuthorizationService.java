@@ -28,6 +28,7 @@ import com.iwhalecloud.byai.manager.domain.connector.authorization.Authorization
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatusResult;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.CredentialState;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorPermissionSummary;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorAuthorizationProvider;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialFormProvider;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCredentialFormProviderRegistry;
@@ -702,7 +703,9 @@ public class ConnectorAuthorizationService {
                     AuthorizationStatus.FINALIZING,
                     finalizingVersion,
                     connected)) {
-                return toDto(connected, null);
+                ConnectorAuthorizationDto dto = toDto(connected, null, false);
+                applyPermissionSummary(dto, ConnectorPermissionSummary.fromAttributes(result.accountAttributes()));
+                return dto;
             }
             return recoverFinalizingAfterCasFailure(session);
         } catch (RuntimeException e) {
@@ -1069,7 +1072,7 @@ public class ConnectorAuthorizationService {
         auth.setAuthMode(connector.getAuthMode());
         auth.setAuthName(accountName(statusResult));
         auth.setExternalAccountId(statusResult == null ? null : statusResult.accountId());
-        auth.setAuthCredential(buildCredential(connector, statusResult, authorizationId));
+        auth.setAuthCredential(buildCredential(connector, statusResult, authorizationId, auth.getAuthCredential()));
         auth.setEnableFlag("Y");
         auth.setStatusCd("00A");
         auth.setLastSyncTime(now);
@@ -1105,11 +1108,20 @@ public class ConnectorAuthorizationService {
     private String buildCredential(
             ConnectorInfo connector,
             AuthorizationStatusResult statusResult,
-            String authorizationId) {
+            String authorizationId,
+            String previousCredential) {
         if ("NONE".equals(connector.getAuthMode())) {
             return null;
         }
         Map<String, Object> metadata = new LinkedHashMap<>();
+        if (StringUtils.hasText(previousCredential)) {
+            try {
+                metadata.putAll(ConnectorPermissionSummary.retainedAttributes(
+                    JSON.parseObject(Sm4Util.decrypt(previousCredential)), connector.getProviderCode(), statusResult));
+            } catch (RuntimeException ignored) {
+                // An unreadable legacy summary must not block saving verified credentials.
+            }
+        }
         putIfHasText(metadata, "providerCode", connector.getProviderCode());
         putIfHasText(metadata, "authorizationId", authorizationId);
         if (statusResult != null) {
@@ -1246,6 +1258,11 @@ public class ConnectorAuthorizationService {
     }
 
     private ConnectorAuthorizationDto toDto(RedisAuthorizationSession session, String authorizationUrl) {
+        return toDto(session, authorizationUrl, true);
+    }
+
+    private ConnectorAuthorizationDto toDto(
+            RedisAuthorizationSession session, String authorizationUrl, boolean readPermissionSummary) {
         ConnectorAuthorizationDto result = new ConnectorAuthorizationDto();
         result.setAuthorizationId(session.authorizationId());
         result.setConnectorId(session.connectorId());
@@ -1256,7 +1273,23 @@ public class ConnectorAuthorizationService {
         result.setExpiresAt(session.expiresAt());
         result.setErrorCode(session.errorCode());
         result.setErrorMessage(ConnectorMessages.localize(session.errorMessage()));
+        if (readPermissionSummary && session.status() == AuthorizationStatus.CONNECTED) {
+            try {
+                ConnectorAuth binding = findActiveAuthorization(session.userId(), session.connectorId());
+                if (bindingMatchesAuthorization(binding, session.authorizationId())) {
+                    applyPermissionSummary(result, ConnectorPermissionSummary.fromAttributes(
+                        JSON.parseObject(Sm4Util.decrypt(binding.getAuthCredential()))));
+                }
+            } catch (RuntimeException ignored) {
+                // Preserve the completed authorization result if public metadata cannot be read.
+            }
+        }
         return result;
+    }
+
+    private void applyPermissionSummary(ConnectorAuthorizationDto dto, ConnectorPermissionSummary summary) {
+        dto.setPermissionStatus(summary.permissionStatus());
+        dto.setMissingScopes(summary.missingScopes());
     }
 
     private String externalStatus(AuthorizationStatus status) {

@@ -7,7 +7,7 @@ import { browserGoalEnabled, resolveGoalConfig } from './goal-config.js'
 import type { BrowserTextServiceFactory } from './goal-types.js'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
+import { defineTool, type ToolDefinition, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { BrowserBrokerClient } from './broker-client.js'
 import {
   type BrowserGoalServices,
@@ -405,7 +405,7 @@ const GOAL_SCHEMA = {
     steps: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { operation: { type: 'string', required: true }, target: { type: 'integer' }, dispatched: { type: 'boolean', required: true } } } },
   },
 }
-function browserTool(controller: BrowserSessionController, goalEnabled: boolean): ToolDefinition {
+function browserTool(controller: BrowserSessionController, goalEnabled: boolean, reportTarget?: (exec: ToolRunContext, initial: boolean) => void): ToolDefinition {
   const defined = defineTool({
     name: 'browser',
     description: '在授权域内操作共享登录态的浏览器。先 open；元素只能用本次观察索引。act 最多32步，动作使用 kind，已返回新观察；勿重放已执行步骤。waitFor 仅一个条件，时限≤10000ms。默认禁止表单提交，仍须遵守业务授权。scroll 可指定观察到的滚动容器，返回即时位移；截图单独调用。' + (goalEnabled ? '复杂目标可用 runGoal；reported_done 仅模型判断，verified 仅页面条件成立。goalControl 可暂停/继续/取消，暂停完成后再人工接管。' : ''),
@@ -536,10 +536,17 @@ function browserTool(controller: BrowserSessionController, goalEnabled: boolean)
     async execute(args, exec) {
       assertBrowserToolInput(args)
       if (!goalEnabled && ['runGoal', 'goalControl'].includes(args.operation)) throw new Error('browser-goal-disabled')
-      return controller.execute(args, exec.agent, exec.signal)
+      const report = (initial = false) => {
+        try { reportTarget?.(exec, initial) } catch { /* display only */ }
+      }
+      let targetReady = false
+      const target = () => { targetReady = true; report() }
+      report(true)
+      try { return await controller.execute(args, exec.agent, exec.signal, target) }
+      finally { if (targetReady) report() }
     },
   })
-  return { ...defined, parameters: { ...BROWSER_PARAMETERS, oneOf: [...BROWSER_PARAMETERS.oneOf, ...(goalEnabled ? GOAL_BRANCHES : [])] } as unknown as Record<string, unknown> }
+  return { ...defined, ...(reportTarget && process.env.BYCLAW_INSTANCE_REFS_ENABLED !== 'false' ? { byclawInstanceRefsVersion: 1 } : {}), parameters: { ...BROWSER_PARAMETERS, oneOf: [...BROWSER_PARAMETERS.oneOf, ...(goalEnabled ? GOAL_BRANCHES : [])] } as unknown as Record<string, unknown> } as ToolDefinition
 }
 
 function resolved(config: Config): Required<Pick<Config, 'maxContexts' | 'maxQueue' | 'idleBrowserMs' | 'leaseTimeoutMs'>> {
@@ -573,7 +580,34 @@ export function registerBrowserTool(
       ? {}
       : { shutdownOnDispose: lifecycle.shutdownOnDispose }),
   })
-  ctx.tools.register(browserTool(controller, lifecycle.goal !== undefined))
+  const reportedTargets = new WeakMap<ToolRunContext, string>()
+  const sourceCalls = new WeakMap<ToolRunContext, number | undefined>()
+  ctx.tools.register(browserTool(controller, lifecycle.goal !== undefined, config.workspaceOnToolEnvironment ? (exec, initial) => {
+    if (process.env.BYCLAW_INSTANCE_REFS_ENABLED === 'false') return
+    if (initial) {
+      const call = [...(exec.agent?.session.snapshotEvents?.() ?? [])].reverse().find(event => (
+        (event.type === 'tool/call' && String(event.data.callId) === String(exec.callId))
+        || (event.type === 'tool/ptc-dispatch-start' && String(event.data.subCallId) === String(exec.callId))))
+      sourceCalls.set(exec, call?.seq)
+    }
+    const sourceCallSeq = sourceCalls.get(exec)
+    if (sourceCallSeq === undefined) return
+    const events = ctx.root as unknown as { emit(type: string, session: unknown, data: unknown): void }
+    const append = (instanceRefs: unknown[]) => {
+      const signature = JSON.stringify(instanceRefs)
+      if (exec.agent?.session && reportedTargets.get(exec) !== signature) {
+        events.emit('byclaw/tool-instance-refs', exec.agent.session, { callId: String(exec.callId), sourceCallSeq, instanceRefs })
+        reportedTargets.set(exec, signature)
+      }
+    }
+    if (initial) { append([]); return }
+    // Read only this remote browser's SSH provider. Local browsers keep the
+    // legacy viewer contract instead of falsely reporting an explicit empty target.
+    const ssh = ctx.get('ssh') as unknown as { instanceRefs?: (capability: string) => unknown[] } | undefined
+    // `ready` leases compute. Display reporting only observes an existing identity.
+    const refs = ssh?.instanceRefs?.('browser.automation') ?? []
+    if (refs.length > 0) append(refs)
+  } : undefined))
 
   ctx.on('agent/disposed', ({ agent }) => {
     void controller.closeAgent(String(agent.id))

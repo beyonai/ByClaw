@@ -2,7 +2,8 @@ import { TextDecoder as NodeTextDecoder } from 'util';
 import JSZip from 'jszip';
 import { OFFICE_VARIANT_PREVIEW_TYPES } from './formats';
 import { openArchive } from './archiveDecoder';
-import { MAX_ARCHIVE_ENTRIES, MAX_ARCHIVE_TEXT_BYTES, MAX_BINARY_PREVIEW_BYTES } from './binaryPreview';
+import { MAX_ARCHIVE_ENTRIES, MAX_ARCHIVE_ENTRY_BYTES } from './binaryPreview';
+import { MAX_ARCHIVE_PREVIEW_BYTES } from './previewSize';
 
 const encodeZip = (zip: JSZip, platform: 'DOS' | 'UNIX' = 'DOS') =>
   zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE', platform });
@@ -40,7 +41,7 @@ describe('ZIP directory and bounded on-demand extraction', () => {
   });
 
   it('lists a highly compressed oversized file but stops when the extracted text exceeds the limit', async () => {
-    const zip = new JSZip().file('large.txt', 'x'.repeat(MAX_ARCHIVE_TEXT_BYTES + 1)).file('small.txt', 'ok');
+    const zip = new JSZip().file('large.txt', 'x'.repeat(MAX_ARCHIVE_ENTRY_BYTES + 1)).file('small.txt', 'ok');
     const archive = await openArchive(await encodeZip(zip));
     await expect(archive.extract('large.txt')).rejects.toMatchObject({ code: 'limit' });
     expect(new NodeTextDecoder().decode(await archive.extract('small.txt'))).toBe('ok');
@@ -87,7 +88,7 @@ describe('ZIP directory and bounded on-demand extraction', () => {
     const zip = new JSZip();
     for (let index = 0; index <= MAX_ARCHIVE_ENTRIES; index++) zip.file(`${index}.txt`, '');
     await expect(openArchive(await encodeZip(zip))).rejects.toMatchObject({ code: 'limit' });
-    await expect(openArchive(new ArrayBuffer(MAX_BINARY_PREVIEW_BYTES + 1))).rejects.toMatchObject({ code: 'limit' });
+    await expect(openArchive(Object.defineProperty(new ArrayBuffer(1), 'byteLength', { value: MAX_ARCHIVE_PREVIEW_BYTES + 1 }))).rejects.toMatchObject({ code: 'limit' });
     await expect(openArchive(new Uint8Array([1, 2, 3]).buffer)).rejects.toThrow();
   });
 

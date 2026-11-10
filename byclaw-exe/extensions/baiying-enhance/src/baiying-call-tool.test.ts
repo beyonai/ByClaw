@@ -51,7 +51,8 @@ describe("buildBaiyingCallDescription", () => {
 
     expect(desc).toContain("信和达知识库 (KG_DOC, id: 10863004");
     expect(desc).toContain("dc智办宝 (MCP, id: 752299921044997");
-    expect(desc).toContain("待办视图 (VIEW, id: 10810924, name: 待办视图, resource_code: todo_view");
+    expect(desc).not.toContain("待办视图");
+    expect(desc).not.toContain("10810924");
   });
 
   it("lists the root agent resource when agentHomeUrl is present", () => {
@@ -79,10 +80,10 @@ describe("buildBaiyingCallDescription", () => {
     expect(desc).toContain("transfer_type: streamable_http");
   });
 
-  it("includes file_url guidance for large OBJECT/VIEW payloads", () => {
+  it("keeps general file guidance without retired execution instructions", () => {
     const desc = buildBaiyingCallDescription({ agent: makeAgent() });
 
-    expect(desc).toContain("`file_url` in response data; `file_url` is a local file path");
+    expect(desc).not.toContain("OBJECT/VIEW");
     expect(desc).toContain("prefer the local-file content pointed to by `file_url`");
     expect(desc).toContain("retry at least 3 times with a 1-2 second interval");
   });

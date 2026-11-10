@@ -7,6 +7,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.util.Date;
+import java.util.List;
 
 /**
  * 连接器列表返回 DTO。
@@ -64,4 +65,14 @@ public class ConnectorListDto {
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ssXXX", timezone = "GMT+8")
     @JSONField(serializeUsing = CredentialExpirationFastJsonSerializer.class)
     private Date lastVerifiedAt;
+    /** Result of the latest permission request, not a guarantee of every platform permission. */
+    private String permissionStatus;
+
+    private List<String> missingScopes = List.of();
+
+    /** Server-only encrypted binding metadata, cleared after projecting public fields. */
+    @JsonIgnore
+    @JSONField(serialize = false)
+    private String authCredential;
+
 }

@@ -558,6 +558,7 @@ public class SessionStreamEventRouter {
         answerDelta.setCreated(System.currentTimeMillis() / 1000);
         answerDelta.setId(StringUtils.defaultIfBlank(payload.getString("id"), UUID.randomUUID().toString().replace("-", "")));
         answerDelta.setTraceId(payload.getString("traceId"));
+        if (payload.containsKey("instanceRefs")) answerDelta.setInstanceRefs(payload.get("instanceRefs"));
         answerDelta.setOrderId(payload.getString("orderId"));
         answerDelta.setParentOrderId(payload.getString("parentOrderId"));
         answerDelta.setSourceAgentType(payload.getString("sourceAgentType"));

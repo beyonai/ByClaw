@@ -108,7 +108,7 @@ class TenantGroupMemberServiceTest extends I18nTestSupport {
     }
 
     @Test
-    void anotherEnterpriseAgentIsNotAutomaticallyAuthorizedByEnterpriseOwnership() {
+    void anotherEnterpriseAgentCanBeInvitedWithoutResourceAccess() {
         when(node.request(eq(context), eq("GET"), eq(path()), eq(null), any())).thenReturn(detail());
         SsResource resource = new SsResource();
         resource.setResourceBizType("DIG_EMPLOYEE");
@@ -119,7 +119,10 @@ class TenantGroupMemberServiceTest extends I18nTestSupport {
         GroupChatMemberRequest request = new GroupChatMemberRequest();
         request.setType("AGENT");
         request.setId(List.of(10000713L));
-        assertThatThrownBy(() -> service.invite(context, groupId, request)).isInstanceOf(ResponseStatusException.class);
+        service.invite(context, groupId, request);
+        verify(node).command(eq(context), eq("POST"), eq(path() + "/members"), eq(groupId.toString()),
+            eq("ADD_MEMBERS"), any(TenantNodeModels.AddMembers.class));
+        verify(resourceAuthorization, never()).hasResourceAccessPermission(any(SsResource.class));
     }
 
     @Test
@@ -135,7 +138,7 @@ class TenantGroupMemberServiceTest extends I18nTestSupport {
     }
 
     @Test
-    void privateAgentWithoutAccessCannotBeAdded() {
+    void privateAgentWithoutAccessCanBePrepared() {
         when(node.request(eq(context), eq("GET"), eq(path()), eq(null), any())).thenReturn(detail());
         SsResource resource = new SsResource();
         resource.setResourceBizType("DIG_EMPLOYEE");
@@ -147,9 +150,27 @@ class TenantGroupMemberServiceTest extends I18nTestSupport {
         request.setType("AGENT");
         request.setId(List.of(10000713L));
 
-        assertThatThrownBy(() -> service.invite(context, groupId, request))
+        assertThat(service.prepareMembers(context, "AGENT", request.getId())).containsExactly(
+            new TenantNodeModels.InvitedMember("AGENT", "10000713", null, true));
+        verify(resourceAuthorization, never()).hasResourceAccessPermission(any(SsResource.class));
+    }
+
+    @Test
+    void invitedAgentMustExistAndBeAnOnShelfDigitalEmployee() {
+        assertThatThrownBy(() -> service.prepareMembers(context, "AGENT", List.of(10000713L)))
             .isInstanceOf(ResponseStatusException.class);
-        verify(node, never()).command(eq(context), eq("POST"), any(), any(), any(), any());
+        SsResource resource = new SsResource();
+        resource.setResourceBizType("EXPERT_TEAM");
+        resource.setResourceStatus(2);
+        when(resources.findById(10000713L)).thenReturn(resource);
+        assertThatThrownBy(() -> service.prepareMembers(context, "AGENT", List.of(10000713L)))
+            .isInstanceOf(ResponseStatusException.class);
+        resource.setResourceBizType("DIG_EMPLOYEE");
+        for (Integer status : java.util.Arrays.asList(null, 1, 3)) {
+            resource.setResourceStatus(status);
+            assertThatThrownBy(() -> service.prepareMembers(context, "AGENT", List.of(10000713L)))
+                .isInstanceOf(ResponseStatusException.class);
+        }
     }
 
     @Test

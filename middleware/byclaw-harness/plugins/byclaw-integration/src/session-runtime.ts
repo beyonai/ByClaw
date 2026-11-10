@@ -1,3 +1,4 @@
+import { describeSessionToolInstanceRefs, onToolInstanceRefs, toolInstanceSourceSeq } from './instance-refs.ts'
 /** Durable DSH root-session runtime used by the BYCLAW_DSH Worker. */
 
 import { ASR_NO_SPEECH_MESSAGE, ByClawVoiceRuntime, VoiceSummaryStreamFilter, byClawVoicePayload, voiceRequestFingerprint, withVoiceCancellation } from './voice-runtime.ts'
@@ -152,6 +153,8 @@ export interface ByClawDshSessionRuntimeOptions {
   sessionMetadata: ByClawSessionMetadataStore
   /** Notify independently owned session observers; failure must not reject user input. */
   sessionOpening?: (command: AskAgentCommand, firstSession: boolean, signal: AbortSignal) => Promise<void>
+  /** Finish only this group's classification before returning its terminal result; ordinary requests return undefined. */
+  waitForGroupChatDisposition?: (command: AskAgentCommand) => Promise<void> | undefined
   /** Bind trusted root role before extensions, including new roots without metadata yet. */
   rootSetup?: (agentCtx: Context, agent: Agent, binding: ByClawRootBinding) => void
   /** Await host extensions before a new, resumed, or reused session accepts input. */
@@ -730,6 +733,7 @@ export interface DshEventDescription {
   summary: string
   text?: string
   toolName?: string
+  instanceRefs?: Array<{ sandboxId: string; instance: string; mappingId?: string }>
   toolCallId?: string
   arguments?: string
   result?: string
@@ -767,7 +771,7 @@ export async function loadPersistedSessionById(
 }
 
 /** Convert a durable DSH event to its ByClaw transcript meaning, omitting internal lifecycle records. */
-export function describeDshSessionEvent(event: SessionEvent): DshEventDescription | undefined {
+export function describeDshSessionEvent(event: SessionEvent, instanceMetadata?: { supported?: boolean; terminal?: 'success' | 'error' }): DshEventDescription | undefined {
   if (event.type === 'user/message') {
     if (event.data.source.kind === 'user') return undefined
     const source = event.data.source as unknown as Record<string, unknown>
@@ -808,6 +812,7 @@ export function describeDshSessionEvent(event: SessionEvent): DshEventDescriptio
     return {
       eventKind: 'tool.call', status: 'running', summary: `Tool call · ${event.data.name}`,
       toolName: event.data.name, toolCallId: String(event.data.callId), arguments: event.data.arguments,
+      ...(instanceMetadata?.supported ? { instanceRefs: [] } : {}),
     }
   }
   if (event.type === 'tool/result') {
@@ -827,6 +832,7 @@ export function describeDshSessionEvent(event: SessionEvent): DshEventDescriptio
       eventKind: 'tool.call', status: 'running', summary: `Tool call · ${event.data.name}`,
       toolName: event.data.name, toolCallId: String(event.data.subCallId),
       arguments: JSON.stringify(event.data.arguments),
+      ...(instanceMetadata?.supported ? { instanceRefs: [] } : {}),
     }
   }
   if (event.type === 'tool/ptc-dispatch') {
@@ -860,6 +866,7 @@ export function sessionEventProjection(
       phase: eventKind === 'tool.call' ? 'start' : details.isError === true ? 'error' : 'success',
       toolCallId: details.toolCallId ?? `${context.messageIdPrefix ?? context.parentMessageId}:tool:${context.sequence}`,
       toolName: details.toolName,
+      instanceRefs: details.instanceRefs,
       ...(eventKind === 'tool.call' && details.arguments !== undefined ? { input: details.arguments } : {}),
       ...(eventKind === 'tool.result' && details.result !== undefined ? { output: details.result } : {}),
       description: summary,
@@ -989,6 +996,7 @@ export class ByClawAsyncTeamGate {
   private rootActive = false
   private readonly activeAgents = new Set<string>()
   private snapshotActiveChildCount = 0
+  private readonly teamWorkRevisions = new Map<string, string>()
   private activityVersion = 0
   private recovering = false
   private disposed = false
@@ -1021,20 +1029,34 @@ export class ByClawAsyncTeamGate {
 
   completeRetainedTeamWhenQuiescent(activeChildCount = 0): void {
     if (!this.waiting || this.kind !== 'team' || this.startCallId !== undefined || !this.teamActive) return
+    if (!this.teamQuiescent) {
+      this.minimumFinalCaptainTurn = this.captainTurnOpen
+        ? this.captainTurn
+        : (this.captainTurn ?? 0) + 1
+    }
     this.teamQuiescent = true
     this.observeSnapshotActiveChildren(activeChildCount)
-    this.minimumFinalCaptainTurn = this.captainTurnOpen
-      ? this.captainTurn
-      : (this.captainTurn ?? 0) + 1
     this.scheduleTimeout()
     this.scheduleQuietCompletion()
   }
 
-  /** Renew the inactivity budget when a retained team's durable snapshot advances. */
+  /** UI-only changes must not invalidate an answer for the same task/result generation. */
+  observeTeamWork(snapshot: TeamActivitySnapshot): void {
+    // Older snapshot producers have no workRevision; retain their task-level fence.
+    const revision = snapshot.workRevision ?? JSON.stringify({
+      lifecycle: snapshot.lifecycle, stoppedAt: snapshot.stoppedAt, tasks: snapshot.tasks,
+    })
+    if (this.teamWorkRevisions.get(snapshot.teamId) === revision) return
+    this.teamWorkRevisions.set(snapshot.teamId, revision)
+    this.recordProgress()
+  }
+
+  /** Renew the inactivity budget when actual work or a new captain report advances. */
   recordProgress(): void {
     if (!this.waiting || this.kind !== 'team') return
     this.teamQuiescent = false
     this.captainAnsweredAfterTeam = false
+    this.minimumFinalCaptainTurn = undefined
     this.clearQuietTimer()
     this.recordActivity()
   }
@@ -1124,13 +1146,13 @@ export class ByClawAsyncTeamGate {
 
   private scheduleQuietCompletion(): void {
     if (!this.waiting || this.kind !== 'team' || !this.teamQuiescent
-      || !this.captainAnsweredAfterTeam || this.rootActive
+      || !this.captainAnsweredAfterTeam || this.rootActive || this.captainTurnOpen
       || this.recovering || this.activeAgents.size > 0 || this.snapshotActiveChildCount > 0) return
     this.clearQuietTimer()
     this.quietTimer = setTimeout(() => {
       this.quietTimer = undefined
       if (this.waiting && this.kind === 'team' && this.teamQuiescent
-        && this.captainAnsweredAfterTeam && !this.rootActive
+        && this.captainAnsweredAfterTeam && !this.rootActive && !this.captainTurnOpen
         && this.activeAgents.size === 0 && this.snapshotActiveChildCount === 0) {
         this.finish()
       }
@@ -1189,7 +1211,30 @@ export class ByClawAsyncTeamGate {
     return false
   }
 
+  private observeTemplateResult(isError: boolean, content: readonly ContentBlock[], meta?: Record<string, unknown>): void {
+    const text = contentText(content)
+    const assistanceReturned = this.templateCallIsAssistance && (
+      meta?.['byclaw_assistance_status'] === 'completed' || meta?.['byclaw_assistance_status'] === 'blocked'
+      || /^Assistance status: (completed|blocked)\b/u.test(text)
+    )
+    if (isError || assistanceReturned) this.templateReported = true
+    else {
+      // DSH PTC records rendered content without presentation metadata. Both
+      // dispatch paths must bind the exact child before accepting its settlement.
+      const childId = meta?.['instance_session_id'] ?? (this.templateCallIsAssistance
+        ? /^Assistance session: ([^\s]+)$/mu.exec(text)?.[1]
+        : /^(?:agent|expert-team) template [^\s]+ instantiated as child ([^\s;]+); parent is waiting for the asynchronous report\.$/mu.exec(text)?.[1])
+      if (typeof childId === 'string' && childId !== '') {
+        this.templateSessionId = childId
+        this.templateReported = this.templateSettledSessions.has(childId)
+      }
+    }
+    this.templateCallId = undefined
+  }
+
   observe(event: SessionEvent): void {
+    if (event.type === 'user/message' && (String(event.data.source.kind) === 'plugin:dsh-agent-teams'
+      || event.data.source.kind === 'subagent-settled')) this.recordProgress()
     if (event.type === 'turn/start') {
       this.captainTurn = event.data.turn
       this.captainTurnOpen = true
@@ -1230,35 +1275,11 @@ export class ByClawAsyncTeamGate {
     if (event.type === 'tool/result' && this.templateCallId !== undefined) {
       const result = toolResultOf(event)
       if (result.toolCallId !== String(this.templateCallId)) return
-      const meta = result.meta
-      const text = contentText(result.content)
-      const assistanceReturned = this.templateCallIsAssistance && (meta?.['byclaw_assistance_status'] === 'completed' || meta?.['byclaw_assistance_status'] === 'blocked' || /^Assistance status: (completed|blocked)\b/u.test(text))
-      if (result.isError || assistanceReturned) this.templateReported = true
-      else {
-        const meta = event.data.meta
-        const childId = (meta !== null && typeof meta === 'object' && !Array.isArray(meta) ? meta['instance_session_id'] : undefined)
-          ?? (result as unknown as { meta?: Record<string, unknown> }).meta?.['instance_session_id']
-          ?? /^Assistance session: ([^\s]+)$/mu.exec(text)?.[1]
-        if (typeof childId === 'string' && childId !== '') {
-          this.templateSessionId = childId
-          this.templateReported = this.templateSettledSessions.has(childId)
-        }
-      }
-      this.templateCallId = undefined
+      this.observeTemplateResult(result.isError, result.content, result.meta)
       return
     }
     if (event.type === 'tool/ptc-dispatch' && this.templateCallId === event.data.subCallId) {
-      const text = contentText(event.data.content)
-      if (event.data.isError || (this.templateCallIsAssistance && /^Assistance status: (completed|blocked)\b/u.test(text))) this.templateReported = true
-      else if (this.templateCallIsAssistance) {
-        // PTC dispatch events do not carry presentation metadata in DSH rc.2.
-        const childId = /^Assistance session: ([^\s]+)$/mu.exec(text)?.[1]
-        if (childId !== undefined) {
-          this.templateSessionId = childId
-          this.templateReported = this.templateSettledSessions.has(childId)
-        }
-      }
-      this.templateCallId = undefined
+      this.observeTemplateResult(event.data.isError, event.data.content)
       return
     }
     if (event.type === 'user/message' && event.data.source.kind === 'subagent-settled') {
@@ -1282,7 +1303,7 @@ export class ByClawAsyncTeamGate {
     const completed = this.kind === 'team'
       ? this.startCallId === undefined && (
           this.teamDeleted
-          || (this.teamQuiescent
+          || (this.teamQuiescent && this.captainAnsweredAfterTeam
             && this.minimumFinalCaptainTurn !== undefined
             && event.data.turn >= this.minimumFinalCaptainTurn)
         )
@@ -1359,6 +1380,8 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   private readonly queues = new Map<string, Promise<unknown>>()
   private readonly coldRecoveryParking = new ColdRecoveryAskParking()
   private readonly disposeSessionEvents: () => void
+  private readonly disposeInstanceRefs: () => void
+  private readonly instanceCallSequences = new WeakMap<ActiveTurn, Map<string, number>>()
   private readonly disposeAgentStatusEvents: () => void
   private readonly disposeAssistantStreamEvents: () => void
   private readonly disposeInboxEvents: () => void
@@ -1380,6 +1403,26 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
 
   constructor(private readonly ctx: Context, private readonly options: ByClawDshSessionRuntimeOptions) {
     this.questions = new ByClawQuestionBroker(options.interactionStore)
+    this.disposeInstanceRefs = onToolInstanceRefs(ctx, (session, data) => {
+      const turn = this.activeTurnFor(session)
+      const saved = options.sessionMetadata.recordToolInstanceRefs(session, data)
+      // Metadata still persists when a tool finishes after its foreground turn.
+      // Attach the rejection handler immediately, before a possibly slow projection queue.
+      const settled = saved.catch((error: unknown) => {
+        this.ctx.logger.warn(`[byclaw-dsh] tool instance metadata failed: ${sanitizeByClawOperationalLog(error)}`)
+        return undefined
+      })
+      if (turn === undefined) return
+      this.queueForwarding(turn, 'tool instance projection', async () => {
+        const record = await settled
+        if (record === undefined || this.instanceCallSequences.get(turn)?.get(`${session.id}:${data.callId}`) !== data.sourceCallSeq) return
+        const { eventKind, status, summary, ...details } = describeSessionToolInstanceRefs(session, record)
+        await this.emitSessionEvent(turn, session, `instance:${data.sourceCallSeq}:${record.revision}`, eventKind, status, summary, {
+          ...details,
+          toolName: turn.toolNames.get(`${session.id}:${data.callId}`),
+        })
+      })
+    })
     this.disposeInboxEvents = ctx.root.on('agent/inbox/claimed', ({ agent, message, turn: turnNumber }) => {
       const pending = this.pendingForeground.get(String(agent.id))
       const turn = pending?.inputMessageId === String(message.id) ? pending.turn : this.activeTurnFor(agent.session)
@@ -1502,8 +1545,14 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     this.assertAccepting()
     const route = this.commandSessionRoute(command)
     const stateWorkspace = byClawSessionCwd(route.externalRootSessionId, this.options.byRoot)
-    return teamStateRuntime(this.ctx).runWithWorkspaceAlias(route.cwd ?? stateWorkspace, stateWorkspace,
-      () => this.askInWorkspace(command, context))
+    try {
+      return await teamStateRuntime(this.ctx).runWithWorkspaceAlias(route.cwd ?? stateWorkspace, stateWorkspace,
+        () => this.askInWorkspace(command, context))
+    } finally {
+      // Classification owns its deadline and failures; it must not replace a conversation error.
+      const completion = this.options.waitForGroupChatDisposition?.(command)
+      if (completion !== undefined) await completion
+    }
   }
 
   private async askInWorkspace(command: AskAgentCommand, context: AgentContext): Promise<ByClawDshAskResult> {
@@ -2029,6 +2078,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     this.voiceControllers.clear()
     this.voiceRequests.clear()
     this.disposeSessionEvents()
+    this.disposeInstanceRefs()
     this.disposeInboxEvents()
     this.disposeAssistantStreamEvents()
     this.disposeAgentStatusEvents()
@@ -2786,6 +2836,12 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     }
 
     if (response) {
+      if (turn.owner === undefined && (event.type === 'assistant/message' || event.type === 'turn/end')) {
+        // Reconcile durable results before accepting this answer. A delayed UI
+        // refresh must not later mistake already summarized work for new work.
+        turn.teamSnapshots?.request()
+        await turn.teamSnapshots?.flush()
+      }
       const wasWaiting = turn.teamGate.waiting
       if ((event.type === 'tool/call' && event.data.name === 'agent_teams_start')
         || (event.type === 'tool/ptc-dispatch-start' && event.data.name === 'agent_teams_start')) {
@@ -2812,6 +2868,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
     if (event.type === 'tool/ptc-dispatch-start') {
       turn.toolNames.set(`${session.id}:${event.data.subCallId}`, event.data.name)
     }
+    if (event.type === 'tool/call' || event.type === 'tool/ptc-dispatch-start') {
+      let calls = this.instanceCallSequences.get(turn)
+      if (calls === undefined) { calls = new Map(); this.instanceCallSequences.set(turn, calls) }
+      calls.set(`${session.id}:${event.type === 'tool/call' ? event.data.callId : event.data.subCallId}`, event.seq)
+    }
 
     const projectedEditDiff = await this.forwardEditDiff(turn, session, event)
     const projectedPlan = event.type === 'todo/write' && root
@@ -2820,8 +2881,24 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       await this.emitPlan(turn, root ? session : this.ctx.root.sessions?.get(SessionId(turn.rootSessionId)),
         root ? undefined : String(session.id))
     }
-    const description = projectedPlan || projectedEditDiff ? undefined : describeDshSessionEvent(event)
+    let instanceMetadata: { supported?: boolean; terminal?: 'success' | 'error' } | undefined
+    if (event.type === 'tool/call' || event.type === 'tool/ptc-dispatch-start') {
+      const agent = this.ctx.root.agents?.get(String(session.id) as never)
+      const definition = this.ctx.tools?.get(event.data.name, agent) as { byclawInstanceRefsVersion?: number } | undefined
+      instanceMetadata = { supported: definition?.byclawInstanceRefsVersion === 1 }
+    }
+    const description = projectedPlan || projectedEditDiff ? undefined : describeDshSessionEvent(event, instanceMetadata)
     if (description !== undefined) {
+      if (description.toolCallId !== undefined) {
+        try {
+          const sourceCallSeq = event.type === 'tool/result' && event.sourceEventSeqs?.length === 1
+            ? event.sourceEventSeqs[0] : toolInstanceSourceSeq(session, description.toolCallId, event.seq)
+          const record = sourceCallSeq === undefined ? undefined : this.options.sessionMetadata.getToolInstanceRefs(session, description.toolCallId, sourceCallSeq)
+          if (record !== undefined) description.instanceRefs = record.instanceRefs
+        } catch (error: unknown) {
+          this.ctx.logger.warn(`[byclaw-dsh] tool instance lookup failed: ${sanitizeByClawOperationalLog(error)}`)
+        }
+      }
       const { eventKind, status, summary, ...details } = description
       const toolName = details.toolName ?? (details.toolCallId === undefined
         ? undefined
@@ -3270,6 +3347,7 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       text?: string
       toolName?: string
       toolCallId?: string
+      instanceRefs?: Array<{ sandboxId: string; instance: string; mappingId?: string }>
       arguments?: string
       result?: string
       isError?: boolean
@@ -3455,6 +3533,10 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       turn.teamGate.retainActiveTeam()
     }
     turn.teamGate.observeSnapshotActiveChildren(workingChildren.size)
+    for (const team of ownedLiveSnapshots) turn.teamGate.observeTeamWork(team)
+    if (ownedLiveSnapshots.length > 0 && ownedLiveSnapshots.every(isQuiescentTeamSnapshot)) {
+      turn.teamGate.completeRetainedTeamWhenQuiescent(workingChildren.size)
+    }
     this.queueRuntimeProjection(turn, turn.runtime.observeTeamActivity(
       ownedLiveSnapshots.some(team => !isQuiescentTeamSnapshot(team)),
       workingChildren.size,
@@ -3467,7 +3549,6 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
         const eventId = dshAgentTeamsSnapshotEventId(team, isArchived)
         if (turn.emittedTeamSnapshots.has(eventId)) continue
         turn.emittedTeamSnapshots.add(eventId)
-        if (!isArchived) turn.teamGate.recordProgress()
         const projection = teamSnapshotProjection(team, {
           archived: isArchived,
           capturedAt: new Date().toISOString(),
@@ -3492,9 +3573,6 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
           this.options.sourceAgentType,
         )
         await this.emitTeamTaskPlans(turn, team, eventId, isArchived)
-      }
-      if (!isArchived && ownedSnapshots.length > 0 && ownedSnapshots.every(isQuiescentTeamSnapshot)) {
-        turn.teamGate.completeRetainedTeamWhenQuiescent(workingChildren.size)
       }
     }
   }

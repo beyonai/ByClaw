@@ -203,9 +203,10 @@ export const normalizeMenuUrl = (url?: string) => {
   return `https://${url}`;
 };
 
+// 暂时隐藏界面技能管理入口，统一过滤后台下发配置，避免头像菜单和管理侧栏继续展示；保留功能便于恢复。
 export const normalizeManagerMenuConfig = (menus: any[]) =>
   menus
-    .slice()
+    .filter((item) => item.menuCode !== 'menu_ui_agent')
     .sort((a, b) => (a.menuOrder || 0) - (b.menuOrder || 0))
     .map((item) => ({
       ...item,

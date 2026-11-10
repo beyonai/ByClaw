@@ -115,3 +115,12 @@ describe('MicroVM template actions', () => {
     }
   });
 });
+
+test('shared configuration submits the host service and selected resource profile', async () => {
+  (startTemplateRebuild as jest.Mock).mockResolvedValue({ id: 'shared', state: 'NEW' });
+  (listTemplateRebuildRecords as jest.Mock).mockResolvedValue({ total: 0, records: [] });
+  render(<TemplateRebuildActions serviceKey="shared-host" profileKey="m" supported />);
+  fireEvent.click(screen.getByRole('button', { name: '重建模板' }));
+  fireEvent.click(await screen.findByRole('button', { name: '确认重建' }));
+  await waitFor(() => expect(startTemplateRebuild).toHaveBeenCalledWith('shared-host', expect.any(String), 'm'));
+});

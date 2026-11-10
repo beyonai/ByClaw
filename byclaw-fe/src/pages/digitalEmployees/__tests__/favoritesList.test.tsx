@@ -241,6 +241,58 @@ describe('commercial employee favorite lists', () => {
   });
 
   // 类型条件必须在接口分页前生效，且搜索、翻页、恢复全部时不能保留上一种类型限制。
+  it.each([false, true])(
+    'preserves organization audience through search and pagination, favorites=%s',
+    async (enabled) => {
+      const first = Array.from({ length: 20 }, (_, index) => row(index + 1));
+      (getAllDigitalEmployeesV2 as jest.Mock).mockImplementation(async ({ pageNum }) => ({
+        list: pageNum === 1 ? first : [row(21)],
+        total: 21,
+        pageNum,
+      }));
+      const ref = React.createRef<any>();
+      const audience = {
+        audienceScopeMode: 'ORGS' as const,
+        audienceOrgIds: ['10', '20'],
+        audienceIncludeDescendants: false,
+      };
+      render(
+        <AllDigitalEmployees
+          ref={ref}
+          source="official"
+          mode="all"
+          enableFavorites={enabled}
+          hideCategories
+          dropdownParam={{ ...audience, digitalEmployeeType: 'ENTERPRISE_GROUP' }}
+          buildFilterParam={buildDigitalEmployeeFilterParam}
+        />
+      );
+      await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(20));
+      await act(async () => {
+        await ref.current.getSearch('财务');
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'load more' }));
+      await waitFor(() => expect(screen.getAllByTestId('card')).toHaveLength(21));
+      expect((getAllDigitalEmployeesV2 as jest.Mock).mock.calls[2][0]).toMatchObject({
+        ...audience,
+        pageNum: 2,
+        keyword: '财务',
+        agentType: '017',
+        ownerType: 'enterprise',
+      });
+      await act(async () => {
+        await ref.current.getSearch('财务', { audienceScopeMode: 'COMPANY' });
+      });
+      const company = (getAllDigitalEmployeesV2 as jest.Mock).mock.calls[3][0];
+      expect(company).toMatchObject({ pageNum: 1, keyword: '财务', audienceScopeMode: 'COMPANY' });
+      expect(company).not.toHaveProperty('audienceOrgIds');
+      await act(async () => {
+        await ref.current.getSearch('财务', { audienceScopeMode: 'ALL' });
+      });
+      expect((getAllDigitalEmployeesV2 as jest.Mock).mock.calls[4][0]).not.toHaveProperty('audienceScopeMode');
+    }
+  );
+
   it.each([
     ['ENTERPRISE_EMPLOYEE', { includeEmployeeGroup: false }],
     ['ENTERPRISE_GROUP', { includeEmployeeGroup: true, agentType: '017' }],

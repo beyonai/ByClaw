@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy;
 
+import com.iwhalecloud.byai.common.constants.resource.RetiredConversationResources;
 import cn.hutool.core.bean.BeanUtil;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson2.JSON;
@@ -166,6 +167,13 @@ import org.springframework.web.context.request.ServletRequestAttributes;
  */
 @Service
 public class DigitalEmployeeApplicationService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private EmployeeVersionStore employeeVersionStore;
+    @org.springframework.beans.factory.annotation.Autowired
+    private EmployeeVersionAccess employeeVersionAccess;
+    @org.springframework.beans.factory.annotation.Autowired
+    private EmployeeVersionLock employeeVersionLock;
+
 
     @Autowired
     private DigitalEmployeeGovernanceService employeeGovernance;
@@ -1005,6 +1013,7 @@ public class DigitalEmployeeApplicationService {
         }
 
 
+        if (employeeVersionStore != null) employeeVersionStore.recordCurrent(ssResource, digitalEmployeeDTO, "CREATE");
         ResourceExtDigEmployeeDto resourceExtDigEmployeeDto = new ResourceExtDigEmployeeDto();
         BeanUtil.copyProperties(ssResource, resourceExtDigEmployeeDto);
         resourceExtDigEmployeeDto.setSsResExtDigEmployee(ssResExtDigEmployee);
@@ -1160,6 +1169,27 @@ public class DigitalEmployeeApplicationService {
      * @param digitalEmployeeDTO 修改对象
      * @return SsResource
      */
+    public void validateVersionDependencies(DigitalEmployeeDTO configuration) {
+        List<Long> requested = this.mergeRelSkillIds(configuration.getRelIds(), configuration.getRelSkills());
+        if (CollectionUtils.isEmpty(requested)) return;
+        List<SsResource> dependencies = this.findInstallRelResources(requested);
+        for (SsResource dependency : dependencies) {
+            if (!Objects.equals(dependency.getComAcctId(), CurrentUserHolder.getEnterpriseId())
+                || !authApplicationService.hasResourceUsePermission(dependency))
+                throw new BaseException("历史版本包含当前无权使用的资源：" + dependency.getResourceName());
+        }
+    }
+
+    public void validateVersionConfiguration(DigitalEmployeeDTO configuration) {
+        if (configuration == null || StringUtils.isBlank(configuration.getResourceName()))
+            throw new BaseException("数字员工名称不能为空");
+        this.normalizeRelSkillsForSave(configuration);
+        this.validateDigitalEmployeeTextFieldLengths(configuration);
+        if (!DigitalEmployType.isValid(configuration.getAgentType())) throw new BaseException("数字员工类型不正确");
+        if ("017".equals(configuration.getAgentType()) && CollectionUtils.isEmpty(configuration.getEmployeeGroupMembers()))
+            throw new BaseException("员工组至少需要一名成员");
+    }
+
     public SsResource updateDigitalEmployee(DigitalEmployeeDTO digitalEmployeeDTO) {
 
         boolean isFrontAccess = digitalEmployeeDTO.isFrontAccess();
@@ -1178,6 +1208,7 @@ public class DigitalEmployeeApplicationService {
         // 全量编辑可能改变技能关系，必须与技能组快照安装/卸载串行化。
         SsResource ssResource = this.lockDigitalEmployeeForSkillRelationMutation(resourceId);
         this.validateDigitalEmployeeUpdatePermission(ssResource);
+        if (employeeVersionStore != null) employeeVersionStore.baseline(ssResource);
         if (digitalEmployeeDTO.getOwnerType() == null) digitalEmployeeDTO.setOwnerType(ssResource.getOwnerType());
         if (!Objects.equals(ssResource.getOwnerType(), digitalEmployeeDTO.getOwnerType())) {
             throw new BaseException(I18nUtil.get("employee.publication.owner.change.forbidden"));
@@ -1199,10 +1230,15 @@ public class DigitalEmployeeApplicationService {
         // back to BYCLAW_* based on agentType.
         boolean harnessRuntime = StringUtils.equalsIgnoreCase(
             StringUtils.trimToEmpty(ssResource.getWorkerAgentType()), WorkerAgentType.HARNESS.getCode());
+        Integer previousStatus = ssResource.getResourceStatus();
+        Long activeVersion = ssResource.getResourceRVerid();
+        Long savedVersion = ssResource.getResourceDVerid();
         BeanUtil.copyProperties(digitalEmployeeDTO, ssResource);
+        ssResource.setResourceRVerid(activeVersion);
+        ssResource.setResourceDVerid(savedVersion);
         ssResource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         ssResource.setUpdateTime(new Date());
-        ssResource.setResourceStatus(ResourceStatus.ON_SHELF.getNum());
+        ssResource.setResourceStatus(EmployeeVersionContext.target() == null ? ResourceStatus.ON_SHELF.getNum() : previousStatus);
         // 归属不可通过编辑变更，个人到企业必须经过发布流程。
         ssResource.setOwnerType(StringUtils.trimToNull(digitalEmployeeDTO.getOwnerType()));
         if (harnessRuntime) {
@@ -1237,7 +1273,7 @@ public class DigitalEmployeeApplicationService {
         // this.syncDigEmployeeSkillsToRedisQuietly(resourceId);
 
         // 前台的直接上架
-        if (isFrontAccess) {
+        if (isFrontAccess && Objects.equals(ssResource.getResourceStatus(), ResourceStatus.ON_SHELF.getNum())) {
             resourceEventService.sendResourceShelfEvent(ssResource);
         }
 
@@ -1263,6 +1299,12 @@ public class DigitalEmployeeApplicationService {
             // 使用新的 memoryConfigList 方式保存(带用户ID条件删除)
             templateRuleInfoApplicationService.saveResourceTemplateRelationsByMemoryConfig(resourceId, memoryConfigList,
                 currentUserId, memoryLibraryId);
+        }
+
+        if (employeeVersionStore != null) {
+            ssResource.setResourceRVerid(activeVersion);
+            ssResource.setResourceDVerid(savedVersion);
+            employeeVersionStore.recordCurrent(ssResource, digitalEmployeeDTO, "EDIT");
         }
 
         if (!isEmployeeGroup) {
@@ -1364,7 +1406,9 @@ public class DigitalEmployeeApplicationService {
                 ssResource = this.lockDigitalEmployeeForSkillRelationMutation(digitalEmployeeId);
             }
         }
+        if (employeeVersionStore != null) ssResource = this.lockDigitalEmployeeForSkillRelationMutation(digitalEmployeeId);
         this.validateResourceInstallPermission(ssResource, installRelResources);
+        installRelResources.forEach(resource -> RetiredConversationResources.requireAvailable(resource.getResourceBizType()));
 
         List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(digitalEmployeeId);
         LinkedHashSet<Long> mergedRelIds = new LinkedHashSet<>();
@@ -1399,6 +1443,7 @@ public class DigitalEmployeeApplicationService {
         SsResource digitalEmployee, Long groupId, List<Long> skillIds) {
         Long currentUserId = this.requireCurrentUserId();
         List<Long> snapshotSkillIds = this.normalizeSnapshotSkillIds(digitalEmployee, groupId, skillIds);
+        if (employeeVersionStore != null) employeeVersionStore.baseline(digitalEmployee);
         SkillGroupInstallResultVo result = new SkillGroupInstallResultVo();
         result.setTotalSkillIds(new ArrayList<>(snapshotSkillIds));
 
@@ -1478,6 +1523,7 @@ public class DigitalEmployeeApplicationService {
     public SkillGroupInstallResultVo uninstallSkillGroupSnapshot(
         SsResource digitalEmployee, Long groupId, SkillGroupUninstallMode mode, String previewToken) {
         this.validateSnapshotContext(digitalEmployee, groupId);
+        if (employeeVersionStore != null) employeeVersionStore.baseline(digitalEmployee);
         SkillGroupUninstallMode effectiveMode = mode == null
             ? SkillGroupUninstallMode.PRESERVE_SHARED : mode;
         SkillGroupInstallResultVo result = new SkillGroupInstallResultVo();
@@ -1676,7 +1722,8 @@ public class DigitalEmployeeApplicationService {
             return this.findDetailsById(employeeIdDTO);
         }
 
-        SsResource ssResource = ssResourceService.findById(digitalEmployeeId);
+        SsResource ssResource = employeeVersionStore == null ? ssResourceService.findById(digitalEmployeeId)
+            : this.lockDigitalEmployeeForSkillRelationMutation(digitalEmployeeId);
         validateDigitalEmployeeResourceUninstallPermission(ssResource);
 
         List<LegacyWorkspaceSkill> legacyWorkspaceSkills = this.findLegacyWorkspaceSkillsToDelete(ssResource,
@@ -1695,6 +1742,7 @@ public class DigitalEmployeeApplicationService {
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
         robotChannelRegistryCoordinator.refreshForResource(digitalEmployeeId);
         // 与编辑保存一致：关联删除提交后再重建 Redis 快照并发送 UPDATED，避免同步读到旧关联。
+        if (employeeVersionStore != null) employeeVersionStore.recordCurrent(ssResource, null, "BINDING_CHANGE");
         digitalEmployeeRuntimeRefreshService.scheduleDigitalEmployeeUpdateRefreshAfterCommit(digitalEmployeeId, null);
 
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
@@ -2017,6 +2065,7 @@ public class DigitalEmployeeApplicationService {
         Long digitalEmployeeId = digitalEmployee.getResourceId();
         this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
         operationLogService.recordOperationLog(digitalEmployee, OperationTypeEnum.UPDATE);
+        if (employeeVersionStore != null) employeeVersionStore.recordCurrent(digitalEmployee, null, "BINDING_CHANGE");
         digitalEmployeeRuntimeRefreshService.scheduleSkillRuntimeRefreshAfterCommit(List.of(digitalEmployeeId));
     }
 
@@ -2066,10 +2115,12 @@ public class DigitalEmployeeApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 I18nUtil.get("digemployee.processor.param.notnull"));
         }
+        if (employeeVersionLock != null) employeeVersionLock.acquire(tenantId, digitalEmployeeId);
         SsResource digitalEmployee = skillGroupMapper.selectDigitalEmployeeForUpdate(digitalEmployeeId, tenantId);
         if (digitalEmployee == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
+        if (employeeVersionStore != null) employeeVersionStore.baseline(digitalEmployee);
         return digitalEmployee;
     }
 
@@ -2388,6 +2439,12 @@ public class DigitalEmployeeApplicationService {
      * validateDigitalEmployeeUpdatePermission。
      */
     private void validateDigitalEmployeeUpdatePermission(SsResource ssResource) {
+        if (employeeVersionAccess != null) {
+            employeeVersionAccess.requireManage(ssResource);
+            if (DigitalEmployeeGovernanceService.isOfficialCopy(ssResource))
+                throw new BaseException("企业员工配置变更需提交更新审核，所有已发布组织通过后生效");
+            return;
+        }
         if (employeeGovernance != null) employeeGovernance.requireDirectMutationAllowed(ssResource);
         if (ssResource == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
@@ -2677,7 +2734,7 @@ public class DigitalEmployeeApplicationService {
     private String resolveDigEmployeeJsonForRedisSync(Long resourceId) {
         SsResExtDigEmployee ext = ssResExtDigEmployeeService.findById(resourceId);
         if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
-            return ext.getTargetContent();
+            return RetiredConversationResources.sanitizeRuntimeJson(ext.getTargetContent());
         }
         // PR-1:target_content 空白时,若开关开启则直接跳过(避免回退到 findDetailsById
         // 的 7-10 SQL).要求:必须先跑 StartupTargetContentPreloader 补齐 target_content.
@@ -2736,7 +2793,7 @@ public class DigitalEmployeeApplicationService {
             }
         }
         json.put("controlledResources", controlled);
-        return json.toJSONString();
+        return RetiredConversationResources.sanitizeRuntimeJson(json.toJSONString());
     }
 
     private boolean doSyncOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto, boolean publication) {
@@ -2967,9 +3024,9 @@ public class DigitalEmployeeApplicationService {
      * 判断是否为支持补齐 JSON 的关联资源类型。
      */
     private boolean isSupportedRelatedResourceBizType(String resourceBizType) {
+        if (RetiredConversationResources.isRetired(resourceBizType)) return false;
         return StringUtils.equalsAny(resourceBizType, ResourceBizTypeEnum.TOOLKIT.name(),
-            ResourceBizTypeEnum.MCP.name(), ResourceBizTypeEnum.AGENT.name(), ResourceBizTypeEnum.VIEW.name(),
-            ResourceBizTypeEnum.OBJECT.name(), ResourceBizTypeEnum.SKILL.name())
+            ResourceBizTypeEnum.MCP.name(), ResourceBizTypeEnum.AGENT.name(), ResourceBizTypeEnum.SKILL.name())
             || StringUtils.startsWithIgnoreCase(resourceBizType, "KG_");
     }
 
@@ -3238,7 +3295,7 @@ public class DigitalEmployeeApplicationService {
         // PR-fix Major-2: 删掉原 else 分支内的 return result; —— 让控制流继续到关联资源处理,
         // 保持与原 collectDigEmployeeSyncEntries 的行为一致(fallback 路径也要写关联资源).
         // 主资源:命中预取直接用;未命中(prefetch 异常/空)回退到原 resolveDigEmployeeJsonForRedisSync
-        String mainJson = prefetchedMainTargetContent;
+        String mainJson = RetiredConversationResources.sanitizeRuntimeJson(prefetchedMainTargetContent);
         if (StringUtils.isBlank(mainJson)) {
             // target_content 预取未取到(空 / 异常):回退到原逐资源解析(保留原行为)
             // 若 skipBlankTargetContent=true,resolveDigEmployeeJsonForRedisSync 内部会记 warn 并 return null
@@ -3463,7 +3520,10 @@ public class DigitalEmployeeApplicationService {
             return;
         }
         String redisKey = DigEmployeeRedisKeys.resourceConfigJsonKey(resourceBizType, resourceId);
-        RedisUtil.setString(redisKey, jsonContent);
+        if (RetiredConversationResources.isRetired(resourceBizType)) return;
+        String runtimeJson = "DIG_EMPLOYEE".equals(resourceBizType)
+            ? RetiredConversationResources.sanitizeRuntimeJson(jsonContent) : jsonContent;
+        RedisUtil.setString(redisKey, runtimeJson);
         logger.debug("资源完整配置已同步至Redis, resourceBizType={}, resourceId={}, redisKey={}", resourceBizType, resourceId,
             redisKey);
     }
@@ -3546,6 +3606,22 @@ public class DigitalEmployeeApplicationService {
      */
     private void compareSsResourceRelDetail(SsResource ssResource, List<Long> relIds,
                                             List<SsResourceRelDetail> resourceRelDetails, List<RelResourceInfo> relResourceInfoList) {
+        // Hidden historical associations remain intact; clients cannot attach retired capabilities anew.
+        Set<Long> existingIds = safeRelations(resourceRelDetails).stream()
+            .map(SsResourceRelDetail::getRelResourceId).collect(Collectors.toSet());
+        Set<Long> allIds = new LinkedHashSet<>(existingIds);
+        if (relIds != null) allIds.addAll(relIds);
+        Set<Long> retiredIds = allIds.isEmpty() ? Collections.emptySet()
+            : safeResources(ssResourceService.findByIdList(new ArrayList<>(allIds))).stream()
+                .filter(resource -> RetiredConversationResources.isRetired(resource.getResourceBizType()))
+                .map(SsResource::getResourceId).collect(Collectors.toSet());
+        if (relIds != null && relIds.stream().anyMatch(id -> retiredIds.contains(id) && !existingIds.contains(id))) {
+            throw new IllegalArgumentException(RetiredConversationResources.REASON);
+        }
+        relIds = relIds == null ? Collections.emptyList()
+            : relIds.stream().filter(id -> !retiredIds.contains(id)).collect(Collectors.toList());
+        resourceRelDetails = safeRelations(resourceRelDetails).stream()
+            .filter(relation -> !retiredIds.contains(relation.getRelResourceId())).collect(Collectors.toList());
         Map<String, List<String>> relResourceInfoListMap = new HashMap<>(10);
         if (CollectionUtils.isNotEmpty(relResourceInfoList)) {
             relResourceInfoListMap = relResourceInfoList.stream().collect(
@@ -3741,12 +3817,15 @@ public class DigitalEmployeeApplicationService {
         return resp.getData();
     }
 
-    /**
-     * 查询详情
-     *
-     * @param employeeIdDTO 查询对象
-     * @return SsResource
-     */
+    /** Keep internal complete relations separate from the editor/API projection. */
+    public DigitalEmployeeDetailsDTO findVisibleDetailsById(EmployeeIdDTO employeeIdDTO) {
+        DigitalEmployeeDetailsDTO details = findDetailsById(employeeIdDTO);
+        if (details == null) return null;
+        return com.alibaba.fastjson.JSON.parseObject(RetiredConversationResources.sanitizeRuntimeJson(
+            com.alibaba.fastjson.JSON.toJSONString(details)), DigitalEmployeeDetailsDTO.class);
+    }
+
+    /** Complete internal details, including historical relations used by editing/publication reconciliation. */
     public DigitalEmployeeDetailsDTO findDetailsById(EmployeeIdDTO employeeIdDTO) {
         Long resourceId = employeeIdDTO.getResourceId();
 
@@ -4208,6 +4287,9 @@ public class DigitalEmployeeApplicationService {
             relResourceList = ssResourceService.findByIdList(relIds);
         }
 
+        relResourceList = relResourceList.stream()
+            .filter(resource -> !RetiredConversationResources.isRetired(resource.getResourceBizType()))
+            .collect(Collectors.toList());
         return ResponseUtil.successResponse(I18nUtil.get("digemployee.rel.resource.query.success"), relResourceList);
     }
 
@@ -4325,7 +4407,9 @@ public class DigitalEmployeeApplicationService {
             return null;
         }
 
-        return ssResourceService.getResourceListByCode(codes);
+        return ssResourceService.getResourceListByCode(codes).stream()
+            .filter(resource -> !RetiredConversationResources.isRetired(resource.getResourceBizType()))
+            .collect(Collectors.toList());
     }
 
     /**

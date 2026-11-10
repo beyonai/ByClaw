@@ -2,7 +2,7 @@ import React from 'react';
 import { message } from 'antd';
 import { useIntl } from '@umijs/max';
 import CopyToFileBrowserModal, { type FileBrowserFolderPathItem } from '@/components/CopyToFileBrowserModal';
-import UploadConfirmModal, { type UploadConfirmFile } from '@/components/UploadConfirmModal';
+import UploadConfirmModal, { type UploadConfirmFile, type UploadProgressRow } from '@/components/UploadConfirmModal';
 import RenameModal from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/RenameModal';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
 import type { FileBrowserItem } from '@/service/fileBrowser';
@@ -20,6 +20,8 @@ interface FileMiniListModalsProps {
   uploadConfirmDirectoryPath: string;
   uploadConfirmConflicts: string[];
   uploadConfirmLoading: boolean;
+  uploadProgressRows?: UploadProgressRow[];
+  onRetryUploadFile?: (id: string) => void;
   showProcessFrontMatter: boolean;
   uploadConfirmOkText: string;
   onUploadDirectoryAction?: () => void;
@@ -88,6 +90,8 @@ const FileMiniListModals: React.FC<FileMiniListModalsProps> = ({
   uploadConfirmDirectoryPath,
   uploadConfirmConflicts,
   uploadConfirmLoading,
+  uploadProgressRows,
+  onRetryUploadFile,
   showProcessFrontMatter,
   uploadConfirmOkText,
   onUploadDirectoryAction,
@@ -153,6 +157,8 @@ const FileMiniListModals: React.FC<FileMiniListModalsProps> = ({
         directoryPath={uploadConfirmDirectoryPath}
         conflicts={uploadConfirmConflicts}
         loading={uploadConfirmLoading}
+        fileProgress={uploadProgressRows}
+        onRetryFile={onRetryUploadFile}
         showProcessFrontMatter={showProcessFrontMatter}
         okText={uploadConfirmOkText}
         directoryActionText={intl.formatMessage({ id: 'fileBrowser.upload.changeDirectory' })}

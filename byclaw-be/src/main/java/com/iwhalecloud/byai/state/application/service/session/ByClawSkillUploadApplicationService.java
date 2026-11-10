@@ -36,7 +36,7 @@ import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
  * - skillName 取自压缩包中 SKILL.md 所在目录的最后一段；若 SKILL.md 在压缩包根，回退到压缩包文件名去扩展名；
  * - 写入文件名统一规范为 "SKILL.md"，保证 query 的大小写敏感匹配能识别。
  *
- * 覆盖语义：上传若同 skillName 已存在，先整体清空旧目录再写新内容。
+ * 覆盖语义：完整备份旧目录后替换；写入失败或注册事务回滚时恢复原目录。
  * 不在服务端保留压缩包本体；解压后逐 entry 流式写入 MinIO。
  *
  * @author qin.guoquan
@@ -75,65 +75,131 @@ public class ByClawSkillUploadApplicationService {
      * @return 与 query 接口同口径的 ByClawSkillDto
      */
     public ByClawSkillDto uploadSkillZip(String userCode, Long resourceId, MultipartFile zipFile) {
-        validateInput(userCode, resourceId, zipFile);
+        return uploadSkillZips(userCode, resourceId, java.util.Collections.singletonList(zipFile)).getFirst();
+    }
 
-        // 切换到目标用户上下文，bucket 解析与读写操作全程在切换后的 LoginInfo 下进行。
-        return ByClawUserWorkspacePaths.withUserContext(userCode, () -> {
-            // 桶不存在则创建；createBucketIfAbsent 是幂等操作，反复调用安全。
-            userFS.init();
-
-            // 一次性把压缩包全部 entry 解析到内存中，便于：
-            // 1. 先做整体校验（最外层 skill 目录下必须仅一个 SKILL.md），失败时不写半个 skill；
-            // 2. 写入前先清空旧目录，最大化避免「写一半失败」的脏状态。
-            List<ParsedEntry> entries = parseArchiveEntries(zipFile);
-            ParsedEntry skillDocEntry = findUniqueSkillDoc(entries);
-            String skillBaseInZip = parentDirOf(skillDocEntry.entryName);
-            String skillName = resolveSkillName(skillBaseInZip, zipFile.getOriginalFilename());
-
-            String skillRootPrefix = skillPathResolver.resolveSkillRootPrefix(userCode, resourceId);
-            String skillRoot = skillRootPrefix + skillName;
-            // 覆盖语义：清空旧目录再写，避免上一个版本的孤儿文件遗留。
-            // 删除前缀本身是幂等的，桶 / 目录不存在时不会抛错。
-            userFS.delete(skillRoot + "/");
-
-            String skillDocObjectKey = null;
-            int writtenCount = 0;
-            for (ParsedEntry entry : entries) {
-                // 仅写入 SKILL.md 同目录（递归）下的内容；zip 中 skill 目录之外的杂项 entry 一律忽略。
-                if (!isUnderSkillBase(entry.entryName, skillBaseInZip)) {
-                    continue;
-                }
-                String relative = relativizeUnderBase(entry.entryName, skillBaseInZip);
-                // SKILL.md 文件名忽略大小写匹配，但写入时规范化为 "SKILL.md"，保证 query 能命中。
-                String normalizedRelative = canonicalizeSkillDocCasing(relative);
-                String objectKey = skillRoot + "/" + normalizedRelative;
-                String contentType = guessContentType(normalizedRelative);
-                try (InputStream in = new ByteArrayInputStream(entry.content)) {
-                    userFS.write(in, entry.content.length, contentType, objectKey);
-                }
-                catch (IOException e) {
-                    // ByteArrayInputStream 关闭不会抛 IOException，这里做兜底；转 IllegalStateException 让上层统一处理。
-                    throw new IllegalStateException(I18nUtil.get("byclaw.fs.write.file.failed", objectKey), e);
-                }
-                if (entry.entryName.equals(skillDocEntry.entryName)) {
-                    skillDocObjectKey = objectKey;
-                }
-                writtenCount++;
-            }
-            logger.info("skill 上传完成, userCode={}, skillName={}, fileCount={}", userCode, skillName, writtenCount);
-            return new ByClawSkillDto(skillName, skillRoot, skillDocObjectKey);
-        });
+    /** Register before the import locks, so rollback restores files while those locks are still held. */
+    public void prepareTransactionRollback() {
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) return;
+        for (var synchronization : org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()) {
+            if (synchronization instanceof UploadRollback rollback && rollback.owner == this) return;
+        }
+        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(new UploadRollback(this));
     }
 
     public List<ByClawSkillDto> uploadSkillZips(String userCode, Long resourceId, List<MultipartFile> zipFiles) {
         if (zipFiles == null || zipFiles.isEmpty()) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
         }
-        List<ByClawSkillDto> result = new ArrayList<>();
-        for (MultipartFile zipFile : zipFiles) {
-            result.add(uploadSkillZip(userCode, resourceId, zipFile));
+        return ByClawUserWorkspacePaths.withUserContext(userCode, () -> {
+            List<PreparedSkill> prepared = new ArrayList<>();
+            for (MultipartFile file : zipFiles) {
+                validateInput(userCode, resourceId, file);
+                List<ParsedEntry> entries = parseArchiveEntries(file);
+                ParsedEntry doc = findUniqueSkillDoc(entries);
+                String base = parentDirOf(doc.entryName);
+                String name = resolveSkillName(base, file.getOriginalFilename());
+                String root = skillPathResolver.resolveSkillRootPrefix(userCode, resourceId) + name;
+                java.util.Map<String, byte[]> files = new java.util.LinkedHashMap<>();
+                for (ParsedEntry entry : entries) {
+                    if (isUnderSkillBase(entry.entryName, base)) {
+                        files.put(root + "/" + canonicalizeSkillDocCasing(relativizeUnderBase(entry.entryName, base)), entry.content);
+                    }
+                }
+                prepared.add(new PreparedSkill(new ByClawSkillDto(name, root, root + "/SKILL.md"), files));
+            }
+            userFS.init();
+            java.util.Map<String, java.util.Map<String, byte[]>> originals = new java.util.LinkedHashMap<>();
+            // Finish reading every old file before deleting anything, including deeply nested scripts.
+            for (PreparedSkill skill : prepared) {
+                String prefix = skill.dto().getSkillPath() + "/";
+                if (originals.containsKey(prefix)) continue;
+                java.util.Map<String, byte[]> files = new java.util.LinkedHashMap<>();
+                for (String path : userFS.list(prefix, Integer.MAX_VALUE)) {
+                    if (path.endsWith("/")) continue;
+                    if (!path.startsWith(prefix)) throw new IllegalStateException("Skill backup escaped its directory");
+                    try (InputStream input = userFS.read(path)) {
+                        if (input == null) throw new IllegalStateException("Cannot read existing skill file: " + path);
+                        files.put(path, input.readAllBytes());
+                    } catch (IOException error) {
+                        throw new IllegalStateException("Cannot back up existing skill file: " + path, error);
+                    }
+                }
+                originals.put(prefix, files);
+            }
+            UploadUndo undo = new UploadUndo(userCode, originals);
+            if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+                prepareTransactionRollback();
+                for (var synchronization : org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()) {
+                    if (synchronization instanceof UploadRollback rollback && rollback.owner == this) rollback.uploads.add(undo);
+                }
+            }
+            try {
+                for (PreparedSkill skill : prepared) {
+                    String prefix = skill.dto().getSkillPath() + "/";
+                    undo.changed.add(prefix);
+                    userFS.delete(prefix);
+                    skill.files().forEach(this::writeFile);
+                }
+                return prepared.stream().map(PreparedSkill::dto).toList();
+            } catch (RuntimeException | Error failure) {
+                try { undo.restore(); } catch (RuntimeException restoreFailure) { failure.addSuppressed(restoreFailure); }
+                throw failure;
+            }
+        });
+    }
+
+    private void writeFile(String path, byte[] bytes) {
+        try (InputStream input = new ByteArrayInputStream(bytes)) {
+            userFS.write(input, bytes.length, guessContentType(path), path);
+        } catch (IOException error) {
+            throw new IllegalStateException(I18nUtil.get("byclaw.fs.write.file.failed", path), error);
         }
-        return result;
+    }
+
+    private record PreparedSkill(ByClawSkillDto dto, java.util.Map<String, byte[]> files) { }
+
+    private final class UploadUndo {
+        private final String userCode;
+        private final java.util.Map<String, java.util.Map<String, byte[]>> originals;
+        private final java.util.Set<String> changed = new java.util.LinkedHashSet<>();
+        private boolean restored;
+        private UploadUndo(String userCode, java.util.Map<String, java.util.Map<String, byte[]>> originals) {
+            this.userCode = userCode;
+            this.originals = originals;
+        }
+        private void restore() {
+            if (restored) return;
+            ByClawUserWorkspacePaths.withUserContext(userCode, () -> {
+                RuntimeException failure = null;
+                for (String prefix : changed) {
+                    try {
+                        userFS.delete(prefix);
+                        originals.get(prefix).forEach(ByClawSkillUploadApplicationService.this::writeFile);
+                    } catch (RuntimeException error) {
+                        if (failure == null) failure = error; else failure.addSuppressed(error);
+                    }
+                }
+                if (failure != null) throw failure;
+                restored = true;
+                return null;
+            });
+        }
+    }
+
+    private static final class UploadRollback implements org.springframework.transaction.support.TransactionSynchronization {
+        private final ByClawSkillUploadApplicationService owner;
+        private final List<UploadUndo> uploads = new ArrayList<>();
+        private UploadRollback(ByClawSkillUploadApplicationService owner) { this.owner = owner; }
+        @Override public int getOrder() { return org.springframework.core.Ordered.HIGHEST_PRECEDENCE; }
+        @Override public void afterCompletion(int status) {
+            if (status == STATUS_COMMITTED) return;
+            // Multiple imports can replace the same directory in one transaction; undo in reverse order.
+            for (int i = uploads.size() - 1; i >= 0; i--) {
+                try { uploads.get(i).restore(); }
+                catch (RuntimeException error) { logger.error("Failed to restore skill workspace after rollback", error); }
+            }
+        }
     }
 
     /** 校验 userCode 和非空 ZIP；大小统一由请求接入层校验，避免与资源中心技能导入产生不同上限。 */

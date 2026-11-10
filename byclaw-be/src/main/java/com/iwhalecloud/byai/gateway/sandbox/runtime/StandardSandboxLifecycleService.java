@@ -86,6 +86,8 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
             data.setEndpoint(CollectionUtils.isNotEmpty(endpoints) ? endpoints.getFirst() : "");
             data.setEndpoints(endpoints);
             data.setInstanceEndpoints(info.getInstanceEndpoints());
+            data.setInstanceContext(info.getInstanceContext());
+            data.setInstanceDescriptors(info.getInstanceDescriptors());
             data.setServicePort(info.getServicePort());
             data.setEndpointHeaders(info.getEndpointHeaders());
             data.setSandboxId(info.getSandboxId());
@@ -164,6 +166,14 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
                 .createdTime(resolveCreatedTime(instance))
                 .lastHeartbeatTime(LocalDateTime.now())
                 .build();
+            if (reusable.isEmpty()) {
+                Map<String,Object> snapshot = com.iwhalecloud.byai.gateway.sandbox.spec.InstanceContextSupport.snapshot(spec);
+                if (snapshot != null) {
+                    snapshot.put("sandboxId", info.getSandboxId());
+                    info.setInstanceContext(snapshot);
+                    info.setInstanceDescriptors(com.iwhalecloud.byai.gateway.sandbox.spec.InstanceContextSupport.descriptors(snapshot));
+                }
+            }
             persistSandbox(redisKey, info);
             log.info("生命周期服务已写入 redis 元数据，provider={}，user={}，type={}，sandboxId={}，redisKey={}",
                 runtimeProvider.providerType(), userCode, sandboxType, info.getSandboxId(), redisKey);

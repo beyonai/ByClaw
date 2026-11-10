@@ -1,4 +1,11 @@
 export default {
+  'SystemParams.uploadPolicy.title': '断点续传策略',
+  'SystemParams.uploadPolicy.maxSize': '断点续传单文件上限（MiB）',
+  'SystemParams.uploadPolicy.chunkSize': '分片大小（MiB）',
+  'SystemParams.uploadPolicy.help':
+    '默认4096 MiB、4 MiB。新会话仍受原单文件上限及平台边界约束（当前16 GiB、分片1–16 MiB、最多1024片）；已有上传会话沿用创建时的策略。',
+  'SystemParams.uploadPolicy.invalid': '参数须为JSON对象，文件上限须为正整数，分片须为1–16 MiB整数。',
+
   // index.tsx
   'SystemParams.paramsManagement': '参数管理',
   'SystemParams.staticParams': '静态参数',

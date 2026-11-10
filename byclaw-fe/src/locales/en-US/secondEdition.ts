@@ -1,4 +1,19 @@
 export default {
+  'fileBrowser.upload.queuedCancelled': 'Queue cancelled; retry to resume',
+  'fileBrowser.upload.cancelQueued': 'Cancel queued uploads',
+  'fileBrowser.upload.manageUnfinished': 'Unfinished uploads',
+  'fileBrowser.upload.storedSessionHint':
+    'Shows uploads saved in this browser and unfinished uploads in your private workspace. Reselect the same file to resume. Cancel and clean removes temporary upload data; completed files are kept.',
+  'fileBrowser.upload.refreshSessions': 'Refresh sessions',
+  'fileBrowser.upload.noStoredSessions': 'No saved upload sessions in this browser.',
+  'fileBrowser.upload.abortSession': 'Cancel and clean',
+  'fileBrowser.upload.admissionFull':
+    'Your unfinished uploads have filled the upload slots. Open Unfinished uploads to resume or explicitly cancel a saved session, then retry.',
+  'fileBrowser.upload.session.COMMITTING': 'Committing',
+  'fileBrowser.upload.session.UPLOADING': 'Unfinished',
+  'fileBrowser.upload.session.COMPLETED': 'Completed',
+  'fileBrowser.upload.session.EXPIRED': 'Expired',
+  'fileBrowser.upload.session.NOT_FOUND': 'Not created',
   // QueryInput Chat组件
   'queryInput.onlineSearch': 'Online Search',
   'queryInput.superAgent': 'Super Agent',
@@ -335,6 +350,16 @@ export default {
   'fileBrowser.info.path': 'Path',
   'fileBrowser.info.ok': 'OK',
   'fileBrowser.upload.success': 'Upload successful',
+  'fileBrowser.upload.hashing': 'Checking file: {name}',
+  'fileBrowser.upload.uploading': 'Uploading: {name}',
+  'fileBrowser.upload.verifying': 'Verifying and saving: {name}',
+  'fileBrowser.upload.resumeHint':
+    'Retry to continue. After reloading, reselect the same file and target directory; verified chunks will be reused.',
+  'fileBrowser.upload.resumed': 'Continuing from verified uploaded chunks.',
+  'fileBrowser.upload.partialFailed': 'Some files failed. Retry each failed file to continue.',
+  'fileBrowser.upload.retryFile': 'Retry this file',
+  'fileBrowser.upload.queued': 'Waiting to upload',
+  'fileBrowser.upload.processing': 'Processing and submitting build: {name}',
   'fileBrowser.upload.failed': 'Upload failed',
   'fileBrowser.download.failed': 'Download failed',
   'fileBrowser.download.downloading': 'Downloading...',

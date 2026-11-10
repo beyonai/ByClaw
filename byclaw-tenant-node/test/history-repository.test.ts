@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import type { DataSource } from "typeorm";
 import { SqlHistoryRepository } from "../src/infrastructure/persistence/history-repository.js";
@@ -14,13 +15,53 @@ function setup() {
   };
 }
 describe("BE query compatibility", () => {
+  it("resolves credentials until the membership row is removed on schemas without state", async () => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      db.exec(`
+        ATTACH DATABASE ':memory:' AS byai;
+        CREATE TABLE byai.byai_session_member (
+          byai_session_member_id TEXT, session_id TEXT, mem_obj_type TEXT,
+          mem_obj_id TEXT, com_acct_id TEXT, api_key TEXT
+        );
+        INSERT INTO byai.byai_session_member VALUES ('81','30','USER','20','10','member-key');
+      `);
+      const repository = new SqlHistoryRepository(
+        {
+          query: async (sql: string, params: string[]) =>
+            db.prepare(sql.replace(/\$\d+/g, "?")).all(...params),
+        } as unknown as DataSource,
+        "10",
+      );
+      expect(await repository.groupMemberId("30", "20")).toBe("81");
+      expect(await repository.groupMemberApiKey("30", "20")).toBe("member-key");
+      db.exec("DELETE FROM byai.byai_session_member");
+      expect(await repository.groupMemberId("30", "20")).toBeNull();
+      expect(await repository.groupMemberApiKey("30", "20")).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reads the active tenant membership ID without selecting its database credential", async () => {
+    const { query, repository } = setup();
+    query.mockResolvedValueOnce([{ byai_session_member_id: "9007199254740993" }]);
+    expect(await repository.groupMemberId("30", "20")).toBe("9007199254740993");
+    const [sql, parameters] = query.mock.calls[0]!;
+    expect(sql).toContain("SELECT byai_session_member_id");
+    expect(sql).not.toContain("api_key");
+    expect(sql).toContain("mem_obj_type='USER'");
+    expect(sql).toContain("com_acct_id=$3");
+    expect(parameters).toEqual(["30", "20", "10"]);
+    expect(await repository.groupMemberId("30", "21")).toBeNull();
+  });
+
   it("limits credential reads to the tenant's active USER membership and supplied original group", async () => {
     const { query, repository } = setup();
     await repository.groupMemberApiKey("30", "20");
     const [sql, parameters] = query.mock.calls[0]!;
     expect(sql).toContain("SELECT api_key");
     expect(sql).toContain("mem_obj_type='USER'");
-    expect(sql).toContain("state='00A'");
     expect(sql).toContain("com_acct_id=$3");
     expect(parameters).toEqual(["30", "20", "10"]);
   });

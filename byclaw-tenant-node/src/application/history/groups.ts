@@ -15,8 +15,14 @@ import {
 /** 群列表、详情、设置及任务读取；私有任务和待发布卡片仅向发起人开放。 */
 export class GroupHistory extends HistoryAccess {
   /** 仅供 BE 出站调用；用户身份取内部鉴权 actor，群成员关系由当前租户核验。 */
-  async groupMemberApiKey(actor: string, sessionId: string) {
+  async groupMemberApiKey(actor: string, sessionId: string, identityOnly = false) {
     await this.access(actor, sessionId, true);
+    // BE 先按权威成员主键查询共享 Redis，缓存未命中后才读取数据库密钥。
+    if (identityOnly)
+      return {
+        byaiSessionMemberId: await this.repository.groupMemberId(sessionId, actor),
+        api_key: null,
+      };
     return { api_key: await this.repository.groupMemberApiKey(sessionId, actor) };
   }
 
@@ -193,7 +199,7 @@ export class GroupHistory extends HistoryAccess {
     return Promise.all(
       (await this.repository.tasks(sessionId)).map(async (task) => {
         const scope = await this.coordination(task.taskSessionId);
-        return { ...task, ...(scope ? { groupCoordination: scope } : {}) };
+        return { ...task, executionBackend: "REMOTE", ...(scope ? { groupCoordination: scope } : {}) };
       }),
     );
   }

@@ -1,3 +1,4 @@
+import { normalizeInstanceRefs } from '@/utils/desktopInstances';
 import { get, isPlainObject, set, isString, omit } from 'lodash';
 
 import { formatSSEDate as formatAgentSSEDate } from './agent/util';
@@ -362,6 +363,9 @@ export const answerDeltaHandler = (sseDataObj: any, msgEvent?: string): { messag
     Object.assign(res.message, { seq, eventType: msgEvent });
   }
 
+  if (Object.prototype.hasOwnProperty.call(sseDataObj, 'instanceRefs')) {
+    set(res, 'message.content.instanceRefs', normalizeInstanceRefs(sseDataObj.instanceRefs));
+  }
   setOrderId(sseDataObj, res);
   setResumeMessageId(sseDataObj, res.message);
 

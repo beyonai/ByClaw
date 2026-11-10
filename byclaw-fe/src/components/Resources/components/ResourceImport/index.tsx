@@ -1,3 +1,5 @@
+import ScopeSelector from '@/components/ResourcePublication/ScopeSelector';
+import { validPublishScope, type PublishScope } from '@/service/resourcePublication';
 import React, { useState, useEffect, useRef } from 'react';
 import { CloseOutlined, DownloadOutlined, LoadingOutlined } from '@ant-design/icons';
 import { Modal, Upload, Tabs, Button, message, Form, TreeSelect, Alert, Table } from 'antd';
@@ -44,6 +46,7 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   onSuccess,
 }) => {
   const intl = useIntl();
+  const [publishScope, setPublishScope] = useState<PublishScope>({ mode: 'COMPANY' });
   const [importLoading, setImportLoading] = useState(false);
   const [localFiles, setLocalFiles] = useState<File[]>([]);
   const [parsingCount, setParsingCount] = useState(0);
@@ -218,6 +221,10 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
       formData.append('file', file);
     });
     formData.append('ownerType', activeTab);
+    if (activeTab === 'enterprise') {
+      if (!validPublishScope(publishScope)) throw new Error(intl.formatMessage({ id: 'rp.organizations' }));
+      formData.append('publishScope', JSON.stringify(publishScope));
+    }
     formData.append('catalogId', `${selectedCatalogId || '-1'}`);
     formData.append('type', 'external');
     return formData;
@@ -317,8 +324,13 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
     try {
       setCurlPanelLoading(true);
       const values = await curlForm.validateFields();
+      if (activeTab === 'enterprise' && !validPublishScope(publishScope)) {
+        throw new Error(intl.formatMessage({ id: 'rp.organizations' }));
+      }
       const payload = {
         ...parsedCurlData,
+        ownerType: activeTab,
+        publishScope: activeTab === 'enterprise' ? publishScope : undefined,
         ...values,
         catalogId: selectedCatalogId || '-1',
         method: (values.method || parsedCurlData.method || 'get').toLowerCase(),
@@ -359,8 +371,11 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
   const failedCount = importResult?.failed || failedItems.length;
   // 预检查结果不代表导入完成；审核统计只使用正式导入接口返回的结果。
   const importedItems = completedImportResult?.items || [];
+  const publicationFailures = importedItems.filter((item) => item.success && item.publicationError);
   const pendingReviewCount = importedItems.filter((item) => item.success && item.reviewRequired).length;
-  const publishedCount = importedItems.filter((item) => item.success && !item.reviewRequired).length;
+  const publishedCount = importedItems.filter(
+    (item) => item.success && !item.reviewRequired && !item.publicationError
+  ).length;
   const showSkillPublicationSummary =
     resourceType === 'SKILL' && !!completedImportResult && (activeTab === 'enterprise' || pendingReviewCount > 0);
   const failedSummaryDescription = failedItems.length
@@ -399,6 +414,13 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
         </Button>,
       ]}
     >
+      {!!publicationFailures.length && (
+        <Alert
+          type="warning"
+          message={intl.formatMessage({ id: 'rp.publicationFailed' })}
+          description={publicationFailures.map((item) => item.resourceName).join('、')}
+        />
+      )}
       {isImportSummaryMode ? (
         <div className={styles.summaryContainer}>
           <Alert
@@ -529,127 +551,134 @@ const ResourceImport: React.FC<ResourceImportProps> = ({
           ) : null}
         </div>
       ) : (
-        <Tabs
-          activeKey={importTab}
-          onChange={setImportTab}
-          tabBarExtraContent={
-            <div className={styles.tabExtraContent}>
-              {currentStep === 'import' ? (
-                <Form layout="inline">
-                  <Form.Item
-                    label={intl.formatMessage({ id: 'resource.belongField' })}
-                    className={styles.formItemNoMargin}
-                  >
-                    <TreeSelect
-                      allowClear
-                      treeData={catalogList}
-                      value={selectedCatalogId}
-                      placeholder={intl.formatMessage({ id: 'resource.belongFieldPlaceholder' })}
-                      treeDataSimpleMode={{
-                        id: 'catalogId',
-                        pId: 'pcatalogId',
-                        rootPId: -1,
-                      }}
-                      fieldNames={{
-                        label: 'catalogName',
-                        value: 'catalogId',
-                      }}
-                      showSearch
-                      treeNodeFilterProp="catalogName"
-                      className={styles.treeSelectMinWidth}
-                      onChange={(value) => {
-                        setSelectedCatalogId(value);
-                      }}
-                    />
-                  </Form.Item>
-                </Form>
-              ) : null}
-              {templateConfig ? (
-                <div className={styles.templateBar}>
-                  <Button type="link" size="small" icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>
-                    {intl.formatMessage({ id: 'resource.import.downloadTemplate' })}
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-          }
-          items={[
-            {
-              key: 'localFile',
-              label: intl.formatMessage({ id: 'common.localFile' }),
-              children: (
-                <div className={styles.localFileContainer}>
-                  <div className={styles.uploadArea}>
-                    <Upload.Dragger
-                      accept={accept}
-                      multiple
-                      showUploadList={false}
-                      disabled={importLoading}
-                      className={`${styles.uploadDragger} ${importLoading ? styles.uploadDraggerLoading : ''}`}
-                      beforeUpload={(file, fileList) => {
-                        if (importLoading) {
-                          return false;
-                        }
-                        if ((file as any).uid === (fileList[0] as any)?.uid) {
-                          addLocalFiles(fileList as File[]);
-                        }
-                        return false;
-                      }}
-                      onDrop={(event) => {
-                        if (importLoading) {
-                          return;
-                        }
-
-                        const droppedFiles = Array.from(event.dataTransfer?.files || []);
-                        if (droppedFiles.some((file) => !isAcceptedFile(file))) {
-                          showUnsupportedFileTypeMessage();
-                        }
-                      }}
+        <>
+          {activeTab === 'enterprise' && currentStep === 'import' && (
+            <Form.Item label={intl.formatMessage({ id: 'rp.scope' })}>
+              <ScopeSelector value={publishScope} onChange={setPublishScope} />
+            </Form.Item>
+          )}
+          <Tabs
+            activeKey={importTab}
+            onChange={setImportTab}
+            tabBarExtraContent={
+              <div className={styles.tabExtraContent}>
+                {currentStep === 'import' ? (
+                  <Form layout="inline">
+                    <Form.Item
+                      label={intl.formatMessage({ id: 'resource.belongField' })}
+                      className={styles.formItemNoMargin}
                     >
-                      <p>
-                        {importLoading ? (
-                          <LoadingOutlined className={styles.uploadIcon} />
-                        ) : (
-                          <AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" className={styles.uploadIcon} />
-                        )}
-                      </p>
-                      <p className={styles.uploadHint}>{uploadHintText}</p>
-                      {/* <br />
+                      <TreeSelect
+                        allowClear
+                        treeData={catalogList}
+                        value={selectedCatalogId}
+                        placeholder={intl.formatMessage({ id: 'resource.belongFieldPlaceholder' })}
+                        treeDataSimpleMode={{
+                          id: 'catalogId',
+                          pId: 'pcatalogId',
+                          rootPId: -1,
+                        }}
+                        fieldNames={{
+                          label: 'catalogName',
+                          value: 'catalogId',
+                        }}
+                        showSearch
+                        treeNodeFilterProp="catalogName"
+                        className={styles.treeSelectMinWidth}
+                        onChange={(value) => {
+                          setSelectedCatalogId(value);
+                        }}
+                      />
+                    </Form.Item>
+                  </Form>
+                ) : null}
+                {templateConfig ? (
+                  <div className={styles.templateBar}>
+                    <Button type="link" size="small" icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>
+                      {intl.formatMessage({ id: 'resource.import.downloadTemplate' })}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            }
+            items={[
+              {
+                key: 'localFile',
+                label: intl.formatMessage({ id: 'common.localFile' }),
+                children: (
+                  <div className={styles.localFileContainer}>
+                    <div className={styles.uploadArea}>
+                      <Upload.Dragger
+                        accept={accept}
+                        multiple
+                        showUploadList={false}
+                        disabled={importLoading}
+                        className={`${styles.uploadDragger} ${importLoading ? styles.uploadDraggerLoading : ''}`}
+                        beforeUpload={(file, fileList) => {
+                          if (importLoading) {
+                            return false;
+                          }
+                          if ((file as any).uid === (fileList[0] as any)?.uid) {
+                            addLocalFiles(fileList as File[]);
+                          }
+                          return false;
+                        }}
+                        onDrop={(event) => {
+                          if (importLoading) {
+                            return;
+                          }
+
+                          const droppedFiles = Array.from(event.dataTransfer?.files || []);
+                          if (droppedFiles.some((file) => !isAcceptedFile(file))) {
+                            showUnsupportedFileTypeMessage();
+                          }
+                        }}
+                      >
+                        <p>
+                          {importLoading ? (
+                            <LoadingOutlined className={styles.uploadIcon} />
+                          ) : (
+                            <AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" className={styles.uploadIcon} />
+                          )}
+                        </p>
+                        <p className={styles.uploadHint}>{uploadHintText}</p>
+                        {/* <br />
                   <p className={styles.uploadFormatHint}>
                     {intl.formatMessage({ id: 'knowledgeCenter.import.formatHint' })}
                   </p>{' '} */}
-                    </Upload.Dragger>
-                    {localFiles.length ? (
-                      <div className={styles.fileCardScroller}>
-                        {localFiles.map((file, index) => (
-                          <div
-                            key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
-                            className={styles.fileCard}
-                            title={file.name}
-                          >
-                            <div className={styles.fileCardIcon}>{accept.slice(1).toUpperCase()}</div>
-                            <div className={styles.fileCardMeta}>
-                              <div className={styles.fileCardName}>{file.name}</div>
-                              <div className={styles.fileCardSize}>{formatFileSize(file.size)}</div>
+                      </Upload.Dragger>
+                      {localFiles.length ? (
+                        <div className={styles.fileCardScroller}>
+                          {localFiles.map((file, index) => (
+                            <div
+                              key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+                              className={styles.fileCard}
+                              title={file.name}
+                            >
+                              <div className={styles.fileCardIcon}>{accept.slice(1).toUpperCase()}</div>
+                              <div className={styles.fileCardMeta}>
+                                <div className={styles.fileCardName}>{file.name}</div>
+                                <div className={styles.fileCardSize}>{formatFileSize(file.size)}</div>
+                              </div>
+                              <Button
+                                type="text"
+                                disabled={importLoading}
+                                size="small"
+                                icon={<CloseOutlined />}
+                                className={styles.fileCardRemove}
+                                onClick={() => removeLocalFile(index)}
+                              />
                             </div>
-                            <Button
-                              type="text"
-                              disabled={importLoading}
-                              size="small"
-                              icon={<CloseOutlined />}
-                              className={styles.fileCardRemove}
-                              onClick={() => removeLocalFile(index)}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              ),
-            },
-          ]}
-        />
+                ),
+              },
+            ]}
+          />
+        </>
       )}
     </Modal>
   );

@@ -96,9 +96,20 @@ remote 模式透传到平台 `POST /internal/platform/sandbox/business/launch`�
 
 ## 常驻（共享）DSH 宿主
 
-配置 `byclaw.sandbox.shared-dsh-host.base-url`/`token`/`web-base-url` 后，系统参数 `BYCLAW_SHARED_DSH_HOST_USERS`
-（`byai_system_config`，逗号、分号或空白分隔的 userCode；不存在、为空或 `*` 表示全部用户）名单内用户的 `byclaw-dsh`
-不再是沙箱：它是常驻宿主进程里的一个用户上下文，BE 不为它写 `ss_sandbox_record`，也不做启动/探测/复用。
+系统参数 `BYCLAW_SANDBOX_SHARED_POLICY`（`byai_system_config`）统一控制平台共享池和常驻 DSH 宿主的用户资格，替代 `BYCLAW_SANDBOX_SHARED_ALL` 和 `BYCLAW_SHARED_DSH_HOST_USERS`，旧参数不再参与判断。
+
+```json
+{"defaultMode":"shared","excludedUsers":["adminvip","zte"]}
+```
+
+字符串先解析为策略对象，再判断：排除名单内用户始终独享，其他用户按 `defaultMode`（`shared` 或 `exclusive`）处理。
+配置使用 Fastjson 直接映射为对象。`excludedUsers` 使用字符串数组，工号去除首尾空白并区分大小写精确匹配，`*` 不作为通配符。
+参数不存在、为空、模式不为 `shared` 或排除名单显式为 null 时不授予共享资格；读取或 JSON 解析失败时记录错误堆栈并返回无共享资格。省略排除名单时默认为空名单；空名单配合 `shared` 表示全部有效用户共享，`exclusive` 表示全部独享。
+旧白名单不能直接迁移为排除名单，否则用户运行模式会反转；部署时需重新确认策略。
+失去共享资格后的平台映射清理沿用既有流程及错误处理。
+
+配置 `byclaw.sandbox.shared-dsh-host.base-url`/`token`/`web-base-url` 且未启用平台共享配置时，符合共享资格用户的 `byclaw-dsh`
+使用常驻宿主进程中的用户上下文，BE 不为它写 `ss_sandbox_record`。
 
 - 启动（登录自启动、问答前的 worker 就绪检查、`launchByUserCode`）= 对宿主做一次幂等的 `PUT /v1/users/{user}`，
   带上 `byclaw-dsh` 规格渲染后的环境；上下文已在时毫秒返回，不在时由宿主加载后返回。问答仍经 Gateway worker 注册转发，
@@ -115,7 +126,7 @@ remote 模式透传到平台 `POST /internal/platform/sandbox/business/launch`�
   为该用户的上下文选 B 的规格；不在名单内或参数读取失败时用宿主默认的 `BYCLAW_TOOL_ENV_SERVICE_KEY`。上下文启动时读取，
   改参数后需该用户的上下文重建（“重启助理”或宿主回收后再次进入）才生效。
 
-决策点只有 `SharedDshHostContexts.routes(userCode, sandboxType)`（`SandboxAutoConfiguration#sharedDshHostContexts`），
+宿主路由通过 `SharedDshHostContexts.routes(userCode, sandboxType)`，复用 `SharedSandboxPolicy.eligible`，
 两种执行模式（本地 / 平台远程）相同。名单每次决策时读取，改参数后下一次请求即生效。
 
 
@@ -147,3 +158,24 @@ BE 两种 Docker 镜像的健康检查使用 `/byaiService/actuator/health`，�
 回滚事务不申请配额。失败由首次登录/聊天继续补偿；legacy 模式及关闭 NAS admission 时不申请。
 仅预开通个人存储，不创建沙箱，也不批量扫描历史账号。目录配额的云端初始化仍可能需要数分钟；
 提前创建账号可以把这段等待移到首次登录之前，刚注册立即聊天仍使用原有等待流程。
+
+文件上传能力探测兼容较早版本 Platform：仅在分片上传能力接口返回 HTTP 404 或显式 `resumable=false` 时告知前端使用既有 multipart 上传接口；认证、网络和服务端错误继续上报。该兼容不会将远程存储切换为 BE 本地存储。
+
+## Instance presentation context
+
+A spec may declare `ports[].presentation: {viewer, label}` and `instanceBindings: {capability: [instance]}`. Publishing validates unique instance names, valid ports and existing binding targets. Runtime readers tolerate damaged optional presentation metadata; it must not stop sandbox execution.
+
+Legacy specs that declare neither valid presentation metadata nor instance bindings keep a null creation context, preserving existing tool viewer behavior. Explicit empty bindings (`{}` or a capability with `[]`) and presentation-only specs opt into version 1; an empty target list is not treated as missing metadata.
+
+Newly created runtimes return credential-free `instanceContext` (version 1, normalized sandboxId, optional mappingId, instanceBindings and instanceDescriptors). The launch CAS persists it separately in `ss_sandbox_record.instance_context_snapshot`; apply the authorized V0.6.0 migration before deploying this reader. Directory and allocation responses restore this snapshot and filter it to authorized endpoint keys. Existing NULL records and provider recovery without an actual creation snapshot remain legacy; current templates never reinterpret them. Shared context projection must not expose physical-host-only endpoints.
+
+Restoration also validates nested descriptor types. A damaged optional snapshot disables its presentation context while preserving existing endpoints and runtime reuse; it does not rewrite the saved record.
+
+Tool events carry optional root `AnswerDelta.instanceRefs` identities. Missing values retain legacy behavior; present invalid values become an explicit empty list. MessageContext unions valid identities by the exact sandbox/mapping/instance tuple and preserves them through streamed snapshots and stored messageStruct history. References never contain URLs, headers or tokens.
+
+
+### 工具沙箱会话租约
+
+`POST /sandbox/toolLease/{acquire,renew,release}` 将登录身份与工具会话身份分开处理。调用者只能为自身申请或归还租约，不能提交身份投影或替其他用户操作。BE 通过 Platform 协调租约，不再用断开 SSH 代表释放计算实例；Platform 不可用时请求失败，不回退到无租约启动。
+
+工具实例为用户全局资源，每个活跃会话单独持有租约。最后一个租约归还或过期后，默认闲置 300 秒释放；Harness 的 `BYCLAW_TOOL_ENV_IDLE_MS` 可配置空闲时长。共享用户上下文释放携带宿主、映射和代次身份，连带清理对应工具实例；旧上下文不能释放替代上下文的资源。

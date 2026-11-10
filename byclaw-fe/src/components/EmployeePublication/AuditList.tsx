@@ -115,33 +115,111 @@ function EnabledPublicationAuditList({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string>();
   const [approvingId, setApprovingId] = useState<string>();
+  const [publishingId, setPublishingId] = useState<string>();
   const approvalInFlight = useRef(false);
+  const publicationAttempt = useRef<{ requestId: string; revision: number; confirmed: boolean }>();
   const loadSequence = useRef(0);
+  const scopeSequence = useRef(0);
   const { confirmPublication, confirmationDialog } = usePublicationConfirmation();
-  const load = useCallback(async () => {
-    const sequence = ++loadSequence.current;
-    setLoading(true);
-    setLoadError(undefined);
-    try {
-      const result = await listPublications(review, page);
-      if (sequence !== loadSequence.current) return;
-      setRows(result.list);
-      setTotal(result.total);
-    } catch (error: any) {
-      if (sequence !== loadSequence.current) return;
-      setRows([]);
-      setTotal(0);
-      setLoadError(publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.retryLater' })));
-    } finally {
-      if (sequence === loadSequence.current) setLoading(false);
-    }
-  }, [intl, review, page]);
+  const load = useCallback(
+    async (background = false) => {
+      const sequence = ++loadSequence.current;
+      if (!background) {
+        setLoading(true);
+        setLoadError(undefined);
+      }
+      try {
+        const result = await listPublications(review, page);
+        if (sequence !== loadSequence.current) return;
+        // 列表短暂返回旧快照时，不能覆盖审批响应中已确认的新修订。
+        setRows((previous) =>
+          result.list.map((row) => {
+            const current = previous.find((item) => item.requestId === row.requestId);
+            return current && current.revision > row.revision ? current : row;
+          })
+        );
+        setTotal(result.total);
+        return result;
+      } catch (error: any) {
+        if (sequence !== loadSequence.current || background) return;
+        setRows([]);
+        setTotal(0);
+        setLoadError(publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.retryLater' })));
+      } finally {
+        if (sequence === loadSequence.current) setLoading(false);
+      }
+    },
+    [intl, review, page]
+  );
   useEffect(() => {
-    load();
+    scopeSequence.current += 1;
+    approvalInFlight.current = false;
+    publicationAttempt.current = undefined;
+    setApprovingId(undefined);
+    setPublishingId(undefined);
+    setRows([]);
+    void load();
     return () => {
+      scopeSequence.current += 1;
       loadSequence.current += 1;
     };
   }, [load]);
+  const applyingKey = rows
+    .filter((row) => row.status === 'APPLYING')
+    .map((row) => `${row.requestId}:${row.revision}`)
+    .join(',');
+  useEffect(() => {
+    if (!applyingKey && !publishingId) return;
+    const applying = new Map(
+      applyingKey
+        .split(',')
+        .filter(Boolean)
+        .map((item) => item.split(':') as [string, string])
+    );
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      const result = await load(true);
+      if (cancelled) return;
+      const attempt = publicationAttempt.current;
+      const completed = result?.list.find(
+        (row) =>
+          attempt &&
+          !attempt.confirmed &&
+          row.requestId === attempt.requestId &&
+          row.revision > attempt.revision &&
+          (['PUBLISHED', 'FAILED'].includes(row.status) ||
+            (row.canReview === false &&
+              ['PUBLISHED', 'PARTIALLY_PUBLISHED', 'APPROVED'].includes(publicationPresentation(row).status)))
+      );
+      // 发布已落库但原请求仍在等待后续通知时，以查询确认的结果结束页面等待。
+      if (attempt && completed) {
+        attempt.confirmed = true;
+        approvalInFlight.current = false;
+        setApprovingId(undefined);
+        setPublishingId(undefined);
+        const feedback = publicationApprovalFeedback(completed);
+        message[feedback.kind](feedback.error || intl.formatMessage({ id: feedback.messageId }, feedback.values));
+      }
+      if (
+        completed ||
+        result?.list.some(
+          (row) =>
+            applying.has(row.requestId) &&
+            row.revision >= Number(applying.get(row.requestId)) &&
+            row.status !== 'APPLYING'
+        )
+      ) {
+        onAuditComplete?.();
+      }
+      timer = setTimeout(poll, 3000);
+    };
+    timer = setTimeout(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [applyingKey, publishingId, intl, load, onAuditComplete]);
   const open = async (row: Publication) => {
     try {
       const detail = await getPublication(row.requestId);
@@ -153,31 +231,56 @@ function EnabledPublicationAuditList({
   };
   const approve = async (row: Publication) => {
     if (approvalInFlight.current) return;
+    const scope = scopeSequence.current;
+    const attempt = { requestId: row.requestId, revision: row.revision, confirmed: false };
     approvalInFlight.current = true;
     setApprovingId(row.requestId);
     try {
       // 预览验证列表修订号，并在实际通过前展示最新资源可用性。
       const current = await previewPublication(row);
+      if (scope !== scopeSequence.current) return;
       const decision = await confirmPublication(current);
+      if (scope !== scopeSequence.current) return;
       if (decision === 'edit') {
         sessionStorage.setItem('EmployeeDetail_prevRoute', `${window.location.pathname}${window.location.search}`);
         navigate(publicationUrl(current));
       }
       if (decision !== 'publish') return;
+      attempt.revision = current.publication.revision;
+      publicationAttempt.current = attempt;
+      setPublishingId(row.requestId);
       const result = await publicationAction('approve', current.publication);
+      if (scope !== scopeSequence.current || attempt.confirmed) return;
+      // 审批响应就是本次结果；不等待整表查询，也不沿用审批前的按钮权限。
+      setRows((previous) =>
+        previous.map((item) => {
+          if (item.requestId !== row.requestId || item.revision > result.publication.revision) return item;
+          return {
+            ...item,
+            ...result.publication,
+            canReview: result.canReview ?? result.publication.canReview ?? false,
+          };
+        })
+      );
       const feedback = publicationApprovalFeedback(result.publication);
       message[feedback.kind](feedback.error || intl.formatMessage({ id: feedback.messageId }, feedback.values));
       if (feedback.kind === 'success' && result.dependencies.some((dependency) => dependency.warning)) {
         message.warning(intl.formatMessage({ id: 'employeePublication.resourceWarning' }));
       }
     } catch (error: any) {
-      message.error(publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.approvalFailed' })));
+      if (scope === scopeSequence.current && !attempt.confirmed) {
+        message.error(publicationErrorMessage(error, intl.formatMessage({ id: 'employeePublication.approvalFailed' })));
+      }
     } finally {
-      await load();
-      // 员工发布审批完成后同步工作区和申请页签的待审角标。
-      onAuditComplete?.();
-      approvalInFlight.current = false;
-      setApprovingId(undefined);
+      if (scope === scopeSequence.current && !attempt.confirmed) {
+        approvalInFlight.current = false;
+        publicationAttempt.current = undefined;
+        setApprovingId(undefined);
+        setPublishingId(undefined);
+        void load(true);
+        // 员工发布审批完成后同步工作区和申请页签的待审角标。
+        onAuditComplete?.();
+      }
     }
   };
   return (
@@ -207,7 +310,7 @@ function EnabledPublicationAuditList({
               {intl.formatMessage({ id: 'employeePublication.audit.total' }, { count: total })}
             </span>
           )}
-          <Button icon={<ReloadOutlined />} loading={loading} disabled={!!approvingId} onClick={load}>
+          <Button icon={<ReloadOutlined />} loading={loading} disabled={!!approvingId} onClick={() => void load()}>
             {intl.formatMessage({ id: 'employeePublication.refresh' })}
           </Button>
         </Space>
@@ -223,7 +326,9 @@ function EnabledPublicationAuditList({
           showIcon
           message={intl.formatMessage({ id: 'employeePublication.audit.loadFailed' })}
           description={loadError}
-          action={<Button onClick={load}>{intl.formatMessage({ id: 'employeePublication.reload' })}</Button>}
+          action={
+            <Button onClick={() => void load()}>{intl.formatMessage({ id: 'employeePublication.reload' })}</Button>
+          }
         />
       ) : (
         <div className={styles.tableWrap}>

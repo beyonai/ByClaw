@@ -72,16 +72,16 @@ public class SharedSandboxController {
         }
         params.put("operatorUserCode", CurrentUserHolder.getCurrentUserCode());
         params.put("platformManager", platform);
-        if ("listMembers".equals(operation)) prepareMemberFilters(params);
+        if ("listMembers".equals(operation) || "listRecords".equals(operation)) prepareUserFilters(params, "listMembers".equals(operation));
         Object result = gateway.call(operation, params);
         return ResponseUtil.successResponse("listMembers".equals(operation) ? enrichMemberNames(result) : result);
     }
 
 
-    private void prepareMemberFilters(Map<String, Object> params) {
+    private void prepareUserFilters(Map<String, Object> params, boolean members) {
         params.remove("userCodes");
         params.remove("userIds");
-        params.putIfAbsent("status", "ACTIVE");
+        if (members) params.putIfAbsent("status", "ACTIVE");
         String keyword = Objects.toString(params.remove("keyword"), "").trim();
         if (keyword.isEmpty()) return;
         // 目录只解析编码/姓名，平台仍按可信租户范围过滤映射后再分页。

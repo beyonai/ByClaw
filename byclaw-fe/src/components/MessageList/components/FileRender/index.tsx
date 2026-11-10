@@ -8,6 +8,7 @@ import { isFunction, get } from 'lodash';
 
 import { CloseOutlined, CloudDownloadOutlined, LoadingOutlined, EnterOutlined, EyeOutlined } from '@ant-design/icons';
 import IconRender from './components/IconRender';
+import AttachmentUploadProgress from './components/AttachmentUploadProgress';
 import Previewer from './components/Previewer';
 import usePreview from './components/Previewer/usePreview';
 import useGlobal from '@/hooks/useGlobal';
@@ -64,6 +65,12 @@ function FileRender(props: IProps) {
   const canDownload = downloadRequest || downloadUrl || queryFile?.fileUrl || queryFile?.fileId;
 
   const isLoading = status === 'uploading' || previewing || downloading;
+  const hasUploadProgress = fileItem.uploadProgress !== undefined && (status === 'uploading' || status === 'error');
+  const isUnavailable = isLoading || status === 'error';
+
+  let uploadStatusId = 'queryInput.attachment.uploading';
+  if (fileItem.uploadPhase === 'processing') uploadStatusId = 'queryInput.attachment.processing';
+  if (status === 'error') uploadStatusId = 'queryInput.attachment.failed';
 
   const moreDesc = () => {
     if (fileItem.useType === 'outline') {
@@ -83,9 +90,13 @@ function FileRender(props: IProps) {
   return (
     <>
       <div className={classnames(styles.fileItem, 'ub ub-ac overflow-hidden')} key={uid}>
-        <div className={classnames(styles.actionList, 'full-width full-height ub ub-ac ub-pc gap8')}>
+        <div
+          className={classnames(styles.actionList, 'full-width full-height ub ub-ac ub-pc gap8', {
+            [styles.uploadActions]: hasUploadProgress,
+          })}
+        >
           {/* 文件卡片统一提供预览入口，不再按格式清单隐藏按钮。 */}
-          {!isLoading && (
+          {!isUnavailable && (
             <div
               className={classnames(styles.fileItemDownload, 'ub ub-ac ub-pc pointer preview')}
               onClick={() => {
@@ -111,7 +122,7 @@ function FileRender(props: IProps) {
               </div>
             </div>
           )}
-          {!isLoading && canDownload && !isPreviewMode && (
+          {!isUnavailable && canDownload && !isPreviewMode && (
             <div
               className={classnames(styles.fileItemDownload, 'ub ub-ac ub-pc pointer download')}
               onClick={() => {
@@ -132,7 +143,7 @@ function FileRender(props: IProps) {
               <CloudDownloadOutlined style={{ fontSize: '18px' }} />
             </div>
           )}
-          {!isLoading && canDownload && canQuote && !isPreviewMode && (
+          {!isUnavailable && canDownload && canQuote && !isPreviewMode && (
             <div
               className={classnames(styles.fileItemDownload, 'ub ub-ac ub-pc pointer cite')}
               onClick={() => {
@@ -184,20 +195,29 @@ function FileRender(props: IProps) {
             </Popconfirm>
           )}
         </div>
-        {isLoading && (
+        {isLoading && !(hasUploadProgress && status === 'uploading') && (
           <div className={classnames(styles.fileItemLoading, 'ub ub-ac ub-pc')}>
             <LoadingOutlined style={{ fontSize: '24px' }} />
           </div>
         )}
         <div style={{ position: 'relative' }}>
-          {imgUrl && <img key={imgUrl} src={imgUrl} alt="" className={styles.fileItemIcon} />}
-          {!imgUrl && <IconRender fileType={(fileType || '').toLowerCase()} />}
+          {hasUploadProgress && (
+            <AttachmentUploadProgress
+              name={name}
+              percent={fileItem.uploadProgress}
+              error={fileItem.uploadError}
+              onRetry={fileItem.retryUpload}
+            />
+          )}
+          {!hasUploadProgress && imgUrl && <img key={imgUrl} src={imgUrl} alt="" className={styles.fileItemIcon} />}
+          {!hasUploadProgress && !imgUrl && <IconRender fileType={(fileType || '').toLowerCase()} />}
         </div>
         <div className={classnames(styles.fileItemInfo, 'ub-f1 overflow-hidden')}>
           <p className={classnames(styles.fileItemName, 'textEllipsis')}>{fileName}</p>
           <div className="ub ub-pj">
             <p className={classnames(styles.fileItemMore, 'textEllipsis')}>
-              {fileType} {!!size && `· ${formatBytes(size)}`}
+              {hasUploadProgress ? intl.formatMessage({ id: uploadStatusId }) : fileType}
+              {!hasUploadProgress && !!size && ` · ${formatBytes(size)}`}
             </p>
             {rightBottomRender?.({
               fileItem,

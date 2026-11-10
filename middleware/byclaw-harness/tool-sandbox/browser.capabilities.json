@@ -1,6 +1,6 @@
 {
   "contract": "byclaw.tool-sandbox/v1",
-  "runtimeVersion": "D0.6.0-browser",
+  "runtimeVersion": "D0.6.0_browser",
   "purpose": "browser",
   "os": "linux",
   "operations": { "protocol": "ssh", "exposure": "private" },

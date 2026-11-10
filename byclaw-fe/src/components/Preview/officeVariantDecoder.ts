@@ -8,6 +8,7 @@ import {
   OFFICE_MAIN_CONTENT_TYPES,
   MAX_OFFICE_EXPANDED_BYTES,
   MAX_OFFICE_METADATA_BYTES,
+  MAX_OFFICE_PART_BYTES,
   type OfficeVariantType,
 } from './officeVariantTypes';
 
@@ -137,7 +138,7 @@ export async function prepareOfficeVariant(buffer: ArrayBuffer, type: OfficeVari
     const metadata = name === '[Content_Types].xml' || name.endsWith('.rels');
     const bytes = await readZipEntry(
       entry,
-      Math.min(metadata ? MAX_OFFICE_METADATA_BYTES : MAX_BINARY_PREVIEW_BYTES, MAX_OFFICE_EXPANDED_BYTES - total)
+      Math.min(metadata ? MAX_OFFICE_METADATA_BYTES : MAX_OFFICE_PART_BYTES, MAX_OFFICE_EXPANDED_BYTES - total)
     );
     total += bytes.byteLength;
     loaded.set(name, bytes);

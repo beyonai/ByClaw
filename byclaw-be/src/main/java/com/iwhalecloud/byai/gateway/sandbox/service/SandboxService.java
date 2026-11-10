@@ -101,6 +101,19 @@ public class SandboxService {
     @Autowired(required = false)
     private com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts sharedDshHostContexts;
 
+    @Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshToolBootstrapClient sharedDshToolBootstrapClient;
+
+    @Lazy
+    @Autowired
+    private com.iwhalecloud.byai.state.domain.chat.service.SystemParamTargetAgentResolver systemParamTargetAgentResolver;
+
+    @Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties sandboxProperties;
+
+    @Autowired
+    private com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxPolicy sharedSandboxPolicy;
+
     /**
      * 该用户的这类沙箱是常驻宿主上的进程内上下文：不建记录、不启动沙箱，直接向宿主要上下文（幂等 PUT）。
      * 工具沙箱由宿主上的运行时在第一次工具调用时自行启动。
@@ -335,6 +348,68 @@ public class SandboxService {
         return launchSandboxInternal(userCode, resourceId, sandboxLaunchContextFactory.resolveRouting(resourceId, userCode));
     }
 
+    /** Resolves the current user's execution sandbox through the existing launch lifecycle. */
+    public SandboxLaunchData launchUserExecutionSandbox(String userCode) {
+        if (StringUtils.isBlank(userCode)) {
+            throw new IllegalArgumentException("userCode is required");
+        }
+        String user = userCode.trim();
+        String targetAgentType = systemParamTargetAgentResolver.resolve(null, user);
+        SandboxLaunchRouting routing = SandboxTargetRouting.resolve(user, targetAgentType,
+            () -> sandboxLaunchContextFactory.resolveRouting(null, user));
+        Map<String, String> toolEnvironmentKeys = Map.of();
+        if (isSharedExecutionContext(user, routing)) {
+            String sharedSandboxType = routing.getSandboxType();
+            String selectedTool = com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts
+                .toolSandboxLookup(() -> byaiSystemConfigService.getDcSystemConfigValueByCode(
+                    com.iwhalecloud.byai.gateway.sandbox.runtime.SharedDshHostContexts.TOOL_SANDBOX_PARAM))
+                .apply(user);
+            String toolServiceKey = StringUtils.defaultIfBlank(selectedTool,
+                sandboxProperties.getSharedDshHost().getToolServiceKey());
+            if (StringUtils.isBlank(toolServiceKey)) {
+                throw new IllegalStateException("User execution tool sandbox is not configured");
+            }
+            routing = new SandboxLaunchRouting(toolServiceKey, SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+            if (isSharedExecutionContext(user, routing)) {
+                throw new IllegalStateException("User execution tool sandbox resolves to a shared host context");
+            }
+            if (platformRemote()) {
+                SandboxServiceSpec toolSpec = resolveEffectiveSpec(routing.getSandboxType(), routing.getProfileKey());
+                if (toolSpec != null && toolSpec.isToolSandbox()) {
+                    if (!toolSpec.isToolSandboxEnabled()) {
+                        throw new IllegalStateException("User execution tool sandbox is disabled");
+                    }
+                    SandboxLaunchData context = managedSharedLaunch(user, sharedSandboxType);
+                    if (context != null) {
+                        context = sharedSandboxGateway.executionAccess(user, sharedSandboxType, context);
+                    }
+                    if (context == null && sharedHostRoutes(user, sharedSandboxType)) {
+                        context = sharedDshHostContexts.ensure(user);
+                    }
+                    if (context == null) {
+                        throw new IllegalStateException("User execution host context is unavailable");
+                    }
+                    // Harness owns the persistent SSH identity; a second identity would break Agent reuse.
+                    toolEnvironmentKeys = sharedDshToolBootstrapClient.load(context, toolServiceKey);
+                }
+            }
+        }
+        SandboxLaunchData launched = launchSandboxInternal(user, null, routing, null, false, toolEnvironmentKeys);
+        if (launched != null && Boolean.TRUE.equals(launched.getIsShared())) {
+            throw new IllegalStateException("Shared host contexts cannot execute sandbox commands");
+        }
+        return launched;
+    }
+
+    private boolean isSharedExecutionContext(String userCode, SandboxLaunchRouting routing) {
+        return SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE.equals(routing.getSandboxType())
+            && (sharedHostRoutes(userCode, routing.getSandboxType())
+                || sharedSandboxGateway != null && sharedSandboxPolicy.eligible(userCode)
+                    && sharedSandboxGateway.enabled()
+                // Redis-announced hosts belong to the legacy lifecycle, not Platform execution.
+                || !platformRemote() && sharedDshHost(userCode, routing) != null);
+    }
+
     /**
      * 按工号启动沙箱，支持通过 serviceKey 覆盖沙箱类型。
      * 如果 serviceKey 为空则走默认 resolveRouting 逻辑（其中会查询用户首选 serviceKey）。
@@ -395,7 +470,12 @@ public class SandboxService {
         if (entity == null) {
             entity = sandboxServiceSpecEntityMapper.selectLegacyByServiceKey(serviceKey.trim());
         }
-        return entity != null && entity.getEnabled() != null && entity.getEnabled() == 1;
+        if (entity == null || !Integer.valueOf(1).equals(entity.getEnabled())) return false;
+        try {
+            return new ObjectMapper().readValue(entity.getSpecJson(), SandboxServiceSpec.class).isToolSandboxEnabled();
+        } catch (Exception invalidSpec) {
+            return false;
+        }
     }
 
     /** Explicit on-demand execution is valid, but must not become a login preference. */
@@ -990,9 +1070,14 @@ public class SandboxService {
         Date remoteExpiresAt = launchData.getRemoteExpiresAt();
         Date lastRenewAt = remoteExpiresAt != null ? lastAccessTime : null;
         Date nextRenewAt = computeNextRenewAt(remoteExpiresAt);
-        int updated = sandboxRecordMapper.updateLaunchSuccess(record.getId(), launchData.getSandboxId(), storedEndpoint,
-            boundGatewayToken, launchData.getTimeoutSeconds(), remoteExpiresAt, lastRenewAt, nextRenewAt,
-            lastAccessTime, record.getLockVersion());
+        record.setInstanceContextSnapshot(toJsonOrNull(launchData.getInstanceContext()));
+        int updated = launchData.getInstanceContext() == null
+            ? sandboxRecordMapper.updateLaunchSuccess(record.getId(), launchData.getSandboxId(), storedEndpoint,
+                boundGatewayToken, launchData.getTimeoutSeconds(), remoteExpiresAt, lastRenewAt, nextRenewAt,
+                lastAccessTime, record.getLockVersion())
+            : sandboxRecordMapper.updateLaunchSuccessWithContext(record.getId(), launchData.getSandboxId(), storedEndpoint,
+                boundGatewayToken, launchData.getTimeoutSeconds(), remoteExpiresAt, lastRenewAt, nextRenewAt,
+                lastAccessTime, record.getLockVersion(), record.getInstanceContextSnapshot());
 
         record.setStatus(STATUS_RUNNING);
         record.setEndpoint(storedEndpoint);
@@ -1009,6 +1094,8 @@ public class SandboxService {
             return null;
         }
         incrementVersions(record, true);
+        launchData.setInstanceContext(com.iwhalecloud.byai.gateway.sandbox.spec.InstanceContextSupport.restore(record.getInstanceContextSnapshot(), record.getSandboxId(), null, instanceEndpoints.keySet()));
+        launchData.setInstanceDescriptors(com.iwhalecloud.byai.gateway.sandbox.spec.InstanceContextSupport.descriptors(launchData.getInstanceContext()));
         sandboxMetadataCache.put(toSandboxInfo(record));
 
         registerSandboxEndpoint(userCode, routing, storedEndpoint, boundGatewayToken);
@@ -1118,6 +1205,8 @@ public class SandboxService {
         String gatewayToken = resolveRecordGatewayToken(record);
         launchData.setEndpoint(endpoint);
         launchData.setSandboxId(record.getSandboxId());
+        launchData.setInstanceContext(com.iwhalecloud.byai.gateway.sandbox.spec.InstanceContextSupport.restore(record.getInstanceContextSnapshot(), record.getSandboxId(), null, instanceEndpoints.keySet()));
+        launchData.setInstanceDescriptors(com.iwhalecloud.byai.gateway.sandbox.spec.InstanceContextSupport.descriptors(launchData.getInstanceContext()));
         launchData.setGatewayToken(gatewayToken);
         launchData.setTimeoutSeconds(record.getTimeoutSeconds());
         launchData.setRemoteExpiresAt(record.getRemoteExpiresAt());
@@ -1429,24 +1518,45 @@ public class SandboxService {
      * @return 沙箱信息，不存在时返回 null
      */
     public List<SandboxInfo> sandboxInfo(String userCode) {
+        return sandboxInfo(userCode, null);
+    }
+
+    /** Resolve one known identity without preparing unrelated sandbox endpoints. */
+    public List<SandboxInfo> sandboxInfo(String userCode, String sandboxId) {
+        if (sandboxId != null && (StringUtils.isBlank(sandboxId) || !sandboxId.equals(sandboxId.trim()))) {
+            throw new IllegalArgumentException("sandboxId must be a nonblank exact identity");
+        }
         if (platformRemote()) {
+            Map<String, Object> params = platformGateway().params("userCode", userCode);
+            if (sandboxId != null) params.put("sandboxId", sandboxId);
             @SuppressWarnings("unchecked")
-            List<SandboxInfo> remote = (List<SandboxInfo>) platformGateway().convert(platformGateway().service("info",platformGateway().params("userCode",userCode)),new com.fasterxml.jackson.core.type.TypeReference<List<SandboxInfo>>(){}.getType());
-            return withSharedHostContext(userCode, remote);
+            List<SandboxInfo> remote = (List<SandboxInfo>) platformGateway().convert(platformGateway().service("info", params),new com.fasterxml.jackson.core.type.TypeReference<List<SandboxInfo>>(){}.getType());
+            return selectSandboxInfos(withSharedHostContext(userCode, remote), sandboxId);
         }
         if (StringUtils.isBlank(userCode)) {
             return null;
         }
         List<SandboxInfo> cached = sandboxMetadataCache.listByUser(userCode);
         if (cached != null && !cached.isEmpty()) {
-            cached.forEach(this::hydrateGatewayToken);
-            return withSharedHostContext(userCode, cached);
+            List<SandboxInfo> selected = selectSandboxInfos(cached, sandboxId);
+            if (!selected.isEmpty()) {
+                selected.forEach(this::hydrateGatewayToken);
+                return selectSandboxInfos(withSharedHostContext(userCode, selected), sandboxId);
+            }
         }
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUser(userCode);
         List<SandboxInfo> result = records == null ? new ArrayList<>()
-            : records.stream().map(this::toSandboxInfo).collect(Collectors.toList());
+            : records.stream().filter(record -> sandboxId == null || sandboxId.equals(record.getSandboxId()))
+                .map(this::toSandboxInfo).collect(Collectors.toList());
         result.forEach(sandboxMetadataCache::put);
-        return withSharedHostContext(userCode, result);
+        return selectSandboxInfos(withSharedHostContext(userCode, result), sandboxId);
+    }
+
+    private List<SandboxInfo> selectSandboxInfos(List<SandboxInfo> infos, String sandboxId) {
+        if (sandboxId == null) return infos;
+        if (infos == null) return new ArrayList<>();
+        return infos.stream().filter(info -> info != null && sandboxId.equals(info.getSandboxId()))
+            .collect(Collectors.toList());
     }
 
     /** The resident host's context for the user is not a record; listings read it from the host. */
@@ -3172,7 +3282,11 @@ public class SandboxService {
         Map<String, String> instanceEndpoints = normalizeRecordInstanceEndpoints(record);
         String endpoint = normalizeRecordEndpoint(record);
         List<String> endpoints = StringUtils.isNotBlank(endpoint) ? List.of(endpoint) : List.of();
+        Map<String, Object> instanceContext = com.iwhalecloud.byai.gateway.sandbox.spec.InstanceContextSupport.restore(
+            record.getInstanceContextSnapshot(), record.getSandboxId(), null, instanceEndpoints.keySet());
         return SandboxInfo.builder()
+            .instanceContext(instanceContext)
+            .instanceDescriptors(com.iwhalecloud.byai.gateway.sandbox.spec.InstanceContextSupport.descriptors(instanceContext))
             .sandboxId(record.getSandboxId())
             .userCode(record.getUserCode())
             .sandboxType(record.getSandboxType())

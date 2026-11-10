@@ -131,4 +131,81 @@ class TenantCommandRecoveryTest {
         verify(schemas,never()).initialize(anyLong(),anyLong(),anyLong(),any(),anyString(),anyLong());
     }
 
+    /** Prepare original database and Node observations without provisioning replacements. */
+    private void schemaReadyForFirstDispatch() {
+        jdbc.update("UPDATE byai.tenant_task SET stage='SCHEMA_INIT' WHERE id=1");
+        jdbc.update("UPDATE byai.tenant_task_step SET step_key='SCHEMA_INIT',provider_request_key='command-1:SCHEMA_INIT'");
+        jdbc.execute("CREATE TABLE byai.ss_sandbox_record(id bigint,enterprise_id bigint,owner_scope varchar(32),sandbox_id varchar(64),status varchar(32),lock_version int,endpoint varchar(128))");
+        when(tenants.selectConfig(2,"PROVISION_REQUEST_ID")).thenReturn("internal-1");
+        when(tenants.selectConfig(2,"DB_SANDBOX_RECORD_ID")).thenReturn("8");
+        when(tenants.selectConfig(2,"NODE_SANDBOX_RECORD_ID")).thenReturn("9");
+        when(schemas.canRetryBeforeDispatch(2)).thenReturn(true);
+        for (long id : new long[] {8, 9}) {
+            String stage = id == 8 ? "DB_CREATE" : "NODE_CREATE";
+            jdbc.update("INSERT INTO byai.ss_sandbox_record VALUES (?,2,'TENANT',?,'RUNNING',0,?)",id,"sandbox-"+id,"http://resource-"+id);
+            var record = new com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord();
+            record.setId(id);record.setEnterpriseId(2L);record.setSandboxId("sandbox-"+id);
+            record.setStatus("RUNNING");record.setLockVersion(0);record.setEndpoint("http://resource-"+id);
+            when(sandboxes.inspectRecovery(2,stage,"command-1:"+stage)).thenReturn(
+                new TenantSandboxService.RecoveryResource("MATCHED",
+                    new TenantSandboxService.TenantSandboxView(id,"sandbox-"+id,"http://resource-"+id),record));
+        }
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode safeBody() {
+        return json.createObjectNode().put("requestId",request).put("expectedRevision","0");
+    }
+
+    @Test void progressCheckResumesOriginalSchemaOnceAndAuditsServiceIdentity() throws Exception {
+        schemaReadyForFirstDispatch();
+        var accepted = recovery.safeResume(1,safeBody());
+        assertEquals("PENDING",accepted.get("status"));
+        assertEquals("RETRY_READY",jdbc.queryForObject("SELECT status FROM byai.tenant_task_step",String.class));
+        assertEquals("SYSTEM_SERVICE",jdbc.queryForObject("SELECT actor_type FROM byai.tenant_task_recovery",String.class));
+        var replay = recovery.safeResume(1,safeBody());
+        for (String key : java.util.List.of("commandId","status","revision","decision")) {
+            assertEquals(accepted.get(key),replay.get(key));
+        }
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM byai.tenant_task_recovery",Integer.class));
+        verify(schemas,never()).initialize(anyLong(),anyLong(),anyLong(),any(),anyString(),anyLong());
+    }
+
+    @Test void progressCheckDoesNotResumeProviderCreationOrUnknownSchemaOutcome() {
+        assertEquals("MANUAL_REQUIRED",recovery.safeResume(1,safeBody()).get("status"));
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM byai.tenant_task_recovery",Integer.class));
+        schemaReadyForFirstDispatch();
+        when(schemas.canRetryBeforeDispatch(2)).thenReturn(false);
+        assertEquals("SCHEMA_AUDIT_RECONCILIATION_REQUIRED",recovery.safeResume(1,safeBody()).get("reasonCode"));
+        assertEquals("STARTED",jdbc.queryForObject("SELECT status FROM byai.tenant_task_step",String.class));
+    }
+
+    @Test void auditAppearingDuringInspectionRollsBackAcceptance() {
+        schemaReadyForFirstDispatch();
+        when(schemas.canRetryBeforeDispatch(2)).thenReturn(true,false);
+        assertThrows(TenantCommandException.class,()->recovery.safeResume(1,safeBody()));
+        assertEquals("MANUAL_REQUIRED",store.find(1).status());
+        assertEquals(0,store.find(1).revision());
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM byai.tenant_task_recovery",Integer.class));
+    }
+
+    @Test void originalNodeBindingAndLiveLeaseCannotBeBypassed() {
+        schemaReadyForFirstDispatch();
+        when(tenants.selectConfig(2,"NODE_SANDBOX_RECORD_ID")).thenReturn("99");
+        assertEquals("SCHEMA_RESOURCE_IDENTITY_UNVERIFIED",recovery.safeResume(1,safeBody()).get("reasonCode"));
+        when(tenants.selectConfig(2,"NODE_SANDBOX_RECORD_ID")).thenReturn("9");
+        jdbc.update("UPDATE byai.tenant_task SET lease_until=? WHERE id=1",java.sql.Timestamp.from(java.time.Instant.now().plusSeconds(600)));
+        assertThrows(TenantCommandException.class,()->recovery.safeResume(1,safeBody()));
+        assertEquals("MANUAL_REQUIRED",store.find(1).status());
+    }
+
+    @Test void changedNodeVersionRollsBackCommandStepAndReceipt() {
+        schemaReadyForFirstDispatch();
+        jdbc.update("UPDATE byai.ss_sandbox_record SET lock_version=1 WHERE id=9");
+        assertEquals("RECOVERY_RESOURCE_CHANGED",assertThrows(TenantCommandException.class,
+            ()->recovery.safeResume(1,safeBody())).getMessage());
+        assertEquals("MANUAL_REQUIRED",store.find(1).status());
+        assertEquals("STARTED",jdbc.queryForObject("SELECT status FROM byai.tenant_task_step",String.class));
+        assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM byai.tenant_task_recovery",Integer.class));
+    }
+
 }

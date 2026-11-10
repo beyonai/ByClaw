@@ -1,4 +1,5 @@
 import { GET, POST } from '@/service/common/request';
+import { downloadFile } from '@/service/fileBrowser';
 import { getChatFileArtifactPath, getRelativeChatFileArtifactPath } from '@/utils/chatFileArtifact';
 
 export type ChatFileArtifact = {
@@ -20,6 +21,11 @@ export type ChatFileArtifactResolveRequest = {
   paths: string[];
 };
 
+export type ProjectSharedFileScope = {
+  resourceId: string;
+  rootPath: string;
+};
+
 export function resolveChatFileArtifacts(params: ChatFileArtifactResolveRequest) {
   return POST<ChatFileArtifact[]>('/byaiService/chat/file-artifacts/resolve', params);
 }
@@ -34,20 +40,40 @@ export async function downloadRelativeChatFileArtifact(params: {
   href: string;
   sessionId?: string;
   messageId?: string;
-}) {
-  const path = getRelativeChatFileArtifactPath(params.href, params.sessionId);
-  if (!path || !params.sessionId) throw new Error('Invalid session file link');
+  sharedScope?: ProjectSharedFileScope;
+}): Promise<{ file: Blob; fileName: string; path: string; loadResource?: (path: string) => Promise<Blob> }> {
+  const { href, sessionId, messageId, sharedScope } = params;
+  const path = getRelativeChatFileArtifactPath(href, sessionId);
+  if (!path || !sessionId) throw new Error('Invalid session file link');
   const artifacts = await resolveChatFileArtifacts({
-    sessionId: params.sessionId,
-    messageId: params.messageId,
+    sessionId,
+    messageId,
     paths: [path],
   });
   const artifact = artifacts.find(
     (item) => getChatFileArtifactPath(item.path) === path && getChatFileArtifactPath(item.sourcePath) === path
   );
-  if (!artifact) throw new Error('Session file not found');
+  if (artifact) {
+    return {
+      ...(await downloadChatFileArtifact({ sessionId, path: artifact.path })),
+      path: artifact.path,
+    };
+  }
+  if (!sharedScope) throw new Error('Session file not found');
+
+  // DSH 项目任务以共享目录为工作目录。会话内无文件时，保留原相对路径到当前项目查找。
+  const { resourceId, rootPath } = sharedScope;
+  const relativePath = path.slice(`/.sessions/${sessionId}/`.length);
+  const sharedPath = `${rootPath}${relativePath}`;
   return {
-    ...(await downloadChatFileArtifact({ sessionId: params.sessionId, path: artifact.path })),
-    path: artifact.path,
+    ...(await downloadFile(resourceId, sharedPath)),
+    path: sharedPath,
+    loadResource: async (resourcePath) => {
+      const decodedPath = decodeURIComponent(resourcePath).replace(/\\/g, '/');
+      if (!decodedPath.startsWith(rootPath) || decodedPath.split('/').includes('..')) {
+        throw new Error('Resource outside project shared directory');
+      }
+      return (await downloadFile(resourceId, decodedPath)).file;
+    },
   };
 }

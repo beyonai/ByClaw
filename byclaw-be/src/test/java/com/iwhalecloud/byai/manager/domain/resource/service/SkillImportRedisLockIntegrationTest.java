@@ -8,8 +8,11 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.data.redis.connection.RedisClusterConfiguration;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.jedis.JedisConnectionFactory;
 import org.springframework.integration.redis.util.RedisLockRegistry;
@@ -19,15 +22,12 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** 本地独立 Redis 验证跨实例互斥、续租及事务结束释放，不连接开发或生产服务。 */
-@EnabledIfEnvironmentVariable(named = "BYCLAW_TEST_REDIS_PORT", matches = "[0-9]+")
 class SkillImportRedisLockIntegrationTest {
 
-    @Test
-    void independentInstancesStayExclusiveBeyondTheOriginalLeaseAndReleaseAfterCommit() throws Exception {
-        int port = Integer.parseInt(System.getenv("BYCLAW_TEST_REDIS_PORT"));
-        var connectionFactory = new JedisConnectionFactory(new RedisStandaloneConfiguration("127.0.0.1", port));
-        connectionFactory.afterPropertiesSet();
-        connectionFactory.start();
+    @ParameterizedTest
+    @ValueSource(strings = {"standalone", "cluster"})
+    void independentInstancesStayExclusiveBeyondTheOriginalLeaseAndReleaseAfterCommit(String mode) throws Exception {
+        var connectionFactory = connectionFactory(mode);
         var scheduler = new ThreadPoolTaskScheduler();
         scheduler.initialize();
         String prefix = "test:skill-import:" + UUID.randomUUID();
@@ -42,7 +42,7 @@ class SkillImportRedisLockIntegrationTest {
                 new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID(), "sa", "")));
             var service = new SkillImportLockService(firstRegistry);
             var first = executor.submit(() -> transaction.executeWithoutResult(status -> {
-                service.acquire("demo");
+                service.acquire("THIRD_SYNC:WHAGE_AGENT:KG_DOC:local-knowledge");
                 acquired.countDown();
                 try {
                     if (!complete.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("test timeout");
@@ -53,7 +53,7 @@ class SkillImportRedisLockIntegrationTest {
                 }
             }));
             assertThat(acquired.await(5, TimeUnit.SECONDS)).isTrue();
-            var competing = secondRegistry.obtain("demo");
+            var competing = secondRegistry.obtain("THIRD_SYNC:WHAGE_AGENT:KG_DOC:local-knowledge");
             // 一次有界等待超过最初的租约；期间不能在另一个实例取得同编码锁。
             boolean unexpectedlyAcquired = competing.tryLock(1_500, TimeUnit.MILLISECONDS);
             if (unexpectedlyAcquired) competing.unlock();
@@ -72,11 +72,10 @@ class SkillImportRedisLockIntegrationTest {
             connectionFactory.destroy();
         }
     }
-    @Test
-    void lostRedisLeaseRollsBackTheDatabaseBeforeCommit() {
-        int port = Integer.parseInt(System.getenv("BYCLAW_TEST_REDIS_PORT"));
-        var connectionFactory = new JedisConnectionFactory(new RedisStandaloneConfiguration("127.0.0.1", port));
-        connectionFactory.afterPropertiesSet();
+    @ParameterizedTest
+    @ValueSource(strings = {"standalone", "cluster"})
+    void lostRedisLeaseRollsBackTheDatabaseBeforeCommit(String mode) {
+        var connectionFactory = connectionFactory(mode);
         String prefix = "test:skill-import:" + UUID.randomUUID();
         var registry = new RedisLockRegistry(connectionFactory, prefix);
         var dataSource = new DriverManagerDataSource("jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1", "sa", "");
@@ -86,10 +85,10 @@ class SkillImportRedisLockIntegrationTest {
             var transaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
             var service = new SkillImportLockService(registry);
             assertThatThrownBy(() -> transaction.executeWithoutResult(status -> {
-                service.acquire("demo");
-                jdbc.update("insert into imported_skill (code) values (?)", "demo");
+                service.acquire("THIRD_SYNC:WHAGE_AGENT:KG_DOC:local-knowledge");
+                jdbc.update("insert into imported_skill (code) values (?)", "THIRD_SYNC:WHAGE_AGENT:KG_DOC:local-knowledge");
                 try (var connection = connectionFactory.getConnection()) {
-                    connection.keyCommands().del((prefix + ":demo").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    connection.keyCommands().del((prefix + ":THIRD_SYNC:WHAGE_AGENT:KG_DOC:local-knowledge").getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 }
             })).isInstanceOf(IllegalStateException.class);
             assertThat(jdbc.queryForObject("select count(*) from imported_skill", Integer.class)).isZero();
@@ -100,4 +99,17 @@ class SkillImportRedisLockIntegrationTest {
             connectionFactory.destroy();
         }
     }
+
+    private JedisConnectionFactory connectionFactory(String mode) {
+        String port = System.getenv("cluster".equals(mode)
+            ? "BYCLAW_TEST_REDIS_CLUSTER_PORT" : "BYCLAW_TEST_REDIS_PORT");
+        assumeTrue(port != null && port.matches("[0-9]+"), "Disposable local Redis must be enabled explicitly");
+        var factory = "cluster".equals(mode)
+            ? new JedisConnectionFactory(new RedisClusterConfiguration(java.util.List.of("127.0.0.1:" + port)))
+            : new JedisConnectionFactory(new RedisStandaloneConfiguration("127.0.0.1", Integer.parseInt(port)));
+        factory.afterPropertiesSet();
+        factory.start();
+        return factory;
+    }
+
 }

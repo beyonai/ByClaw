@@ -95,6 +95,18 @@ public interface SsSandboxRecordMapper {
                             @Param("lastAccessTime") Date lastAccessTime,
                             @Param("lockVersion") Integer lockVersion);
 
+    int updateLaunchSuccessWithContext(@Param("id") Long id,
+                            @Param("sandboxId") String sandboxId,
+                            @Param("endpoint") String endpoint,
+                            @Param("gatewayToken") String gatewayToken,
+                            @Param("timeoutSeconds") Integer timeoutSeconds,
+                            @Param("remoteExpiresAt") Date remoteExpiresAt,
+                            @Param("lastRenewAt") Date lastRenewAt,
+                            @Param("nextRenewAt") Date nextRenewAt,
+                            @Param("lastAccessTime") Date lastAccessTime,
+                            @Param("lockVersion") Integer lockVersion,
+                            @Param("instanceContextSnapshot") String instanceContextSnapshot);
+
     int updateResizeSuccess(@Param("id") Long id,
                             @Param("sandboxId") String sandboxId,
                             @Param("endpoint") String endpoint,
@@ -247,6 +259,8 @@ public interface SsSandboxRecordMapper {
     List<SsSandboxRecord> selectInventoryPage(java.util.Map<String, Object> query);
 
     int countInventory(java.util.Map<String, Object> query);
+
+    List<String> selectInventoryTypes(java.util.Map<String, Object> query);
 
     int countEnterpriseUserSandbox(@Param("id") Long id, @Param("enterpriseId") Long enterpriseId);
 

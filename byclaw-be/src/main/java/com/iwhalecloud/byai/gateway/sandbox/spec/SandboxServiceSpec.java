@@ -36,9 +36,24 @@ public class SandboxServiceSpec {
      */
     @JsonIgnore
     public boolean isAutoStartEnabled() {
+        if (isToolSandbox()) return false;
         Map<String, String> lifecycle = runtimeOptions == null ? null : runtimeOptions.get("lifecycle");
         String value = lifecycle == null ? null : lifecycle.get("autoStart");
         return value == null || Boolean.parseBoolean(value.trim());
+    }
+
+    @JsonIgnore
+    public boolean isToolSandbox() {
+        Map<String, String> tool = runtimeOptions == null ? null : runtimeOptions.get("toolSandbox");
+        return tool != null && "byclaw.tool-sandbox/v1".equals(tool.get("contract"));
+    }
+
+    /** Availability is independent from login startup; old admitted templates remain enabled. */
+    @JsonIgnore
+    public boolean isToolSandboxEnabled() {
+        if (!isToolSandbox()) return true;
+        String value = runtimeOptions.get("toolSandbox").get("enabled");
+        return value == null || "true".equalsIgnoreCase(value.trim()) || "1".equals(value.trim());
     }
 
     /**
@@ -50,6 +65,32 @@ public class SandboxServiceSpec {
      * Ports to wait for. OpenSandbox will expose one endpoint per port.
      */
     private List<PortSpec> ports;
+
+    private Map<String, List<String>> instanceBindings;
+    public void setInstanceBindings(Object value) {
+        instanceBindings = null;
+        if (!(value instanceof Map)) {
+            if (value != null) org.slf4j.LoggerFactory.getLogger(SandboxServiceSpec.class).warn("Invalid optional instance bindings; bindings disabled");
+            return;
+        }
+        Map<String, List<String>> safe = new java.util.LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+            if (!(entry.getKey() instanceof String) || !(entry.getValue() instanceof List)) {
+                org.slf4j.LoggerFactory.getLogger(SandboxServiceSpec.class).warn("Invalid optional instance binding targets; bindings disabled");
+                return;
+            }
+            List<String> names = new java.util.ArrayList<>();
+            for (Object name : (List<?>) entry.getValue()) {
+                if (!(name instanceof String)) {
+                    org.slf4j.LoggerFactory.getLogger(SandboxServiceSpec.class).warn("Invalid optional instance binding identity; bindings disabled");
+                    return;
+                }
+                names.add((String) name);
+            }
+            safe.put((String) entry.getKey(), names);
+        }
+        instanceBindings = safe;
+    }
 
     /**
      * Primary service port exposed by the image.

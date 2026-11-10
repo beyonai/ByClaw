@@ -1,3 +1,4 @@
+import { isRetiredResource, isRetiredResourceType, retiredResourceError } from "../retired-resources.js";
 import { validateRemoteResourceUse } from "../resource-use-guard.js";
 import { discoverBackendBaseUrl } from "../backend-service-discovery.js";
 import { buildHubSkillAuthHeaders } from "../hub-skill-sync.js";
@@ -86,6 +87,7 @@ export class BaiyingExecutor {
     payload?: Dict;
     logger?: BaiyingEnhanceLogger;
   }): Promise<ExecutorResponse> {
+    if (isRetiredResourceType(params.resourceType)) return retiredResourceError();
     const resourceContext = getResourceContext(params.payload ?? {});
     logChannelDebug(`describe(${params.capabilityId})`, { resourceContext, logger: params.logger });
     const authContext = await this.getAuthContext();
@@ -98,7 +100,7 @@ export class BaiyingExecutor {
         return makeError("RESOURCE_USE_DENIED", "Resource use authorization could not be verified");
       }
     }
-    const { capability, resolvedType } = await resolveCapability({
+    const { capability, resolvedType, retired } = await resolveCapability({
       resourcesDir: this.resourcesDir,
       capabilityId: params.capabilityId,
       resourceType: params.resourceType,
@@ -107,6 +109,7 @@ export class BaiyingExecutor {
       session: this.session,
       logger: params.logger,
     });
+    if (retired || isRetiredResource(capability)) return retiredResourceError();
     return describeResource({
       capability,
       resolvedType: resolvedType ?? capability?.resource_type ?? params.resourceType ?? null,
@@ -131,6 +134,7 @@ export class BaiyingExecutor {
     /** Host logger; request logs go through OpenClaw's plugin logger when available. */
     logger?: BaiyingEnhanceLogger;
   }): Promise<ExecutorResponse> {
+    if (isRetiredResourceType(params.resourceType)) return retiredResourceError();
     const payload = isRecord(params.payload) ? params.payload : {};
     const action = params.action || String(payload.action ?? "");
     const resourceContext = getResourceContext(payload);
@@ -151,7 +155,7 @@ export class BaiyingExecutor {
         return makeError("RESOURCE_USE_DENIED", "Resource use authorization could not be verified");
       }
     }
-    const { capability, resolvedType } = await resolveCapability({
+    const { capability, resolvedType, retired } = await resolveCapability({
       resourcesDir: this.resourcesDir,
       capabilityId: params.capabilityId,
       resourceType: params.resourceType,
@@ -160,6 +164,7 @@ export class BaiyingExecutor {
       session: this.session,
       logger: params.logger,
     });
+    if (retired || isRetiredResource(capability)) return retiredResourceError();
     if (!capability) {
       return makeError("CAPABILITY_NOT_FOUND", `Capability not found: ${params.capabilityId}`);
     }
@@ -210,11 +215,11 @@ export class BaiyingExecutor {
         signal: params.signal,
       });
     }
-    if (resType === "mcp" || resType === "object" || resType === "view") {
+    if (resType === "mcp") {
       return await executeMcp({
         capability,
         action,
-        parameters: resType === "object" || resType === "view" ? payload : backendParameters,
+        parameters: backendParameters,
         forwardHeaders:
           Object.keys(mcpForwardHeaders).length > 0 ? mcpForwardHeaders : undefined,
         authContext,

@@ -33,3 +33,22 @@ it('resolves action labels in the current locale and preserves connector protoco
     window.removeEventListener(CONNECTOR_AUTHORIZATION_REQUEST_EVENT, received);
   }
 });
+
+it('recognizes digital human configuration errors and opens the matching connector', () => {
+  mockLocale = 'zh-CN';
+  const output = 'MEDIA_CONNECTOR_CONFIGURATION_REQUIRED: connectorCode=volcengine-digital-human;';
+  expect(parseConnectorAction(output)).toEqual({
+    connectorCode: 'volcengine-digital-human',
+    label: '需要配置火山数字人视频连接器',
+  });
+  mockLocale = 'en-US';
+  expect(parseConnectorAction(output)?.label).toBe('Configure Volcengine digital human video connector');
+  const received = jest.fn();
+  window.addEventListener(CONNECTOR_AUTHORIZATION_REQUEST_EVENT, received);
+  try {
+    requestConnectorAuthorization('volcengine-digital-human');
+    expect(received.mock.calls[0][0].detail).toEqual({ connectorCode: 'volcengine-digital-human' });
+  } finally {
+    window.removeEventListener(CONNECTOR_AUTHORIZATION_REQUEST_EVENT, received);
+  }
+});

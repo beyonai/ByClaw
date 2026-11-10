@@ -7,8 +7,14 @@ import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInventory;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxReleaseException;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient;
+import com.iwhalecloud.byai.manager.domain.tenant.TenantModeService;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
+import com.iwhalecloud.byai.manager.entity.devloop.Project;
+import com.iwhalecloud.byai.manager.entity.users.Users;
+import com.iwhalecloud.byai.manager.mapper.operations.OperationsGroupMapper;
 import com.iwhalecloud.byai.manager.mapper.operations.OperationsSandboxMapper;
 import com.iwhalecloud.byai.manager.vo.operations.OperationsSandboxVo;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +23,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Map;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,6 +50,10 @@ class PlatformOperationsServiceTest {
     private TenantDbProvisioningService tenants;
     private SandboxUserContextRunner context;
     private TenantNodeClient nodes;
+    private TenantModeService tenantModes;
+    private OperationsGroupMapper groups;
+    private ProjectService projectService;
+    private UserService userService;
 
     /** 所有远程调用使用替身。 */
     @BeforeEach
@@ -53,6 +64,10 @@ class PlatformOperationsServiceTest {
         tenants = mock(TenantDbProvisioningService.class);
         context = mock(SandboxUserContextRunner.class);
         nodes = mock(TenantNodeClient.class);
+        tenantModes = mock(TenantModeService.class);
+        groups = mock(OperationsGroupMapper.class);
+        projectService = mock(ProjectService.class);
+        userService = mock(UserService.class);
         SandboxRuntimeInventory inventory = mock(SandboxRuntimeInventory.class);
         when(inventory.current()).thenReturn(Map.of());
         ReflectionTestUtils.setField(service, "json", json);
@@ -62,6 +77,114 @@ class PlatformOperationsServiceTest {
         ReflectionTestUtils.setField(service, "inventory", inventory);
         ReflectionTestUtils.setField(service, "userContext", context);
         ReflectionTestUtils.setField(service, "nodes", nodes);
+        ReflectionTestUtils.setField(service, "tenantModes", tenantModes);
+        ReflectionTestUtils.setField(service, "groupRecords", groups);
+        ReflectionTestUtils.setField(service, "projectService", projectService);
+        ReflectionTestUtils.setField(service, "userService", userService);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void closeGroupQueries() {
+        service.closeGroupQueries();
+    }
+
+    @Test
+    void aggregatedGroupsContinueAfterAnUnavailableTenant() {
+        when(groups.sources(0)).thenReturn(List.of(Map.of("enterpriseId", "1", "enterpriseName", "Default"),
+            Map.of("enterpriseId", "42", "enterpriseName", "Tenant")));
+        when(tenantModes.isSharedDataTenant(1)).thenReturn(true);
+        when(groups.groups(1, "", "")).thenReturn(List.of(
+            Map.of("id", "9", "enterpriseId", "1", "projectId", "71")));
+        Project project = new Project();
+        project.setProjectId(71L);
+        project.setProjectName("默认企业项目");
+        when(projectService.findNamesByIds(1L, Set.of(71L))).thenReturn(List.of(project));
+        ObjectNode request = request("aggregate").put("resource", "groups");
+        var first = service.execute(request);
+        assertThat(first.path("list").get(0).path("enterpriseId").asText()).isEqualTo("1");
+        assertThat(first.path("list").get(0).path("projectName").asText()).isEqualTo("默认企业项目");
+        assertThat(first.path("nextCursor").asText()).isEqualTo("1:1");
+
+        when(groups.sources(1)).thenReturn(List.of(Map.of("enterpriseId", "42", "enterpriseName", "Tenant"),
+            Map.of("enterpriseId", "43", "enterpriseName", "Next")));
+        when(nodes.operationsRequest(eq(42L), any(), any(), any(), any()))
+            .thenThrow(new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
+        when(tenantModes.isSharedDataTenant(43)).thenReturn(true);
+        when(groups.groups(43, "", "")).thenReturn(List.of(Map.of("id", "10", "enterpriseId", "43")));
+        ((ObjectNode) request.get("payload")).put("cursor", "1:1");
+        var second = service.execute(request);
+        assertThat(second.path("partial").asBoolean()).isTrue();
+        assertThat(second.path("failedTenants").get(0).path("enterpriseId").asText()).isEqualTo("42");
+        assertThat(second.path("list").get(0).path("enterpriseId").asText()).isEqualTo("43");
+        assertThat(second.path("nextCursor").isNull()).isTrue();
+    }
+
+    /** 同一项目只查一次，缺失记录和默认项目占位不影响分页。 */
+    @Test
+    void dedicatedGroupListResolvesProjectsInTheRequestedEnterprise() {
+        ObjectNode list = json.createObjectNode().put("total", 4);
+        var groupRows = list.putArray("list");
+        groupRows.addObject().put("projectId", "9007199254740993");
+        groupRows.addObject().put("projectId", "9007199254740993");
+        groupRows.addObject().put("projectId", "72");
+        groupRows.addObject().put("projectId", "-1");
+        when(nodes.operationsRequest(eq(42L), eq("POST"), eq("/internal/v1/operations/groups/query"), any(), any()))
+            .thenReturn(list);
+        Project project = new Project();
+        project.setProjectId(9007199254740993L);
+        project.setProjectName("独立租户项目");
+        Set<Long> projectIds = Set.of(9007199254740993L, 72L);
+        when(projectService.findNamesByIds(42L, projectIds)).thenReturn(List.of(project));
+        ObjectNode groupRequest = request("list").put("resource", "groups");
+        ((ObjectNode) groupRequest.path("payload")).put("enterpriseId", "42");
+
+        var result = service.execute(groupRequest);
+
+        assertThat(result.path("total").asInt()).isEqualTo(4);
+        var rows = result.path("list");
+        assertThat(rows.get(0).path("projectName").asText()).isEqualTo("独立租户项目");
+        assertThat(rows.get(0).path("projectId").asText()).isEqualTo("9007199254740993");
+        assertThat(rows.get(1).path("projectName").asText()).isEqualTo("独立租户项目");
+        assertThat(rows.get(2).has("projectName")).isFalse();
+        assertThat(rows.get(3).has("projectName")).isFalse();
+        verify(projectService).findNamesByIds(42L, projectIds);
+    }
+
+    /** 共享工作组详情同时保留项目、创建人 ID 和对应名称。 */
+    @Test
+    void sharedGroupDetailResolvesProjectAndCreatorNames() {
+        when(tenantModes.isSharedDataTenant(42L)).thenReturn(true);
+        when(groups.detail(42L, 9L)).thenReturn(Map.of("projectId", "71", "creatorId", "21"));
+        Project project = new Project();
+        project.setProjectId(71L);
+        project.setProjectName("关联的项目");
+        when(projectService.findNamesByIds(42L, Set.of(71L))).thenReturn(List.of(project));
+        Users creator = new Users();
+        creator.setUserId(21L);
+        creator.setUserName("工作组创建者");
+        when(userService.findByIds(Set.of(21L))).thenReturn(List.of(creator));
+        ObjectNode groupRequest = request("detail").put("resource", "groups");
+        ((ObjectNode) groupRequest.path("payload")).put("enterpriseId", "42");
+
+        var detail = service.execute(groupRequest);
+
+        assertThat(detail.path("projectName").asText()).isEqualTo("关联的项目");
+        assertThat(detail.path("creatorName").asText()).isEqualTo("工作组创建者");
+        assertThat(detail.path("creatorId").asText()).isEqualTo("21");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(longs = {1L, 456L})
+    void sharedTenantGroupsReadPublicStorage(long enterpriseId) {
+        when(tenantModes.isSharedDataTenant(enterpriseId)).thenReturn(true);
+        when(groups.groups(enterpriseId, "", "")).thenReturn(List.of(Map.of("id", "9")));
+        ObjectNode request = request("list").put("resource", "groups");
+        ((ObjectNode) request.get("payload")).put("enterpriseId", Long.toString(enterpriseId));
+
+        var result = service.execute(request);
+
+        assertThat(result.path("list").get(0).path("id").asText()).isEqualTo("9");
+        verify(nodes, never()).operationsRequest(anyLong(), any(), any(), any(), any());
     }
 
     /** 平台查询沿用受服务认证保护的入口，成员入口继续执行成员鉴权。 */
@@ -249,10 +372,18 @@ class PlatformOperationsServiceTest {
     /** 关联会话只能转发至指定企业的固定只读入口。 */
     @Test
     void groupConversationsUseFixedTenantRoute() {
-        ObjectNode request = request("conversations");
-        request.put("resource", "groups");
-        ((ObjectNode) request.path("payload")).put("enterpriseId", "42").put("pageNum", 2);
-        service.execute(request);
+        ObjectNode page = json.createObjectNode();
+        page.putArray("list").addObject().put("creatorId", "21");
+        when(nodes.operationsRequest(eq(42L), eq("POST"), eq("/internal/v1/operations/groups/9/conversations/query"),
+            any(), any())).thenReturn(page);
+        Users creator = new Users();
+        creator.setUserId(21L);
+        creator.setUserName("会话创建者");
+        when(userService.findByIds(Set.of(21L))).thenReturn(List.of(creator));
+        ObjectNode groupRequest = request("conversations").put("resource", "groups");
+        ((ObjectNode) groupRequest.path("payload")).put("enterpriseId", "42").put("pageNum", 2);
+        var result = service.execute(groupRequest);
+        assertThat(result.path("list").get(0).path("creatorName").asText()).isEqualTo("会话创建者");
         verify(nodes).operationsRequest(eq(42L), eq("POST"),
             eq("/internal/v1/operations/groups/9/conversations/query"),
             eq(json.createObjectNode().put("pageNum", 2).put("pageSize", 20)), any());

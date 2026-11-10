@@ -3,12 +3,13 @@ import { getEffectiveEnableDsh } from '@/service/system';
 import { resolveChatRuntimeType, type ChatRuntimeType } from '@/utils/chatRuntime';
 
 /** UI runtime comes only from the effective ENABLE_DSH, with personal configuration resolved by the server. */
-export function useChatRuntime(sessionId?: string) {
+export function useChatRuntime(sessionId?: string, enabled = true) {
   const [state, setState] = useState<{ sessionId?: string; type: ChatRuntimeType }>({ type: 'unknown' });
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
   useEffect(() => {
+    if (!enabled) return undefined;
     let cancelled = false;
     setError(false);
     setState({ sessionId, type: 'unknown' });
@@ -25,7 +26,7 @@ export function useChatRuntime(sessionId?: string) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId, attempt]);
-  const runtimeType = state.sessionId === sessionId ? state.type : 'unknown';
-  return { runtimeType, runtimeReady: runtimeType !== 'unknown', runtimeError: error, retry };
+  }, [sessionId, attempt, enabled]);
+  const runtimeType = enabled && state.sessionId === sessionId ? state.type : 'unknown';
+  return { runtimeType, runtimeReady: runtimeType !== 'unknown', runtimeError: enabled && error, retry };
 }

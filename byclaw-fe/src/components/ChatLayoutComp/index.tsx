@@ -54,6 +54,7 @@ import {
   shouldPersistDraftSessionProject,
   type DraftSessionProject,
 } from './draftSessionProject';
+import ProjectSharedFileProvider from './ProjectSharedFileProvider';
 
 type IProps = {
   sessionId: string;
@@ -733,6 +734,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 sessionId={sessionId}
                 lastAnswer={lastAnswer}
                 latestDigitalEmployeeMessage={latestDigitalEmployeeMessage}
+                messages={messageList}
                 currentSession={currentSession}
                 agentType={myAgentType}
                 projectId={sessionProjectId}
@@ -760,21 +762,27 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                     {intl.formatMessage({ id: 'chatLayout.loadFailedRetry' })}
                   </button>
                 )}
-                <MessageList
-                  ref={messageListCompRef}
-                  onNext={onNext}
-                  hasMore={hasMore}
+                <ProjectSharedFileProvider
                   sessionId={sessionId}
-                  hideAction={hideAction || notificationSession}
-                  messageList={messageList}
-                  updateMessage={updateMessage}
-                  deleteMessage={guardedDeleteMessage}
-                  multiChoicesList={multiChoicesList}
-                  multiChoicesMsgId={multiChoicesMsgId}
-                  setMultiChoicesMsgId={setMultiChoicesMsgId}
-                  previewInDetailPanel
-                  enableConversationNavigator={isPC && !notificationSession && !isMultiChoices}
-                />
+                  projectId={sessionProjectId}
+                  projectResourceId={sessionProject?.resourceId}
+                >
+                  <MessageList
+                    ref={messageListCompRef}
+                    onNext={onNext}
+                    hasMore={hasMore}
+                    sessionId={sessionId}
+                    hideAction={hideAction || notificationSession}
+                    messageList={messageList}
+                    updateMessage={updateMessage}
+                    deleteMessage={guardedDeleteMessage}
+                    multiChoicesList={multiChoicesList}
+                    multiChoicesMsgId={multiChoicesMsgId}
+                    setMultiChoicesMsgId={setMultiChoicesMsgId}
+                    previewInDetailPanel
+                    enableConversationNavigator={isPC && !notificationSession && !isMultiChoices}
+                  />
+                </ProjectSharedFileProvider>
               </div>
             )}
             {latestTaskPlan ? <ChatTaskPlanDock taskPlan={latestTaskPlan} /> : null}

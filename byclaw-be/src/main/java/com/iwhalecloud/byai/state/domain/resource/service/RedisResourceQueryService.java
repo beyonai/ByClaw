@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.domain.resource.service;
 
+import com.iwhalecloud.byai.common.constants.resource.RetiredConversationResources;
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.constants.staticdata.RedisConfig;
@@ -7,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,7 +49,7 @@ public class RedisResourceQueryService {
         List<Map<String, String>> resources = new ArrayList<>();
         entries.forEach((field, value) -> {
             String type = resourceType(value);
-            if (RESOURCE_KEY_PREFIXES.containsKey(type)) {
+            if (RESOURCE_KEY_PREFIXES.containsKey(type) && !RetiredConversationResources.isRetired(type)) {
                 resources.add(Map.of("resourceId", text(field), "resourceType", type));
             }
         });
@@ -59,14 +61,16 @@ public class RedisResourceQueryService {
         String userId = resolveUserId();
         String resourceType = authorizedType(userId, resourceId);
         if (resourceType == null) return result("BY_RESOURCE_ID", Map.of("allowed", false, "resourceId", resourceId));
+        if (RetiredConversationResources.isRetired(resourceType)) return retired("BY_RESOURCE_ID", resourceId);
         String prefix = RESOURCE_KEY_PREFIXES.get(resourceType);
         if (prefix == null) return result("BY_RESOURCE_ID", Map.of("allowed", false, "resourceId", resourceId, "reason", "UNSUPPORTED_RESOURCE_TYPE"));
         String raw = redis.opsForValue().get(prefix + resourceId);
+        if (retiredSnapshot(raw)) return retired("BY_RESOURCE_ID", resourceId);
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("resourceId", resourceId);
         item.put("resourceType", resourceType);
         item.put("allowed", true);
-        item.put("data", raw == null || raw.isBlank() ? null : JSON.parseObject(raw));
+        item.put("data", raw == null || raw.isBlank() ? null : JSON.parseObject(RetiredConversationResources.sanitizeRuntimeJson(raw)));
         return result("BY_RESOURCE_ID", item);
     }
 
@@ -76,23 +80,25 @@ public class RedisResourceQueryService {
         if (ids.size() > MAX_BATCH_SIZE) throw new IllegalArgumentException("resourceIds exceeds max batch size " + MAX_BATCH_SIZE);
         String userId = resolveUserId();
         Map<Object, Object> authorized = redis.opsForHash().entries(AUTH_KEY_PREFIX + userId);
-        List<String> authorizedIds = ids.stream().filter(id -> RESOURCE_KEY_PREFIXES.containsKey(resourceType(authorized.get(id)))).toList();
-        List<String> keys = authorizedIds.stream().map(id -> RESOURCE_KEY_PREFIXES.get(resourceType(authorized.get(id))) + id).toList();
-        List<String> values = redis.opsForValue().multiGet(keys);
         Map<String, String> rawById = new LinkedHashMap<>();
-        for (int i = 0; i < authorizedIds.size(); i++) {
-            String raw = values != null && i < values.size() ? values.get(i) : null;
-            if (raw != null && !raw.isBlank()) rawById.put(authorizedIds.get(i), raw);
+        // Independent GETs preserve existing keys and work across Redis Cluster hash slots.
+        for (String id : ids) {
+            String type = resourceType(authorized.get(id));
+            if (!RESOURCE_KEY_PREFIXES.containsKey(type) || RetiredConversationResources.isRetired(type)) continue;
+            String raw = redis.opsForValue().get(RESOURCE_KEY_PREFIXES.get(type) + id);
+            if (raw != null && !raw.isBlank()) rawById.put(id, raw);
         }
         List<Map<String, Object>> items = new ArrayList<>();
         List<String> missing = new ArrayList<>();
         for (String id : ids) {
             String type = resourceType(authorized.get(id));
+            if (RetiredConversationResources.isRetired(type)) { items.add(retiredItem(id)); continue; }
             if (!RESOURCE_KEY_PREFIXES.containsKey(type)) { items.add(Map.of("resourceId", id, "allowed", false)); continue; }
             String raw = rawById.get(id);
             if (raw == null || raw.isBlank()) { missing.add(id); continue; }
+            if (retiredSnapshot(raw)) { items.add(retiredItem(id)); continue; }
             Map<String, Object> item = new LinkedHashMap<>();
-            item.put("resourceId", id); item.put("resourceType", type); item.put("allowed", true); item.put("data", JSON.parseObject(raw));
+            item.put("resourceId", id); item.put("resourceType", type); item.put("allowed", true); item.put("data", JSON.parseObject(RetiredConversationResources.sanitizeRuntimeJson(raw)));
             items.add(item);
         }
         return result("BATCH_BY_RESOURCE_IDS", Map.of("items", items, "missingResourceIds", missing));
@@ -149,11 +155,24 @@ public class RedisResourceQueryService {
 
     private static String resourceType(Object value) {
         String raw = text(value); if (raw.isEmpty()) return "";
-        String upper = raw.toUpperCase(); if (RESOURCE_KEY_PREFIXES.containsKey(upper)) return upper;
+        String upper = raw.toUpperCase(Locale.ROOT); if (RESOURCE_KEY_PREFIXES.containsKey(upper) || RetiredConversationResources.isRetired(upper)) return upper;
         try { Object parsed = JSON.parse(raw); if (parsed instanceof Map<?, ?> map) {
-            Object type = map.get("resourceType"); if (type == null) type = map.get("resourceBizType"); return text(type).toUpperCase();
+            Object type = map.get("resourceType"); if (type == null) type = map.get("resourceBizType"); return text(type).toUpperCase(Locale.ROOT);
         }} catch (RuntimeException ignored) { }
         return "";
+    }
+
+    private static Map<String, Object> retiredItem(String id) {
+        return Map.of("resourceId", id, "allowed", false, "reason", RetiredConversationResources.REASON);
+    }
+
+    private static Map<String, Object> retired(String queryType, String id) {
+        return result(queryType, retiredItem(id));
+    }
+
+    private static boolean retiredSnapshot(String raw) {
+        return raw != null && !raw.isBlank()
+            && RetiredConversationResources.isRetiredResource(JSON.parseObject(raw));
     }
 
     private static List<String> toIds(Object raw) {

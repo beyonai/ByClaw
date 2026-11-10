@@ -3,6 +3,10 @@
 消息附件、会话/项目文件、文件浏览器、知识目录及成果文件统一使用 `formats.ts` 和 `PreViewFile`。
 列表的可预览判断、扩展名别名、MIME 与内容渲染使用同一份清单。
 
+聊天右侧「当前会话」中的项目云盘和本地共享在工作区页签中打开附件预览。项目云盘从当前项目知识库下载，本地共享从当前文件空间下载。HTML 内的相对文件链接在工作区打开，并继续从原资源下载。这两个入口在共用渲染器校验原文件大小，各专用解码器继续执行内部预算。
+
+「项目主菜单 → 项目详情 → 项目云盘」也使用附件预览，由项目详情抽屉承载。原文件、HTML 相对资源及链接文件均从当前项目知识库读取，该入口采用相同的大小规则。
+
 - 图片：PNG、JPEG/JPG、GIF、BMP、WebP、SVG、ICO、AVIF、APNG。SVG 使用图片元素展示，提供 XML 源码页签；不进入 HTML 资源解析分支。
 - 文档：PDF、DOCX、XLSX、PPTX 沿用已有预览组件；XLS 使用已安装 Excel 库的 `xls: true` 转换选项。
 - 文本：Markdown/MD、TXT、LOG、JSON、JSONL、NDJSON、CSV、TSV、XML 以及原有代码/配置格式。CSV/TSV 默认以只读表格展示，可切换源码；复用 `Delimited` 的分页和引号/换行解析，不更改下载内容。HTML/HTM/H5 保留原有 HTML 及相对资源预览。
@@ -15,7 +19,8 @@
 当前分支还提供旧版 DOC/PPT 转 PDF、HEIF/TIFF/JXL/RAW 图片、ZIP、RTF、ODS、EPUB 和 SQLite 预览，
 其部署要求与解码边界见 `common-file-preview.md`。本次优化复用这些实现。
 未接入预览器的 DOCM、XLSM、XLSB、PPTM、ODT/ODP 等二进制文件不能落入文本兜底。
-README、.gitignore 等文本候选统一开放入口，读取后检查控制字节；文本统一限制为 2 MiB，超限/非文本提示下载。
+README、.gitignore 等文本候选统一开放入口，读取后检查控制字节。原文件按十进制字节计量。Markdown、HTML、视频和压缩包最多 100 MB，其余已支持的格式最多 50 MB。文件列表大小用于展示，统一渲染器按实际内容校验，超限时仍可下载原件。
+超过 1 MB 的源码分页展示纯文本，超过 10 MB 的 HTML 在切到源码页签时才为该页签读取正文。专用解码器仍对像素、条目、正文和展开量单独限额。
 已知文件名后缀优先于过期的 fileType，例如 HTML 不会因为 fileType=txt 而只显示源码。
 
 回答正文与 Markdown 附件共享按需加载的本地 Mermaid 组件，支持 mermaid/mmd 围栏、图形/源码切换、复制和放大。

@@ -412,7 +412,7 @@ public class TenantDbProvisioningService {
         guard.external("SCHEMA_INIT", Boolean.class, () -> {
             if (!schemaService.initialized(enterpriseId)) {
                 schemaService.initialize(enterpriseId, 1, database.recordId(), node,
-                    config.get("PROVISION_REQUEST_ID"), guard.fencingToken());
+                    config.get("PROVISION_REQUEST_ID"), guard.fencingToken(), guard::local);
             }
             return true;
         });

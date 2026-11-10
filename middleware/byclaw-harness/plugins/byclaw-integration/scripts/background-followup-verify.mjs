@@ -57,6 +57,7 @@ const runtime = new ByClawDshSessionRuntime({
   // No optional services (team model overrides, group policy) are provided in this host.
   get() { return undefined },
 }, { byRoot: '/tmp', sourceAgentType: 'BYCLAW_DSH', agentTemplateDir: '', workspaceRegistry: registry,
+  sessionMetadata: { get() { return undefined } },
   emitter: { async emitChunk(...args) { output.push(args) } } })
 const owner = { rootSessionId: 'root', responseSessionId: 'root', rootMessageId: 'original-task', rootLabel: '队长',
   userCode: 'user', direct: false, workspace: '/tmp/.sessions/root',

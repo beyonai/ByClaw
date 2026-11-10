@@ -6,26 +6,27 @@ byclaw_managed: true
 
 # 飞书全产品 Skill
 
-通过官方 `lark-cli` 命令管理飞书/Lark 产品能力。本 skill 是 ByClaw/OpenClaw 里的聚合入口，结构参考 `dws`，但底层只走 `lark-cli`。
+通过官方 `lark-cli` 命令管理飞书/Lark 产品能力。本 skill 是 ByClaw 各运行时共享的聚合入口，结构参考 `dws`，但底层只走 `lark-cli`。
 
 ## 连接器运行时 HOME 隔离（最高优先级）
 
-- OpenClaw 会注入飞书专属 `LARK_HOME`。每次执行 Lark CLI 都必须仅为该子进程映射 HOME，命令形式为 `HOME="$LARK_HOME" lark-cli ...`。
+- 运行时会注入飞书专属 `LARK_HOME`。每次执行 Lark CLI 都必须仅为该子进程映射 HOME，命令形式为 `HOME="$LARK_HOME" lark-cli ...`。
 - 执行会启动 `lark-cli` 的 Python 脚本时同样使用 `HOME="$LARK_HOME" python3 ...`，使脚本内部启动的 `lark-cli` 继承同一用户凭证目录；本 Skill 的 Node.js 平台同步 helper 不适用此规则。
 - 本规则适用于父 Skill、子 Skill、scripts 和 references 中出现的所有 Lark CLI 命令；其中展示的裸 `lark-cli ...` 仅表示参数结构，实际执行必须增加上述前缀。
 - `LARK_HOME` 缺失或为空时必须停止执行并报告连接器运行时参数缺失，不得回退到默认 HOME、共享目录或其他用户目录。
-- 不得修改 OpenClaw 全局 `HOME`，不得执行 `export HOME="$LARK_HOME"`；映射只允许作用于当前 Lark CLI 或脚本子进程。
+- 不得修改运行时全局 `HOME`，不得执行 `export HOME="$LARK_HOME"`；映射只允许作用于当前 Lark CLI 或脚本子进程。
+- 配置检查、初始化、登录和验证必须使用同一 `LARK_HOME`、同一 CLI workspace 和同一运行时环境。不得清空或改写用于配置发现的环境信号，不得切换 profile、workspace 或配置来源来寻找另一份配置；已有绑定和凭证必须保留。
+- 本 Skill 及 references 中的 `scripts/...` 均相对已加载的 `SKILL.md` 所在目录定位，并将解析后的脚本绝对路径交给执行工具。保持当前执行工作目录，不为寻找脚本切换 CLI workspace；不得假定镜像布局或固定的 `skills/fws` 路径。
 
 ## 授权成功后的平台状态同步（最高优先级）
 
 只有 `lark-cli auth status --json --verify` 明确返回已验证的 user 登录态后，才调用固定的内部同步 helper：
 
 ```bash
-node skills/fws/scripts/connector-auth-sync.mjs
+node scripts/connector-auth-sync.mjs
 ```
 
-- 上述相对路径以 OpenClaw 工作目录为根。
-- 只能原样执行上述命令；不得增加环境变量赋值、URL、Header、body、用户 ID、connectorCode 参数、shell 包装、`curl` 或其他 HTTP 客户端。
+- 按上面的 Skill 目录规则解析 helper 路径，除此之外只能原样执行上述命令；不得增加环境变量赋值、URL、Header、body、用户 ID、connectorCode 参数、shell 包装、`curl` 或其他 HTTP 客户端。
 - helper 的 stdout 必须是单行 JSON；仅当退出码为 0 且顶层布尔字段 `connected` 为 `true` 时，才可报告“连接器已连接”并恢复原业务命令。
 - helper 已独占完整的一次重试预算；Skill 不得再次调用 helper。业务校验错误不得重试。同步失败时报告“CLI 授权可能已完成，但平台连接状态同步失败”。
 - 同步失败不得重新启动 Device Flow，不得复用旧 `device_code`，不得因本地 status 成功而绕过 API 或继续业务命令。
@@ -37,7 +38,7 @@ user 身份业务命令前，先在同一个隔离 HOME 执行 `HOME="$LARK_HOME
 `identities.user.tokenStatus`；该预检不得增加 `--verify`，不得把短期 access token 到期误判为授权失效。
 
 - 仅当预检明确返回 `needs_refresh` 或 `refresh_needed`，并且随后 user 身份业务命令成功后，才原样执行一次
-  `node skills/fws/scripts/connector-auth-sync.mjs`，让后端从同一 native-home 回读并保存刷新后的生命周期元数据。
+  `node scripts/connector-auth-sync.mjs`（按上述 Skill 目录规则定位），让后端从同一 native-home 回读并保存刷新后的生命周期元数据。
 - 业务命令未成功、预检状态为 `valid` 或未知时不执行该业务后回写；未知状态继续按现有错误处理流程判断，禁止猜测。
 - 回写成功以 helper 退出码为 0 且 `connected=true` 为准。回写失败不得改变已经成功的飞书业务结果，不得重试业务
   命令、重新授权或再次调用 helper；应保留业务结果，并补充说明“业务已完成，但平台连接状态同步暂时失败”。
@@ -56,15 +57,15 @@ user 身份业务命令前，先在同一个隔离 HOME 执行 `HOME="$LARK_HOME
 
 ## 严格要求 (MUST DO)
 
-- 在 OpenClaw 场景下，凡是飞书相关操作必须调用本 `fws` skill；不得绕过 skill 直接走其他通道。
+- 凡是飞书相关操作必须调用本 `fws` skill；不得绕过 skill 直接走其他通道。
 - 所有业务命令显式加 `--format json`，认证 split-flow 命令按官方要求用 `--json`。
 - 判断命令成功时看进程退出码或 JSON 顶层 `ok == true`，不要按 OpenAPI 原始响应里的 `code == 0` 判断。
 - 优先使用 `lark-cli <service> +<shortcut>`；没有 shortcut 时再用 `lark-cli <service> <resource> <method>`；仍不满足时才用 `lark-cli api METHOD /open-apis/...`。
 - 使用原生 API 命令或 `lark-cli api` 前必须先查 `lark-cli schema <service>.<resource>.<method> --format json` 或官方文档，确认 `--params` / `--data` 结构。
 - 危险操作先展示操作摘要并取得用户明确同意；如果 CLI 返回 `confirmation_required`/exit 10，再在原命令末尾追加 `--yes` 重试。
 - 批量写操作先控制规模：单批默认不超过 30 个业务对象，产品 reference 或 schema 给出更小上限时按更小上限执行。
-- OpenClaw agent 调用本 skill 时，一旦提示未检测到飞书渠道、`openclaw.json missing channels.feishu section` 或 `configure Feishu in OpenClaw first`，必须立即中断业务命令并走 OpenClaw 渠道配置缺失流程；这是渠道配置问题，不是 user 授权问题，禁止继续提示“确认授权”或执行 `auth login`。
-- OpenClaw agent 调用本 skill 时，一旦出现 user 身份鉴权异常（401/403、登录态失效、缺少 user scope、`missing_scope`、`permission_violations`），必须立即中断当前业务命令并强制进入飞书授权 split-flow：`exec(lark-cli auth login --scope "<missing_scope>" --no-wait --json)` 或 `exec(lark-cli auth login --domain <domain> --no-wait --json)` -> `process(读取该次 exec 返回)` -> 从本次 JSON 输出提取本次授权生成的 `verification_url` 和 `device_code` -> 用 `scripts/qrcode_data_uri.py` 生成二维码 data URI -> 返回 `[点击打开飞书授权](<verification_url>)` 和二维码并结束本轮；禁止输出 `授权链接：https://...` 裸 URL，禁止返回本地图片路径，禁止同轮执行 `--device-code`、禁止继续业务命令、禁止复用历史授权链接或 device code。用户回复“已授权”不等于登录成功，必须在后续轮执行 `--device-code` 并通过 `auth status --json --verify` 验证。
+- 提示应用未配置或 `not_configured` 时，立即中断业务命令并走下方 CLI 应用配置检查；只有满足下方全部首次配置门槛时才初始化，不能仅凭 subtype、缺少 appId 或登录错误重建应用。
+- 一旦出现 user 身份鉴权异常（401/403、登录态失效、缺少 user scope、`missing_scope`、`permission_violations`），必须立即中断当前业务命令并进入飞书授权 split-flow：使用当前运行时的命令执行工具运行 `lark-cli auth login --scope "<missing_scope>" --no-wait --json` 或 `lark-cli auth login --domain <domain> --no-wait --json`，读取本次进程输出，从 JSON 提取本次授权生成的 `verification_url` 和 `device_code`，用 `scripts/qrcode_data_uri.py` 生成二维码 data URI，返回 `[点击打开飞书授权](<verification_url>)` 和二维码并结束本轮；禁止输出裸授权 URL、本地图片路径，禁止同轮执行 `--device-code`、继续业务命令或复用历史授权信息。用户回复“已授权”不等于登录成功，必须在后续轮执行 `--device-code` 并通过 `auth status --json --verify` 验证。
 
 ## 产品总览
 
@@ -171,33 +172,32 @@ lark-cli schema <service>.<resource>.<method> --format json
 1. 先解析 stderr/stdout 中的 JSON envelope：`ok:false`、`error.type`、`error.subtype`、`error.code`、`error.message`、`error.hint`。
 2. 参数缺失或字段格式错误：查 `--help` / `schema` 后修正一次。
 3. `confirmation_required` 或 exit 10：进入危险操作确认流程，不当作普通失败。
-4. OpenClaw 飞书渠道缺失：必须先走下方 OpenClaw 渠道配置缺失流程，不得误走 user 授权。
-5. user 身份鉴权失败或缺少 scope：必须走下方 OpenClaw 鉴权异常强制策略。
+4. CLI 应用配置缺失：必须先走下方应用配置流程，不得误走 user 授权。
+5. user 身份鉴权失败或缺少 scope：必须走下方鉴权异常强制策略。
 6. bot 身份缺少 scope：不要 `auth login`；把错误中的 `console_url` 原样给用户去开发者后台开权限。
 7. 权限/可见范围/资源不存在：停止盲目重试，报告原始错误和可执行的下一步。
 8. 更多见 [error-codes.md](./references/error-codes.md)。
 
-### OpenClaw 渠道配置缺失流程（高于用户授权）
+### CLI 应用配置流程（高于用户授权）
 
-- 触发条件：返回“当前 OpenClaw 配置中未检测到飞书（Feishu）渠道”、`openclaw.json missing channels.feishu section`、`configure Feishu in OpenClaw first`，或 `lark-cli config bind --source openclaw` 无法找到 `channels.feishu`。
-- 错误归类：这是 OpenClaw 渠道配置缺失，表示 `openclaw.json` 里还没有 `channels.feishu.appId/appSecret/domain`；它不是用户个人授权缺失，也不是缺少 user scope。
-- 强制动作：立即停止当前业务命令；不得继续要求用户“确认授权”，不得执行 `lark-cli auth login`，不得尝试查询通讯录。
-- 配置入口：如果当前运行环境能执行命令并回传输出，必须先执行 `lark-cli config init --new --force-init` 获取飞书应用配置链接；从本次输出提取 `https://open.feishu.cn/page/cli?...` 链接，再用 `scripts/qrcode_data_uri.py "<config_url>" --alt "飞书应用配置二维码"` 生成二维码 data URI。
-- 推荐返回：返回 Markdown 配置链接和二维码，并说明“请管理员打开链接或用飞书扫码完成应用配置；完成后需要把 App ID 和 App Secret 安全写入 OpenClaw 的 `channels.feishu`，再回复我继续绑定”。如果无法执行命令或未拿到链接，才退化为手工配置指引；如果二维码生成失败，只返回可点击链接和失败原因，禁止返回破图占位。
-- 用户确认配置成功后：必须先执行 `lark-cli config show` 或 `lark-cli auth status --json --verify` 检查当前会话的 lark-cli 配置；如果能读取到 `appId`，说明 `config init --new --force-init` 已为当前 workspace 写入本地 CLI 应用配置，应立即进入 user 授权/业务查询流程，禁止继续重复回复“仍缺少 channels.feishu”。
-- 本地配置兜底：`channels.feishu` 是 OpenClaw 托管渠道配置；`config init --new --force-init` 是当前 lark-cli workspace 的本地应用配置。当前者缺失但后者已经可用时，可以先用本地配置完成本次查询，同时提醒平台管理员后续把应用凭证同步进 OpenClaw 托管渠道，避免换会话/重建沙箱后丢失。
-- 绑定动作：只有确认 `channels.feishu` 已存在后，才能请求用户确认身份策略并执行 `lark-cli config bind --source openclaw --identity user-default`（个人通讯录等用户资源）或 `--identity bot-only`（机器人/群通知等应用身份场景）。
-- 后续流程：`config bind` 成功后，如果业务还需要访问个人通讯录，再按 OpenClaw 鉴权异常强制策略走 user 授权 split-flow。
-- 禁止事项：禁止把 `config init --new --force-init` 生成的本地 CLI 应用配置说成 OpenClaw 托管渠道已配置；禁止把 App Secret 展示在回复里；禁止在未检查 `lark-cli config show` 前反复要求用户配置 `channels.feishu`。
+- 触发条件：CLI 返回应用配置缺失、`not_configured`，或历史外部配置来源不可用。先停止业务命令，在同一环境执行 `lark-cli config show`。它只检查应用元数据；退出码为 0 且有 `appId` 不代表密钥引用有效。
+- 已有配置：复用当前 CLI 应用，不重新初始化、不切换配置来源；需要 user 身份时继续下方授权流程。若 `auth login` 返回 `not_configured`，但配置检查已有 `appId` 或其他应用元数据，应报告应用配置或密钥引用错误，保留原应用、绑定和凭证，不得重新初始化。历史外部渠道提示不能取代本次检查。
+- 首次配置门槛：只有 `config show` 本身明确返回 `not_configured`，且没有既有应用元数据，同时错误为 `error.type=config`、`error.subtype=not_configured`、没有 `error.field`，错误消息明确表示缺少应用配置，才允许初始化。不能仅凭 subtype 或缺少 appId 推断应用不存在。
+- 配置错误分流：`error.field` 为 `--profile`、`LARKSUITE_CLI_PROFILE` 或 `currentApp` 表示 profile 选择错误，先修正既有 profile 选择并保留配置；仅针对报错指明的选择确认原应用，不试切其他 profile、HOME、workspace 或来源。无活动 profile、`invalid_config`、未知错误消息或密钥错误均须停止并报告，不得初始化。
+- 确认首次配置：满足上述全部门槛后，才执行 `lark-cli config init --new --force-init`。读取本次配置链接，再用 `python3 scripts/qrcode_data_uri.py "<config_url>" --alt "飞书应用配置二维码"` 生成 data URI 二维码。
+- 返回 `[点击打开飞书应用配置](<config_url>)` 和脚本的 `markdownImage`，请管理员打开链接或用飞书扫码完成当前 CLI 应用配置后回复。不得展示 App Secret；无法取得链接时报告本次错误，二维码失败时只返回可点击链接和原因。
+- 后续确认：用户回复后，在同一环境再次执行 `lark-cli config show`；读取到 `appId` 仅确认应用元数据已写入，随后仍须完成 user 登录和 `auth status --json --verify`。密钥引用或登录失败时保留应用并报告，不继续业务命令、不重复初始化。不要把元数据写入说成凭证有效或用户已授权。
+- 外部配置导入仅是管理员明确选择的可选操作，应先查当前 CLI 的 `config bind --help` 并确认来源和身份策略；它不是本流程的前置，也不要求配置任何聊天渠道。
+- 配置与用户凭证都应保存在该用户的持久化 `LARK_HOME`。不得为修复配置提示而删除凭证目录、换用默认 HOME 或其他用户目录。
 
-### OpenClaw 鉴权异常强制策略（最高优先级）
+### 鉴权异常强制策略（最高优先级）
 
 - 触发条件：任一 `lark-cli` 命令返回 401/403、登录态失效、`error.subtype=missing_scope`、`permission_violations`、`error.hint` 含 `auth login`，且当前身份为 `user` 或目标资源必须使用 user 身份。
 - 业务中断：触发后必须立即停止当前业务命令；完成授权前不得继续查询、创建、修改、删除或发送。
 - scope 选择：优先使用错误 envelope 中的缺失 scope；没有明确 scope 但可判断业务域时使用 `--domain <domain>`；无法判断最小授权范围时，向用户说明缺少 scope 信息，不要猜测。
-- 发起授权：只能通过 OpenClaw 的 `exec` 执行 `lark-cli auth login --scope "<missing_scope>" --no-wait --json` 或 `lark-cli auth login --domain <domain> --no-wait --json`，随后必须立即用 `process` 读取本次执行结果。
-- 链接提取：只允许从本次 `process` 返回的 JSON 中提取 `verification_url` 和 `device_code`；必要时 `verification_uri_complete` 可作为授权 URL 兜底；不得拼接、改写、编码/解码 URL。
-- 二维码：必须用 `python3 scripts/qrcode_data_uri.py "<verification_url>" --alt "飞书授权二维码"` 把二维码转成 `data:image/png;base64,...`，并把脚本返回的 `markdownImage` 嵌入回复。ByClaw/OpenClaw 聊天页不能访问 agent 本地相对路径图片，所以禁止返回 `![飞书授权二维码](relative.png)`、`file://...` 或任意本地路径；二维码脚本失败时只返回可点击授权链接和失败原因，不得返回破图占位。
+- 发起授权：使用当前运行时的命令执行工具运行 `lark-cli auth login --scope "<missing_scope>" --no-wait --json` 或 `lark-cli auth login --domain <domain> --no-wait --json`，并立即读取本次进程输出；返回后台进程句柄时，使用对应进程工具读取输出。
+- 链接提取：只允许从本次进程返回的 JSON 中提取 `verification_url` 和 `device_code`；必要时 `verification_uri_complete` 可作为授权 URL 兜底；不得拼接、改写、编码/解码 URL。
+- 二维码：必须用 `python3 scripts/qrcode_data_uri.py "<verification_url>" --alt "飞书授权二维码"` 把二维码转成 `data:image/png;base64,...`，并把脚本返回的 `markdownImage` 嵌入回复。ByClaw 聊天页不能访问 agent 本地相对路径图片，所以禁止返回 `![飞书授权二维码](relative.png)`、`file://...` 或任意本地路径；二维码脚本失败时只返回可点击授权链接和失败原因，不得返回破图占位。
 - 返回规范：本轮必须用 Markdown 超链接返回授权入口，格式为 `[点击打开飞书授权](<verification_url>)`，并在下面返回 data URI 二维码；配置应用入口格式为 `[点击打开飞书应用配置](<config_url>)`。禁止输出 `授权链接：https://...`、`配置链接：https://...` 这类裸 URL；禁止提示“扫描下方二维码”但返回本地图片路径。返回后提示“授权完成后回复我，我会继续完成登录”；禁止在同一轮执行 `lark-cli auth login --device-code <device_code>`。
 - 后续确认：用户回复已授权后，才可执行 `lark-cli auth login --device-code <device_code> --json`，成功后再执行 `lark-cli auth status --json --verify`；确认登录态有效后必须完成固定平台状态同步，API 成功后才可恢复原业务命令。
 - 授权码生命周期：`device_code`、`verification_url` 和二维码只属于本次授权会话；用户回复过晚、`device_code` 过期、已使用、无效或 `--device-code` 返回授权失败时，必须丢弃整组旧凭证，重新执行 `auth login --scope/--domain --no-wait --json` 生成新的链接和 `device_code`，禁止重试旧 `device_code`。

@@ -29,6 +29,7 @@ export const clearToken = () => {
   localStorage.removeItem(portalSessionKey);
   localStorage.removeItem(tokenKey);
   localStorage.removeItem(ssotokenKey);
+  window.dispatchEvent(new Event('byclaw-auth-change'));
 };
 
 const setPortalSessionKey = (value: string) => {
@@ -74,6 +75,12 @@ export interface AuthSnapshot {
   ssoToken: string;
 }
 
+/** Stable principal scope; customized tenants may add a switch generation. */
+export const getDesktopIdentitySnapshot = (): { account: string; enterpriseId: string; tenantSwitchSeq?: number } => ({
+  account: localStorage.getItem('uc') || '',
+  enterpriseId: localStorage.getItem('enterpriseId') || '',
+});
+
 // 保存请求发起时的完整凭证，用于识别登录切换前后的异步请求。
 export const getAuthSnapshot = (): AuthSnapshot => ({
   sessionId: getSessionKey(),
@@ -109,6 +116,7 @@ export const setUserToken = (userTokens: any) => {
   if (ssoToken) {
     setssoToken(ssoToken);
   }
+  window.dispatchEvent(new Event('byclaw-auth-change'));
 };
 
 // AdminVip 用户列表缓存

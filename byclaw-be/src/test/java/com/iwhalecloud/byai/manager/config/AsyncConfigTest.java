@@ -47,6 +47,7 @@ class AsyncConfigTest {
 
     @Test
     void namedExecutorsAlsoPropagateTaskContext() throws Exception {
+        assertContextPropagation(register((ThreadPoolTaskExecutor) new AsyncConfig().mobilePushExecutor()));
         assertContextPropagation(register((ThreadPoolTaskExecutor) new AsyncConfig().sessionTitleExecutor()));
         assertContextPropagation(register((ThreadPoolTaskExecutor) new AsyncConfig().projectInitExecutor()));
         assertContextPropagation(register((ThreadPoolTaskExecutor) new AsyncConfig().auditLogExecutor()));
@@ -54,6 +55,34 @@ class AsyncConfigTest {
             register((ThreadPoolTaskExecutor) new AuthRedisSyncAsyncConfig().authRedisSyncExecutor()));
         assertContextPropagation(
             register((ThreadPoolTaskExecutor) new IntegrationRunAsyncConfig().integrationRunExecutor()));
+    }
+
+    @Test
+    void mobilePushExecutorRejectsExcessWorkInsteadOfBlockingChatThread() throws Exception {
+        ThreadPoolTaskExecutor executor = register((ThreadPoolTaskExecutor) new AsyncConfig().mobilePushExecutor());
+        assertThat(executor.getCorePoolSize()).isEqualTo(1);
+        assertThat(executor.getMaxPoolSize()).isEqualTo(1);
+        var started = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        try {
+            executor.execute(() -> {
+                started.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            assertThat(started.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            for (int index = 0; index < 64; index += 1) {
+                executor.execute(() -> { });
+            }
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> executor.execute(
+                () -> { throw new AssertionError("Chat thread must not run rejected push work"); }))
+                .isInstanceOf(java.util.concurrent.RejectedExecutionException.class);
+        } finally {
+            release.countDown();
+        }
     }
 
     @Test

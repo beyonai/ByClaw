@@ -5,18 +5,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanRequireItem;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
 import com.iwhalecloud.byai.manager.domain.connector.authorization.AuthorizationStatus;
+import com.iwhalecloud.byai.manager.domain.connector.authorization.ConnectorCliRunner.CliResult;
 import com.iwhalecloud.byai.manager.domain.connector.provider.dingtalk.DwsDingtalkAuthorizationProvider;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorInfoService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 /**
  * 钉钉待办扫描服务
@@ -30,6 +28,7 @@ public class DingtalkTodoScanService {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static final String DWS_BIN = "dws";
+    private static final int MAX_OUTPUT_BYTES = 1024 * 1024;
 
     /** 单次拉取上限；DWS 超过 20 会自动分页，这里取一个够用的窗口。 */
     private static final String DEFAULT_SIZE = "50";
@@ -98,45 +97,32 @@ public class DingtalkTodoScanService {
 
             log.info("[DingtalkTodoScan] executing: {}", String.join(" ", cmd));
 
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.redirectErrorStream(true);
-            Map<String, String> env = pb.environment();
-            if (!env.containsKey("HOME")) {
-                env.put("HOME", System.getProperty("user.home"));
-            }
-            // 按源创建者隔离 dws 环境(禁 keychain + DWS_CONFIG_DIR + XDG_DATA_HOME),读其专属授权(与群消息扫描一致)。
-            dwsAuthService.applyUserDwsEnv(env, source.getCreateBy());
-            Process process = pb.start();
-
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line);
-                }
-            }
-
-            boolean finished = process.waitFor(60, TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroyForcibly();
+            // 与授权和 Agent 共用源创建者的执行上下文及凭证位置。
+            CliResult result = dwsAuthService.runCommand(
+                source.getCreateBy(), cmd, Duration.ofSeconds(60), MAX_OUTPUT_BYTES);
+            if (result.exitCode() == 124) {
                 log.error("[DingtalkTodoScan] command timeout");
                 scanLogService.failLog(logId, "DWS command timeout");
                 return items;
             }
+            if (result.truncated()) {
+                scanLogService.failLog(logId, "DWS command output truncated");
+                return null;
+            }
 
-            log.info("[DingtalkTodoScan] exitCode={}, output={}", process.exitValue(), output.toString());
+            log.info("[DingtalkTodoScan] exitCode={}, output={}", result.exitCode(), result.output());
 
-            if (process.exitValue() != 0) {
-                String errDetail = output.toString();
-                log.error("[DingtalkTodoScan] DWS command failed: exitCode={}, output={}", process.exitValue(),
+            if (result.exitCode() != 0) {
+                String errDetail = result.output();
+                log.error("[DingtalkTodoScan] DWS command failed: exitCode={}, output={}", result.exitCode(),
                     errDetail);
-                scanLogService.failLog(logId, "DWS exit code: " + process.exitValue() + ", output: "
+                scanLogService.failLog(logId, "DWS exit code: " + result.exitCode() + ", output: "
                     + (errDetail.length() > 500 ? errDetail.substring(0, 500) : errDetail));
                 return null;
             }
 
             // 待办列表在 result 数组;DWS 不同版本可能是 result 直接为数组或包一层,两种都兼容。
-            JsonNode root = MAPPER.readTree(output.toString());
+            JsonNode root = MAPPER.readTree(result.output());
             JsonNode tasks = root.path("result");
             if (tasks.isObject()) {
                 tasks = tasks.has("todoCards") ? tasks.path("todoCards") : tasks.path("list");

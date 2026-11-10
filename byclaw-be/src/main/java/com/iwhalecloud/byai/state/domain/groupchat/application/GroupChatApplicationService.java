@@ -58,6 +58,8 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
@@ -110,6 +112,8 @@ public class GroupChatApplicationService {
     private final GroupChatMentionService mentionService;
     @Autowired
     private WorkgroupTemplateService workgroupTemplateService;
+    @Autowired
+    private ByaiGroupChatTaskMapper groupChatTaskMapper;
 
     @Autowired
     public GroupChatApplicationService(SessionService sessionService, SequenceService sequenceService,
@@ -228,8 +232,13 @@ public class GroupChatApplicationService {
         if (tenantContext != null) {
             eventEnterpriseId = tenantContext.enterpriseId();
         }
+        ByaiSessionMember owner = members.stream()
+            .filter(member -> MemObjType.USER.name().equals(member.getMemObjType())
+                && UserRole.OWNER.name().equals(member.getUserRole()))
+            .findFirst().orElseThrow(() -> new IllegalStateException("groupchat.member.id.unconfirmed"));
         workgroupHooks.created(session.getSessionId().toString(), session.getSessionName(), eventEnterpriseId,
-            session.getProjectId(), operatorId);
+            session.getProjectId(), operatorId, owner.getMemObjId().toString(),
+            owner.getByaiSessionMemberId() == null ? null : owner.getByaiSessionMemberId().toString());
         return response;
     }
 
@@ -306,7 +315,7 @@ public class GroupChatApplicationService {
             message.setRelatedResources(JSON.toJSONString(resources));
         }
         message.setUsage(1);
-        message.setMessageRef(command.getReplyToMessageId());
+        message.setMessageRef(command.getReplyToMessageId() != null ? command.getReplyToMessageId() : command.getSourceMessageId());
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("scene", "GROUP_CHAT");
         metadata.put("clientRequestId", command.getClientRequestId());
@@ -385,6 +394,58 @@ public class GroupChatApplicationService {
         else {
             eventPublisher.publish(session.getSessionId(), event, null);
         }
+        return messageId;
+    }
+
+    /**
+     * Persist a Desktop-produced group projection without dispatching a second
+     * remote agent turn. The caller remains the authenticated group member;
+     * agent identity is metadata supplied by the local runtime projection.
+     */
+    @Transactional
+    public Long persistRuntimeMessage(ChatMessage command) {
+        sessionService.lockById(command.getSessionId());
+        ByaiSession session = authorizationService.requireGroup(command.getSessionId());
+        authorizationService.requireCurrentUserMember(session.getSessionId());
+        if (!"LOCAL".equalsIgnoreCase(command.getExecutionBackend())) {
+            throw new IllegalArgumentException("executionBackend must be LOCAL");
+        }
+        if ("assistant".equalsIgnoreCase(command.getRole()) && command.getCreatorId() != null) {
+            boolean agentMember = !memberService.findSessionMembers(session.getSessionId(), "AGENT", command.getCreatorId()).isEmpty();
+            if (!agentMember) throw new IllegalArgumentException("local assistant is not a group member");
+        }
+        if (command.getClientRequestId() != null) {
+            ByaiMessage existing = messageMapper.selectGroupMessageByClientRequestId(session.getSessionId(), command.getClientRequestId());
+            if (existing != null) return existing.getMessageId();
+        }
+        Long messageId = sequenceService.nextVal();
+        ByaiMessage message = new ByaiMessage();
+        message.setId(messageId);
+        message.setMessageId(messageId);
+        message.setSessionId(session.getSessionId());
+        message.setProjectId(session.getProjectId());
+        message.setCreatorId(command.getCreatorId() == null ? CurrentUserHolder.getCurrentUserId() : command.getCreatorId());
+        message.setCreatorName(StringUtils.defaultIfBlank(command.getCreatorName(), CurrentUserHolder.getCurrentUserName()));
+        message.setMessageContent(command.getChatContent());
+        message.setMessageRef(command.getReplyToMessageId());
+        message.setUsage("assistant".equalsIgnoreCase(command.getRole()) ? 2 : 1);
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("scene", "GROUP_CHAT");
+        metadata.put("executionBackend", "LOCAL");
+        metadata.put("clientRequestId", command.getClientRequestId());
+        metadata.put("resourceList", command.getResourceList());
+        metadata.put("sourceMessageId", command.getSourceMessageId());
+        metadata.put("targetAgentId", command.getTargetAgentId());
+        message.setMetadata(JSON.toJSONString(metadata));
+        if (command.getFiles() != null && !command.getFiles().isEmpty()) {
+            MessageResourceDto resources = new MessageResourceDto();
+            resources.setFiles(command.getFiles());
+            message.setRelatedResources(JSON.toJSONString(resources));
+        }
+        message.setCreateTime(new Date());
+        message.setUpdateTime(new Date());
+        message.setIsComplete(true);
+        topicService.persistMessage(message);
         return messageId;
     }
 
@@ -1043,5 +1104,31 @@ public class GroupChatApplicationService {
         boundary.setExtParamValue(String.valueOf(latest));
         sessionExtService.save(boundary);
         return direct;
+    }
+
+    /** 私聊任务复用单聊会话，只新增群任务记录，不进入群任务执行与发布链路。 */
+    @Transactional
+    public ByaiGroupChatTask createDirectTask(Long groupSessionId, Long agentId) {
+        ByaiSession direct = createDirectSession(groupSessionId, agentId);
+        ByaiSessionMember agent = memberService.findSessionMember(groupSessionId, MemObjType.AGENT.name(), agentId);
+        Long latest = messageMapper.selectBySessionId(groupSessionId).stream()
+            .map(ByaiMessage::getMessageId)
+            .filter(Objects::nonNull)
+            .max(Long::compareTo)
+            .orElse(0L);
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setTaskSessionId(direct.getSessionId());
+        task.setGroupSessionId(groupSessionId);
+        task.setSourceMessageId(latest);
+        task.setDispatchId(sequenceService.nextVal());
+        task.setInitiatorUserId(CurrentUserHolder.getCurrentUserId());
+        task.setTargetAgentId(agentId);
+        task.setTaskName("与" + (agent == null || StringUtils.isBlank(agent.getMemName()) ? "数字员工" : agent.getMemName()) + "的私聊");
+        task.setStatus("PRIVATE");
+        task.setTurnStatus("PRIVATE");
+        task.setCreateTime(new Date());
+        task.setUpdateTime(new Date());
+        groupChatTaskMapper.insert(task);
+        return task;
     }
 }

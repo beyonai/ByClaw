@@ -38,6 +38,9 @@ jobs:
               - ".github/workflows/docker-build.yml"
             be:
               - "byclaw-be/**"
+              - "middleware/byclaw-harness/browser/novnc-index.html"
+              - "middleware/byclaw-harness/browser/desktop-viewer/**"
+              - "middleware/builtin/runtime-tools/browser-viewer/connection-bridge.mjs"
               - "byclaw-tenant-node/baseline/**"
               - ".github/workflows/docker-build.yml"
             exe:

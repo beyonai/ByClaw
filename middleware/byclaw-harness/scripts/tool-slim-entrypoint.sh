@@ -37,5 +37,7 @@ fi
 # The existing supervisor handles signals, readiness, health and descendant cleanup.
 exec /usr/local/bin/byclaw-browser-supervisor \
     --browser-user byclaw --dsh-user root \
-    --socket-path /run/byclaw-browser/browserd.sock --readiness-timeout 60 \
+    --socket-path /run/byclaw-browser/browserd.sock \
+    --secret-file /run/byclaw-browser/broker.secret --readiness-timeout 60 \
+    --activation-port 19825 \
     -- "$0" --sshd

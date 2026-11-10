@@ -34,6 +34,12 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
           "coordinatorAgentId",
           "coordinatorName",
           "coordinatorAuthorized",
+          "executionBackend",
+          "role",
+          "sourceMessageId",
+          "creatorId",
+          "creatorName",
+          "targetAgentId",
         ].includes(key),
     ) ||
     (payload.mentionAllUsers !== undefined && typeof payload.mentionAllUsers !== "boolean") ||
@@ -45,6 +51,8 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
   const content = text(payload.chatContent ?? "", 262144, true);
   if (!content.trim() && (!payload.files || !payload.files.length))
     throw new DomainError("INVALID_GROUP_MESSAGE");
+  const persistOnly = command.operation === "PERSIST_GROUP_MESSAGE";
+  if (persistOnly && payload.executionBackend !== "LOCAL") throw new DomainError("INVALID_GROUP_MESSAGE");
   const mentionedUsers: string[] = [];
   const mentionedAgents: string[] = [];
   for (const resource of payload.resourceList) {
@@ -99,7 +107,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
     );
     for (const human of humans) mentionedUsers.push(String(human.memObjId ?? human.mem_obj_id));
   }
-  if (mentionedAgents.length && payload.coordinatorAgentId !== undefined) {
+  if (!persistOnly && mentionedAgents.length && payload.coordinatorAgentId !== undefined) {
     const coordinatorAgentId = requireId(payload.coordinatorAgentId);
     const bound = await first(
       db,
@@ -136,16 +144,26 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
     }
   }
   const id = await nextId(db, command.enterpriseId);
-  const reference = payload.replyToMessageId == null ? null : requireId(payload.replyToMessageId);
+  const reference = payload.replyToMessageId != null
+    ? requireId(payload.replyToMessageId)
+    : payload.sourceMessageId == null ? null : requireId(payload.sourceMessageId);
+  const role = persistOnly && payload.role === "assistant" ? "assistant" : "user";
+  const creatorId = persistOnly && payload.creatorId !== undefined ? requireId(payload.creatorId) : command.userId;
+  if (persistOnly && role === "assistant") {
+    const member = await first(db,
+      "SELECT 1 FROM byai.byai_session_member WHERE session_id=$1 AND mem_obj_type='AGENT' AND mem_obj_id=$2 AND com_acct_id=$3",
+      [command.sessionId, creatorId, command.enterpriseId]);
+    if (!member) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+  }
   await insert(db, "byai_message", {
     id,
     message_id: id,
     session_id: command.sessionId,
     enterprise_id: command.enterpriseId,
-    creator_id: command.userId,
+    creator_id: creatorId,
     creator_name: text(payload.creatorName ?? "", 255),
-    usage: 1,
-    role: "user",
+    usage: role === "assistant" ? 2 : 1,
+    role,
     message_ref: reference,
     message_content: content,
     metadata: JSON.stringify({
@@ -153,6 +171,9 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
       clientRequestId: command.requestId,
       resourceList: payload.resourceList,
       mentionAllUsers: payload.mentionAllUsers === true,
+      executionBackend: persistOnly ? "LOCAL" : undefined,
+      sourceMessageId: payload.sourceMessageId,
+      targetAgentId: payload.targetAgentId,
     }),
     related_resources: payload.files?.length ? JSON.stringify({ files: payload.files }) : null,
     client_request_id: command.requestId,
@@ -167,7 +188,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
     if (user === command.userId) continue;
     await indexGroupMention(db, id, command.sessionId, user, command.userId);
   }
-  const dispatches = await createGroupTasks(context, id, content, mentionedAgents);
+  const dispatches = persistOnly ? [] : await createGroupTasks(context, id, content, mentionedAgents);
   const scope = dispatches.find(
     (dispatch) => dispatch.groupCoordination?.mode === "COORDINATED",
   )?.groupCoordination;
@@ -188,4 +209,8 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
       ],
     );
   return { messageId: id, dispatches };
+}
+
+export async function persistGroupMessage(context: CommandContext): Promise<GroupMessageResult> {
+  return sendGroupMessage(context);
 }

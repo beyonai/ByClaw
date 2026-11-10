@@ -95,6 +95,10 @@ public class TenantGroupManagementService {
                 return data.write(tenant, "POST", "/direct-sessions", id, "CREATE_DIRECT_SESSION",
                     Map.of("agentId", ((DirectSessionCreateRequest) args[1]).getAgentId().toString())).data();
             }
+            case "directTask" -> {
+                return data.write(tenant, "POST", "/direct-tasks", id, "CREATE_DIRECT_TASK",
+                    Map.of("agentId", ((DirectSessionCreateRequest) args[1]).getAgentId().toString())).data();
+            }
             default -> throw new IllegalArgumentException(I18nUtil.get("tenant.group.operationUnknown"));
         }
         if ("leave".equals(method) || "remove".equals(method)) {

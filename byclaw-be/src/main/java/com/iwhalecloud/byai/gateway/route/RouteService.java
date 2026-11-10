@@ -175,7 +175,7 @@ public class RouteService {
         ChatChainLog.accept(ctx.assistantChatDto);
         boolean groupScopeValidated = false;
         ctx.setGroupSessionId(null);
-        if (com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.get() == null) {
+        if (ctx.tenantContext == null) {
             var coordination = groupCoordinationProvider == null ? null : groupCoordinationProvider.getIfAvailable();
             if (coordination != null) {
                 coordination.validateRequest(ctx.getAssistantChatDto());

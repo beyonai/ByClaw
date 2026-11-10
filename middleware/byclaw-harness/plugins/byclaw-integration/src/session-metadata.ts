@@ -9,9 +9,12 @@ import {
   type KvTable,
 } from '@deepseek-ai/dsh-storage-domain'
 import { resolve } from 'node:path'
+import { createHash } from 'node:crypto'
 import { z } from 'zod'
+import { toolInstanceRefsSchema, type ToolInstanceRefsEvent } from './instance-refs.ts'
 import { byClawBoundRootSessionId, type ByClawRootBinding } from './session-workspace.ts'
 import { isLegacyProjectWorkspaceTransition } from './session-cwd.ts'
+import { isSafeSharedWorkerRouteRefresh } from './shared-worker-route.ts'
 
 const byClawRootBindingSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('main') }),
@@ -39,12 +42,21 @@ export interface ByClawRootSessionRecord {
   readonly groupCoordination?: GroupCoordinationSpec
 }
 
+export interface ToolInstanceSessionIdentity { readonly id: unknown; readonly header: { readonly createdAt: number } }
+export interface ByClawToolInstanceRecord extends ToolInstanceRefsEvent { revision: number }
+const toolInstanceRecordSchema = toolInstanceRefsSchema.extend({ revision: z.number().int().positive() })
+function toolInstanceKey(session: ToolInstanceSessionIdentity, callId: string, sourceCallSeq: number): string {
+  return createHash('sha256').update(JSON.stringify([String(session.id), session.header.createdAt, callId, sourceCallSeq])).digest('hex')
+}
+
 export const byClawSessionsDomainSpec = defineDomain({
   name: 'byclaw_sessions',
   version: 0,
   layout: 'per-record',
   tables: {
     roots: domainTable<string, ByClawRootSessionRecord>(byClawRootSessionRecordSchema),
+    // Optional display records are validated on read so they cannot prevent roots from opening.
+    tool_instances: domainTable<string, unknown>(z.unknown()),
   },
 })
 
@@ -68,6 +80,15 @@ function sameBinding(left: ByClawRootBinding, right: ByClawRootBinding): boolean
       || (right.kind === 'template' && left.templateId === right.templateId))
 }
 
+function stableGroupCoordination(value: GroupCoordinationSpec): Omit<GroupCoordinationSpec, 'effectiveWorkerAgentTypes'> {
+  const { effectiveWorkerAgentTypes: _routes, ...stable } = value
+  return stable
+}
+
+function sameStableGroupCoordination(left: GroupCoordinationSpec, right: GroupCoordinationSpec): boolean {
+  return JSON.stringify(stableGroupCoordination(left)) === JSON.stringify(stableGroupCoordination(right))
+}
+
 function normalizedRequested(value: EnsureByClawRootMetadata): EnsureByClawRootMetadata {
   return {
     ...value,
@@ -82,12 +103,38 @@ export class ByClawSessionMetadataStore {
   constructor(
     private readonly table: KvTable<string, ByClawRootSessionRecord>,
     private readonly domain?: ByClawSessionsDomain,
+    private readonly toolInstances?: KvTable<string, unknown>,
   ) {}
 
   /** Open the plugin-owned storage domain through DSH's configured storage backend. */
   static async open(ctx: Pick<Context, 'storageDomain'>): Promise<ByClawSessionMetadataStore> {
     const domain = await ctx.storageDomain.open(byClawSessionsDomainSpec)
-    return new ByClawSessionMetadataStore(domain.table('roots'), domain)
+    return new ByClawSessionMetadataStore(domain.table('roots'), domain, domain.table('tool_instances'))
+  }
+
+  getToolInstanceRefs(session: ToolInstanceSessionIdentity, callId: string, sourceCallSeq: number): ByClawToolInstanceRecord | undefined {
+    const record = toolInstanceRecordSchema.safeParse(this.toolInstances?.get(toolInstanceKey(session, callId, sourceCallSeq)))
+    return record.success && record.data.callId === callId && record.data.sourceCallSeq === sourceCallSeq
+      ? record.data
+      : undefined
+  }
+
+  /** Serialize optional display writes with the existing domain; failures do not poison later writes. */
+  recordToolInstanceRefs(session: ToolInstanceSessionIdentity, value: ToolInstanceRefsEvent): Promise<ByClawToolInstanceRecord> {
+    const data = toolInstanceRefsSchema.parse(value)
+    const key = toolInstanceKey(session, data.callId, data.sourceCallSeq)
+    const operation = this.writes.then(async () => {
+      if (this.toolInstances === undefined) throw new Error('ByClaw tool instance metadata table is unavailable')
+      const previous = this.getToolInstanceRefs(session, data.callId, data.sourceCallSeq)
+      const references = new Map((previous?.instanceRefs ?? []).map(ref => [JSON.stringify([ref.sandboxId, ref.mappingId ?? null, ref.instance]), ref]))
+      for (const ref of data.instanceRefs) references.set(JSON.stringify([ref.sandboxId, ref.mappingId ?? null, ref.instance]), ref)
+      if (previous !== undefined && references.size === previous.instanceRefs.length) return previous
+      const record = { callId: data.callId, sourceCallSeq: data.sourceCallSeq, instanceRefs: [...references.values()], revision: (previous?.revision ?? 0) + 1 }
+      await this.toolInstances.put(key, record)
+      return record
+    })
+    this.writes = operation.then(() => undefined, () => undefined)
+    return operation
   }
 
   /** Read one root record from the domain's in-memory durable snapshot. */
@@ -131,13 +178,21 @@ export class ByClawSessionMetadataStore {
               throw new Error('An existing ordinary session only accepts an identity-preserving server DIRECT scope upgrade')
             }
           }
-          const routeUpgrade = current.groupCoordination !== undefined && requested.groupCoordination !== undefined
-            && current.groupCoordination.effectiveWorkerAgentTypes === undefined
-            && requested.groupCoordination.effectiveWorkerAgentTypes !== undefined
-            && JSON.stringify(current.groupCoordination) === JSON.stringify({ ...requested.groupCoordination, effectiveWorkerAgentTypes: undefined })
-              ? requested.groupCoordination : undefined
+          const sameStableScope = current.groupCoordination !== undefined && requested.groupCoordination !== undefined
+            && sameStableGroupCoordination(current.groupCoordination, requested.groupCoordination)
+          const currentRoutes = current.groupCoordination?.effectiveWorkerAgentTypes
+          const requestedRoutes = requested.groupCoordination?.effectiveWorkerAgentTypes
+          const routesChanged = requestedRoutes !== undefined
+            && JSON.stringify(currentRoutes) !== JSON.stringify(requestedRoutes)
+          let routeRefresh: GroupCoordinationSpec | undefined
+          if (sameStableScope && currentRoutes === undefined && requestedRoutes !== undefined) {
+            routeRefresh = requested.groupCoordination!
+          } else if (sameStableScope && currentRoutes !== undefined && requestedRoutes !== undefined && routesChanged
+            && isSafeSharedWorkerRouteRefresh(currentRoutes, requestedRoutes)) {
+            routeRefresh = requested.groupCoordination!
+          }
           if (current.groupCoordination !== undefined && requested.groupCoordination !== undefined
-            && routeUpgrade === undefined && JSON.stringify(current.groupCoordination) !== JSON.stringify(requested.groupCoordination)) {
+            && (!sameStableScope || (routesChanged && routeRefresh === undefined))) {
             throw new Error('A persisted group task cannot change its server-bound coordination scope')
           }
           if (!sameBinding(current.binding, requested.binding)) {
@@ -155,12 +210,12 @@ export class ByClawSessionMetadataStore {
               `ByClaw session ${rootSessionId} cannot change cwd from "${current.identity.cwd ?? '<unset>'}" to "${requested.cwd}"`,
             )
           }
-          if (upgrade !== undefined || routeUpgrade !== undefined || workspaceUpgrade) {
+          if (upgrade !== undefined || routeRefresh !== undefined || workspaceUpgrade) {
             const scoped = {
               ...current,
               ...(workspaceUpgrade ? { identity: { ...current.identity, cwd: requested.cwd! } } : {}),
-              ...(upgrade === undefined && routeUpgrade === undefined ? {} : {
-                groupCoordination: structuredClone((upgrade ?? routeUpgrade)!),
+              ...(upgrade === undefined && routeRefresh === undefined ? {} : {
+                groupCoordination: structuredClone((upgrade ?? routeRefresh)!),
               }),
             }
             await this.table.put(rootSessionId, scoped)

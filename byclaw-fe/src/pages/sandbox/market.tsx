@@ -1,6 +1,6 @@
 import { POST } from '@/service/common/request';
 import { history } from '@umijs/max';
-import { Alert, Button, Card, Checkbox, Empty, message, Space, Spin, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Checkbox, Drawer, Empty, message, Space, Spin, Tag, Typography } from 'antd';
 import copy from 'copy-to-clipboard';
 import { useEffect, useState } from 'react';
 import styles from './market.module.less';
@@ -10,6 +10,10 @@ type Template = {
   serviceKey: string;
   displayName: string;
   imageTag: string;
+  description?: string;
+  coverImage?: string;
+  enabled?: boolean;
+  available?: boolean;
   capabilities: string[];
   buildStatus: string;
   ready: boolean;
@@ -17,7 +21,8 @@ type Template = {
 
 export default function ToolSandboxMarket() {
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [selected, setSelected] = useState<string[]>(['browser', 'media']);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [details, setDetails] = useState<Template | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const refresh = async () => {
@@ -36,20 +41,13 @@ export default function ToolSandboxMarket() {
     refresh();
   }, []);
 
-  const mediaInput = selected.includes('browser')
-    ? '在媒体环境读取采集产物'
-    : '在媒体环境读取当前用户已授权的素材；未提供素材时先询问素材路径';
-  const steps = [
-    selected.includes('browser')
-      ? '在浏览器环境通过 Playwright 采集 https://www.deepseek.com/en/harness/ 和 https://github.com/deepseek-ai/deepseek-harness/ ，保存真实页面截图、正文与来源清单'
-      : '',
-    selected.includes('media') ? `${mediaInput}，用 FFmpeg 生成约24秒、16:9、1080p的无声素材视频，无需配音和字幕` : '',
-  ].filter(Boolean);
-  const task = `请使用工具沙箱模板市场完成所选任务：选用 ${selected.join(
-    '、'
-  )} 环境，使用 sandbox_templates 确认真实能力、sandbox_acquire 申请独立租约；${steps.join(
-    '；'
-  )}。所有操作经各自私网SSH连接，产物写当前用户AgenticFS。返回来源、产物链接与执行记录，完成后释放各租约。`;
+  const usable = templates.filter(
+    (template) => selected.includes(template.templateKey) && template.enabled !== false && template.available !== false
+  );
+  const task = `请根据我的业务需求，使用所选工具环境协同完成任务：${usable
+    .map((template) => `${template.displayName}（${template.capabilities.join('、')}）`)
+    .join('；')}。先确认输入和交付要求，按需申请环境，保留来源与产物，完成后释放资源。`;
+
   const run = () => {
     try {
       if (!copy(task)) throw new Error('Clipboard unavailable');
@@ -79,28 +77,38 @@ export default function ToolSandboxMarket() {
       <Spin spinning={loading}>
         <section className={styles.grid}>
           {templates.map((template) => (
-            <Card key={template.templateKey} className={styles.card}>
+            <Card
+              key={template.serviceKey}
+              className={styles.card}
+              cover={
+                template.coverImage ? (
+                  <img className={styles.cover} src={template.coverImage} alt={template.displayName} />
+                ) : undefined
+              }
+            >
               <Space className={styles.cardTop}>
-                <Tag color={template.ready ? 'green' : 'orange'}>
-                  {template.ready ? '可使用' : template.buildStatus}
+                <Tag color={template.enabled === false ? 'default' : 'green'}>
+                  {template.enabled === false ? '已停用' : template.available === false ? '配置待检查' : '可申请'}
                 </Tag>
+                <Tag>{template.ready ? '已构建' : '按需启动'}</Tag>
                 <span>{template.imageTag}</span>
               </Space>
               <Typography.Title level={2}>{template.displayName}</Typography.Title>
               <p>
-                {template.templateKey === 'browser'
-                  ? '浏览网页、提取资料、记录可核查的来源与页面截图。'
-                  : '读取采集产物，完成素材编排、视频渲染与成片导出。'}
+                {template.description ||
+                  (template.templateKey === 'browser'
+                    ? '浏览网页、提取资料、记录可核查的来源与页面截图。'
+                    : '按任务需要组合专业工具，处理当前用户授权的素材与产物。')}
               </p>
               <Space wrap>
                 {template.capabilities.map((capability) => (
                   <Tag key={capability}>{capability}</Tag>
                 ))}
               </Space>
-              <div className={styles.connection}>独立环境 · 私网 SSH · 用户隔离存储</div>
+              <div className={styles.connection}>独立环境 · 按需使用 · 产物隔离</div>
               <Checkbox
                 checked={selected.includes(template.templateKey)}
-                disabled={!template.ready}
+                disabled={template.enabled === false || template.available === false}
                 onChange={(event) =>
                   setSelected((current) =>
                     event.target.checked
@@ -111,6 +119,9 @@ export default function ToolSandboxMarket() {
               >
                 加入协作任务
               </Checkbox>
+              <Button type="link" onClick={() => setDetails(template)}>
+                查看详情
+              </Button>
             </Card>
           ))}
           {!templates.length && !loading && <Empty description="暂无已准入模板" />}
@@ -118,21 +129,29 @@ export default function ToolSandboxMarket() {
       </Spin>
       <section className={styles.workflow}>
         <div className={styles.eyebrow}>COMPOSE / 多环境协作</div>
-        <Typography.Title level={3}>采集素材 → 媒体制作 → 视频交付</Typography.Title>
-        <p>每种用途拥有独立连接与租约，通过当前用户的授权产物协作；任务结束分别释放。</p>
+        <Typography.Title level={3}>组合所需能力，交给助手执行</Typography.Title>
+        <p>选择任务需要的工具环境，再到聊天中补充业务目标、输入素材和交付要求。</p>
         <Typography.Paragraph copyable={{ text: task }}>{task}</Typography.Paragraph>
         <Button
           type="primary"
           size="large"
           onClick={run}
-          disabled={
-            !selected.length ||
-            selected.some((key) => !templates.find((template) => template.templateKey === key)?.ready)
-          }
+          disabled={!usable.length || usable.length !== selected.length}
         >
           复制协作任务并打开聊天
         </Button>
       </section>
+      <Drawer title={details?.displayName} open={!!details} onClose={() => setDetails(null)} width={540}>
+        {details?.coverImage && <img className={styles.cover} src={details.coverImage} alt={details.displayName} />}
+        <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>
+          {details?.description || '暂无详情描述'}
+        </Typography.Paragraph>
+        <Space wrap>
+          {details?.capabilities.map((capability) => (
+            <Tag key={capability}>{capability}</Tag>
+          ))}
+        </Space>
+      </Drawer>
     </main>
   );
 }

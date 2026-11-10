@@ -33,6 +33,8 @@
 
 Hub 技能的 `READY` 必须同时满足：当前员工 Redis 快照已应用、运行中配置已热加载、技能包版本已确认、`SKILL.md` 位于 `${OPENCLAW_STATE_DIR}/skills/<resourceCode>/`，并且其 frontmatter `name` 已挂载到员工的技能列表。代码目录名可以是数字资源编码。就绪表示技能定义可读取并调用，不代表技能内的每个外部服务、依赖或业务操作已经执行成功。内置技能在页面单独标识，不使用 Hub 下载回执。
 
+企业发布包的文件名与 `SKILL.md.name` 统一使用 `原名_企业`，员工发布带出的技能快照同样改名，避免个人与企业副本被 OpenClaw 按同名合并。全局 Hub 目录中多个包声明同一名称时，该名称不加入员工可用技能列表；同一员工的两条关联出现同名时，回执为 `FAILED / SKILL_NAME_CONFLICT`，不能把两个下载成功的包都报告为可调用。旧同名副本需通过发布流程生成名称互异的新包并更新关联；此检查不修改已有包或授权。
+
 运行端每 15 秒更新 `byai:skill_runtime:<userId>:<employeeId>` Hash，以进程 UUID 为字段。回执包含员工快照 SHA-256、观测时间、60 秒有效期和各技能的版本/状态/受控错误码；Hash TTL 为 120 秒，回执不含本地路径或凭据。后端接口 `/digitalEmployeeController/querySkillRuntimeStatus` 重新校验使用权限和数据库关联，并比对当前快照及技能版本。没有有效回执显示“等待运行端确认”；存在多个活跃实例时须全部就绪才显示“可调用”。
 
 `/digitalEmployeeController/prepareSkills` 仅写当前用户的重试请求，不改变关联或授权。运行端按 15/30/60 秒退避补偿未完成的准备，每分钟重新检查包版本，覆盖 Pub/Sub 丢失和同编码升级。页面重试请求在下一次 15 秒检查中生效，首次对话和工具调用会立即触发准备。失败时页面和模型显示准备失败及错误码，而不是把已关联技能解释为不存在。旧版运行端没有回执，升级并启动用户运行实例后才能确认可用。
@@ -308,3 +310,13 @@ npm test -- src/configured-thinking.test.ts src/config-writer.test.ts src/plugin
 该标记仅存储调用元数据的摘要，不写入原始凭据。启动时也会核对上次保存的摘要，以更新已有会话的工具快照。
 
 旧运行镜像缺少 `unzip` 时，Hub 技能下载器会使用已有的 `python3` 标准库解压，并在写入前校验路径、拒绝符号链接及超限包；不会因 ZIP 损坏而切换解压器。两种工具都不可用时回执为 `RUNTIME_DEPENDENCY_MISSING`，不能误报技能包损坏。正式镜像仍应保留 Dockerfile 中已有的 `unzip` 依赖。
+
+## Retired conversation resources (#267)
+
+`OBJECT`, `VIEW`, `ONTOLOGY_BASE`, and `SCENE` are retired for conversation discovery and execution. Type checks are case-insensitive and trim whitespace. Resource names and descriptions are not used to infer retirement; normal MCP, tools, agents and knowledge resources remain available.
+
+The adapter, tool descriptions, managed workspace files and sub-agent routing exclude retired metadata from old employee snapshots. Explicit type hints, matched context fallbacks and actual Redis snapshots are checked before MCP discovery or execution. The final MCP execution boundary also rejects retired capabilities with `RESOURCE_TYPE_RETIRED`. An explicit unknown resource ID/name cannot fall back to the first association or a different root agent.
+
+Update the backend and plugin together on every runtime instance, refresh employee configurations, and regenerate plugin-managed workspace files. Existing managed files are refreshed using their markers; user-maintained files and historical conversations are preserved. Do not interpret a model repeating old conversation text as a fresh successful lookup. Independently registered wrapper tools require inspection of their actual definitions and call traces; this policy does not disable every MCP or the entire data service.
+
+Run `npm test` and `npm run build`. Regression cases in `src/retired-resources.test.ts` cover backend/type-policy agreement, legacy snapshots, misleading hints, no remote execution, context projection and managed-file preservation. Build assets do not prove a deployed container or real model call succeeds.

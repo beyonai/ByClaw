@@ -604,6 +604,51 @@
     </select>
 
     <select id="discover" resultMap="DigitEmployMarketExtVoResultMap">
+        <if test="audienceFilter != null">
+            <!-- 只读取已生效的发布范围；直接创建的员工/组使用有效组织使用授权。 -->
+            with employee_audience as (
+                select s.resource_id, s.org_id, 0 as direct_employee
+                  from byai.digital_employee_publish_scope s
+                  join ss_resource r on r.resource_id = s.resource_id
+                 where s.tenant_id = #{audienceFilter.tenantId}
+                   and r.com_acct_id = #{audienceFilter.tenantId}
+                   and r.owner_type = 'enterprise' and r.resource_biz_type = 'DIG_EMPLOYEE'
+                   and r.publication_source_id is not null and r.publication_source_id != r.resource_id
+                union all
+                select g.grant_obj_id as resource_id, g.grant_to_obj_id as org_id, 1 as direct_employee
+                  from au_privilege_grant g
+                  join ss_resource r on r.resource_id = g.grant_obj_id
+                 where r.com_acct_id = #{audienceFilter.tenantId}
+                   and r.owner_type = 'enterprise' and r.resource_biz_type = 'DIG_EMPLOYEE'
+                   and (r.publication_source_id is null or r.publication_source_id = r.resource_id)
+                   and g.grant_obj_type = 'DIG_EMPLOYEE' and g.grant_to_obj_type = 'ORG'
+                   and g.grant_type in ('FORCE_USE', 'AVAILABLE_USE')
+                   and g.status_cd = 'A' and g.grant_to_type = 'RED'
+                   and (g.eff_date is null or g.eff_date &lt;= #{audienceFilter.now})
+                   and (g.exp_date is null or g.exp_date &gt; #{audienceFilter.now})
+                   and not exists (
+                       select 1 from au_privilege_grant denied
+                        where denied.grant_obj_id = g.grant_obj_id
+                          and denied.grant_to_obj_id = g.grant_to_obj_id
+                          and denied.grant_obj_type = 'DIG_EMPLOYEE' and denied.grant_to_obj_type = 'ORG'
+                          and denied.grant_type in ('FORCE_USE', 'AVAILABLE_USE')
+                          and denied.status_cd = 'A' and denied.grant_to_type = 'BLACK'
+                          and (denied.eff_date is null or denied.eff_date &lt;= #{audienceFilter.now})
+                          and (denied.exp_date is null or denied.exp_date &gt; #{audienceFilter.now})
+                   )
+            ), company_audience as (
+                select resource_id from employee_audience
+                 group by resource_id
+                having max(case when org_id = -1 then 1 else 0 end) = 1
+                <if test="audienceFilter.rootOrgIds.size() > 0">
+                    or (max(direct_employee) = 1 and count(distinct case when org_id in
+                        <foreach collection="audienceFilter.rootOrgIds" item="root" open="(" separator="," close=")">
+                            #{root}
+                        </foreach>
+                        then org_id end) = #{audienceFilter.rootOrgCount})
+                </if>
+            )
+        </if>
         select
         <if test="includeFavorites == true and favoriteTenantId != null">
                coalesce(fc.favorite_count, 0) as favorite_count,
@@ -794,6 +839,49 @@
                 and (k.red_count &gt; 0 or a.create_by = #{userId})
             </if>
             <!-- 发布组织过滤 -->
+            <if test="audienceFilter != null">
+                and a.com_acct_id = #{audienceFilter.tenantId} and a.owner_type = 'enterprise'
+                <choose>
+                    <when test="audienceFilter.company">
+                        and exists (select 1 from company_audience company where company.resource_id = a.resource_id)
+                    </when>
+                    <otherwise>
+                        and not exists (select 1 from company_audience company where company.resource_id = a.resource_id)
+                        and (
+                            <foreach collection="audienceFilter.matches" item="match" separator=" or ">
+                                (exists (
+                                    select 1 from employee_audience audience
+                                     where audience.resource_id = a.resource_id and audience.org_id in
+                                     <foreach collection="match.orgIds" item="org" open="(" separator="," close=")">
+                                         #{org}
+                                     </foreach>
+                                     <if test="audienceFilter.administrator == false">
+                                         and (a.create_by = #{audienceFilter.viewerId}
+                                         <if test="audienceFilter.visibleOrgIds.size() > 0">
+                                             or audience.org_id in
+                                             <foreach collection="audienceFilter.visibleOrgIds" item="visible" open="(" separator="," close=")">
+                                                 #{visible}
+                                             </foreach>
+                                         </if>
+                                         )
+                                     </if>
+                                )
+                                <if test="match.ancestorIds.size() > 0">
+                                    and not exists (
+                                        select 1 from employee_audience ancestor
+                                         where ancestor.resource_id = a.resource_id and ancestor.org_id in
+                                         <foreach collection="match.ancestorIds" item="ancestor" open="(" separator="," close=")">
+                                             #{ancestor}
+                                         </foreach>
+                                    )
+                                </if>
+                                )
+                            </foreach>
+                        )
+                    </otherwise>
+                </choose>
+            </if>
+            <!-- 原管理组织条件保持原语义；所属组织使用独立的 audienceFilter。 -->
             <if test="publishOrgIds != null and publishOrgIds.size() > 0">
                 and a.man_org_id in
                 <foreach collection="publishOrgIds" item="orgId" open="(" separator="," close=")">

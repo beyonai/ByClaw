@@ -135,6 +135,18 @@ public class TransactionAdviceConfig {
         NameMatchTransactionAttributeSource source = new NameMatchTransactionAttributeSource() {
             @Override
             public TransactionAttribute getTransactionAttribute(Method method, Class<?> targetClass) {
+                // Resource publication import results and external knowledge creation own independent short transactions.
+                // Catching a publication failure must not mark an already-created resource rollback-only.
+                if (targetClass != null) {
+                    String owner = ClassUtils.getUserClass(targetClass).getName();
+                    if (java.util.Set.of(
+                        "com.iwhalecloud.byai.state.application.service.dataset.KnowledgeProvisionService",
+                        "com.iwhalecloud.byai.state.application.service.dataset.KnowledgeProviderService",
+                        "com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationImportSupport").contains(owner)
+                        || (owner.equals("com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService") && method.getName().equals("createDataset"))
+                        || (owner.equals("com.iwhalecloud.byai.state.domain.resource.service.ResourceCurlService")
+                            && java.util.Set.of("runOpenApiOperationOnce", "runSimpleJsonOperationOnce").contains(method.getName()))) return notSurpportedTx;
+                }
                 // Tenant coordinators explicitly commit reservation/intent before remote work and recover duplicate receipts after rollback.
                 if (targetClass != null) {
                     String owner = ClassUtils.getUserClass(targetClass).getName();
@@ -144,6 +156,13 @@ public class TransactionAdviceConfig {
                             && "provisionDurably".equals(method.getName()))) {
                         return notSurpportedTx;
                     }
+                }
+                if (targetClass != null && java.util.Set.of(
+                    "com.iwhalecloud.byai.state.domain.mobilepush.MobilePushService",
+                    "com.iwhalecloud.byai.state.domain.mobilepush.MobilePushAuthority")
+                    .contains(ClassUtils.getUserClass(targetClass).getName())) {
+                    // 通知编排及 Node 权限读取会访问远端，不应持有聊天数据库事务。
+                    return notSurpportedTx;
                 }
                 // Forwarding coordination performs remote control and file I/O; stores explicitly own short transactions.
                 if (targetClass != null && java.util.Set.of(

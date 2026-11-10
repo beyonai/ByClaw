@@ -1,14 +1,19 @@
+import UnfinishedUploads from '@/components/UnfinishedUploads';
 import { resolvePreviewType } from '@/components/Preview/formats';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Empty, Input, message, Modal, Tooltip, Upload } from 'antd';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Empty, Input, message, Modal, Progress, Tooltip, Upload } from 'antd';
 import { CaretUpOutlined, CaretDownOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 // @ts-ignore
-import { useIntl } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import KnowledgeBreadcrumb from '@/components/KnowledgeBreadcrumb';
 import ButtonsWithMore from '@/components/ButtonsWithMore';
 import InfiniteScrollTable from '@/components/InfiniteScrollTable';
 import useGlobal from '@/hooks/useGlobal';
+import useFileTransferQueue, {
+  type FileTransferContext,
+  type FileTransferTask,
+} from '@/layout/sider/components/FileSiderPanel/hooks/useFileTransferQueue';
 import { getFileIconType } from '@/constants/icon';
 import {
   listFiles,
@@ -47,12 +52,49 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
   const intl = useIntl();
   const t = useCallback((id: string, values?: Record<string, any>) => intl.formatMessage({ id }, values), [intl]);
   const isPreviewMode = mode === 'preview';
-  const { EventEmitter } = useGlobal();
+  const { EventEmitter, sessionId } = useGlobal();
+  const userInfo = useSelector(({ user }: any) => user?.userInfo);
 
   const [currentPath, setCurrentPath] = useState<string>('');
   const [items, setItems] = useState<FileBrowserItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [pathInitialized, setPathInitialized] = useState(false);
+  const [initializedContext, setInitializedContext] = useState('');
+  const identity = JSON.stringify([
+    resourceId,
+    userInfo?.userCode,
+    userInfo?.userId,
+    userInfo?.enterpriseId,
+    sessionId,
+  ]);
+  const pathInitialized = initializedContext === identity;
+  const contextRef = useRef<(FileTransferContext & { identity: string }) | undefined>(undefined);
+  const contextSequence = useRef(0);
+  const mountedRef = useRef(true);
+  const listRequestRef = useRef(0);
+  const batchActiveRef = useRef(false);
+  const skillUploadTailRef = useRef<Promise<unknown>>(Promise.resolve());
+  const destinationIdentity = JSON.stringify([identity, currentPath]);
+  if (contextRef.current?.identity !== destinationIdentity) {
+    contextRef.current = {
+      identity: destinationIdentity,
+      key: `${destinationIdentity}:${++contextSequence.current}`,
+      resourceId,
+      ownerKey: userInfo?.userCode || '',
+      sessionId: sessionId || '',
+    };
+    batchActiveRef.current = false;
+  }
+  const transferContext = contextRef.current!;
+  const isCurrentContext = useCallback(
+    (context: FileTransferContext) => mountedRef.current && contextRef.current === context,
+    []
+  );
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<FileBrowserItem | null>(null);
@@ -74,33 +116,45 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
 
   const fetchList = useCallback(
     async (path: string) => {
+      const context = contextRef.current!;
+      const request = ++listRequestRef.current;
+      const current = () => isCurrentContext(context) && request === listRequestRef.current;
       setLoading(true);
       try {
-        const res: any = await listFiles({ resourceId, path });
+        const res: any = await listFiles({ resourceId: context.resourceId, path });
+        if (!current()) return;
         const data = res?.data ?? res ?? [];
         setItems(Array.isArray(data) ? data : []);
       } catch (e: any) {
-        message.error(e?.message || t('fileBrowser.error.loadFailed'));
+        if (current()) message.error(e?.message || t('fileBrowser.error.loadFailed'));
       } finally {
-        setLoading(false);
+        if (current()) setLoading(false);
       }
     },
-    [resourceId, t]
+    [isCurrentContext, t]
   );
 
   useEffect(() => {
+    let cancelled = false;
+    setItems([]);
+    setCurrentPath('');
     if (!resourceId) return;
     getDefaultPath(resourceId)
       .then((res: any) => {
+        if (cancelled) return;
         const defaultPath = res?.data ?? res ?? '/';
         setCurrentPath(defaultPath);
-        setPathInitialized(true);
+        setInitializedContext(identity);
       })
       .catch(() => {
+        if (cancelled) return;
         setCurrentPath('/');
-        setPathInitialized(true);
+        setInitializedContext(identity);
       });
-  }, [resourceId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [resourceId, identity]);
 
   useEffect(() => {
     if (resourceId && pathInitialized && currentPath) fetchList(currentPath);
@@ -240,18 +294,65 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
     [resourceId, currentPath, t, fetchList]
   );
 
+  const uploadOneFile = useCallback(
+    async (task: FileTransferTask, report: (event: any) => void) => {
+      const destination = task.context!;
+      const checkContext = () => {
+        task.checkActive?.();
+        if (!isCurrentContext(destination)) throw new Error(t('fileBrowser.upload.failed'));
+      };
+      const send = () => {
+        checkContext();
+        return uploadFiles(
+          destination.resourceId,
+          task.path,
+          [task.file],
+          (event) =>
+            report({
+              loaded: event.loaded || 0,
+              total: event.total || task.file.size,
+              phase: event.phase || (event.total && event.loaded >= event.total ? 'processing' : 'uploading'),
+              fileName: task.file.name,
+              resumed: event.resumed,
+            }),
+          undefined,
+          { ownerKey: destination.ownerKey, overwrite: task.overwrite, checkContext }
+        );
+      };
+      if (task.file.name.toLowerCase().endsWith('.zip')) {
+        const pending = skillUploadTailRef.current.catch(() => undefined).then(send);
+        skillUploadTailRef.current = pending;
+        await pending;
+      } else {
+        await send();
+      }
+      if (isCurrentContext(destination)) handleRefresh();
+    },
+    [isCurrentContext, t, handleRefresh]
+  );
+  const fileTransfers = useFileTransferQueue(uploadOneFile, transferContext.key);
+  const uploading = fileTransfers.rows.some((row) => row.status === 'pending' || row.status === 'uploading');
   const handleUpload = useCallback(
     async (fileList: File[]) => {
-      if (!fileList.length) return;
+      if (!fileList.length || !pathInitialized || batchActiveRef.current) return;
+      const context = transferContext;
+      batchActiveRef.current = true;
       try {
-        await uploadFiles(resourceId, currentPath, fileList);
-        message.success(t('fileBrowser.upload.success'));
-        handleRefresh();
-      } catch (e: any) {
-        message.error(e?.message || t('fileBrowser.upload.failed'));
+        const succeeded = await fileTransfers.start(
+          fileList.map((file, index) => ({
+            id: `${context.key}:${index}`,
+            file,
+            path: currentPath,
+            overwrite: true,
+            context,
+          }))
+        );
+        if (succeeded && isCurrentContext(context)) message.success(t('fileBrowser.upload.success'));
+      } finally {
+        if (isCurrentContext(context)) batchActiveRef.current = false;
       }
     },
-    [resourceId, currentPath, t, handleRefresh]
+    [pathInitialized, transferContext, fileTransfers.start, currentPath, isCurrentContext, t]
   );
 
   const handleDownload = useCallback(
@@ -654,16 +755,30 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
     return isPreviewMode ? [nameColumn, actionColumn] : [nameColumn, sizeColumn, modifiedColumn, actionColumn];
   }, [t, getActions, handleAction, handleEnterDir, handlePreview, toggleSort, getSortIcon, isSearching, isPreviewMode]);
 
+  const uploadProgressRows = fileTransfers.rows.map((row) => {
+    let label = row.error || t(`fileBrowser.upload.${row.progress.phase}`, { name: row.file.name });
+    if (row.status === 'success') label = t('fileBrowser.upload.success');
+    if (row.status === 'pending') label = t('fileBrowser.upload.queued');
+    return { ...row, label };
+  });
+
   return (
     <div className={`${styles.fileBrowserPanel} ${isPreviewMode ? styles.previewMode : ''}`}>
       <div className={styles.toolbar}>
+        <UnfinishedUploads
+          onCancelQueued={fileTransfers.cancelQueued}
+          ownerKey={transferContext.ownerKey}
+          resourceId={transferContext.resourceId}
+          disabled={uploading}
+        />
         {!isPreviewMode && (
           <>
             <Upload
               showUploadList={false}
               multiple
-              beforeUpload={(_, fileList) => {
-                handleUpload(fileList as unknown as File[]);
+              disabled={!pathInitialized || uploading}
+              beforeUpload={(file, fileList) => {
+                if (file === fileList[0]) void handleUpload(fileList as unknown as File[]);
                 return false;
               }}
             >
@@ -735,6 +850,43 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
           )}
           <KnowledgeBreadcrumb folderPath={folderPath} handleBreadcrumbClick={handleBreadcrumbClick} />
         </div>
+      )}
+
+      {!!fileTransfers.rows.length && (
+        <section className={styles.uploadProgress} aria-live="polite">
+          {uploadProgressRows.map((row) => (
+            <div key={row.id} role="group" aria-label={row.file.name} className={styles.uploadProgressRow}>
+              <div className={styles.uploadProgressTitle}>
+                <span className="textEllipsis" title={row.file.name}>
+                  {row.file.name}
+                </span>
+                {row.status === 'failed' && (
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      void fileTransfers.retry(row.id);
+                    }}
+                  >
+                    {t('fileBrowser.upload.retryFile')}
+                  </Button>
+                )}
+              </div>
+              <span className={styles.uploadProgressLabel}>{row.label}</span>
+              <Progress
+                percent={
+                  row.status === 'success'
+                    ? 100
+                    : Math.min(99, Math.floor((row.progress.loaded / Math.max(1, row.progress.total)) * 100))
+                }
+                status={row.status === 'failed' ? 'exception' : row.status === 'success' ? 'success' : 'active'}
+                size="small"
+              />
+              {row.status === 'failed' && (
+                <span className={styles.uploadProgressLabel}>{t('fileBrowser.upload.resumeHint')}</span>
+              )}
+            </div>
+          ))}
+        </section>
       )}
 
       <div className={styles.content}>

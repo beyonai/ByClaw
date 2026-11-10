@@ -404,7 +404,7 @@ export class BrowserSessionController {
     })
   }
 
-  execute(input: BrowserToolInput, agent: BrowserTurnAgent | undefined, signal: AbortSignal): Promise<BrowserObservationResult> {
+  execute(input: BrowserToolInput, agent: BrowserTurnAgent | undefined, signal: AbortSignal, onTargetReady?: () => void): Promise<BrowserObservationResult> {
     if (this.#closed) return Promise.reject(new Error('browser-controller-closed'))
     const owner = deriveBrowserTurnOwner(agent, this.#projections)
     const key = ownerKey(owner)
@@ -429,6 +429,7 @@ export class BrowserSessionController {
     if (input.operation === 'goalControl') {
       const session = this.#sessions.get(key)
       if (!this.#goal || !session || !this.#broker.goal) return Promise.reject(new Error('browser-goal-unavailable'))
+      try { onTargetReady?.() } catch { /* Optional display observers cannot change browser execution. */ }
       const control = input.command === 'state' ? { command: 'state' as const, runId: input.runId }
         : { command: input.command, runId: input.runId, generation: input.generation }
       return this.#broker.goal(credentials(session.lease), control, operationSignal)
@@ -445,7 +446,7 @@ export class BrowserSessionController {
         )
       }
       try {
-        return await this.#executeOwned(key, record, agent, input, operationSignal)
+        return await this.#executeOwned(key, record, agent, input, operationSignal, onTargetReady)
       } catch (error) {
         const duplicateOpen = error instanceof Error
           && error.message === 'browser-session-already-open'
@@ -542,8 +543,9 @@ export class BrowserSessionController {
     agent: BrowserTurnAgent | undefined,
     input: BrowserToolInput,
     signal: AbortSignal,
+    onTargetReady?: () => void,
   ): Promise<BrowserObservationResult> {
-    if (input.operation === 'runGoal') return this.#runGoal(key, record, agent, input, signal)
+    if (input.operation === 'runGoal') return this.#runGoal(key, record, agent, input, signal, onTargetReady)
     if (input.operation === 'goalControl') throw new Error('browser-goal-control-lane')
     if (input.operation === 'open') {
       if (this.#sessions.has(key)) throw new Error('browser-session-already-open')
@@ -577,6 +579,7 @@ export class BrowserSessionController {
           ...(input.allowedDomains === undefined ? {} : { allowedDomains: input.allowedDomains }),
           ...(input.allowSubmit === undefined ? {} : { allowSubmit: input.allowSubmit }),
         }, signal)
+        try { onTargetReady?.() } catch { /* Optional display observers cannot change browser execution. */ }
         const observation = sanitizeInspection(await this.#broker.inspect(credentials(lease), signal))
         this.#sessions.get(key)!.lastKnown = {
           url: observation.url, title: observation.title, observationId: observation.observationId,
@@ -589,6 +592,9 @@ export class BrowserSessionController {
     }
 
     const session = this.#sessions.get(key)
+    if (session) {
+      try { onTargetReady?.() } catch { /* Optional display observers cannot change browser execution. */ }
+    }
     if (input.operation === 'status') {
       if (!session) {
         const expired = this.#expired.get(key)
@@ -722,7 +728,7 @@ export class BrowserSessionController {
     }
   }
 
-  async #runGoal(key: string, record: BrowserOwnerRecord, agent: BrowserTurnAgent | undefined, input: BrowserGoalInput, signal: AbortSignal): Promise<BrowserObservationResult> {
+  async #runGoal(key: string, record: BrowserOwnerRecord, agent: BrowserTurnAgent | undefined, input: BrowserGoalInput, signal: AbortSignal, onTargetReady?: () => void): Promise<BrowserObservationResult> {
     const services = this.#goal!
     if (!this.#broker.goal) throw new Error('browser-goal-broker-unavailable')
     if ((input.maxSteps ?? 0) > services.config.maxSteps || (input.maxRunMs ?? 0) > services.config.maxRunMs) throw new Error('browser-goal-budget-exceeded')
@@ -737,12 +743,13 @@ export class BrowserSessionController {
       session = this.#sessions.get(key)
       if (!session) {
         await this.#executeOwned(key, record, agent, { operation: 'open', ...(input.startUrl ? { startUrl: input.startUrl } : {}),
-          ...(input.allowedDomains ? { allowedDomains: input.allowedDomains } : {}), allowSubmit: input.allowSubmit === true }, runSignal)
+          ...(input.allowedDomains ? { allowedDomains: input.allowedDomains } : {}), allowSubmit: input.allowSubmit === true }, runSignal, onTargetReady)
         session = this.#sessions.get(key)!
       } else {
         // Existing leases cannot silently widen domains or submission permission.
         if ((input.allowSubmit === true && !session.allowSubmit)
           || (input.allowedDomains && JSON.stringify(input.allowedDomains) !== JSON.stringify(session.allowedDomains))) throw new Error('browser-goal-policy-mismatch')
+        try { onTargetReady?.() } catch { /* Optional display observers cannot change browser execution. */ }
       }
       this.#leases.beginActivity(session.lease)
       const lease = credentials(session.lease)

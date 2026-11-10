@@ -292,6 +292,84 @@ class SandboxServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void targetedSandboxInfoFiltersCachedRowsBeforeHydratingTheirEndpoints() {
+        SandboxMetadataCache cache = mock(SandboxMetadataCache.class);
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "sandboxMetadataCache", cache);
+        SandboxInfo unrelated = spy(SandboxInfo.builder().userCode("alice").sandboxId("unrelated").build());
+        org.mockito.Mockito.doThrow(new AssertionError("unrelated endpoint must not be read"))
+            .when(unrelated).getEndpoints();
+        SandboxInfo selected = SandboxInfo.builder().userCode("alice").sandboxId("selected")
+            .endpoints(List.of("https://desktop.test/?token=fixture")).build();
+        when(cache.listByUser("alice")).thenReturn(List.of(unrelated, selected));
+
+        assertThat(service.sandboxInfo("alice", "selected")).containsExactly(selected);
+        assertThat(selected.getGatewayToken()).isEqualTo("fixture");
+        verify(unrelated, never()).getEndpoints();
+    }
+
+    @Test
+    void targetedSandboxInfoPreservesSharedOverrideBeforeFinalIdentityFiltering() {
+        SandboxMetadataCache cache = mock(SandboxMetadataCache.class);
+        SsSandboxRecordMapper records = mock(SsSandboxRecordMapper.class);
+        var shared = mock(com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxGateway.class);
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "sandboxMetadataCache", cache);
+        ReflectionTestUtils.setField(service, "sandboxRecordMapper", records);
+        ReflectionTestUtils.setField(service, "sharedSandboxGateway", shared);
+        SandboxInfo exclusive = SandboxInfo.builder().userCode("alice").sandboxId("exclusive")
+            .sandboxType("byclaw-dsh").build();
+        SandboxInfo mapping = SandboxInfo.builder().userCode("alice").sandboxId("shared-host")
+            .sandboxType("byclaw-dsh").isShared(true).mappingId("mapping-a").build();
+        when(cache.listByUser("alice")).thenReturn(List.of(exclusive));
+        when(shared.infos("alice")).thenReturn(List.of(mapping));
+
+        assertThat(service.sandboxInfo("alice", "exclusive")).isEmpty();
+        assertThat(service.sandboxInfo("alice", "shared-host")).containsExactly(mapping);
+        assertThat(service.sandboxInfo("alice", "missing")).isEmpty();
+    }
+
+    @Test
+    void targetedSandboxInfoPassesIdentityToPlatformAndFiltersLegacyResponses() {
+        var client = mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformControlClient.class);
+        var execution = mock(com.iwhalecloud.byai.gateway.sandbox.platform.PlatformBackgroundExecution.class);
+        when(execution.isLegacyExecutor()).thenReturn(false);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<com.iwhalecloud.byai.gateway.sandbox.platform.PlatformControlClient> clients = mock(ObjectProvider.class);
+        when(clients.getObject()).thenReturn(client);
+        PlatformRemoteGateway gateway = new PlatformRemoteGateway(execution, clients, new ObjectMapper(),
+            new org.springframework.mock.env.MockEnvironment().withProperty("byclaw.platform.base-url", "http://platform"));
+        @SuppressWarnings("unchecked")
+        ObjectProvider<PlatformRemoteGateway> gateways = mock(ObjectProvider.class);
+        when(gateways.getObject()).thenReturn(gateway);
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "platformGatewayProvider", gateways);
+        when(client.call(eq("sandbox"), eq("business/info"), any())).thenReturn(Map.of("code", 0,
+            "data", List.of(Map.of("sandboxId", "selected"), Map.of("sandboxId", "unrelated"))));
+
+        assertThat(service.sandboxInfo("alice", "selected")).extracting(SandboxInfo::getSandboxId)
+            .containsExactly("selected");
+        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
+        verify(client).call(eq("sandbox"), eq("business/info"), payload.capture());
+        Map<?, ?> params = (Map<?, ?>) payload.getValue();
+        assertThat(params.get("userCode")).isEqualTo("alice");
+        assertThat(params.get("sandboxId")).isEqualTo("selected");
+    }
+
+    @Test
+    void targetedSandboxInfoDoesNotFallBackToAnotherUsersCacheOrRecord() {
+        SandboxMetadataCache cache = mock(SandboxMetadataCache.class);
+        SsSandboxRecordMapper records = mock(SsSandboxRecordMapper.class);
+        SandboxService service = new SandboxService();
+        ReflectionTestUtils.setField(service, "sandboxMetadataCache", cache);
+        ReflectionTestUtils.setField(service, "sandboxRecordMapper", records);
+        when(cache.listByUser("alice")).thenReturn(List.of(SandboxInfo.builder().sandboxId("alice-runtime").build()));
+        assertThat(service.sandboxInfo("bob", "alice-runtime")).isEmpty();
+        verify(cache).listByUser("bob"); verify(records).selectRunningByUser("bob");
+        verify(cache, never()).listByUser("alice");
+    }
+
+    @Test
     void renewSandbox_refreshesHeartbeatAndRemoteLease() {
         SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
         SandboxLaunchContextFactory sandboxLaunchContextFactory = mock(SandboxLaunchContextFactory.class);
@@ -334,6 +412,25 @@ class SandboxServiceTest extends I18nTestSupport {
         assertThat(result.getRemoteExpiresAt()).isNotNull();
         verify(sandboxLifecycleFacade).renewSandbox(any(SandboxInfo.class));
         verify(sandboxMetadataCache).put(any(SandboxInfo.class));
+    }
+
+    @Test
+    void buildLaunchData_keepsExistingEndpointWhenOptionalSnapshotIsDamaged() {
+        SandboxService service = new SandboxService();
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setSandboxId("sandbox-1");
+        record.setEndpoint("{\"desk\":\"http://existing\"}");
+        record.setInstanceContextSnapshot("{\"version\":1,\"instanceBindings\":{},\"instanceDescriptors\":{\"desk\":false}}");
+
+        SandboxLaunchData reused = ReflectionTestUtils.invokeMethod(service, "buildLaunchData", record);
+        SandboxLaunchData decoded = org.junit.jupiter.api.Assertions.assertDoesNotThrow(() ->
+            new ObjectMapper().convertValue(reused, SandboxLaunchData.class));
+
+        assertThat(decoded.getSandboxId()).isEqualTo("sandbox-1");
+        assertThat(decoded.getEndpoint()).isEqualTo("http://existing");
+        assertThat(decoded.getInstanceEndpoints()).containsEntry("desk", "http://existing");
+        assertThat(decoded.getInstanceContext()).isNull();
+        assertThat(decoded.getInstanceDescriptors()).isNull();
     }
 
     @Test

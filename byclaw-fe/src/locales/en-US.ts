@@ -8,6 +8,11 @@ import manager from './en-US/manager';
 import personalModel from '@/pages/models/locales/en-US';
 
 export default {
+  'queryInput.attachment.progress': 'Upload progress',
+  'queryInput.attachment.retry': 'Retry upload',
+  'queryInput.attachment.uploading': 'Uploading',
+  'queryInput.attachment.processing': 'Processing on server',
+  'queryInput.attachment.failed': 'Upload failed. Click the circle to retry',
   ...nasQuota,
   ...adapterRecorder,
   'workgroupTemplate.adminOnly': 'Only adminvip in the open-source edition can manage workgroup templates.',
@@ -355,6 +360,7 @@ export default {
   'connector.credentials.smtp': 'SMTP outgoing server',
   'connector.configureImage': 'Configure image generation model connector',
   'connector.configureSpeech': 'Configure speech model connector',
+  'connector.configureDigitalHuman': 'Configure Volcengine digital human video connector',
   'modelMgr.modal.audioUploadMissing': 'Upload returned no audio file',
   'modelMgr.modal.audioUploadFailed': 'Audio upload failed',
   'modelMgr.modal.uploadMp3': 'Upload MP3',
@@ -386,6 +392,9 @@ export default {
   'skillRuntime.associated': 'Associated; preparing skills',
 
   'digitalEmployees.audienceOrganizations': 'Organizations',
+  'digitalEmployees.audienceFilter.select': 'Search and select organizations',
+  'digitalEmployees.audienceFilter.includeDescendants': 'Include sub-organizations',
+  'digitalEmployees.audienceFilter.retry': 'Could not load organizations. Retry',
   'digitalEmployees.audienceOrganizations.unset': 'No organization set',
   'resource.resourceManageAudit': 'Management access',
   'digitalEmployees.applyManage': 'Request management access',
@@ -1235,6 +1244,7 @@ export default {
   'chatResource.closeTab': 'Close',
   'chatResource.closeOtherTabs': 'Close other tabs',
   'chatResource.closeRightTabs': 'Close tabs to the right',
+  'chatResource.closeList': 'Close resource list',
   'chatResource.toggleList': 'Toggle resource list',
   'chatResource.currentSession': 'Conversation',
   'chatResource.currentEmployee': 'Employee',
@@ -1443,7 +1453,7 @@ export default {
   'fileRender.epubNotice':
     'Displays EPUB chapters and bundled images. Complex layouts, embedded media and external links are omitted.',
   'fileRender.epubLimit':
-    'This EPUB exceeds preview limits (20 MiB, 500 chapters, 2 MiB of text per chapter). Download it to read.',
+    'This EPUB exceeds preview limits (50 MB, 500 chapters, 2 MiB of text per chapter). Download it to read.',
   'fileRender.epubFailed':
     'Unable to preview this ebook. Use a complete, unencrypted EPUB file, or download it to read.',
   'fileRender.openDocumentNotice':
@@ -1451,7 +1461,7 @@ export default {
   'fileRender.openDocumentOmitted':
     'Some images, objects, annotations or complex table structures are omitted. Download the file for full content.',
   'fileRender.openDocumentLimit':
-    'Document exceeds preview limits (20 MiB, 200 slides or expanded content too large). Download to view.',
+    'Document exceeds preview limits (50 MB, 200 slides or expanded content too large). Download to view.',
   'fileRender.openDocumentFailed':
     'Unable to preview this document. Use a complete, unencrypted ODT/ODP file or download to view.',
   'fileRender.openDocumentTitle': 'OpenDocument preview',
@@ -1461,7 +1471,7 @@ export default {
   'fileRender.notebookOmitted':
     'Long text was truncated or unsupported outputs/attachments were omitted. Download for full content.',
   'fileRender.notebookLimit':
-    'Notebook exceeds preview limits (20 MiB, 1,000 cells/outputs or content too large). Download to view.',
+    'Notebook exceeds preview limits (50 MB, 1,000 cells/outputs or content too large). Download to view.',
   'fileRender.notebookFailed':
     'Unable to preview this notebook. Use a valid nbformat 4 IPYNB file or download to view.',
   'fileRender.notebookCell.markdown': 'Markdown',
@@ -1472,13 +1482,13 @@ export default {
   'fileRender.officeVariantNotice':
     'Shows saved static content without macros, external resources or embedded objects. Complex layouts may differ. Downloads keep the original file.',
   'fileRender.officeVariantLimit':
-    'Office file exceeds preview limits (20 MiB, 1,000 internal entries or expanded content too large). Download to view.',
+    'Office file exceeds preview limits (50 MB, 1,000 internal entries or expanded content too large). Download to view.',
   'fileRender.officeVariantFailed':
     'Preview failed. The file may be encrypted, damaged or inconsistent with its extension. Download to view.',
   'fileRender.emlNotice':
     'Shows the email body and attachments, including embedded bitmap images. External images, links, scripts and forms are disabled. Complex layouts may differ.',
   'fileRender.emlLimit':
-    'Email exceeds preview limits (20 MiB, 2 MiB body, 100 attachments or excessive message complexity). Download to view.',
+    'Email exceeds preview limits (50 MB, 2 MiB body, 100 attachments or excessive message complexity). Download to view.',
   'fileRender.emlFailed': 'Unable to preview this email. Use a valid, unencrypted EML file or download to view.',
   'fileRender.msgFailed': 'Unable to preview this MSG. Use a valid, unencrypted email or download to view in Outlook.',
   'fileRender.msgRtfBody':
@@ -1506,7 +1516,7 @@ export default {
   'fileRender.next': 'Next',
   'fileRender.databaseNotice':
     'Read-only SQLite preview: up to 1,000 rows and 100 columns per table. Long text is truncated; binary fields show size only. Use a complete database copy with all writes finalized.',
-  'fileRender.databaseLimit': 'This database exceeds preview limits (50 MiB, 200 tables). Download it to view.',
+  'fileRender.databaseLimit': 'This database exceeds preview limits (50 MB, 200 tables). Download it to view.',
   'fileRender.databaseFailed':
     'Unable to read this database. Use a complete, unencrypted SQLite file with no pending WAL data, or download it to view.',
   'fileRender.databaseTable': 'Table',
@@ -1524,7 +1534,7 @@ export default {
   'fileRender.rawNotice':
     'RAW previews apply white balance and color processing and may differ from camera software. Camera model and compression support depend on the decoder.',
   'fileRender.rawLimit':
-    'This RAW file exceeds preview limits (50 MiB, 100 million sensor pixels). Download it to view.',
+    'This RAW file exceeds preview limits (50 MB, 100 million sensor pixels). Download it to view.',
   'fileRender.previewUnavailable': 'File preview is temporarily unavailable',
   'fileRender.mediaUnsupported': 'This browser cannot decode the media or the file is damaged. Download it to play.',
   'fileRender.formatUnsupported': 'Online preview is unavailable for this format. Download it to view.',
@@ -1532,13 +1542,13 @@ export default {
     'Converted previews may differ from the original layout. Animations and embedded objects do not play. Download to get the original file.',
   'fileRender.legacyFailed':
     'Conversion failed. The file may be damaged, encrypted, or exceed preview limits. Download it to view.',
-  'fileRender.legacyTooLarge': 'This legacy Office file exceeds 20 MiB. Download it to view.',
+  'fileRender.legacyTooLarge': 'This legacy Office file exceeds 50 MB. Download it to view.',
   'fileRender.imageLimit':
-    'Image preview limits exceeded: 20 MiB, 100 pages, or 50 million pixels per page. Download to view.',
+    'Image preview limits exceeded: 50 MB, 100 pages, or 50 million pixels per page. Download to view.',
   'fileRender.jp2Notice':
     'JPEG 2000 is shown as a static image. Common 8-bit RGB/grayscale images are supported; special color spaces, alpha channels and complex encodings may be unsupported.',
   'fileRender.jp2Limit':
-    'JPEG 2000 preview limits: 20 MiB, 8 million pixels and bounded tile complexity. Download larger files to view.',
+    'JPEG 2000 preview limits: 50 MB, 8 million pixels and bounded tile complexity. Download larger files to view.',
   'fileRender.imageDecodeFailed':
     'Unable to decode this image. It may be damaged or use an unsupported encoding. Download to view.',
   'fileRender.binaryTimeout': 'Preview processing timed out. Reopen the file or download it to view.',
@@ -1548,7 +1558,7 @@ export default {
     'Shows text and basic formatting. Images use placeholders and embedded objects are not displayed; complex tables, headers, footers and pagination may differ from the original.',
   'fileRender.rtfPictureOmitted': '[Image omitted. Download the original to view.]',
   'fileRender.rtfLimit':
-    'The RTF exceeds the preview limit (2 MiB or excessive document complexity). Download to view.',
+    'The RTF exceeds the preview limit (50 MB or excessive document complexity). Download to view.',
   'fileRender.rtfFailed':
     'Unable to preview this RTF. It may be damaged or contain unsupported content. Download to view.',
   'fileRender.odsNotice':
@@ -1559,7 +1569,7 @@ export default {
   'fileRender.odsTruncated':
     'Preview is limited to the first {rows} rows and {columns} columns per sheet, with a cell text length limit. Download to view the complete content.',
   'fileRender.odsLimit':
-    'The ODS exceeds the preview limit (20 MiB, 50 worksheets or too much expanded content). Download to view.',
+    'The ODS exceeds the preview limit (50 MB, 50 worksheets or too much expanded content). Download to view.',
   'fileRender.odsFailed':
     'Unable to preview this ODS. It may be encrypted, damaged or use an unsupported format. Download to view.',
   'fileRender.staticPhotoNotice':
@@ -1569,7 +1579,7 @@ export default {
   'fileRender.rotate': 'Rotate',
   'fileRender.resetImage': 'Reset',
   'fileRender.archiveLimit':
-    'Archive preview limits: 20 MiB, 1000 entries; 20 MiB per extracted file, or 2 MiB for text; 50 MiB total declared size for RAR/7z/TAR and actual decompressed size for TGZ.',
+    'Archive preview limits: 100 MB input, 1,000 entries, 20 MB per extracted entry, and 50 MB for extracted ZIP entries, declared RAR/7z/TAR contents, or expanded TGZ.',
   'fileRender.archiveFailed':
     'Unable to open the archive or file. It may be encrypted, damaged, missing volumes, or contain invalid paths. Download to view.',
   'fileRender.archiveNotice':
@@ -1582,7 +1592,7 @@ export default {
   'fileRender.delimitedTable': 'Table data preview',
   'fileRender.delimitedColumn': 'Column {number}',
   'fileRender.delimitedMalformed': 'Invalid delimiter or quote syntax. Switch to source to view the original content.',
-  'fileRender.delimitedTooLarge': 'Table text exceeds 2 MiB. Download it to view.',
+  'fileRender.delimitedTooLarge': 'Table text exceeds 50 MB. Download it to view.',
   'fileRender.delimitedTruncated':
     'Showing only the first {rows} rows and {columns} columns. View the source or download for the full content.',
   'fileRender.deleteConfirm': 'Are you sure to delete this file?',
@@ -4038,7 +4048,7 @@ export default {
   'preview.resourceFailed': 'Some preview resources failed to load: {resources}',
   'preview.binaryText': 'This file is not readable text. Download it to view.',
   'preview.empty': 'The file is empty and cannot be previewed.',
-  'preview.tooLarge': 'Text files over 2 MiB must be downloaded.',
+  'preview.tooLarge': 'This file exceeds the {size} MB preview limit. Download it to view.',
   'preview.htmlPreview': 'HTML Preview',
 
   // PersonnelModel Component
@@ -4375,6 +4385,13 @@ export default {
   'connector.authorization.expiryRefreshFailed': 'Connected, but failed to refresh the expiry time. Try again later.',
   'connector.authorization.listFailed': 'Failed to load connectors. Try again later.',
   'connector.authorization.connected': '{v0} connected',
+  'connector.authorization.partialPermissions':
+    '{name} connected with some permissions missing. See the connector for details.',
+  'connector.authorization.unknownPermissions': '{name} connected. The permission range has not been fully verified.',
+  'connector.authorization.missingPermissions': '{count} permissions not granted. View details',
+  'connector.authorization.partialPermissionsDetails': 'Some permissions were not granted. View details',
+  'connector.authorization.partialPermissionsHint':
+    'Granted permissions remain available. Check the app permissions or authorize again to add the following permissions.',
   'connector.authorization.invalidUrl': 'The authorization service returned an invalid authorization URL.',
   'connector.authorization.popupBlocked': 'Your browser blocked the popup. Click “Continue authorization”.',
   'connector.authorization.notComplete': 'Authorization is not complete yet. Complete it and try again.',
@@ -4565,4 +4582,63 @@ export default {
   'ui.employee.tools.all': 'All tools',
   'ui.resource.back': '← Back to parent',
   'ui.skill.configureFirst': 'Configure this skill in digital employee management first',
+  'rp.scope': 'Publication scope',
+  'rp.selectScope': 'Select publication scope',
+  'rp.company': 'Entire company',
+  'rp.organizations': 'Selected organizations',
+  'rp.notice': 'Publication requires organization review. It does not grant use permissions or install resources.',
+  'rp.retryOrganizations': 'Could not load organizations. Retry',
+  'rp.descendants': 'Include descendants',
+  'rp.filter.ALL': 'All scopes',
+  'rp.filter.COMPANY': 'Entire company',
+  'rp.filter.ORGS': 'Organizations',
+  'rp.filter.UNSET': 'Legacy / unspecified',
+  'rp.mode.LEGACY': 'Legacy / unspecified',
+  'rp.mode.NONE': 'Unpublished',
+  'rp.mode.COMPANY': 'Entire company',
+  'rp.mode.ORGS': 'Organizations',
+  'rp.manage': 'Publication management',
+  'rp.effective': 'Effective scope',
+  'rp.controller': 'Scope managed by',
+  'rp.controller.BYAI': 'ByClaw',
+  'rp.controller.SYNC': 'Resource sync',
+  'rp.request': 'Publication request',
+  'rp.result': 'Review result',
+  'rp.comment': 'Comment',
+  'rp.waitingReplacement': 'Waiting for all targets to approve',
+  'rp.operation.ADD_SCOPE': 'Add organizations',
+  'rp.operation.REPLACE_SCOPE': 'Replace scope',
+  'rp.saveDraft': 'Save draft',
+  'rp.prepare': 'Prepare publication',
+  'rp.submit': 'Submit for review',
+  'rp.approve': 'Approve selected',
+  'rp.reject': 'Reject selected',
+  'rp.withdraw': 'Withdraw pending request',
+  'rp.retract': 'Retract selected scopes',
+  'rp.retractConfirm': 'Retracting publication keeps existing use permissions. Continue?',
+  'rp.reviews': 'Reviews and history',
+  'rp.mine': 'My publication requests',
+  'rp.resource': 'Resource',
+  'rp.applicant': 'Applicant',
+  'rp.actions': 'Actions',
+  'rp.details': 'Details and actions',
+  'rp.saved': 'Saved',
+  'rp.failed': 'Could not process publication. Please retry.',
+  'rp.reload': 'Reload',
+  'rp.useRequests': 'Use requests',
+  'rp.publicationReviews': 'Publication reviews',
+  'rp.importPending': 'Imported and submitted for publication review',
+  'rp.publicationFailed': 'Resource saved. Publication was not submitted; continue in publication management.',
+  'rp.provider': 'Knowledge provider',
+  'rp.status.DRAFT': 'Draft',
+  'rp.status.PENDING': 'Pending',
+  'rp.status.CLOSED': 'Processed',
+  'rp.status.WITHDRAWN': 'Withdrawn',
+  'rp.status.SUPERSEDED': 'Superseded',
+  'rp.status.APPROVED': 'Approved',
+  'rp.status.REJECTED': 'Rejected',
+  'rp.status.CANCELLED': 'Cancelled',
+  'rp.copySaved': 'Enterprise copy saved. Check its publication review progress.',
+  'rp.atomicTool': 'Standalone tool',
+  'rp.republishCopy': 'Create a new copy from the current personal skill',
 };

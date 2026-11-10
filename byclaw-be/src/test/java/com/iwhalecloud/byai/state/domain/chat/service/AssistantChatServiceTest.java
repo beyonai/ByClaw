@@ -35,6 +35,38 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 class AssistantChatServiceTest {
 
     @Test
+    void trialTaskConversationValidatesPublicSessionWithoutCallingNode() {
+        var tenant = new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(57L, 456L, "MEMBER");
+        com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.set(tenant);
+        when(tenantModes.isSharedDataTenant(456L)).thenReturn(true);
+        var dto = new com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto();
+        dto.setSessionId(60L);
+        dto.setSessionType("h_as");
+
+        ReflectionTestUtils.invokeMethod(assistantChatService, "handleSessionLogic", new ByteArrayOutputStream(), dto);
+
+        verify(sessionService).findById(60L);
+        verify(sessionTitleService).resolveInitialTitle(60L, null);
+        verifyNoInteractions(tenantNodeClient);
+        assertThat(com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.get()).isSameAs(tenant);
+    }
+
+    @Test
+    void standardTaskConversationStillReadsNode() {
+        var tenant = new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(57L, 789L, "MEMBER");
+        com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.set(tenant);
+        var dto = new com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto();
+        dto.setSessionId(60L);
+
+        ReflectionTestUtils.invokeMethod(assistantChatService, "handleSessionLogic", new ByteArrayOutputStream(), dto);
+
+        org.mockito.Mockito.verify(tenantNodeClient).request(org.mockito.ArgumentMatchers.eq(tenant),
+            org.mockito.ArgumentMatchers.eq("GET"), org.mockito.ArgumentMatchers.eq("/internal/v1/sessions/60"),
+            org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.any());
+        verifyNoInteractions(sessionService, sessionTitleService);
+    }
+
+    @Test
     void alreadyReportedStartupFailureDoesNotEmitADuplicateTerminalAfterPersistence() {
         var failure = new com.iwhalecloud.byai.state.common.exception.BdpRuntimeException("wrapped",
             new ChatStartupFailureException("startup failed", new IllegalStateException("timeout")));
@@ -48,6 +80,12 @@ class AssistantChatServiceTest {
 
     @InjectMocks
     private AssistantChatService assistantChatService;
+
+    @Mock
+    private com.iwhalecloud.byai.manager.domain.tenant.TenantModeService tenantModes;
+
+    @Mock
+    private com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient tenantNodeClient;
 
     @Mock
     private SessionTitleService sessionTitleService;
@@ -64,6 +102,7 @@ class AssistantChatServiceTest {
     @AfterEach
     void resetLocale() {
         LocaleContextHolder.resetLocaleContext();
+        com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContextHolder.clear();
     }
 
     @ParameterizedTest

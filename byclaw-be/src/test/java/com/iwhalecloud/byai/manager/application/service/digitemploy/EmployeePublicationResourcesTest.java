@@ -25,6 +25,21 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class EmployeePublicationResourcesTest extends I18nTestSupport {
+    @ParameterizedTest
+    @ValueSource(strings = {"OBJECT", "VIEW", "ONTOLOGY_BASE", "SCENE"})
+    void retirementExcludesEnterpriseDependenciesWithoutChangingTheSource(String type) {
+        resource.setResourceBizType(type); resource.setOwnerType("enterprise"); resource.setResourceStatus(2);
+        var captured = service.capture(dto, 7L, 1L, 100L);
+        assertThat(captured.getFirst().getAction()).isEqualTo("OMIT_RESOURCE");
+        assertThat(captured.getFirst().getWarning()).contains("RESOURCE_TYPE_RETIRED");
+        service.validate(captured, 7L, 1L);
+        var mapping = service.materialize(captured, 1L, 90L);
+        assertThat(mapping).containsEntry(20L, null);
+        service.applyPublishedResources(dto, captured, mapping);
+        assertThat(dto.getRelIds()).isEmpty();
+        assertThat(resource.getResourceBizType()).isEqualTo(type);
+        verifyNoInteractions(storage, grants);
+    }
     SsResourceService resources = mock(SsResourceService.class);
     SsResExtSkillService skills = mock(SsResExtSkillService.class);
     ResourceArtifactStorageService storage = mock(ResourceArtifactStorageService.class);
@@ -89,18 +104,18 @@ class EmployeePublicationResourcesTest extends I18nTestSupport {
         verify(auth, never()).handleAuth(any());
         verifyNoInteractions(organizations);
     }
-    @Test void sharedPersonalSkillPreservesItsCreatorAndFreezesLocalizedCopyName() {
+    @Test void sharedPersonalSkillPreservesItsCreatorAndFreezesRuntimeCopyName() {
         resource.setCreateBy(9L);
         readableSkill();
         org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.SIMPLIFIED_CHINESE);
         var captured = service.capture(dto, 7L, 1L, 100L);
         assertThat(captured.getFirst().getAction()).isEqualTo("COPY_SKILL");
         assertThat(captured.getFirst().getResource().getCreateBy()).isEqualTo(9L);
-        assertThat(captured.getFirst().getCopyName()).isEqualTo("技能(企业)");
+        assertThat(captured.getFirst().getCopyName()).isEqualTo("技能_企业");
         org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.US);
         service.validate(captured, 7L, 1L);
         assertThat(captured.getFirst().getAction()).isEqualTo("COPY_SKILL");
-        assertThat(EmployeePublicationResources.describe(captured.getFirst()).impact()).contains("技能(企业)");
+        assertThat(EmployeePublicationResources.describe(captured.getFirst()).impact()).contains("技能_企业");
         when(auth.hasResourceUsePermission(resource, 7L)).thenReturn(false);
         service.validate(captured, 7L, 1L);
         assertThat(captured.getFirst().getAction()).isEqualTo("OMIT_RESOURCE");

@@ -79,7 +79,7 @@ class ResourceFavoriteWriteIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"DIG_EMPLOYEE", "SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT"})
+    @ValueSource(strings = {"DIG_EMPLOYEE", "SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "TOOL", "AGENT"})
     void favoriteCancelAndRepeatedRequestsAreIdempotent(String type) {
         jdbc.update("UPDATE ss_resource SET resource_biz_type=? WHERE resource_id=33", type);
         assertThat(set(0, 11L, true).favoriteCount()).isEqualTo(1);
@@ -93,7 +93,7 @@ class ResourceFavoriteWriteIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"DIG_EMPLOYEE", "SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "AGENT"})
+    @ValueSource(strings = {"DIG_EMPLOYEE", "SKILL", "KG_DOC", "KG_QA", "KG_TERM", "MCP", "TOOLKIT", "TOOL", "AGENT"})
     void legacyUnscopedResourcesCanBeFavoritedWithCountsIsolatedByTenant(String type) {
         jdbc.update("UPDATE ss_resource SET resource_biz_type=?, com_acct_id=NULL, view_auth_controlled=NULL, use_auth_controlled=NULL WHERE resource_id=33", type);
 

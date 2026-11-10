@@ -1,4 +1,12 @@
 export default {
+  'SystemParams.uploadPolicy.title': 'Resumable file transfer policy',
+  'SystemParams.uploadPolicy.maxSize': 'Maximum resumable file size (MiB)',
+  'SystemParams.uploadPolicy.chunkSize': 'Chunk size (MiB)',
+  'SystemParams.uploadPolicy.help':
+    'Defaults:4096 MiB and4 MiB. New sessions also respect the existing single-file limit and platform bounds (currently16 GiB,1–16 MiB chunks, at most1024 chunks). Existing sessions retain their admitted policy.',
+  'SystemParams.uploadPolicy.invalid':
+    'Use a JSON object, a positive integer maximum size and an integer chunk size from1 through16 MiB.',
+
   // index.tsx
   'SystemParams.paramsManagement': 'Parameter Management',
   'SystemParams.staticParams': 'Static Parameters',

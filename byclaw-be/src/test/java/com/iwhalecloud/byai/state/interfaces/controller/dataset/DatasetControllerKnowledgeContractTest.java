@@ -56,6 +56,28 @@ class DatasetControllerKnowledgeContractTest extends com.iwhalecloud.byai.common
         var request = ArgumentCaptor.forClass(KnowledgeFileCountRequest.class);
         verify(service).fileCount(request.capture());
         assertThat(request.getValue().getResourceId()).isEqualTo(42L);
+        assertThat(request.getValue().getExcludePathPrefixList()).isNull();
+    }
+
+    /** 排除目录为可选参数，门户原路由接收后交由应用层适配 status。 */
+    @Test
+    void fileCountAcceptsExcludedDirectoryPrefixes() throws Exception {
+        KnowledgeFileCountResult knowledgeFileCountResult = new KnowledgeFileCountResult();
+        knowledgeFileCountResult.setFileCount(0L);
+        when(service.fileCount(any())).thenReturn(knowledgeFileCountResult);
+
+        mvc.perform(post("/datasetController/knowledgeBases/fileCount")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"resourceId\":42,\"excludePathPrefixList\":[\"/group-task-results/\"]}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.fileCount").value(0));
+
+        ArgumentCaptor<KnowledgeFileCountRequest> knowledgeFileCountCaptor =
+            ArgumentCaptor.forClass(KnowledgeFileCountRequest.class);
+        verify(service).fileCount(knowledgeFileCountCaptor.capture());
+        assertThat(knowledgeFileCountCaptor.getValue().getResourceId()).isEqualTo(42L);
+        assertThat(knowledgeFileCountCaptor.getValue().getExcludePathPrefixList())
+            .containsExactly("/group-task-results/");
     }
 
     @Test

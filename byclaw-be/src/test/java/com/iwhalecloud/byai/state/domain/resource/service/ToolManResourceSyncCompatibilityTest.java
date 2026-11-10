@@ -50,6 +50,8 @@ class ToolManResourceSyncCompatibilityTest extends com.iwhalecloud.byai.common.i
     private SsResourceService resources;
     private SsResource resource;
     private Boolean manageDuringImport;
+    private Long userIdDuringImport;
+    private DatasetApplicationService datasets;
 
     @BeforeEach
     void setUp() {
@@ -83,12 +85,13 @@ class ToolManResourceSyncCompatibilityTest extends com.iwhalecloud.byai.common.i
         resources = mock(SsResourceService.class);
         when(resources.findByImportIdentity(any(), any(), any())).thenReturn(resource);
         service = spy(new ToolManService());
+        ReflectionTestUtils.setField(service, "resourcePublicationService", mock(com.iwhalecloud.byai.manager.application.service.resource.ResourcePublicationService.class));
         ReflectionTestUtils.setField(service, "enterpriseResourceSyncService", sync);
         ReflectionTestUtils.setField(service, "ssResourceService", resources);
         ReflectionTestUtils.setField(service, "authApplicationService", auth);
         doAnswer(invocation -> importResult()).when(service).importToolJsonNewFromMultipart(any(), any(), any());
 
-        DatasetApplicationService datasets = mock(DatasetApplicationService.class);
+        datasets = mock(DatasetApplicationService.class);
         ReflectionTestUtils.setField(service, "datasetApplicationService", datasets);
         when(datasets.importDatasetJson(any(), any(), any())).thenAnswer(invocation -> {
             importResult();
@@ -205,6 +208,91 @@ class ToolManResourceSyncCompatibilityTest extends com.iwhalecloud.byai.common.i
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"personal", "personal_default"})
+    void enterprisePayloadCannotReclassifyOrGrantALocallyManagedPersonalKnowledgeBase(String localOwner) {
+        resource.setResourceBizType("KG_DOC");
+        resource.setOwnerType(localOwner);
+        resource.setCreateBy(9L);
+        when(datasets.isOwnershipManagedLocally(resource)).thenReturn(true);
+
+        service.addToolFromThird(request("KG_DOC", "{\"ownerType\":\"enterprise\",\"autoAuthorize\":true,\"authScope\":{}}"));
+
+        verify(datasets).importDatasetJson(eq("enterprise"), eq(0L), any());
+        verify(sync, never()).validateExisting(any());
+        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap());
+        assertThat(manageDuringImport).isTrue();
+    }
+
+    @Test
+    void localProvenanceAloneDoesNotGrantPermissionToUpdatePersonalKnowledge() {
+        resource.setResourceBizType("KG_DOC");
+        resource.setOwnerType("personal");
+        when(datasets.isOwnershipManagedLocally(resource)).thenReturn(true);
+
+        service.addToolFromThird(request("KG_DOC", "{\"ownerType\":\"enterprise\",\"autoAuthorize\":true,\"authScope\":{}}"));
+
+        assertThat(manageDuringImport).isFalse();
+        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap());
+    }
+
+    @Test
+    void localEnterpriseKnowledgeKeepsNormalEnterpriseReconciliation() {
+        resource.setResourceBizType("KG_DOC");
+        resource.setCreateBy(9L);
+        when(datasets.isOwnershipManagedLocally(resource)).thenReturn(true);
+
+        service.addToolFromThird(request("KG_DOC", "{\"ownerType\":\"enterprise\"}"));
+
+        verify(sync).completeImport(eq(10L), any(), eq(true), anyMap());
+    }
+
+    @Test
+    void externalWhaleKnowledgeCanFollowAnIncomingEnterpriseOwnershipChange() {
+        resource.setResourceBizType("KG_DOC");
+        resource.setSystemCode("WHALE_AGENT");
+        resource.setOwnerType("personal");
+        resource.setCreateBy(9L);
+        JSONObject json = JSONObject.parseObject(request("KG_DOC", "{\"ownerType\":\"enterprise\"}"));
+        json.put("systemCode", "WHALE_AGENT");
+
+        service.addToolFromThird(json.toJSONString());
+
+        assertThat(manageDuringImport).isTrue();
+        verify(datasets).importDatasetJson(eq("enterprise"), eq(0L), any());
+        verify(sync).completeImport(eq(10L), any(), eq(true), anyMap());
+    }
+
+    @Test
+    void localKnowledgeCannotBypassTheDeletedResourceCheck() {
+        resource.setResourceBizType("KG_DOC");
+        resource.setResourceStatus(-1);
+        when(datasets.isOwnershipManagedLocally(resource)).thenReturn(true);
+        try (var messages = new I18nTestScope(Locale.US)) {
+            assertThatThrownBy(() -> service.addToolFromThird(request("KG_DOC", "{}")))
+                .isInstanceOf(IllegalArgumentException.class);
+        }
+        verify(datasets, never()).importDatasetJson(any(), any(), any());
+        verify(sync, never()).completeImport(anyLong(), any(), anyBoolean(), anyMap());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SKILL", "TOOLKIT", "MCP", "AGENT", "KG_DOC", "KG_DB", "KG_QA", "KG_TERM"})
+    void enterpriseCreatorDoesNotReplaceTheAuthenticatedSyncPrincipal(String type) {
+        resource.setResourceBizType(type);
+        service.addToolFromThird(request(type, "{\"ownerType\":\"enterprise\",\"createBy\":\"8\",\"autoAuthorize\":false}"));
+        assertThat(userIdDuringImport).isEqualTo(9L);
+        assertThat(CurrentUserHolder.getCurrentUserId()).isEqualTo(9L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "-1", "1.5", "true", "\"abc\"", "\"\"", "\"9223372036854775808\"", "{}"})
+    void malformedCreatorIsRejectedBeforeAnyImport(String creator) {
+        assertThatThrownBy(() -> service.addToolFromThird(request("SKILL", "{\"createBy\":" + creator + "}")))
+            .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("createBy");
+        verify(resources, never()).lockSkillImport(any());
+    }
+
     private String request(String type, String fields) {
         JSONObject json = JSONObject.parseObject(fields);
         json.put("resourceBizType", type);
@@ -215,6 +303,7 @@ class ToolManResourceSyncCompatibilityTest extends com.iwhalecloud.byai.common.i
 
     private Map<String, Object> importResult() {
         manageDuringImport = auth.hasResourceManagePermission(resource);
+        userIdDuringImport = CurrentUserHolder.getCurrentUserId();
         return new HashMap<>(Map.of("resourceId", "10"));
     }
 }

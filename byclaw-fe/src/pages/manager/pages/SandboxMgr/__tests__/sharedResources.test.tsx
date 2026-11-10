@@ -70,6 +70,7 @@ test('shows shared capacity and opens members of the selected instance', async (
   render(<SharedResources canManage={false} />);
   expect(await screen.findByText('sandbox-1')).toBeInTheDocument();
   expect(screen.getByText('3 / 12')).toBeInTheDocument();
+  expect(screen.getByRole('columnheader', { name: '存活时长' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '查看用户' }));
   expect(await screen.findByText('alice')).toBeInTheDocument();
   await waitFor(() =>
@@ -77,6 +78,36 @@ test('shows shared capacity and opens members of the selected instance', async (
   );
   expect(screen.queryByRole('button', { name: '释放实例' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '释放用户' })).not.toBeInTheDocument();
+});
+
+test('keeps long sandbox ids compact and uses the user-resource pagination layout', async () => {
+  const sandboxId = 'microvm--cn-beijing--sbx-c16bae09-8c69-4767-b631-c86e86ebecce';
+  (listSharedRecords as jest.Mock).mockResolvedValueOnce({
+    records: [
+      {
+        id: 's1',
+        sandboxId,
+        serviceKey: 'byclaw-sandbox',
+        profileKey: 'xs',
+        poolScope: 'GLOBAL',
+        status: 'RUNNING',
+        capacity: 5,
+        occupiedSlots: 1,
+        onlineUsers: 1,
+      },
+    ],
+    total: 140,
+  });
+
+  const { container } = render(<SharedResources canManage={false} />);
+  const idCell = (await screen.findByText(sandboxId)).closest('td');
+
+  expect(idCell).toHaveClass('ant-table-cell-ellipsis');
+  expect(idCell).toHaveAttribute('title', sandboxId);
+  expect(container.querySelector('.ant-table-body')).toHaveStyle({ maxHeight: 'calc(100vh - 280px)' });
+  expect(container.querySelector('.shared-table-scroll')).toHaveStyle({ overflow: 'auto' });
+  expect(container.querySelectorAll('.ant-table-pagination')).toHaveLength(1);
+  expect(screen.getByText('共 140 条')).toBeInTheDocument();
 });
 
 test('queries running records by default and allows clearing the status filter', async () => {
@@ -98,6 +129,36 @@ test('queries running records by default and allows clearing the status filter',
   await waitFor(() =>
     expect(listSharedRecords).toHaveBeenLastCalledWith(expect.objectContaining({ status: undefined }))
   );
+});
+
+test.each([
+  ['zh-CN', '排空中', '释放实例'],
+  ['en-US', 'Draining', 'Release instance'],
+])('allows managers to release draining shared instances in %s', async (locale, draining, release) => {
+  mockLocale = locale;
+  (listSharedRecords as jest.Mock).mockResolvedValueOnce({
+    records: [
+      {
+        id: 'draining-1',
+        sandboxId: 'sandbox-draining',
+        serviceKey: 'byclaw-sandbox',
+        profileKey: 'xs',
+        poolScope: 'GLOBAL',
+        status: 'DRAINING',
+        capacity: 5,
+        occupiedSlots: 1,
+        onlineUsers: 1,
+      },
+    ],
+    total: 1,
+  });
+
+  render(<SharedResources canManage />);
+
+  expect(await screen.findByText(draining)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: release })).toBeInTheDocument();
+  fireEvent.mouseDown(screen.getAllByRole('combobox')[0]);
+  expect(await screen.findByTitle(draining)).toBeInTheDocument();
 });
 
 test.each([
@@ -347,3 +408,83 @@ test.each([
     }
   }
 );
+
+test('shows server aggregates across all pages and searches assigned users', async () => {
+  (listSharedRecords as jest.Mock).mockResolvedValue({
+    records: [],
+    total: 25,
+    summary: { onlineSandboxes: 12, onlineUsers: 37 },
+  });
+  render(<SharedResources canManage={false} />);
+  expect(await screen.findByText('在线服务沙箱：12')).toBeInTheDocument();
+  expect(screen.getByText('在线用户：37')).toBeInTheDocument();
+  const search = screen.getByPlaceholderText('按工号或姓名定位沙箱');
+  fireEvent.change(search, { target: { value: ' Alice ' } });
+  fireEvent.keyDown(search, { key: 'Enter', code: 'Enter', keyCode: 13 });
+  await waitFor(() =>
+    expect(listSharedRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        keyword: 'Alice',
+        pageIndex: 1,
+      })
+    )
+  );
+});
+
+test('shows the heartbeat deadline, falls back to the scheduled deadline and keeps missing plans empty', async () => {
+  const planned = 1893456000000;
+  const scheduled = 1893542400000;
+  (listSharedRecords as jest.Mock).mockResolvedValue({
+    records: [
+      { id: 'heartbeat', status: 'DRAINING', releasePolicy: 'HEARTBEAT', plannedReleaseAt: planned, releaseAt: 1 },
+      { id: 'scheduled', status: 'RUNNING', releasePolicy: 'SCHEDULED', plannedReleaseAt: null, releaseAt: scheduled },
+      { id: 'occupied', status: 'RUNNING', releasePolicy: 'HEARTBEAT', plannedReleaseAt: null, releaseAt: 0 },
+    ],
+    total: 3,
+  });
+  render(<SharedResources canManage={false} />);
+  expect((await screen.findByText('heartbeat')).closest('tr')).toHaveTextContent(
+    new Date(planned).toLocaleString('zh-CN')
+  );
+  expect(screen.getByText('scheduled').closest('tr')).toHaveTextContent(new Date(scheduled).toLocaleString('zh-CN'));
+  const columns = screen.getAllByRole('columnheader');
+  const plannedIndex = columns.findIndex((column) => column.textContent === '计划释放时间');
+  expect(screen.getByText('occupied').closest('tr')!.children[plannedIndex]).toHaveTextContent(/^-$/);
+});
+
+test('refreshes the current filtered page every 30 seconds and stops when unmounted', async () => {
+  const interval = jest.spyOn(window, 'setInterval');
+  const clear = jest.spyOn(window, 'clearInterval');
+  try {
+    (listSharedRecords as jest.Mock).mockResolvedValue({ records: [{ id: 'poll', status: 'RUNNING' }], total: 80 });
+    const { unmount } = render(<SharedResources canManage={false} />);
+    await waitFor(() => expect(listSharedRecords).toHaveBeenCalledTimes(1));
+    const search = screen.getByPlaceholderText('按工号或姓名定位沙箱');
+    fireEvent.change(search, { target: { value: ' Alice ' } });
+    fireEvent.keyDown(search, { key: 'Enter', code: 'Enter', keyCode: 13 });
+    await waitFor(() =>
+      expect(listSharedRecords).toHaveBeenLastCalledWith(expect.objectContaining({ keyword: 'Alice' }))
+    );
+    fireEvent.click(screen.getByTitle('2'));
+    await waitFor(() => expect(listSharedRecords).toHaveBeenLastCalledWith(expect.objectContaining({ pageIndex: 2 })));
+    const timerIndex = interval.mock.calls.findIndex(([, delay]) => delay === 30000);
+    expect(timerIndex).toBeGreaterThanOrEqual(0);
+    const tick = interval.mock.calls[timerIndex][0] as () => void;
+    const before = (listSharedRecords as jest.Mock).mock.calls.length;
+    await act(async () => tick());
+    expect(listSharedRecords).toHaveBeenCalledTimes(before + 1);
+    expect(listSharedRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({ keyword: 'Alice', status: 'RUNNING', pageIndex: 2, pageSize: 20 })
+    );
+    fireEvent.click(screen.getByRole('button', { name: '查看用户' }));
+    await screen.findByText('Alice Chen');
+    const duringOperation = (listSharedRecords as jest.Mock).mock.calls.length;
+    await act(async () => tick());
+    expect(listSharedRecords).toHaveBeenCalledTimes(duringOperation);
+    unmount();
+    expect(clear).toHaveBeenCalledWith(interval.mock.results[timerIndex].value);
+  } finally {
+    interval.mockRestore();
+    clear.mockRestore();
+  }
+});

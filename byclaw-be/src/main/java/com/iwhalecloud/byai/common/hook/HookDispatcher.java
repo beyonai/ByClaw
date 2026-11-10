@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.common.hook;
 
 import io.micrometer.core.instrument.MeterRegistry;
+import com.iwhalecloud.byai.common.util.JsonUtil;
 import java.net.ProtocolException;
 import java.util.List;
 import java.util.Map;
@@ -65,7 +66,12 @@ public class HookDispatcher implements AutoCloseable {
         HookEventSchema schema = schemas.stream().filter(item -> item.type().equals(type) && item.version() == version)
             .findFirst().orElse(null);
         if (schema == null) {
+            logger.info("触发勾子失败，事件未注册,type={},version={},data={}", type, version, JsonUtil.toJSONString(data));
             return;
+        }
+        if (properties.getSubscriptions().values().stream().noneMatch(subscription -> subscription.isEnabled()
+            && type.equals(subscription.getEvent()) && version == subscription.getEventVersion())) {
+            logger.info("触发勾子失败，无启用的匹配订阅,type={},version={},data={}", type, version, JsonUtil.toJSONString(data));
         }
         String eventId = UUID.randomUUID().toString();
         properties.getSubscriptions().forEach((id, subscription) -> {
@@ -75,6 +81,7 @@ public class HookDispatcher implements AutoCloseable {
             if (!TransactionSynchronizationManager.isActualTransactionActive()
                 || !TransactionSynchronizationManager.isSynchronizationActive()) {
                 record(id, eventId, "no_transaction", 0, 0);
+                logger.info("触发勾子失败，无活动事务,type={},data={}", type, JsonUtil.toJSONString(data));
                 return;
             }
             try {
@@ -85,21 +92,34 @@ public class HookDispatcher implements AutoCloseable {
                     return value.isMissingNode() || value.isNull() || (value.isTextual() && value.asText().isBlank());
                 });
                 if (missingRequired) {
+                    logger.info("触发勾子失败，缺少必填字段,subscription={},requiredFields={},data={}", id,
+                        JsonUtil.toJSONString(subscription.getRequiredDataFields()), JsonUtil.toJSONString(data));
                     record(id, eventId, "filtered", 0, 0);
                     return;
                 }
                 Request request = mapper.map(id, subscription, envelope);
+                logger.info("勾子等待事务提交,subscription={},event={},data={}", id, eventId, JsonUtil.toJSONString(data));
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override
                     public void afterCommit() {
+                        logger.info("勾子事务已提交，提交投递任务,subscription={},event={}", id, eventId);
                         try {
                             executor.execute(() -> send(id, eventId, subscription, request, 1));
                         } catch (RuntimeException rejected) {
                             record(id, eventId, "rejected", 0, 0);
                         }
                     }
+
+                    @Override
+                    public void afterCompletion(int status) {
+                        if (status != TransactionSynchronization.STATUS_COMMITTED) {
+                            logger.info("触发勾子失败，事务未提交,subscription={},event={},status={}", id, eventId, status);
+                        }
+                    }
                 });
             } catch (RuntimeException invalidPayload) {
+                logger.info("触发勾子失败，请求映射异常,subscription={},event={},exceptionType={},data={}", id,
+                    eventId, invalidPayload.getClass().getSimpleName(), JsonUtil.toJSONString(data));
                 record(id, eventId, "mapping_error", 0, 0);
             }
         });
@@ -109,16 +129,19 @@ public class HookDispatcher implements AutoCloseable {
     private void send(String subscriptionId, String eventId, HookProperties.Subscription subscription, Request request, int number) {
         long start = System.nanoTime();
         DeliveryAttempt attempt = new DeliveryAttempt();
+        logger.info("勾子开始HTTP投递,subscription={},event={},attempt={}", subscriptionId, eventId, number);
         try {
             Request signed = signer.sign(request, subscription.getHttp().getAuth());
             try (Response response = client.newCall(signed.newBuilder().tag(DeliveryAttempt.class, attempt).build()).execute()) {
+                logger.info("勾子HTTP响应,subscription={},event={},attempt={},status={}", subscriptionId, eventId, number, response.code());
                 if (response.isSuccessful()) {
                     record(subscriptionId, eventId, "success", response.code(), System.nanoTime() - start);
                     return;
                 }
+                logger.info("勾子HTTP失败响应,subscription={},event={},attempt={},status={},response={}", subscriptionId, eventId, number, response.code(), response.body() == null ? null : response.body().string());
             }
         } catch (Exception failure) {
-            // Diagnostics exclude the URL, credentials, response body and raw exception message.
+            logger.info("勾子HTTP投递异常,subscription={},event={},attempt={},exceptionType={}", subscriptionId, eventId, number, failure.getClass().getSimpleName());
         }
         HookProperties.Retry policy = subscription.getRetry();
         boolean retryable = attempt.status == 0 ? policy.isTransportErrors() : policy.getStatuses().contains(attempt.status);
@@ -143,14 +166,9 @@ public class HookDispatcher implements AutoCloseable {
     }
 
     private void record(String subscriptionId, String eventId, String outcome, int status, long nanos) {
-        // Never log request/response bodies, URLs, headers or exception messages containing credentials.
-        if ("success".equals(outcome)) {
-            logger.debug("Hook delivery subscription={} event={} outcome={} status={} durationMs={}",
-                subscriptionId, eventId, outcome, status, TimeUnit.NANOSECONDS.toMillis(nanos));
-        } else {
-            logger.warn("Hook delivery subscription={} event={} outcome={} status={} durationMs={}",
-                subscriptionId, eventId, outcome, status, TimeUnit.NANOSECONDS.toMillis(nanos));
-        }
+        // Delivery outcomes share the event id with transaction and HTTP diagnostics.
+        logger.info("勾子投递结果 subscription={} event={} outcome={} status={} durationMs={}",
+            subscriptionId, eventId, outcome, status, TimeUnit.NANOSECONDS.toMillis(nanos));
         if (meters != null) {
             try {
                 meters.counter("byclaw.hooks.deliveries", "subscription", subscriptionId, "outcome", outcome).increment();

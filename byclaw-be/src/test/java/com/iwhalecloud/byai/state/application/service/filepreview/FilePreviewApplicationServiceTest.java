@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
@@ -76,11 +77,23 @@ class FilePreviewApplicationServiceTest {
     }
 
     @Test
+    void acceptsTheDecimalFiftyMegabyteBoundary() throws Exception {
+        byte[] pdf = "%PDF-preview".getBytes(StandardCharsets.US_ASCII);
+        MultipartFile file = mock(MultipartFile.class);
+        when(file.getOriginalFilename()).thenReturn("limit.doc");
+        when(file.getSize()).thenReturn(50_000_000L);
+        when(file.getInputStream()).thenReturn(new ByteArrayInputStream(OLE_HEADER));
+        when(converter.convertFileToPdf(any(), eq("preview.doc"))).thenReturn(pdf);
+
+        assertThat(service.convert(file)).isSameAs(pdf);
+    }
+
+    @Test
     void rejectsEmptyOversizedAndRenamedNonOfficeInputBeforeConversion() {
         assertStatus(new MockMultipartFile("file", "empty.doc", "application/msword", new byte[0]), 400);
         MultipartFile large = mock(MultipartFile.class);
         when(large.getOriginalFilename()).thenReturn("large.ppt");
-        when(large.getSize()).thenReturn((long) FilePreviewApplicationService.MAX_FILE_SIZE + 1);
+        when(large.getSize()).thenReturn(50_000_001L);
         assertStatus(large, 413);
         assertStatus(new MockMultipartFile("file", "renamed.doc", "application/msword", "<html/>".getBytes(StandardCharsets.UTF_8)), 422);
         verifyNoInteractions(converter);

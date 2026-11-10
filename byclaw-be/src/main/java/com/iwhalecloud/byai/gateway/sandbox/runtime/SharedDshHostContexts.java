@@ -6,7 +6,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -33,8 +32,8 @@ public final class SharedDshHostContexts {
 
     private static final Logger log = LoggerFactory.getLogger(SharedDshHostContexts.class);
 
-    /** System parameter: user codes that run on the shared host; absent, blank or {@code *} = nobody. */
-    public static final String USERS_PARAM = "BYCLAW_SHARED_DSH_HOST_USERS";
+    /** JSON policy shared with platform sandbox routing. */
+    public static final String POLICY_PARAM = "BYCLAW_SANDBOX_SHARED_POLICY";
     /**
      * System parameter: which users get which tool sandbox (B), as {@code userCode=service_key} pairs separated
      * by commas, semicolons or whitespace. Users not listed get the host's default tool sandbox.
@@ -149,31 +148,25 @@ public final class SharedDshHostContexts {
     }
 
     /**
-     * User filter backed by the {@value #USERS_PARAM} system parameter, read on every decision so an
-     * administrator's change applies to the next request. Unreadable configuration does not grant access.
+     * 每次读取 JSON 策略并直接映射为配置对象。
+     *
+     * @param configuredPolicy 提供系统参数 JSON 字符串的查询函数
+     * @return 用户资格判断函数；读取或解析异常时记录堆栈并返回 false
      */
-    public static Predicate<String> userFilter(Supplier<String> configuredUsers) {
+    public static Predicate<String> userFilter(Supplier<String> configuredPolicy) {
         return userCode -> {
-            String value;
-            try {
-                value = configuredUsers.get();
-            }
-            catch (RuntimeException e) {
-                log.warn("读取系统参数 {} 失败，不授予常驻 DSH 宿主访问：{}", USERS_PARAM, e.getMessage());
+            if (StringUtils.isBlank(userCode)) {
                 return false;
             }
-            return allowsUser(value, userCode);
+            try {
+                var policy = com.alibaba.fastjson.JSON.parseObject(configuredPolicy.get(),
+                    com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxPolicyConfig.class);
+                return com.iwhalecloud.byai.gateway.sandbox.shared.SharedSandboxPolicy.eligible(policy, userCode);
+            } catch (RuntimeException unavailable) {
+                log.error(unavailable.getMessage(), unavailable);
+                return false;
+            }
         };
-    }
-
-    /** Exact comma/semicolon/space separated membership; empty and wildcard do not grant access. */
-    static boolean allowsUser(String configuredUsers, String userCode) {
-        String value = StringUtils.trimToEmpty(configuredUsers);
-        if (value.isEmpty() || "*".equals(value) || StringUtils.isBlank(userCode)) {
-            return false;
-        }
-        Set<String> users = new java.util.HashSet<>(java.util.Arrays.asList(USER_LIST_SEPARATOR.split(value)));
-        return users.contains(StringUtils.trimToEmpty(userCode));
     }
 
     /**
