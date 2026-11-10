@@ -86,7 +86,8 @@ public class GroupChatEventPublisher {
 
     /** 使用写入前已鉴权的成员快照，离群和解散提交后仍可通知原成员。 */
     public int publishTenantMembers(TenantRequestContext tenant, JSONObject event, List<?> members) {
-        event.put("enterpriseId", String.valueOf(tenant.enterpriseId()));
+        JSONObject deliveryEvent = mutableCopy(event);
+        deliveryEvent.put("enterpriseId", String.valueOf(tenant.enterpriseId()));
         int sent = 0;
         List<Long> recipientIds = new java.util.ArrayList<>();
         for (Object value : members) {
@@ -100,7 +101,7 @@ public class GroupChatEventPublisher {
                 if (!channel.isActive() || !Objects.equals(String.valueOf(tenant.enterpriseId()),
                     channel.attr(Constant.ATT_ENTERPRISE_ID).get())) continue;
                 try {
-                    channel.writeAndFlush(new TextWebSocketFrame(event.toJSONString()));
+                    channel.writeAndFlush(new TextWebSocketFrame(deliveryEvent.toJSONString()));
                     sent++;
                 }
                 catch (Exception error) {
@@ -114,7 +115,10 @@ public class GroupChatEventPublisher {
     /** Only the forwarding service supplies freshly bound USER recipients; completion means enqueue, never client receipt. */
     public void publishForwardMembers(long enterpriseId,List<Long> recipientIds,JSONObject event) {
         if(enterpriseId<=0||event==null)throw new IllegalArgumentException("FORWARD_INVALID_DELIVERY");
-        event.put("enterpriseId",Long.toString(enterpriseId));
+        // Callers may pass JSONObject instances backed by immutable maps (for example Map.of in tests).
+        // Keep the committed event immutable from the caller's perspective while adding delivery metadata.
+        JSONObject deliveryEvent = mutableCopy(event);
+        deliveryEvent.put("enterpriseId",Long.toString(enterpriseId));
         // The message is already committed; socket delivery failures cannot suppress external facts.
         publishCommitted(enterpriseId, event, recipientIds);
         List<io.netty.channel.ChannelFuture> sends=new java.util.ArrayList<>();
@@ -122,7 +126,7 @@ public class GroupChatEventPublisher {
             for(Long id:new java.util.LinkedHashSet<>(recipientIds)) {
                 for(Channel channel:channelManager.getChannels(id)) {
                     if(!channel.isActive()||!Objects.equals(Long.toString(enterpriseId),channel.attr(Constant.ATT_ENTERPRISE_ID).get()))continue;
-                    sends.add(channel.writeAndFlush(new TextWebSocketFrame(event.toJSONString())));
+                    sends.add(channel.writeAndFlush(new TextWebSocketFrame(deliveryEvent.toJSONString())));
                 }
             }
             long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
@@ -147,5 +151,11 @@ public class GroupChatEventPublisher {
         } catch (RuntimeException error) {
             log.warn("Workgroup event submission failed, enterpriseId={}", enterpriseId);
         }
+    }
+
+    private static JSONObject mutableCopy(JSONObject event) {
+        JSONObject copy = new JSONObject();
+        copy.putAll(event);
+        return copy;
     }
 }
