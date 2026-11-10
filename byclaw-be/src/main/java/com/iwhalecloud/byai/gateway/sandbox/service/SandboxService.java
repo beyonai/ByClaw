@@ -1521,6 +1521,16 @@ public class SandboxService {
         return sandboxInfo(userCode, null);
     }
 
+    public Map<String, String> resolveSharedIngressHeaders(String userCode, SandboxInfo binding, String endpoint) {
+        if (binding.getMappingId() == null) {
+            return binding.getEndpointHeaders() == null ? Map.of() : binding.getEndpointHeaders();
+        }
+        if (sharedSandboxGateway == null) {
+            throw new IllegalStateException("Shared execution context is unavailable");
+        }
+        return sharedSandboxGateway.executionHeaders(userCode, binding, endpoint);
+    }
+
     /** Resolve one known identity without preparing unrelated sandbox endpoints. */
     public List<SandboxInfo> sandboxInfo(String userCode, String sandboxId) {
         if (sandboxId != null && (StringUtils.isBlank(sandboxId) || !sandboxId.equals(sandboxId.trim()))) {
