@@ -14,7 +14,18 @@ public class TenantForwardMaintenanceStore implements ForwardMaintenanceStore {
     private final TenantNodeClient node;
     public TenantForwardMaintenanceStore(TenantNodeClient node){this.node=node;}
     private <T>T call(long tenant,String path,Object body,TypeReference<T> type){return node.serviceRequest(tenant,"POST","/internal/v1/forward-maintenance/"+path,body,type);}
-    @Override public Page scan(long tenant,Category category,String after,int limit){Map<String,Object> body=new HashMap<>();body.put("category",category.name());body.put("after",after);body.put("limit",limit);return call(tenant,"scan",body,new TypeReference<>(){});}
+    @Override
+    public Page scan(long tenant, Category category, String after, int limit) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("category", category.name());
+        body.put("after", after);
+        body.put("limit", limit);
+        try {
+            return call(tenant, "scan", body, new TypeReference<>() {});
+        } catch (TenantNodeClient.ForwardScanPausedException paused) {
+            return new Page(List.of(), after);
+        }
+    }
     @Override public DeliveryLease claimDelivery(ForwardOperationLocator l,long target,String owner,Duration d){return call(l.enterpriseId(),"delivery/claim",new Claim(l,target,owner,d.toMillis()),new TypeReference<>(){});}
     @Override public DeliveryLease renewDelivery(DeliveryLease l,Duration d){return call(l.locator().enterpriseId(),"delivery/renew",new Renew(l,d.toMillis()),new TypeReference<>(){});}
     @Override public Delivery delivery(DeliveryLease l,long message){return call(l.locator().enterpriseId(),"delivery/read",Map.of("lease",l,"messageId",Long.toString(message)),new TypeReference<>(){});}

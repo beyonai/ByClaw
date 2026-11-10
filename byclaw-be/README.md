@@ -958,6 +958,8 @@ check the task's `turnStatus` and BE task execution logs to determine whether th
 
 HACU 切换企业时，登录 Token 负责认证用户，当前企业保存在该用户的 HTTP 会话中。后续带同一用户 Token 的请求会沿用会话里的企业 ID，避免旧 Token 把切换结果覆盖；浏览器 Cookie 属于其他用户时仍以 Token 身份为准。BE 访问租户 Node 时校验服务注册记录与沙箱 ID，再通过容器网络的 `sandbox-<沙箱 ID>` 和注册端口直连，不依赖沙箱记录 endpoint 的存储格式。
 
+租户工作组转发恢复定时扫描工作和待投递记录。Node 就绪后仍可能因当前执行策略暂缓扫描。对于扫描接口明确返回的 `409 POLICY_EXECUTION_DISABLED` 或 `409 POLICY_NOT_EFFECTIVE`，BE 保留扫描游标，下一轮重新检查。其他响应错误仍保留恢复诊断。
+
 租户聊天继续使用现有 `/assiman/qryConversations` 和 `/assiman/getMessages` 协议。BE 根据租户上下文将会话精确查询、列表和历史消息转发到对应 Node；对尚无 `messageStruct` 的 worker 纯文本历史回答，在响应中投影为原有前端可渲染的回答片段，并将成对的 `<think>` 内容投影为思考片段。投影不改写租户数据库中的原始消息。个人空间沿用原处理链路。
 
 HACU 工作组列表合并租户 Node 中的新工作组与平台旧库中属于同一企业、且当前用户为成员的存量工作组；打开存量工作组时继续访问旧库，按企业和成员双重校验，防止跨租户读取。新建工作组时，BE 校验所选数字员工和模板资源权限，连同群主、工作组名称和目标在租户 Node 的同一次创建事务中写入；当前不支持在创建请求中附加其他真人成员。
