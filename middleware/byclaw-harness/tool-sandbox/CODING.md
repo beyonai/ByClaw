@@ -1,6 +1,6 @@
 # Codex 工具沙箱（暂不安装 Claude）
 
-在 `coding-sandbox-hs` 上制作独立工具沙箱 B。父镜像沿用 browser 的 SSH、文件和浏览器能力；不修改 Harness 路由及前后端。
+在 `coding-sandbox-hs` 上制作独立工具沙箱 B。父镜像沿用 browser 的 SSH、文件和浏览器能力。本节只说明工具镜像；Harness 固定路由见 [实施说明](../plugins/byclaw-integration/CODING-ROUTING.zh.md)。
 
 ## 1. 本次文件
 
@@ -95,7 +95,7 @@ codex exec --skip-git-repo-check --json '只回复 CODEX_READY'
 
 镜像已内置配置，直接调用原生 **`codex`**，不提供包装命令或配置生成入口。入口不设置权限放开参数，沿用 CLI 默认权限；工作目录及权限策略由调用者明确传入。验收时再用 `--model` / `-c` 覆盖一次，并核对网关实际收到的地址和模型；指定员工的固定路由与参数约束由后续 4.1 实现。本次不开发群上下文交接。
 
-安装验收通过后，再开发 4.1 的指定员工路由、流式输出和停止链路；镜像上架本身不会自动把用户消息交给 Codex。
+指定员工固定路由已新增到 Harness 源码，部署配置与验收见 [Codex 固定路由](../plugins/byclaw-integration/CODING-ROUTING.zh.md)。需要重新构建并部署 Harness 主镜像；本工具镜像可复用。镜像上架本身不会自动把用户消息交给 Codex。
 
 ## 5. 本次验证范围
 

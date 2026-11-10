@@ -79,6 +79,10 @@ import type { ByClawSessionHost } from './session-extensions.ts'
 import { registerByClawAgentWorkspacePolicy, ByClawSessionWorkspaceRegistry } from './session-workspace.ts'
 import { resolveByClawByRoot, resolveByClawLocalE2eStorageRoot, resolveByClawInboundPath } from './inbound-context.ts'
 import { ByClawDshWorkerRuntime } from './worker-runtime.ts'
+import { ByClawExecutionRouter, type ExecutionSandbox } from './coding-router.ts'
+import { byClawInboundTurnContextDeclaration, buildByClawInboundTurnContext } from './inbound-context.ts'
+import { emitByClawProjection, reasoningProjection, toolCallProjection, type DshProjectionContext } from './byclaw-presentation.ts'
+import type { AskAgentCommand } from '@byclaw/by-framework'
 import { ByClawDshSandboxBusyPublisher } from './sandbox-busy.ts'
 import {
   decryptByClawAuthToken,
@@ -209,6 +213,8 @@ export interface Config {
   provider?: string
   model?: string
   workerId?: string
+  agentExecutionMap?: string
+  codexExecTimeoutMs?: number
   agentTypes?: string[]
   refreshChannel?: string
   authorizationPollMs?: number
@@ -274,6 +280,8 @@ export const Config: z<Config> = z.object({
   provider: z.string(),
   model: z.string(),
   workerId: z.string(),
+  agentExecutionMap: z.string().default('{}'),
+  codexExecTimeoutMs: z.natural().min(1000).max(900000).default(300000),
   workspaceOnToolEnvironment: z.boolean().default(false),
   byRoot: z.string(),
   dshHome: z.string(),
@@ -680,6 +688,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
   let sessions: ByClawDshSessionRuntime | undefined
   let disposition: ReturnType<typeof installGroupChatDisposition> | undefined
   let worker: ByClawDshWorkerRuntime | undefined
+  let execution: ByClawExecutionRouter | undefined
   let sandboxBusy: ByClawDshSandboxBusyPublisher | undefined
   let resourceWatch: ByClawResourceWatch | undefined
   let acceptingRefresh = true
@@ -701,6 +710,8 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
     await settle(() => resourceRuntime.close())
     await settle(() => generationLease.close())
     await settle(() => refresh)
+    worker?.stopAdmission()
+    await settle(execution === undefined ? undefined : () => execution?.close() ?? Promise.resolve())
     await settle(worker === undefined ? undefined : () => worker?.close() ?? Promise.resolve())
     await settle(disposition === undefined ? undefined : () => disposition?.close() ?? Promise.resolve())
     await settle(sessions === undefined ? undefined : () => sessions?.close() ?? Promise.resolve())
@@ -1121,6 +1132,48 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       // This adapter is used only by eligible group turns, never ordinary input or context boot.
       ...(userFiles === undefined ? {} : { files: toolEnvironmentFiles(ctx), historyFiles: toolEnvironmentFiles(ctx) }),
     })
+    const resolveInboundTarget = (command: AskAgentCommand, text: string) => {
+      const coordination = groupCoordinationFromExtra(command.extraPayload)
+      if (coordination === undefined) return resolveByClawInboundTarget(resources, command.extraPayload, text)
+      const id = String(command.extraPayload['agent_id'] ?? command.extraPayload['agentId'] ?? coordination.coordinatorAgentId)
+      if (id !== coordination.coordinatorAgentId && !coordination.allowedAgentIds.includes(id)) throw new Error('Inbound group employee is outside the server-bound task scope')
+      const employee = resources.employees.find(candidate => candidate.id === id)
+      return { templateId: `byclaw-employee-${id}`, resourceId: id, kind: 'employee' as const, name: employee?.name ?? (id === coordination.coordinatorAgentId ? '群组工作助手' : '数字员工'), text }
+    }
+    type ExecutionToolEnvironment = { sandboxCatalog?: ExecutionSandbox; environmentValue?: (name: string) => string | undefined }
+    const executionEnvironment = () => {
+      const ssh = ctx.get('ssh') as ExecutionToolEnvironment | undefined
+      return {
+        BYCLAW_AGENT_EXECUTION_MAP: ssh?.environmentValue?.('BYCLAW_AGENT_EXECUTION_MAP') ?? config.agentExecutionMap ?? '{}',
+        CODEX_EXEC_TIMEOUT_MS: ssh?.environmentValue?.('CODEX_EXEC_TIMEOUT_MS') ?? String(config.codexExecTimeoutMs ?? 300000),
+      }
+    }
+    execution = new ByClawExecutionRouter({
+      userCode,
+      environment: executionEnvironment,
+      resolveTarget: resolveInboundTarget,
+      sandbox: () => (ctx.get('ssh') as ExecutionToolEnvironment | undefined)?.sandboxCatalog,
+      onActivityChange: () => sandboxBusy?.activityChanged(),
+      prepareContext: (command, target) => [
+        '执行以下用户任务。附件和工作文件位于同一用户的 /by 卷。请返回任务结果。',
+        byClawInboundTurnContextDeclaration(buildByClawInboundTurnContext(command)),
+        '<user-task>', target.text, '</user-task>',
+      ].join('\n\n'),
+      emit: async (command, context, event) => {
+        const projectionContext: DshProjectionContext = {
+          sessionId: String(command.header.sessionId), rootSessionId: String(command.header.sessionId),
+          externalParentSessionId: String(context.sessionId), scope: 'parent', depth: 0,
+          sequence: `codex:${command.header.messageId}:${event.id}`, eventKind: event.kind === 'tool' ? 'tool.call' : 'session.output',
+          parentMessageId: command.header.messageId,
+          groupMetadata: { executor: event.executionType, employee_id: event.employeeId },
+        }
+        const projection = event.kind === 'progress'
+          ? reasoningProjection(event.detail ?? event.title, projectionContext)
+          : toolCallProjection({ toolCallId: `codex:${command.header.messageId}:${event.id}`, toolName: event.title,
+            phase: event.phase, source: 'runtime', ...(event.detail === undefined ? {} : { output: event.detail }) }, projectionContext)
+        await emitByClawProjection(emitter, String(context.sessionId), context.traceId, projection, sourceAgentType)
+      },
+    })
     sessions = new ByClawDshSessionRuntime(ctx, {
       workspace,
       voiceRuntime,
@@ -1149,14 +1202,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       sessionSetup: (agentCtx, command, agent) => setupTodoExecution(ctx, agentCtx, agent, command, sessionHost,
         sessionMetadata.get(String(agent.id))?.groupCoordination, isSuperAssistant(agent)),
       workspaceRegistry,
-      resolveInboundTarget: (command, text) => {
-        const coordination = groupCoordinationFromExtra(command.extraPayload)
-        if (coordination === undefined) return resolveByClawInboundTarget(resources, command.extraPayload, text)
-        const id = String(command.extraPayload['agent_id'] ?? command.extraPayload['agentId'] ?? coordination.coordinatorAgentId)
-        if (id !== coordination.coordinatorAgentId && !coordination.allowedAgentIds.includes(id)) throw new Error('Inbound group employee is outside the server-bound task scope')
-        const employee = resources.employees.find(candidate => candidate.id === id)
-        return { templateId: `byclaw-employee-${id}`, resourceId: id, kind: 'employee', name: employee?.name ?? (id === coordination.coordinatorAgentId ? '群组工作助手' : '数字员工'), text }
-      },
+      resolveInboundTarget,
       templateRuntime,
       onActivityChange: () => sandboxBusy?.activityChanged(),
     })
@@ -1169,10 +1215,10 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       agentType: agentTypes.find(candidate => (
         candidate === BYCLAW_DSH_AGENT_TYPE || candidate.startsWith(`${BYCLAW_DSH_AGENT_TYPE}_`)
       )) ?? BYCLAW_DSH_AGENT_TYPE,
-      activity: () => sessions?.sandboxBusySnapshot() ?? {
-        busy: false,
-        activeAgentCount: 0,
-        activeChildCount: 0,
+      activity: () => {
+        const snapshot = sessions?.sandboxBusySnapshot() ?? { busy: false, activeAgentCount: 0, activeChildCount: 0 }
+        const executionCount = execution?.activeCount ?? 0
+        return { ...snapshot, busy: snapshot.busy || executionCount > 0, activeAgentCount: snapshot.activeAgentCount + executionCount }
       },
       logger: ctx.logger,
     })
@@ -1185,6 +1231,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       admission: ctx.get('byclawManagedAdmission'),
       agentTypes,
       sessions,
+      execution,
     })
     startupPhase('worker-start')
     await startup.measure('worker-registration', () => worker!.start(id))
@@ -1198,11 +1245,13 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
         activity: () => {
           const snapshot = runtimeSessions.sandboxBusySnapshot()
           const activeRequests = runtimeWorker.admission?.activeRequests ?? 0
-          return { busy: snapshot.busy || activeRequests > 0, activeRequests: Math.max(activeRequests, snapshot.activeAgentCount + snapshot.activeChildCount) }
+          const executionCount = execution?.activeCount ?? 0
+          return { busy: snapshot.busy || activeRequests > 0 || executionCount > 0, activeRequests: Math.max(activeRequests, snapshot.activeAgentCount + snapshot.activeChildCount + executionCount) }
         },
         stopAdmission: () => runtimeWorker.stopAdmission(),
         stopExecution: async () => {
           runtimeWorker.stopAdmission()
+          await execution?.close()
           // Cancel this user's sessions before joining the worker during context disposal.
           await runtimeSessions.close({ requireStopped: true })
         },

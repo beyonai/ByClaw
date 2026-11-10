@@ -99,6 +99,9 @@ const volume = schema.object({
 export const BE_TOKEN_SOURCE = 'byclawBeTokenSource'
 
 export class ToolEnv extends ToolEnvConnection {
+  /** Per-user catalog API for deterministic executors; same leases and authorization as tools. */
+  sandboxCatalog: ToolSandboxManager | undefined
+  environmentValue(name: string): string | undefined { return this.catalogLaunchEnv[name] }
   /** The byclaw-be backend, when that is the configured one; for {@link renewBeToken}. */
   private readonly beBackend: ByClawBeBackend | undefined
   private readonly catalogRuntimes = new Set<ToolEnv>()
@@ -207,11 +210,11 @@ export class ToolEnv extends ToolEnvConnection {
       try { await runtime.ssh.acquireSession(allocationSessionId) }
       catch (error) { await runtime.ssh.releaseOwned(false).catch(() => {}); await fiber.dispose(); throw error }
       this.catalogRuntimes.add(runtime.ssh)
-      const execute = async (argv: readonly string[], cwd = workspace, signal?: AbortSignal, sessionId = allocationSessionId): Promise<SandboxResult> => runtime.ssh.runInSession(sessionId, async () => {
+      const execute = async (argv: readonly string[], cwd = workspace, signal?: AbortSignal, sessionId = allocationSessionId, onStdout?: (chunk: string) => void): Promise<SandboxResult> => runtime.ssh.runInSession(sessionId, async () => {
         const root = posix.resolve(workspace), target = posix.resolve(cwd)
         if (target !== root && !target.startsWith(`${root}/`)) throw new Error('WORKSPACE_FORBIDDEN')
         const process = runtime.subprocess.spawn({ argv, cwd: target, stdio: { stdin: 'ignore', stdout: { maxBytes: 1024 * 1024 }, stderr: { maxBytes: 1024 * 1024 } }, graceMs: 5000, signal })
-        return executeSandboxProcess(process, signal)
+        return executeSandboxProcess(process, signal, onStdout)
       })
       return {
         identity: () => ({ ...(runtime.ssh.instanceContext === undefined ? {} : { instanceContext: runtime.ssh.instanceContext }), workspaceRoot: workspace, ...(runtime.ssh.sandboxId === undefined ? {} : { sandboxId: runtime.ssh.sandboxId }) }),
@@ -223,6 +226,7 @@ export class ToolEnv extends ToolEnvConnection {
       }
     }, event => ctx.logger('byclaw-tool-env').info(`sandbox.lifecycle ${JSON.stringify(event)}`),
     () => this.beBackend!.catalogTemplates())
+    this.sandboxCatalog = manager
     registerCatalogLifecycle(ctx, manager)
     ctx.effect(() => () => manager.dispose())
     ctx.inject(['tools'], inner => { registerCatalogTools(inner, manager) })
