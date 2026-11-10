@@ -1378,6 +1378,8 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
   }>()
   private readonly foregroundQueues = new Map<string, Promise<unknown>>()
   private readonly messageAgents = new Map<string, Agent>()
+  /** Roots whose children this process already checked for a host restart: later children are its own. */
+  private readonly interruptionChecked = new WeakSet<Agent>()
   private readonly queues = new Map<string, Promise<unknown>>()
   private readonly coldRecoveryParking = new ColdRecoveryAskParking()
   private readonly disposeSessionEvents: () => void
@@ -2292,11 +2294,14 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       await turn.teamSnapshots.flush()
       this.assertAccepting()
       ready({ mode: entry.mode, dshSessionId: String(rootAgent.id) })
-      // A host that died while children ran left them unsettled; settle them for the root first.
       const ownEvents = rootAgent.session.ownEvents()
-      const interrupted = interruptedChildren(ownEvents, childId => this.ctx.agents.get(SessionId(childId)) !== undefined)
-      // The message framework redelivers a command whose worker died; an ask_user recovery reuses the header on purpose.
       const targetId = route.targetDshSessionId !== undefined && route.targetDshSessionId !== String(rootAgent.id) ? route.targetDshSessionId : undefined
+      // A host that died while children ran left them unsettled; settle them on the first command
+      // this process delivers to the root, whose turn then carries the root's answer to them.
+      const checkInterruption = targetId === undefined && !this.interruptionChecked.has(rootAgent)
+      if (checkInterruption) this.interruptionChecked.add(rootAgent)
+      const interrupted = checkInterruption ? interruptedChildren(ownEvents, childId => this.ctx.agents.get(SessionId(childId)) !== undefined) : []
+      // The message framework redelivers a command whose worker died; an ask_user recovery reuses the header on purpose.
       const redelivered = command.extraPayload['byclaw_recovered_interaction_id'] === undefined
         && redeliveredCommand(command.header.messageId, ownEvents, targetId === undefined ? undefined : await this.storedEvents(targetId))
       if (interrupted.length > 0) {
@@ -2305,7 +2310,11 @@ export class ByClawDshSessionRuntime implements ByClawDshSessionPort {
       }
       if (redelivered) {
         this.ctx.logger.warn(`[byclaw-dsh] message ${command.header.messageId} was already admitted by an earlier process; telling ${targetId ?? String(rootAgent.id)} it was interrupted instead of resending it`)
-        if (targetId === undefined) rootAgent.followup(interruptedTurnNotice(command.header.messageId))
+        if (targetId === undefined) {
+          const notice = interruptedTurnNotice(command.header.messageId)
+          turn.initiation?.expectInput(String(rootAgent.id), String(notice.id))
+          rootAgent.followup(notice)
+        }
       }
       const agent = await measureChatStage('harness.input_submit', async () => {
         // The redelivered command's text is already in its session's history; only the notices are new.

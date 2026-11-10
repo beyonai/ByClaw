@@ -41,6 +41,11 @@ export function interruptedChildren(events: readonly SessionEvent[], isLive: (ch
       }
     } else if (event.type === 'user/message' && event.data.source.kind === 'subagent-settled') {
       settled.set(String(event.data.source.senderSessionId), event.seq)
+    } else if (event.type === 'agent/inbox/spliced') {
+      // A settlement waiting for a busy parent is already durable in its inbox.
+      for (const message of event.data.inserted) {
+        if (message.source.kind === 'subagent-settled') settled.set(String(message.source.senderSessionId), event.seq)
+      }
     }
   }
   return [...dispatched].filter(([childId, seq]) => seq > (settled.get(childId) ?? -1) && !isLive(childId)).map(([childId]) => childId)

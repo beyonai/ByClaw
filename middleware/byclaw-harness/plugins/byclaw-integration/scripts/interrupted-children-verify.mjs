@@ -28,6 +28,10 @@ const redispatched = [...events, call('f'), result('f', 'child-done')]
 assert.deepEqual(interruptedChildren(redispatched, none), ['child-cut', 'child-ptc', 'child-done'])
 assert.deepEqual(interruptedChildren([...redispatched, settled('child-done'), settled('child-cut'), settled('child-ptc')], none), [])
 
+// A settlement still waiting in a busy parent's inbox already settles the child.
+const queued = { type: 'agent/inbox/spliced', seq: seq++, data: { target: 'next-turn', start: 0, inserted: [settled('child-cut').data] } }
+assert.deepEqual(interruptedChildren([...events, queued], none), ['child-ptc'])
+
 // The notice settles the child for the next check, exactly like DSH's own.
 const notice = interruptionNotice('child-cut')
 assert.equal(notice.source.kind, 'subagent-settled')
