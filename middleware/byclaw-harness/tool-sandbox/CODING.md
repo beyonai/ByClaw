@@ -71,9 +71,9 @@ codex exec --skip-git-repo-check --model '其他模型ID' \
 
 仅配置 `CODEX_BASE_URL`、`CODEX_MODEL` 环境变量不会覆盖本文件；后续执行器若提供这两个可选变量，须在值非空时转换为上面的命令行参数。修改镜像默认值需要更新 `codex.config.toml` 并重新构建。
 
-原生会话保存在 `CODEX_HOME`，当前示例未持久化该目录，重建实例后会话可能丢失。当前 `/by` 卷保存工作文件；若另行挂载 `CODEX_HOME`，需预置 `config.toml`，因为空卷会遮盖镜像内置配置。
+直接手工调用的原生会话保存在镜像默认 `CODEX_HOME`，当前示例未持久化该目录。Harness 固定路由现已使用 `/by/.sessions/{sessionId}/executors/{agentId}/codex-home`，每轮从镜像默认配置生成专用配置并按 threadId 续聊；原生状态随 `/by` 持久卷保留。详见 [上下文交接](../plugins/byclaw-integration/CODING-CONTEXT.zh.md)。
 
-这是独立工具镜像：不要直接替换当前 `none + web` 的 Harness 镜像。`CODEX_AGENT_IDS` 属于后续 Harness 路由配置，不配置到本工具镜像来实现自动分流。
+这是独立工具镜像：不要直接替换 Harness 主镜像。`BYCLAW_AGENT_EXECUTION_MAP` 配置在处理请求的 Harness 主环境，通过已有沙箱目录选择 coding；不放到本工具镜像实现分流。
 
 ### 从 r1 更新到 r2
 
@@ -93,7 +93,7 @@ codex exec --skip-git-repo-check --json '只回复 CODEX_READY'
 
 `codex --version` 应显示 0.167.0；以实际工具用户 byclaw 验证。随后在授权工作区做一次文件读写，并核对网关收到的 URL、模型及最终回复。不要打印 API Key。
 
-镜像已内置配置，直接调用原生 **`codex`**，不提供包装命令或配置生成入口。入口不设置权限放开参数，沿用 CLI 默认权限；工作目录及权限策略由调用者明确传入。验收时再用 `--model` / `-c` 覆盖一次，并核对网关实际收到的地址和模型；指定员工的固定路由与参数约束由后续 4.1 实现。本次不开发群上下文交接。
+镜像已内置配置，可直接调用原生 **`codex`**；工具启动入口不生成配置。手工调用沿用 CLI 默认权限或明确传入参数；Harness 固定路由通过随插件分发的 Python runner 准备专用配置，使用原有免交互权限策略，并接收上下文、共享 Skill 和文件回传。验收时用 `--model` / `-c` 覆盖一次，并核对网关实际收到的地址和模型。
 
 指定员工固定路由已新增到 Harness 源码，部署配置与验收见 [Codex 固定路由](../plugins/byclaw-integration/CODING-ROUTING.zh.md)。需要重新构建并部署 Harness 主镜像；本工具镜像可复用。镜像上架本身不会自动把用户消息交给 Codex。
 

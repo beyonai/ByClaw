@@ -30,6 +30,7 @@ import z from '@deepseek-ai/schemastery'
 import {
   GatewayDataEmitter,
   createRedis,
+  EventType,
 } from '@byclaw/by-framework'
 import { createLazyByClawSkillLoader } from './lazy-skills.ts'
 import { ByClawOnDemandResources } from './on-demand-resources.ts'
@@ -43,7 +44,7 @@ import { ByClawExternalWorkerAdapter } from './group-worker.ts'
 import { GroupStateBoundary } from './group-state-boundary.ts'
 import { groupCoordinationFromExtra, scopeIdentity, ByClawGroupCoordinationRuntime } from './group-coordination.ts'
 import { defaultAgentTemplateDir, readAgentTemplate } from './agent-template.ts'
-import { agentSkillRootFor, AGENT_SKILLS_ROOT } from './skill-runtime.ts'
+import { agentSkillRootFor, AGENT_SKILLS_ROOT, SKILL_CREATOR_POLICY } from './skill-runtime.ts'
 import { lazyToolEnvironment, lazyToolEnvironmentFiles, mediaArtifactIo, toolEnvironmentFiles } from './tool-environment-files.ts'
 import { ToolEnvironmentSkills } from './tool-environment-skills.ts'
 import { memberSkillProjectionRoot } from './group-skill-resources.ts'
@@ -81,7 +82,8 @@ import { resolveByClawByRoot, resolveByClawLocalE2eStorageRoot, resolveByClawInb
 import { ByClawDshWorkerRuntime } from './worker-runtime.ts'
 import { ByClawExecutionRouter, type ExecutionSandbox } from './coding-router.ts'
 import { codingEventPresentation } from './coding-presentation.ts'
-import { byClawInboundTurnContextDeclaration, buildByClawInboundTurnContext } from './inbound-context.ts'
+import { codingLeaseFileChecks, codingPreviousCwd, prepareCodingContext } from './coding-context.ts'
+import type { ByClawCodingSetup } from './session-extensions.ts'
 import { emitByClawProjection, reasoningProjection, toolCallProjection } from './byclaw-presentation.ts'
 import type { AskAgentCommand } from '@byclaw/by-framework'
 import { ByClawDshSandboxBusyPublisher } from './sandbox-busy.ts'
@@ -126,7 +128,7 @@ export * from './session-workspace.ts'
 export * from './inbound-context.ts'
 export * from './session-metadata.ts'
 export { byClawTurnModelOverride } from './session-runtime.ts'
-export type { ByClawSessionHost, ByClawSessionSetup } from './session-extensions.ts'
+export type { ByClawSessionHost, ByClawSessionSetup, ByClawCodingSetup } from './session-extensions.ts'
 export * from './repair-legacy-session.ts'
 export * from './inbound-routing.ts'
 export * from './byclaw-presentation.ts'
@@ -1156,11 +1158,30 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       sandbox: () => (ctx.get('ssh') as ExecutionToolEnvironment | undefined)?.sandboxCatalog,
       onActivityChange: () => sandboxBusy?.activityChanged(),
       log: entry => ctx.logger('byclaw-execution').info(`execution.lifecycle ${JSON.stringify(entry)}`),
-      prepareContext: (command, target) => [
-        '执行以下用户任务。附件和工作文件位于同一用户的 /by 卷。请返回任务结果。',
-        byClawInboundTurnContextDeclaration(buildByClawInboundTurnContext(command)),
-        '<user-task>', target.text, '</user-task>',
-      ].join('\n\n'),
+      prepareContext: async (command, target, lease) => {
+        const template = await templateRuntime.prepareEmployee(`byclaw-employee-${target.resourceId}`, groupCoordinationFromExtra(command.extraPayload))
+        lease.signal.throwIfAborted()
+        const skills = (await skillRuntime.employeeSkills(template)).map(skill => ({ ...skill,
+          path: skillDirectories?.visiblePath(skill.path) ?? skill.path }))
+        const setup: ByClawCodingSetup = { command, host: { ...sessionHost,
+          userFiles: codingLeaseFileChecks(lease.sandbox, lease.actor, lease.leaseId, lease.workspaceRoot, lease.signal) } }
+        await ctx.serial('byclaw/coding-setup', setup)
+        lease.signal.throwIfAborted()
+        const savedCwd = sessionMetadata.get(String(command.header.sessionId))?.identity.cwd
+        const previousCwd = await codingPreviousCwd(lease, String(command.header.sessionId), target.resourceId)
+          ?? (savedCwd !== undefined && /^\/by\/\.shared\/project_-?\d+$/u.test(savedCwd) ? savedCwd : undefined)
+        return prepareCodingContext(command, target, { ...template, persona: `${template.persona}\n\n${SKILL_CREATOR_POLICY}` }, skills, setup.publication, previousCwd)
+      },
+      emitFileChanges: async (command, context, payload, workspace) => {
+        const rootSessionId = String(command.header.sessionId)
+        // The native snapshots are on the same /by volume used by the original UserFS API.
+        await emitter.emitChunk(String(context.sessionId), context.traceId, {
+          content: JSON.stringify(payload), metadata: { event_source: 'dsh', event_kind: 'file_changes', session_scope: 'parent',
+            external_session_id: rootSessionId, external_root_session_id: rootSessionId, host_session_id: String(context.sessionId), workspace },
+        }, { eventType: EventType.ANSWER_DELTA, contentType: '3016' as never, sourceAgentType,
+          messageId: `${command.header.messageId}:file-changes:${workspace === `/by/.sessions/${rootSessionId}` ? 'session' : 'project'}:${payload.files[0]?.uuid}`,
+          parentMessageId: String(command.header.messageId) })
+      },
       emit: async (command, context, event) => {
         const presentation = codingEventPresentation(event, { sessionId: String(command.header.sessionId),
           hostSessionId: String(context.sessionId), messageId: String(command.header.messageId) })

@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 Optional DSH plugin providing `prepare_group_task_publication` for eligible ByClaw sessions. It owns HACU detection, durable activation, tool registration, file validation, and BE calls. ByClaw Integration does not depend on this plugin and works without it.
 
+Routed Codex turns use the generic `byclaw/coding-setup` hook with the same durable activation and trusted task binding, without constructing a DSH Agent. An eligible structured final response requests `text + sourcePaths`; the host invokes the original client, checks files on that coding lease and resolves fresh credentials. This only prepares a user-confirmed card; it never uploads, sends group messages, completes tasks or automatically retries an uncertain request.
+
 ## Composition and activation
 
 The plugin listens to Integration's awaited `byclaw/session-setup` event. Integration supplies the trusted command, explicit Agent instance and context, and host callbacks for current login headers and `/by/` path mapping. It contains no publication-specific branch, configuration, or stored field. No async `agent/created` interception or method patching is used.

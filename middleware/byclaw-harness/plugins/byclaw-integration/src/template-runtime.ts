@@ -152,6 +152,8 @@ export function concludeParentForTemplateInstance(
 }
 
 export interface ByClawTemplateInstanceRuntime {
+  /** Prepare authorized employee data without resolving a model or creating a DSH Agent. */
+  prepareEmployee(templateId: string, coordination?: GroupCoordinationSpec): Promise<DshAgentTemplate>
   /** Compose an authorized template as the inbound root Agent itself. */
   prepareRoot(templateId: string, coordination?: GroupCoordinationSpec): Promise<{
     templateId: string
@@ -352,22 +354,29 @@ export function registerAgentTemplateRuntime(ctx: Context, config: {
     })
   }
 
-  const runtime: ByClawTemplateInstanceRuntime = {
-    async prepareRoot(templateId, coordination) {
-      if (coordination !== undefined) {
-        await config.groupCoordination?.validate(coordination)
-        if (templateId !== `byclaw-employee-${coordination.coordinatorAgentId}`) {
-          await config.groupCoordination?.prepareSelected?.(coordination, templateId)
-        }
+  const withEmployee = async <T>(templateId: string, coordination: GroupCoordinationSpec | undefined,
+    operation: (template: DshAgentTemplate) => Promise<T>): Promise<T> => {
+    if (coordination !== undefined) {
+      await config.groupCoordination?.validate(coordination)
+      if (templateId !== `byclaw-employee-${coordination.coordinatorAgentId}`) {
+        await config.groupCoordination?.prepareSelected?.(coordination, templateId)
       }
-      else await config.beforeInstantiate?.(templateId)
-      return withCatalogRead(async () => {
-        const template = coordination === undefined ? await readAgentTemplate(config.catalogDir, templateId)
-          : await config.groupCoordination?.resolveTemplate(coordination, templateId)
-        if (template === undefined) throw new Error(`agent template "${templateId}" was not found`)
-        if (!template.source.directlyAuthorized && template.kind === 'agent') {
-          throw new Error(`agent template "${templateId}" is available only through its authorized expert team`)
-        }
+    }
+    else await config.beforeInstantiate?.(templateId)
+    return withCatalogRead(async () => {
+      const template = coordination === undefined ? await readAgentTemplate(config.catalogDir, templateId)
+        : await config.groupCoordination?.resolveTemplate(coordination, templateId)
+      if (template === undefined) throw new Error(`agent template "${templateId}" was not found`)
+      if (!template.source.directlyAuthorized && template.kind === 'agent') {
+        throw new Error(`agent template "${templateId}" is available only through its authorized expert team`)
+      }
+      return operation(template)
+    })
+  }
+  const runtime: ByClawTemplateInstanceRuntime = {
+    prepareEmployee: (templateId, coordination) => withEmployee(templateId, coordination, async template => template),
+    async prepareRoot(templateId, coordination) {
+      return withEmployee(templateId, coordination, async template => {
         const selection = await config.resolveModel(`template:${template.id}`, template.source.modelId)
         return {
           templateId: template.id,

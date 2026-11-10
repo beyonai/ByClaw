@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
-import { ByClawExecutionRouter, parseAgentExecutionMap, dispatchExecutionAsk, CODEX_EXEC_SCRIPT } from '../src/coding-router.ts'
+import { ByClawExecutionRouter, parseAgentExecutionMap, dispatchExecutionAsk } from '../src/coding-router.ts'
+import { CODING_WORKSPACE_RUNNER, codingWorkspace } from '../src/coding-context.ts'
 import { CodexEventAdapter } from '../src/cli-event-adapter.ts'
 import { codingPublicText, summarizeCodingDiagnostic } from '../src/coding-diagnostics.ts'
 import { codingEventPresentation } from '../src/coding-presentation.ts'
@@ -41,7 +42,8 @@ function fixture(options = {}) {
       if (options.unauthorized) throw new Error('not authorized')
       return { kind: 'employee', resourceId: cmd.extraPayload.agent_id, text }
     },
-    prepareContext: (cmd, target) => options.prompt ?? target.text,
+    prepareContext: (cmd, target) => ({ prompt: options.prompt ?? target.text, employeeId: target.resourceId, persona: '', skills: [],
+      workspace: codingWorkspace(String(cmd.header.sessionId), undefined) }),
     sandbox: () => options.noSandbox ? undefined : manager,
     emit: async (_cmd, _context, event) => { events.push(event); if (options.emitFails) throw new Error('offline') },
     log: entry => { logs.push(entry); options.log?.(entry) },
@@ -64,9 +66,9 @@ test('a simple question invokes Codex in coding sandbox and returns its answer w
   const result = await f.run()
   assert.equal(result.finalAnswer, '6'); assert.equal(result.executor, 'codex'); assert.equal(result.codexThreadId, 'thread-one')
   assert.equal(f.dshCalls, 0); assert.equal(f.calls.length, 1)
-  assert.deepEqual(f.calls[0].argv.slice(0, 4), ['sh', '-c', CODEX_EXEC_SCRIPT, 'byclaw-codex'])
-  assert.match(f.calls[0].argv[4], /^\/by\/\.sessions\/codex-[a-f0-9]{64}$/)
-  assert.equal(f.calls[0].argv.at(-1), '1+5=?')
+  assert.deepEqual(f.calls[0].argv.slice(0, 3), ['python3', '-c', CODING_WORKSPACE_RUNNER])
+  assert.equal(JSON.parse(f.calls[0].argv[3]).home, '/by/.sessions/s1/executors/11444401/codex-home')
+  assert.equal(f.calls[0].argv[4], '1+5=?')
   assert.deepEqual(f.releases, [false]); assert.equal(f.router.activeCount, 0)
   assert.ok(f.events.some(event => event.id === 'exec' && event.phase === 'success'))
   assert.equal(f.events.filter(event => event.kind === 'progress').length, 0, 'final answer must not be duplicated in reasoning')
@@ -106,7 +108,7 @@ test('repeat delivery reuses execution, conflicting payload rejects, separate se
   await assert.rejects(f.run({ ...command(), content: 'different task' }), /EXECUTION_REQUEST_CONFLICT/)
   const next = command(); next.header.sessionId = 's2'
   await f.run(next)
-  assert.notEqual(f.calls[0].argv[4], f.calls[1].argv[4])
+  assert.notEqual(JSON.parse(f.calls[0].argv[3]).home, JSON.parse(f.calls[1].argv[3]).home)
 })
 test('concurrent requests from the same employee session execute serially', async () => {
   let running = 0, max = 0
@@ -191,9 +193,9 @@ test('SSH polling waits for incomplete UTF-8 tails instead of corrupting JSONL',
 test('input with shell syntax stays a separate argv value', async () => {
   const prompt = 'quote\' " ; $(touch /tmp/never-execute)\nsecond line'
   const f = fixture({ prompt }); await f.run()
-  assert.equal(f.calls[0].argv.at(-1), prompt)
-  assert.equal(f.calls[0].argv[2], CODEX_EXEC_SCRIPT)
-  assert.ok(!CODEX_EXEC_SCRIPT.includes(prompt))
+  assert.equal(f.calls[0].argv[4], prompt)
+  assert.equal(f.calls[0].argv[2], CODING_WORKSPACE_RUNNER)
+  assert.ok(!CODING_WORKSPACE_RUNNER.includes(prompt))
 })
 test('failed event forwarding aborts CLI execution instead of producing a success', async () => {
   const f = fixture({ emitFails: true, execute: async ({ signal }) => { await delay(60_000, undefined, { signal }) } })

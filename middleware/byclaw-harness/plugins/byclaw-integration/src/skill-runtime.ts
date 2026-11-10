@@ -45,6 +45,7 @@ interface Binding {
 
 /** Default employee (agent-workspace) Skill root inside the user tree. */
 export const AGENT_SKILLS_ROOT = '/by/.openclaw'
+export const SKILL_CREATOR_POLICY = 'Skill workflow invariant: before creating, editing, or updating any Skill, you must load the `skill-creator` Skill first and follow the instructions it provides. This applies to existing Skills, newly created Skills, root Agents, and delegated Agents alike.'
 
 /** Employee (agent-workspace) Skill root beneath a user tree (`byRoot`). */
 export function agentSkillRootFor(byRoot: string): string {
@@ -315,6 +316,17 @@ export class ByClawSkillRuntime {
       .map(skill => ({ name: skill.name, path: skill.resourceBase!.path }))
   }
 
+  /** Same lazy/overlay view as DSH, without constructing an Agent or copying Skill directories. */
+  async employeeSkills(template: Pick<DshAgentTemplate, 'id' | 'source'>): Promise<Array<{ name: string; path: string; enabled: boolean }>> {
+    if (this.disposed) throw new Error('ByClaw Skill runtime is disposed')
+    const view = await this.effectiveView({ templateId: template.id, agentId: template.source.resourceId, dshAgentId: '' })
+    return [...view.definitions.values()].map(skill => {
+      const path = skill.path ?? (skill.resourceBase === undefined ? undefined : join(skill.resourceBase.path, 'SKILL.md'))
+      if (path === undefined) throw new Error('EXECUTION_SKILL_PATH_MISSING')
+      return { name: skill.name, path, enabled: skill.invocation.modelInvocable }
+    }).sort((a, b) => a.name.localeCompare(b.name))
+  }
+
   /** Read a staged generation before publication; the returned commit performs no I/O and cannot partially publish. */
   async prepareGeneration(
     templates: readonly DshAgentTemplate[],
@@ -505,7 +517,7 @@ export class ByClawSkillRuntime {
     this.disposers.push(ctx.systemPrompt.section({
       name: 'byclaw:skill-creator-policy',
       order: 115,
-      text: 'Skill workflow invariant: before creating, editing, or updating any Skill, you must load the `skill-creator` Skill first and follow the instructions it provides. This applies to existing Skills, newly created Skills, root Agents, and delegated Agents alike.',
+      text: SKILL_CREATOR_POLICY,
     }))
     const original = { list: skills.list, snapshot: skills.snapshot, get: skills.get }
     // What the model is shown: member copies for expert members, then each directory where commands run.

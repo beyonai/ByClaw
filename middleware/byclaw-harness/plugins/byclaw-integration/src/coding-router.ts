@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto'
 import type { AskAgentCommand, AgentContext } from '@byclaw/by-framework'
 import { CodexEventAdapter, type CodingEvent } from './cli-event-adapter.ts'
 import { summarizeCodingDiagnostic, type CodingDiagnosticSummary } from './coding-diagnostics.ts'
+import { CODING_WORKSPACE_RUNNER, codingFinalOutput, codingRunManifest, type CodingContext } from './coding-context.ts'
+import type { FileChangesSummaryPayload } from './file-changes.ts'
 
 export type ExecutionType = 'CODEX_CLI' | 'CLAUDE_CLI' | 'UNITY'
 export type ExecutionKind = 'codex' | 'claude' | 'unity'
@@ -57,7 +59,10 @@ export interface ExecutionRouterOptions {
   userCode: string
   environment: () => Readonly<ExecutionRouterEnvironment>
   resolveTarget: (command: AskAgentCommand, text: string) => ExecutionTarget | undefined
-  prepareContext: (command: AskAgentCommand, target: ExecutionTarget) => string
+  prepareContext: (command: AskAgentCommand, target: ExecutionTarget, lease: {
+    sandbox: ExecutionSandbox; actor: string; leaseId: string; workspaceRoot: string; signal: AbortSignal; identity: string
+  }) => CodingContext | Promise<CodingContext>
+  emitFileChanges?: (command: AskAgentCommand, context: AgentContext, payload: FileChangesSummaryPayload, workspace: string) => Promise<void>
   sandbox: () => ExecutionSandbox | undefined
   emit: (command: AskAgentCommand, context: AgentContext, event: ExecutionRouteEvent) => Promise<void>
   onActivityChange?: () => void
@@ -87,20 +92,6 @@ export function parseAgentExecutionMap(value: string | undefined): ReadonlyMap<s
   }
   return result
 }
-
-// Task text is always a positional argument, never interpolated into shell source.
-// Credentials and image defaults are read in B, not copied from the host to the prompt.
-export const CODEX_EXEC_SCRIPT = [
-  'set -eu',
-  'work=$1; shift',
-  'mkdir -p -- "$work"; cd -- "$work"',
-  'if [ -n "${CODEX_MODEL:-}" ]; then set -- --model "$CODEX_MODEL" "$@"; fi',
-  'if [ -n "${CODEX_BASE_URL:-}" ]; then',
-  '  provider=$(printf \'%s\' "$CODEX_BASE_URL" | python3 -c \'import json,sys; print("model_providers.byclaw.base_url=" + json.dumps(sys.stdin.read()))\')',
-  '  set -- -c "$provider" "$@"',
-  'fi',
-  'exec codex exec --json --skip-git-repo-check -c \'approval_policy="never"\' --sandbox danger-full-access "$@"',
-].join('\n')
 
 interface Request {
   messageId: string
@@ -132,11 +123,9 @@ export class ByClawExecutionRouter {
     if (executionType === undefined) return undefined
     if (this.closed) throw new Error('EXECUTION_ROUTER_CLOSED')
     if (!target.text.trim()) throw new Error('EXECUTION_TEXT_REQUIRED')
-    const prompt = this.options.prepareContext(command, target)
-    if (Buffer.byteLength(prompt, 'utf8') > 64 * 1024) throw new Error('EXECUTION_INPUT_TOO_LARGE')
     const identity = JSON.stringify([command.header.userCode, command.header.sessionId, target.resourceId, executionType])
     const key = JSON.stringify([identity, command.header.messageId])
-    const fingerprint = createHash('sha256').update(prompt).digest('hex')
+    const fingerprint = createHash('sha256').update(JSON.stringify([target.text, command.content, command.header.metadata, command.extraPayload])).digest('hex')
     const previous = this.requests.get(key)
     if (previous) {
       if (previous.fingerprint !== fingerprint) throw new Error('EXECUTION_REQUEST_CONFLICT')
@@ -148,7 +137,7 @@ export class ByClawExecutionRouter {
     const queued = this.queues.get(identity) ?? Promise.resolve()
     const queuedAt = performance.now()
     const request: Request = { messageId: command.header.messageId, fingerprint, control, settled: false, promise: Promise.resolve(undefined as never) }
-    request.promise = queued.catch(() => {}).then(() => this.execute(command, context, target, prompt, identity, executionType, control, timeout, queuedAt))
+    request.promise = queued.catch(() => {}).then(() => this.execute(command, context, target, identity, executionType, control, timeout, queuedAt))
       .finally(() => {
         request.settled = true
         this.options.onActivityChange?.()
@@ -162,7 +151,7 @@ export class ByClawExecutionRouter {
     return request.promise
   }
 
-  private async execute(command: AskAgentCommand, context: AgentContext, target: ExecutionTarget, prompt: string, identity: string, executionType: ExecutionType, control: AbortController, timeout: number, queuedAt: number): Promise<ExecutionResult> {
+  private async execute(command: AskAgentCommand, context: AgentContext, target: ExecutionTarget, identity: string, executionType: ExecutionType, control: AbortController, timeout: number, queuedAt: number): Promise<ExecutionResult> {
     const definition = EXECUTION_DEFINITIONS[executionType]
     if (definition.executor !== 'codex') throw new Error(`EXECUTOR_NOT_IMPLEMENTED:${executionType}`)
     const signal = AbortSignal.any([control.signal, AbortSignal.timeout(timeout)])
@@ -214,8 +203,24 @@ export class ByClawExecutionRouter {
     }
     let executionStarted = queuedAt
     let firstActivity = false
+    let prepared: CodingContext | undefined
     const parser = new CodexEventAdapter(event => emit(event, 'cli'), () => {
       if (!firstActivity) { firstActivity = true; log('first_activity', 'success', executionStarted) }
+    }, event => {
+      if (event.type === 'byclaw.workspace') {
+        const statuses: Record<string, string> = { waiting: '等待同一员工会话的前轮执行结束', resumed: '已续接 Codex 会话',
+          created: '已准备 Codex 工作空间', recreated: '原生状态缺失或工作目录变化，重建 Codex 会话', partial: '文件变更扫描不完整，部分文件未纳入展示' }
+        const detail = statuses[String(event.status)]
+        if (detail) emit({ kind: 'progress', id: `workspace-${sequence + 1}`, title: 'Codex 上下文', phase: 'success', detail })
+      } else if (event.type === 'byclaw.file_changes') {
+        if (!prepared) throw new Error('EXECUTION_UNEXPECTED_FILE_CHANGES')
+        const workspace = String(event.workspace)
+        if (![prepared.workspace.cwd, prepared.workspace.sessionRoot].includes(workspace)) throw new Error('EXECUTION_FILE_SCOPE_MISMATCH')
+        const payload = validateFileChanges(event.payload, String(command.header.sessionId))
+        forwarding = forwarding.then(async () => {
+          if (!forwardingError) await this.options.emitFileChanges?.(command, context, payload, workspace)
+        }).catch(error => { forwardingError = error; control.abort(new Error('EXECUTION_EVENT_FORWARDING_FAILED')) })
+      }
     })
     let sandbox: ExecutionSandbox | undefined
     let result: ExecutionResult | undefined
@@ -233,10 +238,14 @@ export class ByClawExecutionRouter {
       signal.throwIfAborted()
       endStage('success')
       startStage('exec', 'Codex 执行任务')
-      const cwd = `${lease.workspaceRoot}/.sessions/codex-${createHash('sha256').update(identity).digest('hex')}`
+      prepared = await this.options.prepareContext(command, target, { sandbox, actor, ...lease, signal, identity })
+      signal.throwIfAborted()
+      const prompt = prepared.prompt
+      if (Buffer.byteLength(prompt, 'utf8') > 64 * 1024) throw new Error('EXECUTION_INPUT_TOO_LARGE')
+      const argv = ['python3', '-c', CODING_WORKSPACE_RUNNER, JSON.stringify(codingRunManifest(prepared, identity, String(command.header.messageId))), prompt, lease.workspaceRoot]
       executionStarted = performance.now()
       let firstStdout = false
-      const processResult = await sandbox.execute(actor, lease.leaseId, ['sh', '-c', CODEX_EXEC_SCRIPT, 'byclaw-codex', cwd, '--', prompt], lease.workspaceRoot, signal, chunk => {
+      const processResult = await sandbox.execute(actor, lease.leaseId, argv, lease.workspaceRoot, signal, chunk => {
         if (!firstStdout && chunk) { firstStdout = true; log('first_stdout', 'success', executionStarted) }
         parser.write(chunk)
       })
@@ -244,10 +253,29 @@ export class ByClawExecutionRouter {
       processOutcome = { exitCode: processResult.exitCode, ...(diagnostic === undefined ? {} : { diagnostic }) }
       if (diagnostic) log('stderr', 'success', executionStarted, { diagnostic, exitCode: processResult.exitCode })
       signal.throwIfAborted()
-      const answer = parser.finish(processResult.exitCode)
+      if (processResult.exitCode !== 0) {
+        const reason = /(?:^|\n)((?:EXECUTION|CODEX)_[A-Z_]{1,80})(?:\r?\n|$)/u.exec(processResult.stderr)?.[1]
+        if (reason) throw new Error(reason)
+      }
+      const output = codingFinalOutput(parser.finish(processResult.exitCode), prepared?.publication !== undefined)
+      let answer = output.answer
       endStage('success', undefined, processOutcome)
       await forwarding
       if (forwardingError) throw forwardingError
+      if (output.publication !== undefined) {
+        signal.throwIfAborted()
+        emit({ kind: 'tool', id: 'publication', title: '准备群任务成果，等待确认', phase: 'start' })
+        try {
+          await prepared!.publication!.prepare(output.publication, signal)
+          emit({ kind: 'tool', id: 'publication', title: '准备群任务成果，等待确认', phase: 'success' })
+          answer += '\n\n群任务成果已准备，等待你确认后发送。'
+        } catch {
+          emit({ kind: 'tool', id: 'publication', title: '准备群任务成果，等待确认', phase: 'error', detail: '准备结果未确认，请查询原待发布卡片；不能声称已经发布，不自动重试。' })
+          throw new Error('EXECUTION_PUBLICATION_UNCONFIRMED')
+        }
+        await forwarding
+        if (forwardingError) throw forwardingError
+      }
       result = { answer, finalAnswer: answer, executor: definition.executor, executionType, ...(parser.threadId === undefined ? {} : { codexThreadId: parser.threadId }) }
     } catch (error) {
       const code = failureCode()
@@ -293,4 +321,22 @@ export class ByClawExecutionRouter {
     for (const request of this.requests.values()) if (!request.settled) request.control.abort(new Error('EXECUTION_SHUTDOWN'))
     await Promise.allSettled([...this.requests.values()].map(request => request.promise))
   }
+}
+
+/** Only the original bounded 3016 shape and safe relative paths may reach UserFS UI. */
+function validateFileChanges(value: unknown, sessionId: string): FileChangesSummaryPayload {
+  const payload = value as FileChangesSummaryPayload | undefined
+  if (!payload || payload.type !== 'file_changes' || payload.version !== 2 || payload.sessionId !== sessionId
+    || !Array.isArray(payload.files) || payload.files.length > 20000) throw new Error('EXECUTION_INVALID_FILE_CHANGES')
+  for (const file of payload.files) {
+    if (!/^[a-f0-9-]{36}$/iu.test(file.uuid) || !file.path || file.path.startsWith('/') || /[\\\u0000]/u.test(file.path)
+      || file.path.split('/').some(part => part === '..' || part === '.')
+      || !['added', 'modified', 'deleted'].includes(file.changeType) || typeof file.binary !== 'boolean'
+      || ![file.additions, file.deletions].every(n => Number.isSafeInteger(n) && n >= 0)
+      || !Array.isArray(file.sources) || file.sources.some(source => source !== 'write')) throw new Error('EXECUTION_INVALID_FILE_CHANGES')
+  }
+  return { ...payload, summary: { total: payload.files.length,
+    added: payload.files.filter(file => file.changeType === 'added').length,
+    modified: payload.files.filter(file => file.changeType === 'modified').length,
+    deleted: payload.files.filter(file => file.changeType === 'deleted').length } }
 }

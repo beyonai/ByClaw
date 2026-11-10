@@ -100,6 +100,22 @@ function catalog(decision: Awaited<ReturnType<Awaited<ReturnType<typeof fixture>
   if (decision.kind !== 'enter') throw new Error('step rejected')
   return decision.messages.find(message => message.source.kind === 'skill-catalog')
 }
+
+it('exposes the same employee overlay to CLI without an Agent, Skill copies or another employee grant', async () => {
+  const f = await fixture({ skillDirectories: { async present() { throw new Error('CLI must not copy Skills') } } })
+  const employee = f.templates[0]!
+  const local = join(f.root, 'agent-skills', `workspace-baiying-agent-${employee.source.resourceId}`, 'skills')
+  await skill(local, 'html-artifact', 'Local override', 'Local body')
+  const view = await f.runtime.employeeSkills(employee)
+  expect(view.map(item => item.name)).toEqual(['builtin-help', 'html-artifact'])
+  expect(view.find(item => item.name === 'html-artifact')?.path).toBe(join(local, 'html-artifact', 'SKILL.md'))
+  expect(view.every(item => item.enabled)).toBe(true)
+  expect(view.some(item => item.name === 'other-employee')).toBe(false)
+  await rm(join(local, 'html-artifact'), { recursive: true })
+  expect((await f.runtime.employeeSkills(employee)).find(item => item.name === 'html-artifact')?.path).toBe(join(f.html.path, 'SKILL.md'))
+  ;(await f.runtime.prepareGeneration([{ ...employee, skills: [] }], f.cache, f.cache))()
+  expect((await f.runtime.employeeSkills(employee)).map(item => item.name)).toEqual(['builtin-help'])
+})
 function persist(who: Agent, decision: { kind: string; messages?: unknown[] }) {
   if (decision.kind !== 'enter') throw new Error('step rejected')
   for (const message of decision.messages ?? []) who.session.append('user/message', message as never, { surfaceOp: 'append' })
@@ -538,6 +554,24 @@ it('binds directly targeted root agents including empty associations', async () 
   cleanups.push(() => scope.dispose())
   await scope.ctx.plugin({ inject: ['systemPrompt'], apply(ctx: Context) { prepared.setup(ctx.extend({ agent: root }), root) } })
   expect((await f.ctx.skills.list({ scope: root })).map(s => s.name)).toEqual(['builtin-help', 'html-artifact', 'unrelated-global'])
+})
+
+it('prepares authorized CLI employee data without resolving a DSH model and rejects revoked roots', async () => {
+  const f = await fixture()
+  const catalogDir = join(f.root, 'cli-roots')
+  const employee = template('byclaw-employee-cli', [])
+  await writeAgentTemplate(catalogDir, employee)
+  f.ctx.provide('subagents', {})
+  let models = 0
+  const runtime = registerAgentTemplateRuntime(f.ctx, {
+    catalogDir, subagentProvider: 'spawn', resolveModel: async () => { models++; throw new Error('CLI must not resolve DSH model') },
+    workspaceRegistry: {} as never, skillRuntime: f.runtime,
+  })
+  expect(await runtime.prepareEmployee(employee.id)).toEqual(employee)
+  expect(models).toBe(0)
+  await writeAgentTemplate(catalogDir, { ...employee, source: { ...employee.source, directlyAuthorized: false } })
+  await expect(runtime.prepareEmployee(employee.id)).rejects.toThrow('authorized expert team')
+  expect(models).toBe(0)
 })
 
 it('scopes fallback template skills to the composed Agent and disposes them with its scope', async () => {

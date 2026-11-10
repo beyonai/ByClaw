@@ -32,6 +32,7 @@ export class CodexEventAdapter {
   constructor(
     private readonly emit: (event: CodingEvent) => void = () => {},
     private readonly onActivity: () => void = () => {},
+    private readonly onWorkspace: (event: Record<string, unknown>) => void = () => {},
   ) {}
 
   write(chunk: string): void {
@@ -67,6 +68,7 @@ export class CodexEventAdapter {
     let event: Record<string, unknown> | undefined
     try { event = record(JSON.parse(line)) } catch { throw new Error('CODEX_INVALID_JSONL') }
     if (!event || typeof event.type !== 'string') throw new Error('CODEX_INVALID_EVENT')
+    if (event.type === 'byclaw.workspace' || event.type === 'byclaw.file_changes') { this.onWorkspace(event); return }
     if (event.type === 'thread.started' && typeof event.thread_id === 'string') this.threadId = event.thread_id
     if (event.type === 'turn.started') {
       this.answer = ''; this.explicitAnswer = undefined; this.candidate = undefined; this.completed = false

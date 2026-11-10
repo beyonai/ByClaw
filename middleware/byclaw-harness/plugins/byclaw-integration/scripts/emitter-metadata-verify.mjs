@@ -95,7 +95,9 @@ const router = new ByClawExecutionRouter({
   userCode: 'test-user',
   environment: () => ({ BYCLAW_AGENT_EXECUTION_MAP: '{"11444401":"CODEX_CLI"}' }),
   resolveTarget: (_command, text) => ({ resourceId: '11444401', kind: 'employee', text }),
-  prepareContext: (_command, target) => target.text,
+  prepareContext: (command, target) => ({ prompt: target.text, employeeId: target.resourceId, persona: '', skills: [],
+    workspace: { cwd: `/by/.sessions/${command.header.sessionId}`, sessionRoot: `/by/.sessions/${command.header.sessionId}`,
+      sharedRoot: '/by/.shared', defaultOutputRoot: `/by/.sessions/${command.header.sessionId}` } }),
   sandbox: () => ({
     acquire: async () => ({ leaseId: 'lease', workspaceRoot: '/by' }),
     execute: async (_actor, _lease, _argv, _cwd, _signal, onStdout) => {

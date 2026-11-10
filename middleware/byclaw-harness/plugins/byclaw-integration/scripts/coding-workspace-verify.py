@@ -1,0 +1,163 @@
+"""Keyless tests of the actual lease-local runner; no online model or user files."""
+import contextlib
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import tomllib
+import unittest
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location('coding_workspace', Path(__file__).with_name('coding-workspace.py'))
+runner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runner)
+
+
+class WorkspaceTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='coding-workspace-test-')
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.by = self.root / 'by'
+        self.by.mkdir()
+        self.defaults = self.root / 'image'
+        self.defaults.mkdir()
+        self.default_config = 'model="image-model"\nmodel_provider="byclaw"\n[model_providers.byclaw]\nbase_url="https://example.invalid/v1"\nenv_key="CODEX_AUTH"\nwire_api="responses"\n'
+        (self.defaults / 'config.toml').write_text(self.default_config, encoding='utf-8')
+        session = self.by / '.sessions' / 's1'
+        cwd = self.by / '.shared' / 'project_8'
+        self.manifest = dict(version=1, identity='identity-a', employeeId='1001', messageId='m1', persona='RULE_CHECK', skills=[],
+            workspace=dict(sessionRoot=str(session), cwd=str(cwd), defaultOutputRoot=str(cwd), sharedRoot=str(self.by / '.shared')),
+            home=str(session / 'executors' / '1001' / 'codex-home'))
+        self.home = Path(self.manifest['home'])
+        self.cwd = cwd
+
+    def run_cli(self, callback=None, manifest=None):
+        calls = []
+        thread = '12345678-1234-1234-1234-123456789abc'
+        class Child:
+            def __init__(child, args, **kwargs):
+                calls.append((args, kwargs))
+                if callback:
+                    callback(args, kwargs)
+                native = Path(kwargs['env']['CODEX_HOME']) / 'sessions' / ('rollout-' + thread + '.jsonl')
+                native.parent.mkdir(exist_ok=True)
+                native.write_text('native state', encoding='utf-8')
+                child.stdin = io.StringIO()
+                child.stdout = io.StringIO('\n'.join(json.dumps(item) for item in [
+                    dict(type='thread.started', thread_id=thread), dict(type='turn.started'),
+                    dict(type='item.completed', item=dict(id='answer', type='agent_message', text='done')), dict(type='turn.completed')]) + '\n')
+            def wait(child):
+                return 0
+            def poll(child):
+                return 0
+        output = io.StringIO()
+        with patch.dict(os.environ, dict(CODEX_HOME=str(self.defaults), CODEX_AUTH='test-auth-not-a-prompt', CODEX_MODEL='override-model', CODEX_BASE_URL='https://override.invalid/v1')):
+            with patch.object(runner.subprocess, 'Popen', Child), contextlib.redirect_stdout(output):
+                code = runner.run(manifest or self.manifest, 'current task', self.by)
+        self.assertEqual(code, 0)
+        return calls, [json.loads(line) for line in output.getvalue().splitlines()]
+
+    def test_config_identity_resume_and_rule_update(self):
+        self.cwd.mkdir(parents=True)
+        original = self.cwd / 'AGENTS.md'
+        original.write_text('project policy', encoding='utf-8')
+        calls, _ = self.run_cli()
+        data = tomllib.loads((self.home / 'config.toml').read_text(encoding='utf-8'))
+        self.assertEqual(data['model'], 'image-model')
+        self.assertEqual(data['model_providers']['byclaw']['env_key'], 'CODEX_AUTH')
+        self.assertNotIn('test-auth', (self.home / 'config.toml').read_text())
+        self.assertEqual(data['developer_instructions'], 'RULE_CHECK')
+        self.assertEqual(calls[0][1]['env']['CODEX_HOME'], str(self.home))
+        self.assertEqual(calls[0][1]['env']['DSH_BYCLAW_AGENT_ID'], '1001')
+        self.assertIn('override-model', calls[0][0])
+        self.assertEqual(calls[0][0][-1], '-')
+        self.manifest['persona'] = 'UPDATED_RULE'
+        calls, events = self.run_cli()
+        self.assertIn('resume', calls[0][0])
+        self.assertIn('12345678-1234-1234-1234-123456789abc', calls[0][0])
+        self.assertTrue(any(event.get('status') == 'resumed' for event in events))
+        self.assertEqual((self.home / 'AGENTS.md').read_text().strip(), 'UPDATED_RULE')
+        self.assertEqual(original.read_text(), 'project policy')
+        self.assertEqual((self.defaults / 'config.toml').read_text(), self.default_config)
+
+    def test_missing_native_state_recreates_but_foreign_identity_rejects(self):
+        self.run_cli()
+        for file in (self.home / 'sessions').glob('*'):
+            file.unlink()
+        calls, events = self.run_cli()
+        self.assertNotIn('resume', calls[0][0])
+        self.assertTrue(any(event.get('status') == 'recreated' for event in events))
+        self.manifest['identity'] = 'other-user'
+        with self.assertRaisesRegex(ValueError, 'SCOPE_MISMATCH'):
+            self.run_cli()
+
+    def test_existing_file_binary_shell_output_and_session_artifact_use_original_protocol(self):
+        self.cwd.mkdir(parents=True)
+        (self.cwd / 'old.txt').write_text('old\n', encoding='utf-8', newline='\n')
+        def write_files(args, kwargs):
+            (self.cwd / 'old.txt').write_text('new\n', encoding='utf-8', newline='\n')
+            nested = self.cwd / 'reports' / 'deep'
+            nested.mkdir(parents=True)
+            (nested / 'result.md').write_text('RULE_CHECK\nreport\n', encoding='utf-8')
+            (nested / 'archive.zip').write_bytes(b'PK\0binary')
+            (Path(self.manifest['workspace']['sessionRoot']) / 'session.txt').write_text('session\n', encoding='utf-8')
+        _, events = self.run_cli(write_files)
+        summaries = [event for event in events if event['type'] == 'byclaw.file_changes']
+        self.assertEqual(len(summaries), 2)
+        details = []
+        for summary in summaries:
+            self.assertEqual(summary['payload']['version'], 2)
+            for file in summary['payload']['files']:
+                path = self.by / '.file_changes' / 's1' / 'files' / (file['uuid'] + '.json')
+                details.append(json.loads(path.read_text(encoding='utf-8')))
+        modified = next(item for item in details if item['filePath'] == 'old.txt')
+        self.assertEqual(modified['originalContent'], 'old\n')
+        self.assertEqual(modified['modifiedContent'], 'new\n')
+        archive = next(item for item in details if item['filePath'].endswith('.zip'))
+        self.assertTrue(archive['binary'])
+        self.assertTrue(archive['modifiedExists'])
+        self.assertEqual(archive['modifiedSize'], len(b'PK\0binary'))
+        self.assertFalse(any('executors/' in item['filePath'] for item in details))
+        self.assertFalse(list(self.by.rglob('HANDOFF.md')))
+        self.assertFalse(list(self.by.rglob('delivery.json')))
+
+    def test_missing_skill_mount_fails_before_model(self):
+        self.manifest['skills'] = [dict(name='missing', path=str(self.root / 'missing' / 'SKILL.md'), enabled=True)]
+        with self.assertRaisesRegex(ValueError, 'SKILL_MOUNT_MISSING'):
+            self.run_cli()
+
+    def test_oversized_scan_never_invents_deletions(self):
+        before = ({'unseen.txt': dict(size=1, text='a')}, True)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            runner.file_changes(self.cwd, 's1', before, ({}, False), self.by)
+        self.assertNotIn('file_changes', output.getvalue())
+        self.assertIn('partial', output.getvalue())
+
+    def test_real_cross_process_lock_serializes_same_identity(self):
+        lock = self.root / 'shared.lock'
+        program = ('import importlib.util,time,sys\n'
+            's=importlib.util.spec_from_file_location("runner",sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m)\n'
+            'from pathlib import Path\n'
+            'with m.identity_lock(Path(sys.argv[2])):\n'
+            ' print("ENTER",time.monotonic(),flush=True);time.sleep(.3);print("EXIT",time.monotonic(),flush=True)\n')
+        args = [sys.executable, '-c', program, str(Path(runner.__file__)), str(lock)]
+        first = subprocess.Popen(args, stdout=subprocess.PIPE, text=True)
+        self.assertTrue(first.stdout.readline().startswith('ENTER'))
+        second = subprocess.Popen(args, stdout=subprocess.PIPE, text=True)
+        first_output = first.communicate(timeout=10)[0]
+        second_output = second.communicate(timeout=10)[0]
+        left = float(next(line.split()[1] for line in first_output.splitlines() if line.startswith('EXIT')))
+        right = float(next(line.split()[1] for line in second_output.splitlines() if line.startswith('ENTER')))
+        self.assertGreaterEqual(right, left)
+        self.assertEqual(first.returncode, 0)
+        self.assertEqual(second.returncode, 0)
+
+
+if __name__ == '__main__':
+    unittest.main()

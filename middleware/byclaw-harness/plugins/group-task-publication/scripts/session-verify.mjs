@@ -41,7 +41,9 @@ assert.equal(await state.select(command({}, { userCode: 'other-user' })), undefi
 const integrationManifest = JSON.parse(readFileSync(new URL('../../byclaw-integration/package.json', import.meta.url), 'utf8'))
 assert.equal(integrationManifest.dependencies['@byclaw/dsh-group-task-publication'], undefined)
 const integrationSource = readFileSync(new URL('../../byclaw-integration/src/index.ts', import.meta.url), 'utf8')
-assert.ok(integrationSource.includes("ctx.serial('byclaw/session-setup'"))
+const setupSource = readFileSync(new URL('../../byclaw-integration/src/todo-execution-setup.ts', import.meta.url), 'utf8')
+assert.ok(integrationSource.includes('setupTodoExecution(ctx, agentCtx, agent, command, sessionHost'))
+assert.ok(setupSource.includes("ctx.serial('byclaw/session-setup'"))
 assert.doesNotMatch(integrationSource, /groupTaskPublication|dsh-group-task-publication/)
 
 // Lifecycle checks start with empty durable storage, independent of the state-selection cases.
@@ -115,6 +117,21 @@ try {
   let plugin = await ctx.plugin(PublicationPlugin)
   fibers.push(plugin)
   assert.equal(ctx.tools.schemas().length, 0)
+
+  // CLI eligibility uses the same durable activation without constructing an Agent
+  // or requesting credentials until there is an explicit publication request.
+  const cli = { command: command(hacu, { sessionId: 'cli-only-task' }), host }
+  await ctx.serial('byclaw/coding-setup', cli)
+  assert.equal(typeof cli.publication?.prepare, 'function')
+  assert.match(cli.publication.description, /整体替换/u)
+  assert.match(cli.publication.description, /不发送群消息/u)
+  const followup = { command: command({}, { sessionId: 'cli-only-task' }), host }
+  await ctx.serial('byclaw/coding-setup', followup)
+  assert.equal(typeof followup.publication?.prepare, 'function')
+  const ordinary = { command: command({}, { sessionId: 'normal-cli' }), host }
+  await ctx.serial('byclaw/coding-setup', ordinary)
+  assert.equal(ordinary.publication, undefined)
+  await assert.rejects(ctx.serial('byclaw/coding-setup', { ...cli, command: command(hacu, { userCode: 'other-user' }) }), /身份不一致/u)
 
   // Hold the durable write to prove that the generic awaited hook fences factory publication.
   const put = table.put

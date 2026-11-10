@@ -21,6 +21,8 @@
 
 路由由 Harness 主沙箱执行。命中后直接申请工具沙箱并运行 CLI，不再让 DSH 模型决定是否调用工具；执行失败也不会回退为 DSH 答案。
 
+上下文、共享 Skill、专用 CODEX_HOME、原生续聊及文件回写见 [上下文交接](CODING-CONTEXT.zh.md)。
+
 ## 配置
 
 在 Harness 主沙箱配置：
