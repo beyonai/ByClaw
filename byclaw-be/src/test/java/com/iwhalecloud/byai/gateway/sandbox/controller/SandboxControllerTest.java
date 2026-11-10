@@ -376,7 +376,7 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
         setPlatformManager();
         SandboxController controller = controllerWithInventory();
         var inventory = mock(com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInventory.class);
-        when(inventory.current()).thenReturn(Map.of());
+        when(inventory.currentForManagement()).thenReturn(Map.of());
         var mapper = mock(SsSandboxRecordMapper.class);
         var tenants = mock(TenantSandboxService.class);
         ReflectionTestUtils.setField(controller, "runtimeInventory", inventory);
@@ -393,11 +393,44 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
     }
 
     @Test
+    void listRecordsIncludesRequestedPreferencesOncePerUserAndExcludesTenantRows() {
+        setPlatformManager();
+        SandboxController controller = controllerWithInventory();
+        var mapper = mock(SsSandboxRecordMapper.class);
+        var service = mock(SandboxService.class);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(controller, "sandboxService", service);
+        var personal = new SsSandboxRecord();
+        personal.setOwnerScope("USER");
+        personal.setUserCode("personal-user");
+        var tenant = new SsSandboxRecord();
+        tenant.setOwnerScope("TENANT");
+        tenant.setUserCode("tenant-user");
+        when(mapper.selectInventoryPage(org.mockito.ArgumentMatchers.anyMap())).thenReturn(List.of(personal, tenant, personal));
+        when(service.getPreferredServiceKey("personal-user")).thenReturn("byclaw-dsh");
+        when(service.buildRecordView(personal)).thenReturn(new SandboxRecordView());
+        when(service.buildRecordView(tenant)).thenReturn(new SandboxRecordView());
+
+        ResponseUtil response;
+        try (var redis = mockStatic(RedisUtil.class)) {
+            redis.when(() -> RedisUtil.getString("SHARE_BFM_USER_CODE_personal-user")).thenReturn("1001");
+            redis.when(() -> RedisUtil.getString("SHARE_BFM_USER_1001"))
+                .thenReturn("{\"userId\":1001,\"userName\":\"Test User\"}");
+            response = controller.listRecords(Map.of("ownerScope", "ALL", "includePreferredServiceKeys", true));
+        }
+
+        assertThat(((Map<?, ?>) response.getData()).get("preferredServiceKeys"))
+            .isEqualTo(Map.of("personal-user", "byclaw-dsh"));
+        verify(service).getPreferredServiceKey("personal-user");
+        verify(service, never()).getPreferredServiceKey("tenant-user");
+    }
+
+    @Test
     void listRecords_includesPersistedStatusesAbsentFromTheRunningInventory() {
         setPlatformManager();
         SandboxController controller = new SandboxController();
         var inventory = mock(com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInventory.class);
-        when(inventory.current()).thenReturn(Map.of("released-id", "RUNNING"));
+        when(inventory.currentForManagement()).thenReturn(Map.of("released-id", "RUNNING"));
         var mapper = mock(SsSandboxRecordMapper.class);
         var service = mock(SandboxService.class);
         var config = mock(ByaiSystemConfigService.class);
@@ -438,7 +471,7 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
         setPlatformManager();
         SandboxController controller = new SandboxController();
         var inventory = mock(com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInventory.class);
-        when(inventory.current()).thenReturn(Map.of());
+        when(inventory.currentForManagement()).thenReturn(Map.of());
         var mapper = mock(SsSandboxRecordMapper.class);
         var service = mock(SandboxService.class);
         var config = mock(ByaiSystemConfigService.class);
@@ -517,7 +550,7 @@ class SandboxControllerTest extends com.iwhalecloud.byai.common.i18n.I18nTestSup
     private SandboxController controllerWithInventory() {
         SandboxController controller = new SandboxController();
         var inventory = mock(com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInventory.class);
-        when(inventory.current()).thenReturn(Map.of("live-id", "RUNNING"));
+        when(inventory.currentForManagement()).thenReturn(Map.of("live-id", "RUNNING"));
         ReflectionTestUtils.setField(controller, "runtimeInventory", inventory);
         return controller;
     }

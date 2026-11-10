@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { setMultiTenancyConfig } from '@/utils/multiTenancy';
 import { listTenants } from '@/pages/manager/service/TenantMgr';
+import { getPreferredServiceKey } from '@/pages/manager/service/SandboxMgr';
 import SandboxMgr from '../index';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 
@@ -85,6 +86,51 @@ test('a late tenant response cannot replace user resources after the switch is d
   act(() => tenantRequest.success({ list: [{ ...record, ownerScope: 'TENANT', sandboxId: 'old-tenant-sandbox' }] }));
   expect(screen.getByText('user-sandbox')).toBeInTheDocument();
   expect(screen.queryByText('old-tenant-sandbox')).not.toBeInTheDocument();
+});
+
+test('switching scope ignores an older list response and uses preferences returned with the latest page', () => {
+  setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '1' });
+  render(<SandboxMgr />);
+  const requests = () => mockDispatch.mock.calls.filter(([action]) => action.type === 'sandboxMgr/listSandboxRecords');
+  const tenantRequest = requests()[0][0];
+  fireEvent.click(screen.getByRole('tab', { name: '用户资源' }));
+  const userRequest = requests()[1][0];
+  expect(userRequest.payload.includePreferredServiceKeys).toBe(true);
+  const record = { id: 1, ownerScope: 'USER', userCode: 'user-1', sandboxType: 'openclaw', status: 'RUNNING' };
+  act(() =>
+    userRequest.success({
+      list: [{ ...record, sandboxId: 'user-sandbox' }],
+      preferredServiceKeys: { 'user-1': 'openclaw' },
+    })
+  );
+  act(() => tenantRequest.success({ list: [{ ...record, ownerScope: 'TENANT', sandboxId: 'old-tenant-sandbox' }] }));
+  expect(screen.getByText('user-sandbox')).toBeInTheDocument();
+  expect(screen.queryByText('old-tenant-sandbox')).not.toBeInTheDocument();
+  expect(getPreferredServiceKey).not.toHaveBeenCalled();
+});
+
+test('manual refresh takes priority over a pending background refresh', () => {
+  jest.useFakeTimers();
+  try {
+    setMultiTenancyConfig({ ENABLE_MULTI_TENACY: '0' });
+    render(<SandboxMgr />);
+    const requests = () =>
+      mockDispatch.mock.calls.filter(([action]) => action.type === 'sandboxMgr/listSandboxRecords');
+    act(() => requests()[0][0].success({ list: [] }));
+    fireEvent.click(screen.getByRole('switch'));
+    act(() => jest.advanceTimersByTime(10000));
+    expect(requests()).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: /sandboxMgr\.action\.refresh/ }));
+    expect(requests()).toHaveLength(3);
+    const record = { id: 1, ownerScope: 'USER', userCode: 'user-1', sandboxType: 'openclaw', status: 'RUNNING' };
+    act(() => requests()[2][0].success({ list: [{ ...record, sandboxId: 'fresh-sandbox' }] }));
+    act(() => requests()[1][0].success({ list: [{ ...record, sandboxId: 'stale-sandbox' }] }));
+    expect(screen.getByText('fresh-sandbox')).toBeInTheDocument();
+    expect(screen.queryByText('stale-sandbox')).not.toBeInTheDocument();
+  } finally {
+    jest.useRealTimers();
+  }
 });
 
 test('a role change to business manager ignores an earlier tenant response', () => {

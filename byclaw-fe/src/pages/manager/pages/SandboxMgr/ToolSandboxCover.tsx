@@ -1,19 +1,32 @@
 import { DeleteOutlined, UploadOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { Button, Input, message, Space, Upload } from 'antd';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { isValidToolCover, MAX_TOOL_COVER_BYTES } from './serviceSpecUtils';
 import styles from './market.module.less';
 
 interface Props {
   value?: string;
   onChange?: (value: string) => void;
+  onReadingChange?: (reading: boolean) => void;
 }
 
-export default function ToolSandboxCover({ value = '', onChange }: Props) {
+export default function ToolSandboxCover({ value = '', onChange, onReadingChange }: Props) {
   const intl = useIntl();
   const t = (key: string) => intl.formatMessage({ id: `sandboxMgr.market.${key}` });
   const [reading, setReading] = useState(false);
+  const pendingReader = useRef<FileReader | null>(null);
+
+  useEffect(() => {
+    return () => {
+      const reader = pendingReader.current;
+      if (!reader) return;
+      pendingReader.current = null;
+      reader.abort();
+      onReadingChange?.(false);
+    };
+  }, [onReadingChange]);
+
   return (
     <div className={styles.coverEditor}>
       {value && isValidToolCover(value) && (
@@ -22,6 +35,7 @@ export default function ToolSandboxCover({ value = '', onChange }: Props) {
       <Input
         aria-label={t('coverUrl')}
         placeholder={t('coverUrl')}
+        disabled={reading}
         value={value.startsWith('data:') ? '' : value}
         onChange={(event) => onChange?.(event.target.value)}
       />
@@ -35,17 +49,22 @@ export default function ToolSandboxCover({ value = '', onChange }: Props) {
               message.error(t('coverInvalid'));
               return Upload.LIST_IGNORE;
             }
-            setReading(true);
+            if (pendingReader.current) return Upload.LIST_IGNORE;
             const reader = new FileReader();
+            pendingReader.current = reader;
+            setReading(true);
+            onReadingChange?.(true);
             reader.onload = () => {
-              setReading(false);
               const result = typeof reader.result === 'string' ? reader.result : '';
               if (!isValidToolCover(result)) message.error(t('coverInvalid'));
               else onChange?.(result);
             };
-            reader.onerror = () => {
+            reader.onerror = () => message.error(t('coverReadFailed'));
+            reader.onloadend = () => {
+              if (pendingReader.current !== reader) return;
+              pendingReader.current = null;
               setReading(false);
-              message.error(t('coverReadFailed'));
+              onReadingChange?.(false);
             };
             reader.readAsDataURL(file);
             return false;

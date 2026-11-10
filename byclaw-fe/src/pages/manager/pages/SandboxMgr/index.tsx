@@ -344,10 +344,12 @@ const SandboxMgr = () => {
     (preset) => preset.serviceKey === formServiceKey || preset.aliases.includes(formServiceKey)
   );
   const [savingSpec, setSavingSpec] = useState(false);
+  const [readingSpecCover, setReadingSpecCover] = useState(false);
   const [updatingSpecKey, setUpdatingSpecKey] = useState<string | null>(null);
 
   // 沙箱弹性计算配置相关状态
   const [specDrawerTab, setSpecDrawerTab] = useState('spec');
+  const requestedConfigTabs = useRef(new Set<string>());
   const [profileList, setProfileList] = useState<ServiceProfileItem[]>([]);
   const [profileLoading, setProfileLoading] = useState(false);
   const [resizeForm] = Form.useForm();
@@ -380,8 +382,9 @@ const SandboxMgr = () => {
   const [launching, setLaunching] = useState(false);
   const [launchSpecList, setLaunchSpecList] = useState<ServiceSpecItem[]>([]);
   const [preferredMap, setPreferredMap] = useState<Record<string, string>>({});
+  const [preferredFromList, setPreferredFromList] = useState(false);
 
-  const refreshTimer = useRef<NodeJS.Timeout | null>(null);
+  const pendingRecordRequest = useRef<symbol | undefined>(undefined);
   const curParam = useRef<{
     pageIndex?: number;
     pageSize?: number;
@@ -576,20 +579,33 @@ const SandboxMgr = () => {
         sandboxType: type || undefined,
         ownerScope: canViewTenantResources ? scope : 'USER',
         enterpriseId: canViewTenantResources && scope === 'TENANT' ? tenantId : undefined,
+        includePreferredServiceKeys: !canViewTenantResources || scope === 'USER',
       };
 
       const requestRevision = getMultiTenancyRevision();
+      if (silent && pendingRecordRequest.current) return;
+      const request = Symbol();
+      pendingRecordRequest.current = request;
       curParam.current = p;
       if (!silent) setManualLoading(true);
 
+      const finishRequest = () => {
+        if (pendingRecordRequest.current !== request) return false;
+        pendingRecordRequest.current = undefined;
+        if (requestRevision !== getMultiTenancyRevision() || canViewTenantResources !== tenantPermissionRef.current)
+          return false;
+        if (!silent) setManualLoading(false);
+        return true;
+      };
       dispatch({
         type: 'sandboxMgr/listSandboxRecords',
         payload: p,
         success: (data: any) => {
-          if (requestRevision !== getMultiTenancyRevision() || canViewTenantResources !== tenantPermissionRef.current)
-            return;
+          if (!finishRequest()) return;
           setList(data?.list || []);
           setSandboxTypes(data?.sandboxTypes || []);
+          setPreferredFromList(data?.preferredServiceKeys !== undefined);
+          if (data?.preferredServiceKeys !== undefined) setPreferredMap(data.preferredServiceKeys);
           setPageInfo((prev) => ({
             ...prev,
             pageIndex: data?.pageIndex || myPageInfo.pageIndex,
@@ -597,13 +613,8 @@ const SandboxMgr = () => {
             total: data?.total || 0,
             totalPage: data?.totalPage || 0,
           }));
-          if (!silent) setManualLoading(false);
         },
-        fail: () => {
-          if (requestRevision !== getMultiTenancyRevision() || canViewTenantResources !== tenantPermissionRef.current)
-            return;
-          if (!silent) setManualLoading(false);
-        },
+        fail: finishRequest,
       });
     },
     [dispatch, ownerScope, enterpriseId, canViewTenantResources, providerStatus, sandboxType]
@@ -627,33 +638,26 @@ const SandboxMgr = () => {
     };
   }, [canViewTenantResources]);
 
-  // Auto refresh (silent)
+  // Poll only the applied query on the visible resource tab.
   useEffect(() => {
-    if (autoRefresh) {
-      refreshTimer.current = setInterval(() => {
-        loadData(
-          {
-            pageIndex: curParam.current?.pageIndex || pageInfo.pageIndex,
-            pageSize: curParam.current?.pageSize || pageInfo.pageSize,
-          },
-          curParam.current?.keyword ?? keyword,
-          curParam.current?.status ?? status,
-          true,
-          curParam.current?.ownerScope ?? ownerScope,
-          curParam.current?.enterpriseId ?? enterpriseId
-        );
-      }, 10000);
-    } else if (refreshTimer.current) {
-      clearInterval(refreshTimer.current);
-      refreshTimer.current = null;
-    }
-
-    return () => {
-      if (refreshTimer.current) {
-        clearInterval(refreshTimer.current);
-      }
-    };
-  }, [autoRefresh, loadData, pageInfo, keyword, status, ownerScope, enterpriseId]);
+    if (!autoRefresh || sharedOpen || recoveryOpen) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      const query = curParam.current;
+      if (!query.pageIndex || !query.pageSize) return;
+      loadData(
+        { pageIndex: query.pageIndex, pageSize: query.pageSize },
+        query.keyword,
+        query.status,
+        true,
+        query.ownerScope,
+        query.enterpriseId,
+        query.providerStatus,
+        query.sandboxType
+      );
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [autoRefresh, loadData, recoveryOpen, sharedOpen]);
 
   // Reload the visible resource scope when the system switch or role changes.
   useEffect(() => {
@@ -666,8 +670,9 @@ const SandboxMgr = () => {
     loadData({ pageIndex: 1, pageSize: pageInfo.pageSize }, keyword, status);
   }, [canViewTenantResources]);
 
-  // Load preferred serviceKey for each unique userCode in the list
+  // Older backends omit the page-level preferences.
   useEffect(() => {
+    if (preferredFromList) return;
     const userCodes = [
       ...new Set(
         list
@@ -677,9 +682,11 @@ const SandboxMgr = () => {
       ),
     ];
     if (!userCodes.length) return;
+    let active = true;
     userCodes.forEach(async (code) => {
       try {
         const res: any = await getPreferredServiceKey(code);
+        if (!active) return;
         const key = res?.code === 0 && typeof res.data === 'string' ? res.data : null;
         if (key) {
           setPreferredMap((prev) => ({ ...prev, [code]: key }));
@@ -697,7 +704,10 @@ const SandboxMgr = () => {
         // ignore
       }
     });
-  }, [list]);
+    return () => {
+      active = false;
+    };
+  }, [list, preferredFromList]);
 
   const handleSearch = useCallback(() => {
     loadData({ ...pageInfo, pageIndex: 1 }, keyword, status);
@@ -860,11 +870,21 @@ const SandboxMgr = () => {
   );
 
   const handleOpenSpecDrawer = () => {
+    requestedConfigTabs.current.clear();
     setSpecDrawerOpen(true);
     loadSpecList();
-    loadProfileList();
-    loadHealthSwitch();
-    loadWatermarkList();
+  };
+
+  const handleSpecDrawerTabChange = (tab: string) => {
+    setSpecDrawerTab(tab);
+    const dataTab = tab === 'elastic' ? 'profile' : tab;
+    if (requestedConfigTabs.current.has(dataTab)) return;
+    requestedConfigTabs.current.add(dataTab);
+    if (dataTab === 'profile') loadProfileList();
+    if (dataTab === 'health') {
+      loadHealthSwitch();
+      loadWatermarkList();
+    }
   };
 
   const handleCloseSpecDrawer = useCallback(() => {
@@ -944,6 +964,7 @@ const SandboxMgr = () => {
   );
 
   const handleSaveSpec = useCallback(() => {
+    if (savingSpec || readingSpecCover) return;
     specForm
       .validateFields()
       .then((values) => {
@@ -959,13 +980,27 @@ const SandboxMgr = () => {
         };
         let payload = spec;
         if (values.dimension === 'USER') payload = buildServiceSpecPayload(spec, values.autoStart !== false);
-        if (values.dimension === 'TOOL')
-          payload = buildToolSandboxPayload(spec, {
-            description: values.description,
-            capabilities: values.capabilities,
-            coverImage: values.coverImage,
-            enabled: values.enabled !== false,
-          });
+        if (values.dimension === 'TOOL') {
+          payload = buildToolSandboxPayload(
+            spec,
+            {
+              description: values.description,
+              capabilities: values.capabilities,
+              coverImage: values.coverImage,
+              enabled: values.enabled !== false,
+            },
+            editingSpec ?? undefined
+          );
+          if (!isValidToolCover(getToolSandboxMetadata(payload).coverImage)) {
+            specForm.setFields([
+              {
+                name: 'coverImage',
+                errors: [intl.formatMessage({ id: 'sandboxMgr.market.coverInvalid' })],
+              },
+            ]);
+            return;
+          }
+        }
         setSavingSpec(true);
         dispatch({
           type: 'sandboxMgr/saveServiceSpec',
@@ -984,7 +1019,7 @@ const SandboxMgr = () => {
       .catch(() => {
         // Validation errors are displayed beside the form fields.
       });
-  }, [dispatch, specForm, loadSpecList, editingSpec]);
+  }, [dispatch, editingSpec, intl, loadSpecList, readingSpecCover, savingSpec, specForm]);
 
   const handleSpecEnabledChange = useCallback(
     (record: ServiceSpecItem, checked: boolean) => {
@@ -2224,7 +2259,6 @@ const SandboxMgr = () => {
               value={keyword}
               onChange={(e) => setKeyword(trim(e.target.value))}
               onSearch={handleSearch}
-              onPressEnter={handleSearch}
               style={{ width: 300 }}
               allowClear
             />
@@ -2376,7 +2410,7 @@ const SandboxMgr = () => {
       >
         <Tabs
           activeKey={specDrawerTab}
-          onChange={setSpecDrawerTab}
+          onChange={handleSpecDrawerTabChange}
           items={[
             {
               key: 'spec',
@@ -2806,6 +2840,7 @@ const SandboxMgr = () => {
         onCancel={handleCancelSpecForm}
         onOk={handleSaveSpec}
         confirmLoading={savingSpec}
+        okButtonProps={{ disabled: savingSpec || readingSpecCover }}
         width={720}
       >
         <Form form={specForm} layout="vertical" preserve={false}>
@@ -2908,16 +2943,8 @@ const SandboxMgr = () => {
                 label={intl.formatMessage({ id: 'sandboxMgr.market.cover' })}
                 name="coverImage"
                 extra={intl.formatMessage({ id: 'sandboxMgr.market.coverTip' })}
-                rules={[
-                  {
-                    validator: (_rule, value) =>
-                      !value || isValidToolCover(value)
-                        ? Promise.resolve()
-                        : Promise.reject(new Error(intl.formatMessage({ id: 'sandboxMgr.market.coverInvalid' }))),
-                  },
-                ]}
               >
-                <ToolSandboxCover />
+                <ToolSandboxCover onReadingChange={setReadingSpecCover} />
               </Form.Item>
             </>
           )}

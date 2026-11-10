@@ -5,16 +5,35 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest;
+import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
+import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
+import com.iwhalecloud.byai.common.quota.TestSharedPolicies;
+import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxLifecycleFacade;
+import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
+import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
+import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
+import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
+import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.slf4j.LoggerFactory;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -106,6 +125,88 @@ class TenantCommandWorkerDiagnosticsTest {
         assertEquals(1,calls.get());
         assertEquals(1,db.queryForObject("SELECT count(*) FROM byai.tenant_task",Integer.class));
         assertNull(db.queryForObject("SELECT active_command_id FROM byai.tenant_operation_state",Long.class));
+    }
+
+    @Test void preparingTemplatesRetryBothLaunchesOnTheOriginalCommand(@TempDir Path root) throws Exception {
+        var fixture = new TenantCommandStoreTest();
+        fixture.setup();
+        var db = fixture.jdbc;
+        db.execute("CREATE TABLE byai.tenant_config(enterprise_id bigint,params_code varchar(64),params_value text)");
+        db.execute("""
+            CREATE TABLE byai.tenant_task_step(command_id bigint,step_key varchar(64),status varchar(32),
+            provider_request_key varchar(128),result text,revision bigint DEFAULT 0,PRIMARY KEY(command_id,step_key))
+            """);
+        db.update("INSERT INTO byai.tenant_operation_state(enterprise_id,active_command_id,policy_revision) VALUES(2,1,1)");
+        var json = new ObjectMapper();
+        var shared = new TestSharedPolicies();
+        shared.publish(2, json.readTree("{\"revision\":\"1\",\"accessMode\":\"PREPARED\"}"));
+        var policies = new TenantExecutionPolicyService(db, json, shared.reader, false, "");
+
+        var lifecycle = mock(SandboxLifecycleFacade.class);
+        var specs = mock(SandboxServiceSpecRepository.class);
+        var spec = new SandboxServiceSpec();
+        spec.setOwnerScope("TENANT");
+        spec.setResourceLimits(Map.of("cpu", "1", "memory", "1Gi"));
+        when(specs.findByServiceKeyAndProfile(anyString(), eq("m"))).thenReturn(Optional.of(spec));
+        var records = mock(SsSandboxRecordMapper.class);
+        var recordIds = new AtomicLong();
+        when(records.insert(any(SsSandboxRecord.class))).thenAnswer(call -> {
+            call.<SsSandboxRecord>getArgument(0).setId(recordIds.incrementAndGet());
+            return 1;
+        });
+        when(records.updateStatusToFailed(anyLong(), eq("SANDBOX_TEMPLATE_PREPARING"), any(), eq(0))).thenReturn(1);
+        when(records.updateLaunchSuccess(anyLong(), anyString(), anyString(), isNull(), any(), isNull(),
+            isNull(), isNull(), any(), eq(0))).thenReturn(1);
+        var sandboxes = new TenantSandboxService(lifecycle, mock(OpenSandboxClient.class), specs, records, json,
+            root.toString(), "localhost", "6379", "0", "default", "db-test-password", "http://be", "test-token", "");
+        ReflectionTestUtils.setField(sandboxes, "tenantPolicyConfigs", mock(TenantAdminTenantMapper.class));
+
+        var requests = new ArrayList<String>();
+        when(lifecycle.launchSandbox(any())).thenAnswer(call -> {
+            SandboxLaunchRequest request = call.getArgument(0);
+            String key = request.getMetadata().get("providerRequestKey");
+            boolean firstAttempt = !requests.contains(key);
+            requests.add(key);
+            if (firstAttempt) {
+                return SandboxResponse.error("SANDBOX_TEMPLATE_PREPARING");
+            }
+            var sandbox = new SandboxLaunchData();
+            sandbox.setSandboxId("sandbox-" + requests.size());
+            sandbox.setEndpoint("tcp://localhost:5432");
+            return SandboxResponse.success(sandbox);
+        });
+
+        var provisioner = mock(TenantDbProvisioningService.class);
+        doAnswer(call -> {
+            TenantProvisioningGuard guard = call.getArgument(1);
+            var database = guard.external("DB_CREATE", TenantSandboxService.TenantSandboxView.class,
+                () -> sandboxes.launchOpenGauss(2, "m", "byclaw_t_2", "bc_t_2_admin", "db-test-password",
+                    guard.providerRequestKey("DB_CREATE")));
+            guard.external("NODE_CREATE", TenantSandboxService.TenantSandboxView.class,
+                () -> sandboxes.launchDataNode(2, "m", database.recordId(), 1, guard.providerRequestKey("NODE_CREATE")));
+            return null;
+        }).when(provisioner).provisionDurably(eq(2L), any());
+        var worker = new TenantCommandWorker(fixture.store, db, fixture.tx.getTransactionManager(), json, provisioner, policies);
+
+        for (String stage : List.of("DB_CREATE", "NODE_CREATE")) {
+            worker.scan();
+            var command = fixture.store.find(1);
+            assertEquals("RETRY_WAIT", command.status());
+            assertEquals(stage, command.stage());
+            assertEquals("SANDBOX_TEMPLATE_PREPARING", command.errorCode());
+            assertEquals("RETRY_READY", db.queryForObject(
+                "SELECT status FROM byai.tenant_task_step WHERE command_id=1 AND step_key=?", String.class, stage));
+            assertEquals(1L, db.queryForObject("SELECT active_command_id FROM byai.tenant_operation_state", Long.class));
+            assertTrue(fixture.store.candidates("PROVISION").isEmpty());
+            db.update("UPDATE byai.tenant_task SET next_attempt_at=CURRENT_TIMESTAMP WHERE id=1");
+        }
+        worker.scan();
+
+        assertEquals("SUCCEEDED", fixture.store.find(1).status());
+        assertEquals(List.of("command-1:DB_CREATE", "command-1:DB_CREATE",
+            "command-1:NODE_CREATE", "command-1:NODE_CREATE"), requests);
+        assertEquals(1, db.queryForObject("SELECT count(*) FROM byai.tenant_task", Integer.class));
+        assertNull(db.queryForObject("SELECT active_command_id FROM byai.tenant_operation_state", Long.class));
     }
 
     private void assertFailureLogged(RuntimeException failure, String expectedCode) throws Exception {

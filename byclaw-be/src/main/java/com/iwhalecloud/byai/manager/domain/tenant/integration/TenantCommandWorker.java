@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.domain.tenant.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.util.RuntimeEnvironment;
+import com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService.TemplatePreparingException;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService;
 import com.iwhalecloud.byai.manager.domain.tenant.policy.TenantExecutionPolicyService;
 import java.time.Duration;
@@ -42,9 +43,9 @@ public class TenantCommandWorker {
         for(long id:store.candidates("PROVISION")) {
             var lease=store.claim(id,worker,Duration.ofMinutes(30));
             if(lease==null) continue;
+            var guard = new TenantProvisioningGuard(store,jdbc,tx,json,lease,policies);
             try {
                 if(!"PROVISION".equals(store.find(id).type())) throw new TenantCommandException(409,"COMMAND_TYPE_UNSUPPORTED");
-                var guard = new TenantProvisioningGuard(store,jdbc,tx,json,lease,policies);
                 provisioner.provisionDurably(lease.enterpriseId(),guard);
                 guard.local(() -> {
                     store.fence(lease);
@@ -53,20 +54,44 @@ public class TenantCommandWorker {
                     store.finish(lease,"SUCCEEDED","READY",null);
                 });
             } catch(Exception error) {
-                // Existing provider adapters cannot prove non-creation after a transport failure. Keep the slot.
-                String rawCode=error instanceof TenantCommandException command ? command.getMessage() : null;
+                // Only a pre-create template response proves the provider did not create an instance.
+                boolean waitingForTemplate = error instanceof TemplatePreparingException;
                 boolean waitingForSnapshot = error instanceof com.iwhalecloud.byai.common.quota.SharedQuotaReader.SharedQuotaUnavailableException;
-                String code=waitingForSnapshot ? "SHARED_QUOTA_NOT_READY" : rawCode!=null&&rawCode.matches("[A-Z][A-Z0-9_]{1,79}")?rawCode:"PROVIDER_RESULT_UNKNOWN";
+                boolean retry = waitingForTemplate || waitingForSnapshot;
+                String status = retry ? "RETRY_WAIT" : "MANUAL_REQUIRED";
+                String rawCode = error instanceof TenantCommandException command ? command.getMessage() : null;
+                String code;
+                if (waitingForTemplate) {
+                    code = TemplatePreparingException.CODE;
+                } else if (waitingForSnapshot) {
+                    code = "SHARED_QUOTA_NOT_READY";
+                } else {
+                    code = rawCode != null && rawCode.matches("[A-Z][A-Z0-9_]{1,79}") ? rawCode : "PROVIDER_RESULT_UNKNOWN";
+                }
                 try {
-                    String failedStage=tx.execute(status -> {
-                        String stage=store.find(id).stage();
-                        store.finish(lease,waitingForSnapshot ? "RETRY_WAIT" : "MANUAL_REQUIRED",stage,code);
-                        if (waitingForSnapshot) jdbc.update("UPDATE byai.tenant_task SET next_attempt_at=CURRENT_TIMESTAMP + INTERVAL '5' SECOND WHERE id=?",id);
+                    String failedStage = tx.execute(transaction -> {
+                        String stage = store.find(id).stage();
+                        store.finish(lease, status, stage, code);
+                        if (waitingForTemplate) {
+                            // Keep the intent and provider key. The lease, step and retry time commit together.
+                            int updated = jdbc.update("""
+                                UPDATE byai.tenant_task_step SET status='RETRY_READY', revision=revision+1
+                                WHERE command_id=? AND step_key=? AND step_key IN ('DB_CREATE','NODE_CREATE')
+                                  AND status='STARTED' AND provider_request_key=?
+                                """, id, stage, guard.providerRequestKey(stage));
+                            if (updated != 1) throw new TenantCommandException(409, "TEMPLATE_RETRY_STEP_CHANGED");
+                        }
+                        if (retry) jdbc.update("UPDATE byai.tenant_task SET next_attempt_at=CURRENT_TIMESTAMP + INTERVAL '5' SECOND WHERE id=?", id);
                         return stage;
                     });
-                    // Log only after the durable acknowledgement commits, and never attach provider exception payloads.
-                    LOG.error("Tenant command failed commandId={} enterpriseId={} status={} stage={} errorCode={} exceptionType={} failurePath={}",
-                        id,lease.enterpriseId(),waitingForSnapshot ? "RETRY_WAIT" : "MANUAL_REQUIRED",safeStage(failedStage),code,error.getClass().getName(),failurePath(error));
+                    // Log only after the durable acknowledgement commits, without attaching provider payloads.
+                    if (waitingForTemplate) {
+                        LOG.info("Tenant command waiting for sandbox template commandId={} enterpriseId={} stage={}",
+                            id, lease.enterpriseId(), safeStage(failedStage));
+                    } else {
+                        LOG.error("Tenant command failed commandId={} enterpriseId={} status={} stage={} errorCode={} exceptionType={} failurePath={}",
+                            id, lease.enterpriseId(), status, safeStage(failedStage), code, error.getClass().getName(), failurePath(error));
+                    }
                 } catch(Exception stale) {
                     // The next scan will reclaim an expired command; the old worker must not overwrite it.
                     LOG.warn("Tenant command acknowledgement failed commandId={} enterpriseId={} stage=UNKNOWN errorCode={} exceptionType={} acknowledgementExceptionType={} failurePath={}",
