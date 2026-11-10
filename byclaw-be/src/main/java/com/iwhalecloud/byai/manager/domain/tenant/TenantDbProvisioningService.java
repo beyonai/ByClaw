@@ -592,10 +592,7 @@ public class TenantDbProvisioningService {
             value = parsed.instanceEndpoints().getOrDefault("opengauss", parsed.instanceEndpoints().get(SandboxEndpointRecordSupport.OPENCLAW_INSTANCE));
         }
         URI uri = URI.create(value.contains("://") ? value : "tcp://" + value);
-        if("https".equals(uri.getScheme()) && uri.getHost()!=null
-            && uri.getHost().matches("15432-[a-z0-9-]+\\.[a-z0-9-]+-vpc\\.sandbox\\.aliyuncs\\.com")
-            && (uri.getPort()==-1 || uri.getPort()==443) && uri.getUserInfo()==null
-            && uri.getQuery()==null && uri.getFragment()==null && (uri.getPath().isEmpty() || "/".equals(uri.getPath()))) {
+        if (SandboxEndpointRecordSupport.isPrivateDatabaseEndpoint(uri)) {
             return new HostPort(uri.getHost(),443);
         }
         if (uri.getHost() == null || uri.getPort() <= 0) {

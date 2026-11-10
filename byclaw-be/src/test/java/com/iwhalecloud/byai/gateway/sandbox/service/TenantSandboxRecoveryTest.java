@@ -36,6 +36,12 @@ class TenantSandboxRecoveryTest {
         assertEquals("RESOURCE_IDENTITY_MISMATCH",service.inspectRecovery(7,"DB_CREATE","command-6:DB_CREATE").reasonCode());
         assertEquals("RESOURCE_IDENTITY_MISMATCH",service.inspectRestartRecord(7,"DB_CREATE","9").reasonCode());
         assertEquals("MATCHED",service.inspectRestartRecord(7,"DB_CREATE","8").reasonCode());
+        // Restarted MicroVMs expose PostgreSQL through a private HTTPS proxy.
+        row.setSandboxId("microvm--cn-beijing--db"); remote.setId(row.getSandboxId());
+        row.setEndpoint("https://15432-sbx-123.cn-beijing-vpc.sandbox.aliyuncs.com");
+        assertEquals("MATCHED", service.inspectRestartRecord(7,"DB_CREATE","8").reasonCode());
+        row.setEndpoint("https://15432-sbx-123.cn-beijing-vpc.sandbox.aliyuncs.com/other");
+        assertEquals("RESOURCE_CONNECTION_DATA_UNAVAILABLE", service.inspectRestartRecord(7,"DB_CREATE","8").reasonCode());
         when(client.recoveryInventory(anyMap())).thenReturn(List.of(remote,remote));
         assertEquals("MULTIPLE_PROVIDER_RESOURCES",service.inspectRecovery(7,"DB_CREATE","command-6:DB_CREATE").reasonCode());
         when(client.recoveryInventory(anyMap())).thenThrow(new OpenSandboxClient.OpenSandboxException("PROVIDER_QUERY_DISABLED"));

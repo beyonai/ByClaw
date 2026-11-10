@@ -256,6 +256,13 @@ public class TenantCommandRecovery {
             || !"hacu".equals(command.sourceSystem()) || !("internal-" + id).equals(tenants.selectConfig(tenant,"PROVISION_REQUEST_ID"))) return denied;
         var db = sandboxes.inspectRestartRecord(tenant,"DB_CREATE",dbId);
         var node = sandboxes.inspectRestartRecord(tenant,"NODE_CREATE",nodeId);
+        // Preserve the provider's blocking reason so operators can distinguish identity, endpoint and runtime failures.
+        if (db != null && !"MATCHED".equals(db.reasonCode())) {
+            return decision(command,"MANUAL_REQUIRED",db.reasonCode(),step,slot,null,null);
+        }
+        if (node != null && !"MATCHED".equals(node.reasonCode())) {
+            return decision(command,"MANUAL_REQUIRED",node.reasonCode(),step,slot,null,null);
+        }
         if (!matchesRecord(db,dbId) || !matchesRecord(node,nodeId)
             || !restartBindingsMatch(tenant,id,db.adopted().recordId(),node.adopted().recordId())
             || !schemas.verifiedRecoveryAudit(tenant,"internal-" + id,db.adopted().recordId())

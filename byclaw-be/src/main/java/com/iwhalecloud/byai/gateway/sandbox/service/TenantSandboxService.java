@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
+import com.iwhalecloud.byai.gateway.sandbox.support.SandboxEndpointRecordSupport;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -552,7 +553,7 @@ public class TenantSandboxService {
             || !type.equals(active.getServiceType()) || !candidate.getId().equals(active.getSandboxId())
             || !Long.toString(active.getId()).equals(candidate.getMetadata().get("recordId"))
             || active.getLockVersion() == null || !"RUNNING".equals(active.getStatus()) || active.getEndpoint() == null || active.getEndpoint().isBlank()
-            || (DB_TYPE.equals(type) && !active.getEndpoint().startsWith("tcp://"))) {
+            || (DB_TYPE.equals(type) && !SandboxEndpointRecordSupport.supportsDatabaseRecovery(active.getEndpoint(), active.getSandboxId()))) {
             return new RecoveryResource("RESOURCE_CONNECTION_DATA_UNAVAILABLE", null, null);
         }
         if (candidate.getStatus() == null || !"Running".equalsIgnoreCase(candidate.getStatus().getState())) {
