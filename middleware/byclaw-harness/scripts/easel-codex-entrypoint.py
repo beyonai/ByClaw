@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import pwd
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -144,6 +145,9 @@ def configure(root: Path) -> None:
         '`EASEL_AGENT_RUNTIME=codex` and `outputs/_harness/config.json` select Codex.',
         'Ask before publishing to external platforms or other irreversible side effects.', '',
     ]))
+    preview_help = Path('/etc/byclaw-tool-sandbox/APP_PREVIEW.md')
+    if preview_help.is_file():
+        write_if_missing(root / 'APP_PREVIEW.md', preview_help.read_text(encoding='utf-8'))
     write_if_missing(root / LAYOUT_FILE, json.dumps({
         'version': 2, 'sourceRevision': SOURCE_REVISION,
         'dependencies': 'image', 'localDependencies': 'preserved-if-present',
@@ -317,6 +321,7 @@ def main() -> int:
     os.environ['PYTHONPATH'] = str(WORKSPACE)
     os.environ['PATH'] = str(VENV / 'bin') + ':' + os.environ.get('PATH', '')
     log('Easel source and image dependencies ready')
+    subprocess.run(['/usr/local/bin/sandbox-app', 'init'], check=True)
     os.execv(TOOL_ENTRYPOINT, [TOOL_ENTRYPOINT, 'tools'])
     return 1
 

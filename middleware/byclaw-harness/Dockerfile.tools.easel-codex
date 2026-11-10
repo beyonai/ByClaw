@@ -45,7 +45,7 @@ RUN set -eux; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential pkg-config python3-dev python3-pip python3-venv \
         ffmpeg fd-find ghostscript imagemagick jq libgl1 libgomp1 libsm6 \
-        libxext6 libxrender1 pandoc poppler-utils ripgrep sqlite3; \
+        libxext6 libxrender1 nginx pandoc poppler-utils ripgrep sqlite3; \
     ln -sf /usr/bin/fdfind /usr/local/bin/fd; \
     rm -rf /var/lib/apt/lists/* /root/.npm /root/.cache /tmp/configure-cn-sources.sh
 
@@ -131,6 +131,8 @@ RUN set -eux; \
     npm cache clean --force
 
 COPY --chmod=0755 middleware/byclaw-harness/scripts/easel-codex-entrypoint.py /usr/local/bin/byclaw-easel-codex-entrypoint
+COPY --chmod=0755 middleware/byclaw-harness/scripts/sandbox-app.py /usr/local/bin/sandbox-app
+COPY middleware/byclaw-harness/tool-sandbox/APP_PREVIEW.md /etc/byclaw-tool-sandbox/APP_PREVIEW.md
 COPY middleware/byclaw-harness/tool-sandbox/easel-codex.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
 COPY middleware/byclaw-harness/tool-sandbox/easel-codex.source.json /etc/byclaw-tool-sandbox/easel-codex.source.json
 
@@ -160,7 +162,7 @@ RUN set -eux; \
     chmod 0644 /etc/byclaw-tool-env.session-env
 
 WORKDIR /by
-EXPOSE 22 8022 8081 19825
+EXPOSE 22 8022 8081 8082 19825
 LABEL io.byclaw.tool-sandbox.contract="byclaw.tool-sandbox/v1" \
       io.byclaw.tool-sandbox.purpose="easel-codex" \
       io.byclaw.tool-sandbox.easel.source.commit="5c12e42e9019d276368130b52385b770749ffa6f"

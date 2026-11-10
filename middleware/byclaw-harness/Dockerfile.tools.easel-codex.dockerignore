@@ -5,9 +5,11 @@
 !middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh
 !middleware/byclaw-harness/tool-sandbox/easel-codex.capabilities.json
 !middleware/byclaw-harness/tool-sandbox/easel-codex.source.json
+!middleware/byclaw-harness/tool-sandbox/APP_PREVIEW.md
 !middleware/byclaw-harness/tool-sandbox/assets/
 !middleware/byclaw-harness/tool-sandbox/assets/easel-source-5c12e42.tar.gz
 !middleware/byclaw-harness/tool-sandbox/assets/easel-source-5c12e42.tar.gz.sha256
 !middleware/byclaw-harness/scripts/
 !middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py
 !middleware/byclaw-harness/scripts/easel-codex-entrypoint.py
+!middleware/byclaw-harness/scripts/sandbox-app.py
