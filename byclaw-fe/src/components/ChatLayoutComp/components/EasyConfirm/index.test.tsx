@@ -18,7 +18,7 @@ const mockMessageInfo = jest.fn();
 let mockQueryInputProps: {
   inputDraft?: DefaultValueSchema;
   onInputDraftChange: (draft: DefaultValueSchema) => void;
-  onSend: (payload: any) => void;
+  onSend: (payload: any) => void | Promise<unknown>;
   onFileUploadSessionCreated: (sessionId: string) => void;
 };
 
@@ -313,6 +313,32 @@ describe('session chat drafts', () => {
     expect(mockQueryInputProps.inputDraft).toEqual(draft);
     remounted.rerender(<EasyConfirm {...props} sessionId="" />);
     expect(mockQueryInputProps.inputDraft?.text).toBe('New session input');
+  });
+
+  it('restores the unsent text and references after a voice message is sent', () => {
+    const view = render(<EasyConfirm {...props} />);
+    act(() => mockQueryInputProps.onInputDraftChange(draft));
+    act(() => mockQueryInputProps.onSend({ queryQuestion: '[语音消息]', payload: { messageType: 'VOICE' } }));
+    view.unmount();
+    render(<EasyConfirm {...props} />);
+    expect(mockQueryInputProps.inputDraft).toEqual(draft);
+  });
+
+  it('moves the unsent draft only to the session created by the first voice message', async () => {
+    const view = render(<EasyConfirm {...props} sessionId="" />);
+    act(() => mockQueryInputProps.onInputDraftChange(draft));
+    await act(async () => {
+      await mockQueryInputProps.onSend({
+        queryQuestion: '[语音消息]',
+        payload: { messageType: 'VOICE', sessionId: props.sessionId },
+      });
+    });
+    view.rerender(<EasyConfirm {...props} sessionId="other-session" />);
+    expect(mockQueryInputProps.inputDraft).toBeUndefined();
+    view.rerender(<EasyConfirm {...props} />);
+    expect(mockQueryInputProps.inputDraft).toEqual(draft);
+    view.rerender(<EasyConfirm {...props} sessionId="" />);
+    expect(mockQueryInputProps.inputDraft).toBeUndefined();
   });
 
   it('clears only the active session draft and keeps late callbacks scoped to their source', () => {

@@ -102,11 +102,11 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
     }));
   };
 
-  getSendPayload = () => {
+  getSendPayload = (textOverride?: string) => {
     const { inputValue, SQMode, checkedResourceList } = this.state;
     const { myAgentType } = this.props;
 
-    const sendVal = trim(inputValue);
+    const sendVal = trim(textOverride ?? inputValue);
 
     if (!sendVal) return null;
 
@@ -208,16 +208,6 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
           </div>
         )}
       </Space>
-    );
-  };
-
-  bottomRightRender = () => {
-    return (
-      <>
-        <Space size="large" className={chatStyles.bottomRight}>
-          {this.STTRender()}
-        </Space>
-      </>
     );
   };
 

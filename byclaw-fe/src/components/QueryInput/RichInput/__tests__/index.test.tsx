@@ -55,6 +55,38 @@ describe('RichInput', () => {
     children: [{ text: '' }],
   });
 
+  it('retains the draft while read-only and makes a dictation result undoable as one edit', async () => {
+    const ref = createRef<RichInputRef>();
+    const onSend = jest.fn();
+    const view = render(<RichInput ref={ref} canQuote onSend={onSend} />);
+    await act(async () => ref.current?.setText('原有草稿'));
+    const insert = ref.current?.captureTextInsertion();
+
+    view.rerender(<RichInput ref={ref} canQuote readOnly onSend={onSend} />);
+    expect(view.container.querySelector('[data-slate-editor]')).toHaveAttribute('contenteditable', 'false');
+    expect(ref.current?.getPayload().text).toBe('原有草稿');
+
+    view.rerender(<RichInput ref={ref} canQuote onSend={onSend} />);
+    await act(async () => insert?.('，识别结果'));
+    expect(ref.current?.getPayload().text).toBe('原有草稿，识别结果');
+    expect(onSend).not.toHaveBeenCalled();
+    await act(async () => ref.current?.undo());
+    expect(ref.current?.getPayload().text).toBe('原有草稿');
+  });
+
+  it('shows live dictation in the editor without changing the draft until it is accepted', async () => {
+    const ref = createRef<RichInputRef>();
+    const view = render(<RichInput ref={ref} canQuote />);
+    await act(async () => ref.current?.setText('原有草稿'));
+    const insert = ref.current!.captureTextInsertion();
+    await act(async () => insert('识别中', true));
+    expect(view.container.querySelector('[data-slate-editor]')).toHaveTextContent('识别中');
+    expect(ref.current?.getPayload().text).toBe('原有草稿');
+    await act(async () => insert());
+    expect(view.container.querySelector('[data-slate-editor]')).not.toHaveTextContent('识别中');
+    expect(ref.current?.getPayload().text).toBe('原有草稿');
+  });
+
   it.each<DefaultValueSchema>([
     { text: 'Unsent text', resourceList: [] },
     {

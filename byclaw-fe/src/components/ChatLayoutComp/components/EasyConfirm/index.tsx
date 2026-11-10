@@ -48,7 +48,7 @@ type IProps = {
   /** 新建任务上传文件后保持输入框实例，避免接口返回 sessionId 导致已上传文件丢失。 */
   preserveInputOnSessionChange?: boolean;
 
-  onSend: (param: ISendProps) => void;
+  onSend: (param: ISendProps) => void | boolean | Promise<void | boolean>;
   onCancel: () => void;
 
   myAgentType: IAgentType;
@@ -165,9 +165,31 @@ const EasyConfirm = (props: IProps) => {
 
   const onSendWithDraftClean = useCallback(
     (param: ISendProps) => {
-      // 发送后不再带入本轮正文和引用；输入组件随后回写保留的 @ 员工。
-      if (!disableInputDraft) inputDrafts.delete(inputDraftKey);
-      onSend(param);
+      if (disableInputDraft) return onSend(param);
+      if (param.payload?.messageType !== 'VOICE') {
+        // 文字消息发送后，由输入组件回写保留的 @ 员工。
+        inputDrafts.delete(inputDraftKey);
+        return onSend(param);
+      }
+      const targetSessionId = `${param.payload.sessionId || ''}`;
+      const draft = inputDrafts.get(inputDraftKey);
+      if (inputDraftKey || !targetSessionId || !draft || inputDrafts.has(targetSessionId)) return onSend(param);
+
+      // 首条语音消息可能由上传直接创建会话，路由切换前让新会话能读取文字草稿。
+      inputDrafts.set(targetSessionId, draft);
+      return (async () => {
+        let accepted: void | boolean = false;
+        try {
+          accepted = await onSend(param);
+          return accepted;
+        } finally {
+          if (accepted === false) {
+            if (inputDrafts.get(targetSessionId) === draft) inputDrafts.delete(targetSessionId);
+          } else if (inputDrafts.get(inputDraftKey) === draft) {
+            inputDrafts.delete(inputDraftKey);
+          }
+        }
+      })();
     },
     [disableInputDraft, inputDraftKey, onSend]
   );

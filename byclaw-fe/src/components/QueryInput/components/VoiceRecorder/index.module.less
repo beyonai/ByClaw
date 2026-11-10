@@ -1,11 +1,15 @@
 .recordButton {
+  position: relative;
   width: 32px;
   height: 32px;
   padding: 4px;
-  color: #687080;
-  font-size: 19px;
+  overflow: hidden;
+  color: var(--beyond-color-text-secondary, #525e70);
+  font-size: 18px;
+  touch-action: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 
-  // 麦克风图标外层不使用文字行盒，保持图标与按钮几何中心重合。
   :global {
     .@{antPrefix}-btn-icon {
       display: flex;
@@ -13,105 +17,254 @@
       justify-content: center;
     }
   }
-}
 
-.recordingPanel {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  width: 220px;
-  padding: 6px;
-  font-variant-numeric: tabular-nums;
-}
+  &:focus-visible {
+    outline: 2px solid var(--beyond-color-primary, #315bc8);
+    outline-offset: 2px;
+  }
 
-.recordingHint {
-  color: var(--beyond-color-text-secondary, #8b8d98);
-  font-size: 12px;
-}
+  &[aria-pressed='true'],
+  &[data-holding='true'] {
+    color: var(--beyond-color-primary, #315bc8);
+    background: var(--beyond-color-primary-bg, #edf2ff);
+  }
 
-.holdButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 48px;
-  user-select: none;
-  touch-action: none;
-}
+  &[data-canceling='true'] {
+    color: var(--beyond-color-error, #b92842);
+    background: var(--beyond-color-error-bg, #fff0f1);
+  }
 
-.canceling {
-  background: #e25161 !important;
-  border-color: #e25161 !important;
-}
-
-.limitHint {
-  color: var(--beyond-color-text-tertiary, #a7a8b2);
-  font-size: 11px;
-}
-
-.recordingDot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 8px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: recordingPulse 1s ease-in-out infinite;
-}
-
-@keyframes recordingPulse {
-  50% {
-    opacity: 0.35;
+  &[data-holding='true']::after {
+    position: absolute;
+    right: 4px;
+    bottom: 1px;
+    left: 4px;
+    height: 2px;
+    border-radius: 2px;
+    background: currentColor;
+    transform-origin: left;
+    animation: holdProgress var(--voice-hold-duration) linear both;
+    content: '';
+    pointer-events: none;
   }
 }
 
-.desktopBar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 236px;
-  height: 36px;
-  padding: 3px 5px;
-  background: var(--beyond-color-bg-container, #fff);
-  border: 1px solid var(--beyond-color-border-secondary, #ececf2);
-  border-radius: 20px;
+@keyframes holdProgress {
+  from {
+    transform: scaleX(0);
+  }
+
+  to {
+    transform: scaleX(1);
+  }
 }
 
-.cancelButton {
-  flex: 0 0 auto;
-  width: 26px;
-  color: var(--beyond-color-text-secondary, #8b8d98);
+.recordButtonWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.recordingPanel {
+  --voice-wave: #20a975;
+  --voice-timer-ink: var(--beyond-color-text-secondary, #525e70);
+  --voice-timer-bg: var(--beyond-color-fill-quaternary, #f3f5f7);
+  display: flex;
+  box-sizing: border-box;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 10px;
+
+  &[data-canceling='true'] {
+    --voice-wave: var(--beyond-color-error, #b92842);
+    --voice-timer-ink: var(--voice-wave);
+    --voice-timer-bg: rgba(185, 40, 66, 0.08);
+  }
+}
+
+.recordingMeter {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  gap: 14px;
+}
+
+.duration {
+  min-width: 58px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--voice-timer-bg);
+  color: var(--voice-timer-ink);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
 }
 
 .waveform {
   display: flex;
+  height: 60px;
+  max-height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  overflow: hidden;
+
+  span {
+    width: 8px;
+    min-height: 6px;
+    max-height: 100%;
+    border-radius: 4px;
+    background: var(--voice-wave);
+    transition: height 100ms ease;
+  }
+}
+
+.recordingHint {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 8px);
+  z-index: 1;
+  display: inline-flex;
+  width: max-content;
+  max-width: min(164px, calc(100vw - 92px));
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px;
+  border-radius: 5px;
+  background: var(--beyond-color-bg-container, #fff);
+  color: var(--beyond-color-text-secondary, #525e70);
+  font-size: 12px;
+  line-height: 16px;
+  transform: translateY(-50%);
+  pointer-events: none;
+
+  &[data-canceling='true'] {
+    color: var(--beyond-color-error, #b92842);
+  }
+}
+
+.dictationPill {
+  --dictation-green: #20a975;
+  display: flex;
+  box-sizing: border-box;
+  width: clamp(148px, 38vw, 236px);
+  height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 1px 5px;
+  border: 1px solid var(--beyond-color-border-secondary, #e9e9e9);
+  border-radius: 999px;
+  background: var(--beyond-color-bg-container, #fff);
+}
+
+.dictationCancel,
+.dictationFinish {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  flex: none;
+}
+
+.dictationCancel {
+  color: var(--beyond-color-text, #39414d);
+}
+
+.dictationFinish:not(:disabled) {
+  border-color: var(--dictation-green);
+  background: var(--dictation-green);
+
+  &:hover,
+  &:focus-visible {
+    border-color: #18875e;
+    background: #18875e;
+  }
+}
+
+.dictationWave {
+  display: flex;
+  min-width: 0;
+  height: 22px;
   flex: 1;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  height: 26px;
+  gap: clamp(2px, 0.7vw, 4px);
   overflow: hidden;
 
   span {
     width: 3px;
-    min-height: 3px;
-    max-height: 24px;
+    max-height: 22px;
+    flex: 0 1 3px;
     border-radius: 2px;
-    background: #27ae78;
-    transition: height 90ms ease;
+    background: var(--dictation-green);
+    transition: height 100ms ease;
   }
 }
 
-.desktopDuration {
-  min-width: 25px;
-  color: var(--beyond-color-text-secondary, #8b8d98);
+.dictationStatus {
+  display: -webkit-box;
+  min-width: 0;
+  max-height: 28px;
+  flex: 1;
+  overflow: hidden;
+  color: var(--beyond-color-text-secondary, #525e70);
   font-size: 12px;
-  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+  overflow-wrap: anywhere;
+  text-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
-.sendButton {
-  flex: 0 0 auto;
-  background: #27ae78 !important;
-  box-shadow: none;
+.dictationTime {
+  min-width: 26px;
+  color: var(--beyond-color-text, #39414d);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.retry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 12px;
+  padding: 7px 10px;
+  border: 1px solid var(--beyond-color-border-secondary, #dce2eb);
+  border-radius: 10px;
+  background: var(--beyond-color-fill-quaternary, #f6f8fc);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.retryMessage,
+.retryActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.retryMessage {
+  flex: 1 1 150px;
+  color: var(--beyond-color-error, #b92842);
+}
+
+.retryActions {
+  margin-inline-start: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waveform span,
+  .dictationWave span {
+    transition: none;
+  }
+
+  .recordButton[data-holding='true']::after {
+    animation: none;
+  }
 }

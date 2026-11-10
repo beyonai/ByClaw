@@ -234,6 +234,27 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
     [activeSessionId, dispatch, getTargetSessionId]
   );
 
+  const capturePendingMessageCleanup = useCallback(
+    (ids: string[]) => {
+      const targetSessionId = getTargetSessionId();
+      const pendingIds = new Set(ids);
+      return () => {
+        dispatch({
+          type: 'messageStore/updateSessionMessageList',
+          payload: {
+            sessionId: targetSessionId,
+            messageList: (messages: IMessage[]) => {
+              const next = messages.filter((msg) => msg.messageId || !pendingIds.has(msg.msgId));
+              if (targetSessionId === curSessionId.current) messageListRef.current = next;
+              return next;
+            },
+          },
+        });
+      };
+    },
+    [dispatch, getTargetSessionId]
+  );
+
   const setMessageList = useCallback(
     (value: SetStateAction<IMessage[]>) => {
       const nextList = typeof value === 'function' ? value(messageListRef.current) : value;
@@ -605,6 +626,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
   return {
     messageList, // 当前会话的消息列表
     setMessageList, // 直接设置消息列表的方法
+    capturePendingMessageCleanup,
     hasMore, // 是否有更多消息（用于分页）
 
     setSessionId, // 设置/切换会话ID的方法

@@ -1,3 +1,4 @@
+import type { NodeEntry, PointRef } from 'slate';
 import React, { useCallback, useEffect, useMemo, useState, forwardRef, useImperativeHandle, useRef } from 'react';
 import { createEditor, Descendant, Transforms, Editor, Element, Range, Path } from 'slate';
 import { Slate, Editable, withReact, ReactEditor } from 'slate-react';
@@ -138,6 +139,7 @@ export interface RichInputRef {
   clearAfterSend: () => void;
   getPersistentMentionDraft: (includeQuestion?: boolean) => { text: string; resourceList: Resource[] };
   appendText: (text: string) => void;
+  captureTextInsertion: () => (text?: string, preview?: boolean) => void;
   insertItem: (item: any, type: IResourceType) => any;
   getPayload: () => PayloadType;
   undo: () => void;
@@ -168,6 +170,13 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   const mentionType = mentionPopoverData.type;
   const editor = useMemo<Editor>(() => withEditableNavigation(withMention(withHistory(withReact(createEditor())))), []);
   const isFirstAutoOnChange = useRef(true);
+  const [dictationPreview, setDictationPreview] = useState<{ anchor: PointRef; text: string }>();
+  const decorateDictation = ([, path]: NodeEntry) => {
+    if (!dictationPreview || !editor.children.length) return [];
+    const point = dictationPreview.anchor.current || Editor.end(editor, []);
+    if (!Path.equals(path, point.path)) return [];
+    return [{ anchor: point, focus: point, dictationText: dictationPreview.text }];
+  };
   const editorWrapRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const lastChatModeRef = useRef(chatMode);
@@ -776,6 +785,24 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       }
       Transforms.insertText(editor, text);
     },
+    captureTextInsertion: () => {
+      let point = editor.selection ? Range.end(editor.selection) : Editor.end(editor, []);
+      const voidEntry = Editor.void(editor, { at: point });
+      if (voidEntry) point = Editor.after(editor, voidEntry[1]) || Editor.end(editor, []);
+      const anchor = Editor.pointRef(editor, point, { affinity: 'forward' });
+      return (text?: string, preview?: boolean) => {
+        if (preview) {
+          setDictationPreview(text ? { anchor, text } : undefined);
+          return;
+        }
+        setDictationPreview(undefined);
+        const at = anchor.unref();
+        if (!text || !editor.children.length) return;
+        HistoryEditor.withNewBatch(editor as Editor & HistoryEditor, () =>
+          Transforms.insertText(editor, text, { at: at || Editor.end(editor, []) })
+        );
+      };
+    },
     getPayload,
     undo: () => HistoryEditor.undo(editor as Editor & HistoryEditor),
   }));
@@ -794,15 +821,26 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
           <Editable
             as={EditableRootWithAria}
             autoComplete="off"
+            readOnly={props.readOnly}
             onDragOver={(e) => {
               e.preventDefault();
             }}
             renderElement={elementRender}
-            placeholder={placeholder}
-            onKeyDown={onKeyDown}
+            placeholder={dictationPreview ? undefined : placeholder}
+            decorate={decorateDictation}
+            renderLeaf={({ attributes, children, leaf }) => {
+              const { dictationText } = leaf as typeof leaf & { dictationText?: string };
+              return (
+                <span {...attributes}>
+                  {dictationText && <span contentEditable={false}>{dictationText}</span>}
+                  {children}
+                </span>
+              );
+            }}
+            onKeyDown={props.readOnly ? undefined : onKeyDown}
             className={styles.slate}
-            onDrop={onDrop}
-            onPaste={onPaste}
+            onDrop={props.readOnly ? undefined : onDrop}
+            onPaste={props.readOnly ? undefined : onPaste}
             onCompositionStart={() => {
               handleMentionCompositionStart(editor, isComposing);
             }}
@@ -810,7 +848,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
               isComposing.current = false;
             }}
           />
-          {agentPlaceholder}
+          {!dictationPreview && agentPlaceholder}
         </div>
       </Slate>
       {mentionType !== '@' && (

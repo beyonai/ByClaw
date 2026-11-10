@@ -151,18 +151,22 @@ export default function Mobile(props: { hideHeader?: boolean }) {
 
   const onSend = useCallback(
     async (param: ISendProps, isRetry?: boolean) => {
-      if (disabledInput) return;
+      const voice = param.payload?.messageType === 'VOICE';
+      if (disabledInput) return voice ? false : undefined;
       if (!isRetry) {
         Object.assign(param, { payload: { ...param.payload } });
       }
       try {
         const res = await sendQuery(param);
-        if (res) {
+        const sent = Boolean(res && (!voice || (await res.submitted) !== false));
+        if (sent && !param.sendSignal?.aborted) {
           requestIdleCallback(() => {
             messageListCompRef.current?.toBottom();
           });
         }
+        if (voice) return sent;
       } catch (e) {
+        if (voice) return false;
         if (e instanceof Promise) {
           e.finally(() => {
             onSendRef.current?.(param, true);

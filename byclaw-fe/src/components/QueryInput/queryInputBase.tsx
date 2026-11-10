@@ -17,7 +17,7 @@ import AntdIcon from '../AntdIcon';
 import OperatePopup from './components/OperatePopup';
 import styles from './index.module.less';
 import RichInput, { RichInputRef, RichInputResourceList } from './RichInput';
-import VoiceRecorder from './components/VoiceRecorder';
+import VoiceRecorder, { type VoiceInputMode } from './components/VoiceRecorder';
 import { uploadFiles } from '@/service/file';
 import { updateAttachmentByUid } from './utils/attachmentUpload';
 import { buildVoiceSendProps, type VoiceMessage } from '@/utils/voice';
@@ -36,7 +36,7 @@ import { hasUnresolvedEmployeeResource } from './RichInput/utils/employeeResourc
 export type IProps = {
   getMessageList?: () => Array<IMessage>;
 
-  onSend: (param: ISendProps) => void;
+  onSend: (param: ISendProps) => void | boolean | Promise<void | boolean>;
 
   chatMode: IChatModeType;
   setChatMode?: React.Dispatch<React.SetStateAction<IChatModeType>>;
@@ -86,7 +86,7 @@ export type IProps = {
 
 export type IState = {
   inputValue?: string;
-  voiceRecording?: boolean;
+  voiceInput?: { mode: VoiceInputMode; scope: string };
   showAssitant: boolean;
   fileList: IFile[];
   singleChatTargetRealHumanFlag: boolean;
@@ -109,6 +109,12 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   isComposing = false;
 
   voiceInputMounted = false;
+
+  voicePanelRef = React.createRef<HTMLDivElement>();
+
+  dictationPanelRef = React.createRef<HTMLDivElement>();
+
+  uploadedVoice = new WeakMap<File, { voice: VoiceMessage; sessionId?: string | number }>();
 
   richInputRef = React.createRef<RichInputRef>();
 
@@ -331,45 +337,87 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     return agentIds.length === 1 ? agentIds[0] : undefined;
   };
 
-  sendVoice = async (file: File, durationMs: number) => {
-    if (this.props.cannotSend || !this.checkIsSending()) return;
+  sendVoice = async (file: File, durationMs: number, cancelToken: AbortController) => {
+    const { signal } = cancelToken;
+    if (signal.aborted) return;
+    if (this.props.cannotSend || !this.checkIsSending()) {
+      throw getIntl().formatMessage({ id: 'voice.cannotSend' });
+    }
     const targetSessionId = this.props.sessionId;
     const sendPayload = this.getSendPayload('[语音消息]');
     if (!sendPayload) throw new Error(getIntl().formatMessage({ id: 'voice.cannotSend' }));
-    const formData = new FormData();
-    formData.append('files', file);
-    formData.append('sessionType', 'AGENT');
-    if (this.props.sessionId) formData.append('sessionId', this.props.sessionId);
-    const { agentId } = this.props.globalContext;
-    if (agentId) formData.append('agentId', `${agentId}`);
-    const projectId = this.props.selectedProject?.projectId ?? this.props.projectId;
-    if (projectId !== undefined) formData.append('projectId', `${projectId}`);
-    const uploaded = await uploadFiles(formData);
-    if (!this.voiceInputMounted || targetSessionId !== this.props.sessionId) return;
-    const audio = (uploaded.rebuildFileList || uploaded.uploadItems || [])[0];
-    if (!audio?.fileId) throw new Error(getIntl().formatMessage({ id: 'voice.uploadMissing' }));
-    const voice: VoiceMessage = {
-      fileId: audio.fileId,
-      fileUrl: audio.fileUrl || audio.filePath,
-      fileName: audio.fileName || file.name,
-      durationMs: Math.round(durationMs),
-      mimeType: 'audio/mpeg',
-    };
-    this.finallySendQuery(buildVoiceSendProps(sendPayload as ISendProps, voice, file.size, uploaded.sessionId));
+    const payload = this.completeSendPayload(sendPayload as ISendProps);
+
+    let audio = this.uploadedVoice.get(file);
+    if (!audio) {
+      const formData = new FormData();
+      formData.append('files', file);
+      formData.append('sessionType', 'AGENT');
+      if (targetSessionId) formData.append('sessionId', targetSessionId);
+      const { agentId } = this.props.globalContext;
+      if (agentId) formData.append('agentId', `${agentId}`);
+      const projectId = this.props.selectedProject?.projectId ?? this.props.projectId;
+      if (projectId !== undefined) formData.append('projectId', `${projectId}`);
+      const uploaded = await uploadFiles(formData, undefined, cancelToken);
+      if (signal.aborted || !this.voiceInputMounted || targetSessionId !== this.props.sessionId) return;
+      const item = (uploaded.rebuildFileList || uploaded.uploadItems || [])[0];
+      if (!item?.fileId) throw new Error(getIntl().formatMessage({ id: 'voice.uploadMissing' }));
+      audio = {
+        sessionId: uploaded.sessionId,
+        voice: {
+          fileId: item.fileId,
+          fileUrl: item.fileUrl || item.filePath,
+          fileName: item.fileName || file.name,
+          durationMs: Math.round(durationMs),
+          mimeType: 'audio/mpeg',
+        },
+      };
+      this.uploadedVoice.set(file, audio);
+    }
+
+    if (this.props.cannotSend || !this.checkIsSending()) {
+      throw getIntl().formatMessage({ id: 'voice.cannotSend' });
+    }
+    const submitted = await this.props.onSend({
+      ...buildVoiceSendProps(payload, audio.voice, file.size, audio.sessionId),
+      sendSignal: signal,
+    });
+    if (submitted === false) throw new Error(getIntl().formatMessage({ id: 'voice.cannotSend' }));
   };
 
-  onVoiceRecordingChange = (active: boolean) => {
-    this.setState((prevState) => ({ ...prevState, voiceRecording: active }));
+  getVoiceScope = () =>
+    JSON.stringify([this.props.sessionId, this.props.selectedProject?.projectId ?? this.props.projectId]);
+
+  getVoiceMode = () => {
+    const { voiceInput } = this.state;
+    if (!this.props.userInfo || this.props.cannotSTT || voiceInput?.scope !== this.getVoiceScope()) return undefined;
+    return voiceInput?.mode;
   };
+
+  onVoiceModeChange = (mode?: VoiceInputMode) => {
+    const scope = this.getVoiceScope();
+    if (mode === this.getVoiceMode() && (!this.state.voiceInput || this.state.voiceInput.scope === scope)) return;
+    this.setState((prevState) => ({ ...prevState, voiceInput: mode ? { mode, scope } : undefined }));
+  };
+
+  getVoicePanel = () => this.voicePanelRef.current;
+
+  getDictationPanel = () => this.dictationPanelRef.current;
+
+  captureDictationInsertion = () => this.richInputRef.current?.captureTextInsertion();
 
   STTRender = () => {
     const { userInfo, cannotSTT, cannotSend } = this.props;
     if (!userInfo || cannotSTT) return null;
     return (
       <VoiceRecorder
+        key={this.getVoiceScope()}
         disabled={cannotSend || !this.checkIsSending()}
         onRecorded={this.sendVoice}
-        onActiveChange={this.onVoiceRecordingChange}
+        onModeChange={this.onVoiceModeChange}
+        panelContainer={this.getVoicePanel}
+        dictationContainer={this.getDictationPanel}
+        captureInsertion={this.captureDictationInsertion}
       />
     );
   };
@@ -458,7 +506,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   };
 
   // 所有子类的onSend都从父类这里触发，这里需要额外加一些公共的参数
-  finallySendQuery = (data: any) => {
+  completeSendPayload = (data: ISendProps) => {
     // Chat、Employees 等输入框会覆盖 getSendPayload，项目选择必须在公共发送出口统一补入。
     const selectedProject = this.props.selectedProject || this.selectedProject;
     const currentInputPayload = this.getCurrentInputPayload();
@@ -488,8 +536,10 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     if (resourceList.length) {
       set(data, 'resourceList', resourceList);
     }
-    this.props.onSend(data);
+    return data;
   };
+
+  finallySendQuery = (data: ISendProps) => this.props.onSend(this.completeSendPayload(data));
 
   onSendQuery = () => {
     const payload = this.getSendPayload();
@@ -530,7 +580,8 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   inputLower = () => {
     const { onCancel, cannotSend } = this.props;
-    const canSend = this.checkCanSend();
+    const voiceMode = this.getVoiceMode();
+    const canSend = !voiceMode && this.checkCanSend();
     const bottomLeft = this.bottomLeftRender();
     const bottomRight = this.bottomRightRender();
     const hasTools = !!bottomLeft || !!bottomRight;
@@ -562,7 +613,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
         </ConfigProvider>
         <Space className={styles.toolsRight}>
           {this.STTRender()}
-          {!cannotSend && !this.state.voiceRecording && (
+          {!cannotSend && voiceMode !== 'dictation' && (
             <>
               {!this.checkIsSending() ? (
                 <Button
@@ -571,6 +622,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
                     onCancel?.();
                   }}
                   className={classNames(styles.sendBtn, styles.cancelBtn)}
+                  style={{ visibility: voiceMode === 'recording' ? 'hidden' : undefined }}
                 />
               ) : (
                 <Button
@@ -589,6 +641,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
                       ? `var(--${PREFIX_NAME}-color-primary)`
                       : `var(--${PREFIX_NAME}-color-fill)`,
                     boxShadow: 'none',
+                    visibility: voiceMode === 'recording' ? 'hidden' : undefined,
                   }}
                   className={styles.sendBtn}
                   disabled={!canSend}
@@ -709,71 +762,77 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const { cannotAt, myAgentType, setMyAgentType, chatMode, isBottom, placeholder } = this.props;
     const { agentId, setAgentId } = this.props.globalContext;
     const { connectNetAgentId } = this.state;
+    const voiceRecording = this.getVoiceMode() === 'recording';
     return (
-      <div style={{ display: 'flex' }}>
-        <RichInput
-          style={{ flex: '1 1 auto' }}
-          agentId={agentId}
-          agentType={myAgentType}
-          ref={this.richInputRef}
-          defaultPlaceholder={placeholder}
-          inAgentRoute={this.chechCannotAt()}
-          initialInputValue={this.props.initialInputValue}
-          inputDraft={this.props.inputDraft}
-          onPasteFiles={this.onPasteFiles}
-          onDraftChange={this.props.onInputDraftChange}
-          onChange={(inputSchema) => {
-            const { text, agentId: currentAgentId, agentType, resourceList, displayText } = inputSchema;
-            this.displayQuestion = displayText;
-            this.setState((prev) => ({
-              ...prev,
-              resourceList,
-              inputValue: text,
-              connectNet: resourceList.some((item) => `${item.resourceId}` === `${connectNetAgentId}`),
-            }));
-            this.syncSiderAgent(resourceList);
-            if (!cannotAt && `${agentId || ''}` !== `${currentAgentId || ''}`) {
-              let nextAgentType = agentType;
-              if (!currentAgentId && agentId) {
-                // agentId从有到无，意味着，用户在输入框内，主动删除了输入框最左侧的agent数字员工，这个时候，agentType直接转为common
-                nextAgentType = agentTypeMap.common;
+      <>
+        <div className={styles.voiceInputArea}>
+          <RichInput
+            style={{ flex: '1 1 auto', visibility: voiceRecording ? 'hidden' : undefined }}
+            readOnly={voiceRecording}
+            agentId={agentId}
+            agentType={myAgentType}
+            ref={this.richInputRef}
+            defaultPlaceholder={placeholder}
+            inAgentRoute={this.chechCannotAt()}
+            initialInputValue={this.props.initialInputValue}
+            inputDraft={this.props.inputDraft}
+            onPasteFiles={this.onPasteFiles}
+            onDraftChange={this.props.onInputDraftChange}
+            onChange={(inputSchema) => {
+              const { text, agentId: currentAgentId, agentType, resourceList, displayText } = inputSchema;
+              this.displayQuestion = displayText;
+              this.setState((prev) => ({
+                ...prev,
+                resourceList,
+                inputValue: text,
+                connectNet: resourceList.some((item) => `${item.resourceId}` === `${connectNetAgentId}`),
+              }));
+              this.syncSiderAgent(resourceList);
+              if (!cannotAt && `${agentId || ''}` !== `${currentAgentId || ''}`) {
+                let nextAgentType = agentType;
+                if (!currentAgentId && agentId) {
+                  // agentId从有到无，意味着，用户在输入框内，主动删除了输入框最左侧的agent数字员工，这个时候，agentType直接转为common
+                  nextAgentType = agentTypeMap.common;
+                }
+                setMyAgentType?.(nextAgentType as IAgentType);
+                // 全局会话员工 ID 统一使用字符串，避免 number/string 来回切换触发默认 @ 节点重建。
+                setAgentId?.(currentAgentId ? `${currentAgentId}` : '');
               }
-              setMyAgentType?.(nextAgentType as IAgentType);
-              // 全局会话员工 ID 统一使用字符串，避免 number/string 来回切换触发默认 @ 节点重建。
-              setAgentId?.(currentAgentId ? `${currentAgentId}` : '');
-            }
-          }}
-          onSend={() => {
-            this.onSendQuery();
-          }}
-          chatMode={chatMode}
-          isInputAtBottom={isBottom}
-          canSend={() => {
-            return this.checkIsSending() && this.checkCanSend();
-          }}
-          canQuote={this.checkCanQuote()}
-          resourceAgentIds={this.getResourceAgentIds()}
-          userCode={(this.props.userInfo as any)?.userCode}
-          {...getInputResourceProject(this.props)}
-          mentionPopoverPlacement={this.props.mentionPopoverPlacement}
-          onResourcePopoverChange={({ open, inputText, width }) => {
-            if (!open) {
-              // 员工更多操作的 Dropdown/Popconfirm 会使编辑器失焦，不能因此关闭加号资源弹窗。
-              const hasResourceActionOverlay =
-                document.body.dataset.resourceActionOverlay === 'true' ||
-                document.querySelector('.ant-dropdown, .ant-popconfirm, .ant-popover-buttons');
-              if (hasResourceActionOverlay) return;
-            }
-            this.setState({
-              toolsPopoverOpen: open,
-              toolsPopoverWidth: open ? width : undefined,
-              toolsPopoverKeyword: open ? inputText : undefined,
-              ...(open ? { activeToolMenuKey: 'expert', visitedToolTabs: ['expert'] } : {}),
-            });
-          }}
-        />
-        {this.getAssitantTrigger()}
-      </div>
+            }}
+            onSend={() => {
+              this.onSendQuery();
+            }}
+            chatMode={chatMode}
+            isInputAtBottom={isBottom}
+            canSend={() => {
+              return !this.getVoiceMode() && this.checkIsSending() && this.checkCanSend();
+            }}
+            canQuote={this.checkCanQuote()}
+            resourceAgentIds={this.getResourceAgentIds()}
+            userCode={(this.props.userInfo as any)?.userCode}
+            {...getInputResourceProject(this.props)}
+            mentionPopoverPlacement={this.props.mentionPopoverPlacement}
+            onResourcePopoverChange={({ open, inputText, width }) => {
+              if (!open) {
+                // 员工更多操作的 Dropdown/Popconfirm 会使编辑器失焦，不能因此关闭加号资源弹窗。
+                const hasResourceActionOverlay =
+                  document.body.dataset.resourceActionOverlay === 'true' ||
+                  document.querySelector('.ant-dropdown, .ant-popconfirm, .ant-popover-buttons');
+                if (hasResourceActionOverlay) return;
+              }
+              this.setState({
+                toolsPopoverOpen: open,
+                toolsPopoverWidth: open ? width : undefined,
+                toolsPopoverKeyword: open ? inputText : undefined,
+                ...(open ? { activeToolMenuKey: 'expert', visitedToolTabs: ['expert'] } : {}),
+              });
+            }}
+          />
+          {this.getAssitantTrigger()}
+          <div className={styles.voicePanelSlot} ref={this.voicePanelRef} />
+        </div>
+        <div ref={this.dictationPanelRef} />
+      </>
     );
   }
 

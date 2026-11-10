@@ -128,19 +128,23 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
 
   const onSend = useCallback(
     async (param: ISendProps, isRetry?: boolean) => {
-      if (notificationSession) return;
+      const voice = param.payload?.messageType === 'VOICE';
+      if (notificationSession) return voice ? false : undefined;
       if (!isRetry) {
         Object.assign(param, { payload: { ...param.payload, ...tempParamsRef.current } });
       }
       try {
         const res = await sendQuery(param);
-        if (res) {
+        const sent = Boolean(res && (!voice || (await res.submitted) !== false));
+        if (sent && !param.sendSignal?.aborted) {
           setIsBottom?.(true);
           requestIdleCallback(() => {
             messageListCompRef.current?.toBottom();
           });
         }
+        if (voice) return sent;
       } catch (e) {
+        if (voice) return false;
         console.error(e);
       }
     },

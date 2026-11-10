@@ -26,7 +26,7 @@ describe('manager/service/session', () => {
   it('getDcSystemConfig posts params directly', () => {
     const payload = { standType: 'DEV' };
     getDcSystemConfig(payload);
-    expect(mockPOST).toHaveBeenCalledWith('/byaiService/system/staticdata/getDcSystemConfig', payload);
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/system/staticdata/getDcSystemConfig', payload, undefined);
   });
 
   it('getDcSystemConfigValueByCodes posts payload directly', () => {

@@ -23,6 +23,7 @@ const mockSend = jest.fn((text?: string, payload?: any) => {
     cancel: jest.fn(),
   };
 });
+const mockClearPendingMessages = jest.fn();
 const mockUpdateMessage = jest.fn((msg: any) => msg);
 const mockWaitForSessionMessageLoaded = jest.fn(() => Promise.resolve());
 const mockReloadLatestMessageList = jest.fn(() => Promise.resolve());
@@ -74,6 +75,7 @@ jest.mock('../useChat/useMessage', () => ({
     setSessionId: jest.fn(),
     getMoreSessionMessage: jest.fn(),
     setMessageList: jest.fn(),
+    capturePendingMessageCleanup: () => mockClearPendingMessages,
     updateMessage: mockUpdateMessage,
     reloadLatestMessageList: mockReloadLatestMessageList,
     waitForSessionMessageLoaded: mockWaitForSessionMessageLoaded,
@@ -1331,6 +1333,29 @@ describe('hooks/useChat/index', () => {
     });
 
     expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a voice WebSocket failure and clears the temporary turn so the recording can be retried', async () => {
+    let fail: () => void = () => undefined;
+    const pending = new Promise<{ failed: boolean }>((resolve) => {
+      fail = () => resolve({ failed: true });
+    });
+    mockSend.mockReturnValueOnce({ promise: pending, cancel: jest.fn() });
+    const { result } = renderHook(() => useChat({ sessionId: 's1', addSession: jest.fn() } as any));
+    const controller = new AbortController();
+
+    await act(async () => {
+      const handle = await result.current.sendQuery({
+        queryQuestion: '[语音消息]',
+        payload: { messageType: 'VOICE' },
+        sendSignal: controller.signal,
+      });
+      if (!handle) throw new Error('Expected a pending voice send');
+      expect(mockClearPendingMessages).not.toHaveBeenCalled();
+      fail();
+      await expect(handle.submitted).resolves.toBe(false);
+      expect(mockClearPendingMessages).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('blocks parent input while the root runtime is active', async () => {

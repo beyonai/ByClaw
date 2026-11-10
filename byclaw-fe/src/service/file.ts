@@ -51,7 +51,12 @@ export const uploadImage = (data: FormData) =>
     },
   });
 
-export const uploadFiles = async (data: FormData, onUploadProgress?: ConfigType['onUploadProgress']) => {
+export const uploadFiles = async (
+  data: FormData,
+  onUploadProgress?: ConfigType['onUploadProgress'],
+  cancelToken?: ConfigType['cancelToken']
+) => {
+  const cancellation = cancelToken ? { cancelToken } : {};
   if (hasDesktopLocalFiles() && window.byclawDesktop?.files?.registerAttachments) {
     const files = data.getAll('files').filter((value): value is File => value instanceof File);
     const registered = await window.byclawDesktop.files.registerAttachments(files);
@@ -59,10 +64,15 @@ export const uploadFiles = async (data: FormData, onUploadProgress?: ConfigType[
     data.forEach((value, key) => {
       if (key !== 'files' && typeof value === 'string') payload[key] = value;
     });
-    const res = await POST<any>('/byaiService/chat/uploadFiles', payload, { responseCfg: { hideErrorTips: true } });
+    if (cancelToken?.signal.aborted) throw new Error('Upload cancelled');
+    const res = await POST<any>('/byaiService/chat/uploadFiles', payload, {
+      ...cancellation,
+      responseCfg: { hideErrorTips: true },
+    });
     return { ...res, rebuildFileList: res.uploadItems || [] };
   }
   return POST<any>('/byaiService/chat/uploadFiles', data, {
+    ...cancellation,
     ...(onUploadProgress ? { onUploadProgress } : {}),
     responseCfg: { hideErrorTips: true },
     timeout: 480000,

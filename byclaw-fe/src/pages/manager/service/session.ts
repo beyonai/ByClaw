@@ -1,8 +1,8 @@
 // @ts-nocheck
-import { POST } from '@/service/common/request';
+import { POST, type ConfigType } from '@/service/common/request';
 
-export async function getDcSystemConfig(params: any) {
-  return POST('/byaiService/system/staticdata/getDcSystemConfig', params);
+export async function getDcSystemConfig<T = any>(params: any, config?: ConfigType) {
+  return POST<T>('/byaiService/system/staticdata/getDcSystemConfig', params, config);
 }
 
 export const getDcSystemConfigValueByCodes = (payload: any) => {

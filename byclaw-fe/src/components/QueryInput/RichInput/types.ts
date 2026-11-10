@@ -62,6 +62,7 @@ export interface DefaultValueSchema {
 }
 export interface Props {
   inAgentRoute?: boolean;
+  readOnly?: boolean;
 
   /** 显式业务初始值存在时，不自动补入会话历史员工。 */
   initialInputValue?: DefaultValueSchema;

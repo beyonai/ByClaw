@@ -177,6 +177,28 @@ describe('hooks/useChat/useMessage', () => {
     };
   });
 
+  it('cleans up only unsubmitted messages in the originating session after switching', async () => {
+    const { result, rerender } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
+      initialProps: { sessionId: 's2' },
+    });
+    const cleanup = result.current.capturePendingMessageCleanup(['voice', 'accepted']);
+    sessionListMap.get('s2').list = [
+      { msgId: 'voice' },
+      { msgId: 'accepted', messageId: 'server-id' },
+      { msgId: 'unrelated' },
+    ];
+
+    await act(async () => rerender({ sessionId: 's1' }));
+    const otherMessages = sessionListMap.get('s1').list;
+    act(() => cleanup());
+    expect(sessionListMap.get('s2').list).toEqual([
+      { msgId: 'accepted', messageId: 'server-id' },
+      { msgId: 'unrelated' },
+    ]);
+    expect(sessionListMap.get('s1').list).toEqual(otherMessages);
+    expect(delMessage).not.toHaveBeenCalled();
+  });
+
   it('loads session messages on session change and emits metadata/scroll events', async () => {
     const { result, rerender } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
       initialProps: { sessionId: 's1' },
@@ -440,10 +462,7 @@ describe('hooks/useChat/useMessage', () => {
       agentId: '11221954',
       agentName: 'zht',
       traceId: 'resume-trace',
-      thinkList: [
-        { uuid: 'old-thinking', text: '原来的思考过程' },
-        { text: '个人助理正在启动中，请等待' },
-      ],
+      thinkList: [{ uuid: 'old-thinking', text: '原来的思考过程' }, { text: '个人助理正在启动中，请等待' }],
     });
   });
 

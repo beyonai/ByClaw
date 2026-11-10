@@ -126,6 +126,7 @@ export type ISendProps = {
 
   /** 输入框展示给用户的文本，包含数字员工名称；queryQuestion 仍保留后端识别所需的占位符。 */
   displayText?: string;
+  sendSignal?: AbortSignal;
   inheritQryMsgId?: IMessage['msgId'];
 
   /** Cold resume 时由交互组件提供的最新回答消息，避免读取到尚未刷新的 messageListRef。 */
@@ -308,6 +309,7 @@ function useChat(props: IProps) {
     setSessionId,
     getMoreSessionMessage,
     setMessageList,
+    capturePendingMessageCleanup,
     updateMessage,
     reloadLatestMessageList,
     waitForSessionMessageLoaded = () => Promise.resolve(),
@@ -1063,7 +1065,8 @@ function useChat(props: IProps) {
       return false;
     }
 
-    const { queryQuestion, displayText, payload = {}, msgOpt = {} } = sendProps;
+    const { queryQuestion, displayText, payload = {}, msgOpt = {}, sendSignal } = sendProps;
+    if (sendSignal?.aborted) return false;
     const preliminaryDigitalEmployeeResources = getDigitalEmployeeResources(sendProps.resourceList);
     const isResumeChat = get(payload, 'actionType') === 'RESUME';
     let isContinuingRunningTrace = false;
@@ -1134,6 +1137,7 @@ function useChat(props: IProps) {
     }
 
     await onBeforeSend?.();
+    if (sendSignal?.aborted) return false;
 
     let _queryQuestion = queryQuestion;
     let _agentId = (fixedAgentId || get(restPayload, 'agentId') || agentId) as string | undefined;
@@ -1142,14 +1146,15 @@ function useChat(props: IProps) {
     let hasFreshResumeTarget = false;
     const llmMessageId = get(restPayload, 'llmMessageId');
 
-    const persistedResumeAnswer = isResumeChat && llmMessageId
-      ? messageListRef.current.find(
-        (item) =>
-          item.fromBeyond &&
-            `${item.messageId ?? ''}` === `${llmMessageId ?? ''}` &&
-            (!inheritQryMsgId || !item.queryMsgId || `${item.queryMsgId}` === `${inheritQryMsgId}`)
-      )
-      : undefined;
+    const persistedResumeAnswer =
+      isResumeChat && llmMessageId
+        ? messageListRef.current.find(
+          (item) =>
+            item.fromBeyond &&
+              `${item.messageId ?? ''}` === `${llmMessageId ?? ''}` &&
+              (!inheritQryMsgId || !item.queryMsgId || `${item.queryMsgId}` === `${inheritQryMsgId}`)
+        )
+        : undefined;
 
     hasFreshResumeTarget = isMatchingResumeAnswer(sendProps.resumeAnswerMsg, {
       sessionId,
@@ -1214,14 +1219,9 @@ function useChat(props: IProps) {
         }
       }
       if (isContinuingRunningTrace && hasFreshResumeTarget && resumeTargetAnswer) {
-        const refreshed = refreshChatStreamAnswerMessage(
-          { sessionId, traceId: payload.traceId },
-          resumeTargetAnswer
-        );
-        const rebound = rebindChatStreamAnswerMessage(
-          { sessionId, traceId: payload.traceId },
-          resumeTargetAnswer
-        ) || refreshed;
+        const refreshed = refreshChatStreamAnswerMessage({ sessionId, traceId: payload.traceId }, resumeTargetAnswer);
+        const rebound =
+          rebindChatStreamAnswerMessage({ sessionId, traceId: payload.traceId }, resumeTargetAnswer) || refreshed;
         if (!rebound) {
           isContinuingRunningTrace = false;
           isColdResume = true;
@@ -1505,19 +1505,33 @@ function useChat(props: IProps) {
       sendResult.cancel();
     };
 
-    void sendResult.promise?.then((outcome) => {
-      if (!('failed' in outcome) || !outcome.failed) return;
+    sendSignal?.addEventListener('abort', cancel, { once: true });
+    const voice = payload.messageType === 'VOICE';
+    // 保留原会话的临时消息清理入口，避免取消或切换会话后改到新会话的消息列表。
+    const clearUnsentVoice =
+      voice && sendSignal
+        ? capturePendingMessageCleanup([newQueryMsg.msgId, ...laneEntries.map(({ answerMsg }) => answerMsg.msgId)])
+        : undefined;
+    const submitted = sendResult.promise?.then((outcome) => {
+      sendSignal?.removeEventListener('abort', cancel);
+      if (!('failed' in outcome) || !outcome.failed) return true;
+      clearUnsentVoice?.();
       laneEntries.forEach((entry) => {
-        set(entry.answerMsg, 'messageState', IMessageState.Cancel);
-        updateMessage(entry.answerMsg);
+        if (!clearUnsentVoice) {
+          set(entry.answerMsg, 'messageState', IMessageState.Cancel);
+          updateMessage(entry.answerMsg);
+        }
+        pendingProjectIdByClientRequestRef.current.delete(entry.lane.clientRequestId);
         chatSessionRuntimeManager.cancel(entry.lane.clientRequestId, entry.answerMsg.sessionId || sessionId);
         unregisterPendingChatContext(entry.lane.clientRequestId);
         unregisterSessionChatContext(entry.answerMsg.sessionId || sessionId, entry.lane.clientRequestId);
       });
+      return false;
     });
 
+    const sendHandle = voice ? { cancel, submitted } : { cancel };
     if (isContinuingRunningTrace) {
-      return { cancel };
+      return sendHandle;
     }
 
     laneEntries.forEach((entry) => {
@@ -1590,7 +1604,7 @@ function useChat(props: IProps) {
       }
     });
 
-    return { cancel };
+    return sendHandle;
   });
 
   /**
