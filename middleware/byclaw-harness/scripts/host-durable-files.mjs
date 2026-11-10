@@ -14,7 +14,13 @@
  * file changed here since (the write failed, or the host died first): {@link SYNCED_FILE}
  * remembers what this host stored.
  *
- * One host serves a user at a time (the Redis claim), so the files have one writer.
+ * One host serves a user at a time (the Redis claim). The store enforces it for these files too:
+ * restoring raises the user's epoch, and a write from a host holding an older one is refused
+ * ({@link DurableFilesLostError}), after which that host stores nothing more for the user.
+ *
+ * A row this host cannot open (another service secret, or a damaged value) is never replaced:
+ * the host then stores nothing for the user, so a host with the wrong secret cannot overwrite
+ * what the others wrote.
  */
 import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto'
 import { mkdirSync, watch } from 'node:fs'
@@ -75,7 +81,42 @@ export function openFile(key, user, name, sealed) {
   return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()])
 }
 
-/** Rows in `<schema>.dsh_host_file`, one per user and file. openGauss has no ON CONFLICT: update, then insert. */
+/** Name of the row holding a user's epoch; not a durable file name. */
+const OWNER_ROW = '.owner'
+
+/** A newer host took the user's durable files; this host may not write them any more. */
+export class DurableFilesLostError extends Error {
+  constructor(user) {
+    super(`durable files of ${user} are now written by another host`)
+    this.name = 'DurableFilesLostError'
+  }
+}
+
+/** Run `body` in one transaction on a checked-out client; a connection that broke is not reused. */
+async function transaction(pool, body) {
+  const client = await pool.connect()
+  // The pool stops listening once a client is checked out; unhandled, a dropped connection would kill the host.
+  let broken
+  const onError = (error) => { broken = error }
+  client.on?.('error', onError)
+  try {
+    await client.query('BEGIN')
+    const result = await body(client)
+    await client.query('COMMIT')
+    return result
+  } catch (error) {
+    if (broken === undefined) await client.query('ROLLBACK').catch((rollback) => { broken = rollback })
+    throw error
+  } finally {
+    client.off?.('error', onError)
+    client.release(broken)
+  }
+}
+
+/**
+ * Rows in `<schema>.dsh_host_file`, one per user and file, plus one holding the user's epoch.
+ * openGauss has no ON CONFLICT: update, then insert.
+ */
 export function sqlFileStore(pool, schema = 'byai') {
   const table = `${schema}.dsh_host_file`
   let ready
@@ -90,19 +131,35 @@ export function sqlFileStore(pool, schema = 'byai') {
     async list(user) {
       await ensure()
       const { rows } = await pool.query(`SELECT name, value FROM ${table} WHERE user_code = $1`, [user])
-      return rows.map(row => ({ name: row.name, value: row.value }))
+      return rows.filter(row => row.name !== OWNER_ROW).map(row => ({ name: row.name, value: row.value }))
     },
-    async put(user, name, value) {
+    /** Take the user's files for this host: raise the epoch and return it. Earlier holders can no longer write. */
+    async claim(user) {
       await ensure()
-      const now = Date.now()
-      const updated = await pool.query(`UPDATE ${table} SET value = $1, updated_at = $2 WHERE user_code = $3 AND name = $4`, [value, now, user, name])
-      if (updated.rowCount > 0) return
-      try {
-        await pool.query(`INSERT INTO ${table} (user_code, name, value, updated_at) VALUES ($1, $2, $3, $4)`, [user, name, value, now])
-      } catch (error) {
-        if (error?.code !== '23505') throw error
-        await pool.query(`UPDATE ${table} SET value = $1, updated_at = $2 WHERE user_code = $3 AND name = $4`, [value, now, user, name])
-      }
+      const raise = () => transaction(pool, async (tx) => {
+        const { rows } = await tx.query(`SELECT value FROM ${table} WHERE user_code = $1 AND name = $2 FOR UPDATE`, [user, OWNER_ROW])
+        const epoch = rows[0] === undefined ? 1 : Number(rows[0].value) + 1
+        if (rows[0] === undefined) await tx.query(`INSERT INTO ${table} (user_code, name, value, updated_at) VALUES ($1, $2, $3, $4)`, [user, OWNER_ROW, String(epoch), Date.now()])
+        else await tx.query(`UPDATE ${table} SET value = $1, updated_at = $2 WHERE user_code = $3 AND name = $4`, [String(epoch), Date.now(), user, OWNER_ROW])
+        return epoch
+      })
+      // Two hosts creating the row at once: the loser finds it on the second try.
+      return raise().catch((error) => { if (error?.code !== '23505') throw error; return raise() })
+    },
+    /**
+     * Write one row while this host still holds `epoch`.
+     * @throws {DurableFilesLostError} when another host claimed the user since.
+     */
+    async put(user, epoch, name, value) {
+      await ensure()
+      await transaction(pool, async (tx) => {
+        // The lock on the epoch row also orders the user's writers, so the insert below cannot race another.
+        const { rows } = await tx.query(`SELECT value FROM ${table} WHERE user_code = $1 AND name = $2 FOR UPDATE`, [user, OWNER_ROW])
+        if (rows[0] === undefined || Number(rows[0].value) !== epoch) throw new DurableFilesLostError(user)
+        const now = Date.now()
+        const updated = await tx.query(`UPDATE ${table} SET value = $1, updated_at = $2 WHERE user_code = $3 AND name = $4`, [value, now, user, name])
+        if (updated.rowCount === 0) await tx.query(`INSERT INTO ${table} (user_code, name, value, updated_at) VALUES ($1, $2, $3, $4)`, [user, name, value, now])
+      })
     },
   }
 }
@@ -155,6 +212,9 @@ export class DurableFiles {
     this.savingSynced = Promise.resolve()
     this.watchers = []
     this.closed = false
+    /** Set once this host may no longer store the user's files: another host took them, or a row here cannot be opened. */
+    this.stopped = false
+    this.epoch = undefined
     this.rescan = undefined
   }
 
@@ -162,10 +222,12 @@ export class DurableFiles {
    * Bring the home in line with the store: write stored files, delete deleted ones, and leave
    * files kept on their host alone. The store wins, except where it still holds what this host
    * last stored and the file changed here since (the write failed, or the host died first).
-   * Then store local files the store never had. A row that cannot be opened is logged and
-   * replaced by the local file, if there is one.
+   * Then store local files the store never had. A row that cannot be opened is left as it is,
+   * and from then on this host stores nothing for the user.
    */
   async restore() {
+    // Claim before reading: whatever an earlier host writes after this is refused, not missed.
+    this.epoch = await this.store.claim(this.user)
     const rows = await this.store.list(this.user)
     this.synced = await this.readSynced()
     let restored = 0, deleted = 0, kept = 0, unreadable = 0
@@ -195,7 +257,8 @@ export class DurableFiles {
       try {
         data = openFile(this.key, this.user, row.name, row.value)
       } catch (error) {
-        this.log(`durable file ${row.name} of ${this.user} cannot be opened (${error.message}); skipped`)
+        // Writes above followed a row this key opened, so a host with another secret has written nothing yet.
+        if (!this.stopped) this.stop(`ERROR: durable file ${row.name} of ${this.user} cannot be opened (${error.message}): this host's service secret differs from the one that stored it, or the row is damaged. Nothing of this user is stored from this host until the secret matches or the row is removed`)
         unreadable += 1
         continue
       }
@@ -211,13 +274,14 @@ export class DurableFiles {
         continue
       }
       await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-      const staged = `${path}.${randomBytes(6).toString('hex')}.restore`
+      // Named like the plugins' own temporaries, so one left by a crash is never taken for a durable file.
+      const staged = `${path}.${randomBytes(6).toString('hex')}.tmp`
       await writeFile(staged, data, { mode: 0o600 })
       await rename(staged, path)
       this.synced.set(row.name, hash)
       restored += 1
     }
-    const missing = (await presentFiles(this.home)).filter(name => !this.stored.has(name))
+    const missing = this.stopped ? [] : (await presentFiles(this.home)).filter(name => !this.stored.has(name))
     for (const name of missing) await this.sync(name)
     await this.saveSynced()
     this.log(`durable files for ${this.user}: ${rows.length} stored, ${restored} restored, ${deleted} deleted, ${kept} kept from this host, ${missing.length} stored new${unreadable > 0 ? `, ${unreadable} unreadable` : ''}`)
@@ -229,17 +293,26 @@ export class DurableFiles {
    * plugins' sockets (a `stat` of one before the first context boot breaks DSH's module resolution).
    */
   start() {
+    if (this.stopped) return
+    // A renamed or removed team directory reports only the directory: rescan the trees shortly after.
+    const rescan = () => {
+      if (this.closed || this.stopped) return
+      clearTimeout(this.rescan)
+      this.rescan = setTimeout(() => {
+        void this.flush().catch(error => this.log(`storing durable files for ${this.user} failed: ${error.message}`))
+      }, 200)
+    }
     const onChange = prefix => (_event, filename) => {
       if (filename === null || filename === undefined) return
       const name = prefix + String(filename).split(sep).join('/')
-      if (isDurableFile(name)) void this.sync(name).catch(error => this.log(`storing ${name} for ${this.user} failed: ${error.message}`))
-      // A renamed or removed team directory reports only the directory: rescan the trees shortly after.
-      if (underDurableTree(name) && !this.closed) {
-        clearTimeout(this.rescan)
-        this.rescan = setTimeout(() => {
-          void this.flush().catch(error => this.log(`storing durable files for ${this.user} failed: ${error.message}`))
-        }, 200)
-      }
+      if (isDurableFile(name)) {
+        // A file's own change needs no rescan. The name is a directory when it cannot be read as a file,
+        // and may have been one when nothing is there and no file of that name was ever stored.
+        void this.sync(name).then(() => { if (!this.stored.has(name)) rescan() }, (error) => {
+          if (error.code === 'EISDIR') rescan()
+          else this.log(`storing ${name} for ${this.user} failed: ${error.message}`)
+        })
+      } else if (underDurableTree(name) && !name.endsWith('.tmp')) rescan()
     }
     const follow = (dir, prefix, recursive) => {
       const watcher = watch(join(this.home, dir), { recursive }, onChange(prefix))
@@ -253,41 +326,57 @@ export class DurableFiles {
     }
   }
 
-  /** Store one file's current content, or forget it when it is gone. Calls for one name run in order. */
+  /** Store one file's current state. Calls for one name run in order; losing the files to another host stops this one. */
   sync(name) {
     const previous = this.queue.get(name) ?? Promise.resolve()
-    const next = previous.catch(() => {}).then(async () => {
-      const data = await readIfPresent(join(this.home, name))
-      if (data === undefined) {
-        const stored = this.stored.get(name)
-        // A file kept on another host is not missing there.
-        if (stored === undefined || stored === DELETED || (stored === LOCAL_ONLY && !this.held.has(name))) return
-        await this.store.put(this.user, name, DELETED)
-        this.stored.set(name, DELETED)
-        this.held.delete(name)
-        this.markSynced(name, undefined)
-        return
-      }
-      if (data.length > MAX_FILE_BYTES) {
-        this.held.add(name)
-        if (this.stored.get(name) === LOCAL_ONLY) return
-        this.log(`durable file ${name} of ${this.user} is ${data.length} bytes; kept on this host only`)
-        await this.store.put(this.user, name, LOCAL_ONLY)
-        this.stored.set(name, LOCAL_ONLY)
-        this.markSynced(name, undefined)
-        return
-      }
-      const hash = digest(data)
-      if (this.stored.get(name) === hash || this.stale.get(name) === hash) return
-      await this.store.put(this.user, name, sealFile(this.key, this.user, name, data))
-      this.stored.set(name, hash)
-      this.held.delete(name)
-      this.stale.delete(name)
-      this.markSynced(name, hash)
-    })
+    const next = previous.catch(() => {}).then(() => this.storeOne(name).catch((error) => {
+      if (!(error instanceof DurableFilesLostError)) throw error
+      this.stop(`ERROR: ${error.message}; this host stores nothing more for the user`)
+    }))
     this.queue.set(name, next)
     void next.finally(() => { if (this.queue.get(name) === next) this.queue.delete(name) }).catch(() => {})
     return next
+  }
+
+  /** Stop storing and watching: the store's rows are no longer this host's to write. */
+  stop(reason) {
+    if (this.stopped) return
+    this.stopped = true
+    clearTimeout(this.rescan)
+    for (const watcher of this.watchers) watcher.close()
+    this.log(reason)
+  }
+
+  /** Store one file's current content, or mark it deleted when it is gone. */
+  async storeOne(name) {
+    if (this.stopped) return
+    const data = await readIfPresent(join(this.home, name))
+    if (data === undefined) {
+      const stored = this.stored.get(name)
+      // A file kept on another host is not missing there.
+      if (stored === undefined || stored === DELETED || (stored === LOCAL_ONLY && !this.held.has(name))) return
+      await this.store.put(this.user, this.epoch, name, DELETED)
+      this.stored.set(name, DELETED)
+      this.held.delete(name)
+      this.markSynced(name, undefined)
+      return
+    }
+    if (data.length > MAX_FILE_BYTES) {
+      this.held.add(name)
+      if (this.stored.get(name) === LOCAL_ONLY) return
+      this.log(`durable file ${name} of ${this.user} is ${data.length} bytes; kept on this host only`)
+      await this.store.put(this.user, this.epoch, name, LOCAL_ONLY)
+      this.stored.set(name, LOCAL_ONLY)
+      this.markSynced(name, undefined)
+      return
+    }
+    const hash = digest(data)
+    if (this.stored.get(name) === hash || this.stale.get(name) === hash) return
+    await this.store.put(this.user, this.epoch, name, sealFile(this.key, this.user, name, data))
+    this.stored.set(name, hash)
+    this.held.delete(name)
+    this.stale.delete(name)
+    this.markSynced(name, hash)
   }
 
   async readSynced() {

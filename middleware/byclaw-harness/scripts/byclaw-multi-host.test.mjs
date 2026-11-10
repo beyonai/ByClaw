@@ -1139,8 +1139,10 @@ test('credential files are stored in the database only with both the secret file
 })
 
 test('the service secret as a value never reaches a launch environment', () => {
-  const values = host.launchEnvironmentValues({ BYCLAW_CREDENTIAL_SECRET: 'secret', PATH: '/bin' }, {}, 'u1')
+  const values = host.launchEnvironmentValues({ BYCLAW_CREDENTIAL_SECRET: 'secret', BYCLAW_CREDENTIAL_SECRET_FILE: '/run/secrets/service-secret', PATH: '/bin' }, {}, 'u1')
   assert.equal(values.BYCLAW_CREDENTIAL_SECRET, undefined)
+  // Nor where the host keeps it.
+  assert.equal(values.BYCLAW_CREDENTIAL_SECRET_FILE, undefined)
   assert.equal(values.PATH, '/bin')
 })
 

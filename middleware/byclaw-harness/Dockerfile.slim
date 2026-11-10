@@ -361,6 +361,9 @@ COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/core/tools
 COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/core/tools/lib/ /workspace/packages/core/tools/lib/
 COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/subagent/tool-subagent/src/ /workspace/packages/subagent/tool-subagent/src/
 COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/subagent/tool-subagent/lib/ /workspace/packages/subagent/tool-subagent/lib/
+# The base image's workspace copy is unpatched; anything resolving the package from there must get the patched build too.
+COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/subagent/subagent/src/ /workspace/packages/subagent/subagent/src/
+COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/subagent/subagent/lib/ /workspace/packages/subagent/subagent/lib/
 COPY middleware/byclaw-harness/scripts/verify-by-framework-runtime.mjs /usr/local/lib/byclaw/verify-by-framework-runtime.mjs
 COPY --chown=byclaw:byclaw middleware/builtin/ /opt/byclaw/builtin/
 COPY --chown=byclaw:byclaw middleware/builtin/skills/ /opt/byclaw/dsh-managed/skills/

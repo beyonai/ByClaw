@@ -471,7 +471,7 @@ export function parseEnsureBody(body) {
 export function launchEnvironmentValues(processEnv, env, user, managed = false) {
   const values = {}
   // Launch values reach the tool sandbox, where model-generated commands could read the database password.
-  for (const [name, value] of Object.entries(processEnv)) if (!name.startsWith('BYCLAW_SESSION_DB_') && name !== 'BYCLAW_CREDENTIAL_SECRET' && typeof value === 'string' && (!managed || !/TOKEN|SECRET|API_KEY|USER_INFO|USER_CODE|ENTERPRISE_ID|USER_ID/i.test(name))) values[name] = value
+  for (const [name, value] of Object.entries(processEnv)) if (!name.startsWith('BYCLAW_SESSION_DB_') && !name.startsWith('BYCLAW_CREDENTIAL_SECRET') && typeof value === 'string' && (!managed || !/TOKEN|SECRET|API_KEY|USER_INFO|USER_CODE|ENTERPRISE_ID|USER_ID/i.test(name))) values[name] = value
   return { ...values, ...env, USER_CODE: user }
 }
 
@@ -1648,6 +1648,8 @@ async function main() {
   const credentialSecret = process.env.BYCLAW_CREDENTIAL_SECRET
   delete process.env.BYCLAW_CREDENTIAL_SECRET
   const config = readHostConfig(process.env)
+  // The database URL carries a password; the config holds it from here on, so nothing the host spawns inherits it.
+  delete process.env.BYCLAW_SESSION_DB_URL
   // Establish host defaults before evaluating any plugin modules.
   applyHostProcessDefaults(config, process.env)
   const runtimeStarted = performance.now()
