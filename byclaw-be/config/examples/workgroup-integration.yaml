@@ -1,0 +1,13 @@
+# 只作部署合并示例，不自动加载，不开启服务。
+# 若 hacu 身份已有权限，须在原 scopes 中追加 workgroup:read，不得覆盖已有值或放宽企业范围。
+byclaw:
+  integration:
+    security:
+      enabled: ${BYCLAW_INTEGRATION_SECURITY_ENABLED:false}
+      clients:
+        hacu:
+          source-system: hacu
+          secret: ${HACU_BYCLAW_TENANT_SECRET:}
+          scopes: [workgroup:read]
+          all-tenants: false
+          enterprise-ids: ["1"]

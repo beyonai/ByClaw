@@ -1,0 +1,67 @@
+# HACU 工作组完整消息事件独立示例；按部署流程显式加载，不启用其他示例订阅。
+byclaw:
+  hooks:
+    enabled: ${BYCLAW_HOOKS_ENABLED:false}
+    defaults:
+      connect-timeout: 2s
+      call-timeout: 5s
+    subscriptions:
+      # 已提交的完整群消息事实。与 HACU ByClawEventAuthenticator 使用同一原始字节 HMAC 协议。
+      hacu-workgroup-message:
+        enabled: ${HACU_WORKGROUP_EVENTS_ENABLED:false}
+        event: workgroup.message.created
+        event-version: 1
+        retry:
+          max-attempts: 3
+          delay: 2s
+          statuses: [429, 500, 502, 503, 504]
+          transport-errors: true
+        http:
+          method: POST
+          url: "${HACU_WORKGROUP_EVENTS_URL:https://hacu.example.com/hacuService/api/v1/integrations/byclaw/workgroup-events}"
+          headers:
+            Content-Type: application/json
+          auth:
+            type: hmac-sha256
+            client-id: "${HACU_WORKGROUP_EVENT_CLIENT_ID:byclaw-workgroup}"
+            secret: "${HACU_WORKGROUP_EVENT_SECRET:}"
+            separator: "\n"
+            canonical-fields:
+              - value: BYCLAW-HMAC-SHA256-V1
+              - from: request.method
+              - from: request.path
+              - from: request.query
+              - from: request.bodySha256
+              - from: request.timestamp
+              - from: request.nonce
+              - from: auth.clientId
+            headers:
+              X-ByClaw-Client-Id:
+                from: auth.clientId
+              X-ByClaw-Timestamp:
+                from: request.timestamp
+              X-ByClaw-Nonce:
+                from: request.nonce
+              X-ByClaw-Signature:
+                from: signature
+          body:
+            eventId:
+              from: event.id
+            eventType:
+              from: event.type
+            version:
+              from: event.version
+            occurredAtEpochSeconds:
+              from: event.occurredAtEpochSeconds
+            enterpriseId:
+              from: data.enterpriseId
+            groupId:
+              from: data.groupId
+            messageId:
+              from: data.messageId
+            senderId:
+              from: data.senderId
+            senderType:
+              from: data.senderType
+            recipientIds:
+              from: data.recipientIds

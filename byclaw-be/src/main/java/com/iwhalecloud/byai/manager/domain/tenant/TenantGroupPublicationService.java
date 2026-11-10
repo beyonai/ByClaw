@@ -99,6 +99,7 @@ public class TenantGroupPublicationService {
         created.put("files", files);
         created.put("kind", "TASK_RESULT");
         created.put("creatorId", task.path("targetAgentId").asText());
+        created.put("speaker", Map.of("type", "AGENT", "agentId", task.path("targetAgentId").asText()));
         created.put("resourceList", parsed.resourceList());
         events.publishTenant(tenant, Long.valueOf(groupId), created);
         return result;

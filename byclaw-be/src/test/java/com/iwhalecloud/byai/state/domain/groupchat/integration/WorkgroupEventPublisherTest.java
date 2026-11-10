@@ -1,4 +1,4 @@
-package com.iwhalecloud.byai.state.domain.mobilepush;
+package com.iwhalecloud.byai.state.domain.groupchat.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Set;
 
 import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.WorkgroupMessageEvents;
 import com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
@@ -23,16 +24,16 @@ import com.iwhalecloud.byai.state.domain.ws.manager.ChannelManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
-class MobilePushPublisherTest {
+class WorkgroupEventPublisherTest {
     @Test
-    void offlineMembersAreNotifiedForSharedAndTenantMessagesWithoutChangingBroadcastResult() {
+    void sharedAndTenantFactsIncludeOfflineRecipientsWithoutChangingSocketResults() {
         SessionMemberService members = mock(SessionMemberService.class);
         ChannelManager channels = mock(ChannelManager.class);
         SessionService sessions = mock(SessionService.class);
-        MobilePushService push = mock(MobilePushService.class);
+        WorkgroupMessageEvents messageEvents = mock(WorkgroupMessageEvents.class);
         GroupChatEventPublisher publisher = new GroupChatEventPublisher(members, channels);
         ReflectionTestUtils.setField(publisher, "sessionService", sessions);
-        ReflectionTestUtils.setField(publisher, "mobilePush", push);
+        ReflectionTestUtils.setField(publisher, "messageEvents", messageEvents);
         ByaiSession group = new ByaiSession();
         group.setEnterpriseId(7L);
         ByaiSessionMember member = new ByaiSessionMember();
@@ -42,12 +43,37 @@ class MobilePushPublisherTest {
         when(channels.getChannels(22L)).thenReturn(Set.of());
         JSONObject event = new JSONObject(Map.of("event", "MESSAGE_CREATED", "sessionId", "30", "messageId", "40"));
         assertThat(publisher.publish(30L, event, null)).isZero();
-        verify(push).notifyMembers(7, event, List.of(22L));
+        verify(messageEvents).committed(7, event, List.of(22L));
         assertThat(publisher.publishTenantMembers(new TenantRequestContext(22, 8, "MEMBER"), event,
             List.of(Map.of("memObjType", "USER", "memObjId", "22"),
                 Map.of("memObjType", "AGENT", "memObjId", "23")))).isZero();
-        verify(push).notifyMembers(8, event, List.of(22L));
-        doThrow(new IllegalStateException("executor unavailable")).when(push).notifyMembers(anyLong(), any(), any());
+        verify(messageEvents).committed(8, event, List.of(22L));
+        doThrow(new IllegalStateException("executor unavailable")).when(messageEvents).committed(anyLong(), any(), any());
         assertThat(publisher.publish(30L, event, null)).isZero();
     }
+    @Test
+    void forwardSocketFailureCannotSuppressAlreadyCommittedFact() {
+        var channels = mock(ChannelManager.class);
+        var publisher = new GroupChatEventPublisher(mock(SessionMemberService.class), channels);
+        var messageEvents = mock(WorkgroupMessageEvents.class);
+        ReflectionTestUtils.setField(publisher, "messageEvents", messageEvents);
+        var failing = new io.netty.channel.embedded.EmbeddedChannel(new io.netty.channel.ChannelOutboundHandlerAdapter() {
+            @Override
+            public void write(io.netty.channel.ChannelHandlerContext context, Object message, io.netty.channel.ChannelPromise promise) {
+                io.netty.util.ReferenceCountUtil.release(message);
+                promise.setFailure(new IllegalStateException("test transport failure"));
+            }
+        });
+        failing.attr(com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_ENTERPRISE_ID).set("7");
+        when(channels.getChannels(22L)).thenReturn(Set.of(failing));
+        var event = new JSONObject(Map.of("event", "MESSAGE_CREATED", "sessionId", "30", "messageId", "40"));
+        try {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> publisher.publishForwardMembers(7, List.of(22L), event))
+                .hasMessage("FORWARD_DELIVERY_UNAVAILABLE");
+            verify(messageEvents).committed(7, event, List.of(22L));
+        } finally {
+            failing.finishAndReleaseAll();
+        }
+    }
+
 }

@@ -22,21 +22,6 @@ import lombok.extern.slf4j.Slf4j;
 @EnableAsync
 public class AsyncConfig {
 
-    /** 手机提醒仅保留有限的内存等待，满载拒绝，不能在聊天线程执行远端推送。 */
-    @Bean("mobilePushExecutor")
-    public Executor mobilePushExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(1);
-        executor.setMaxPoolSize(1);
-        executor.setQueueCapacity(64);
-        executor.setThreadNamePrefix("mobile-push-");
-        configureContextPropagation(executor);
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
-        executor.setWaitForTasksToCompleteOnShutdown(false);
-        executor.initialize();
-        return executor;
-    }
-
     /** Optional model-generated titles must never run on a chat request thread under load. */
     @Bean("sessionTitleExecutor")
     public Executor sessionTitleExecutor() {

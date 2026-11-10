@@ -133,6 +133,25 @@ class InternalServiceAuthenticationTest {
         mvc.perform(builder).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
             .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string("HACU"));
     }
+    @Test void workgroupReadsRequireExactReadScopeAndTenantBoundary() {
+        String path = "/internal/v1/tenants/42/workgroups/30/messages/40/access/22";
+        assertEquals("workgroup:read", InternalServiceRoutes.scope("GET", path));
+        assertEquals("workgroup:read", InternalServiceRoutes.scope("GET", "/internal/v1/tenants/42/workgroups/30/members/22"));
+        assertEquals("workgroup:read", InternalServiceRoutes.scope("GET", "/internal/v1/tenants/42/accounts/22/workgroup-unread"));
+        assertFalse(InternalServiceRoutes.matches("POST", path));
+        assertFalse(InternalServiceRoutes.matches("GET", path + "/extra"));
+        var verifier = verifier();
+        var signed = request("workgroup-read-nonce-123");
+        signed.setRequestURI(path);
+        signed.removeHeader("X-ByClaw-Signature");
+        signed.addHeader("X-ByClaw-Signature", InternalServiceAuthenticator.sign(
+            "test-only-signing-material-at-least-32-bytes", InternalServiceAuthenticator.canonical(signed, new byte[0])));
+        assertEquals(403, assertThrows(InternalServiceSecurityException.class,
+            () -> verifier.authenticate(signed, new byte[0])).status());
+        properties.getClients().get("hacu").setScopes(Set.of("workgroup:read"));
+        assertEquals("hacu", verifier.authenticate(signed, new byte[0]).clientId());
+    }
+
     @Test void routesDoNotCaptureExistingNodeInternalEndpoints() {
         assertTrue(InternalServiceRoutes.matches("GET", "/internal/v1/commands/by-request"));
         assertEquals("tenant:manage", InternalServiceRoutes.scope("POST", "/internal/v1/platform-operations"));
