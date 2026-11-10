@@ -213,8 +213,7 @@ public class TenantSandboxService {
             reason = reason == null || reason.isBlank() ? "tenant Node launch failed"
                 : reason.replace(redisPassword, "[redacted]").replace(internalToken, "[redacted]");
             reason = reason.substring(0, Math.min(reason.length(), 500));
-            recordMapper.updateStatusToFailed(record.getId(), reason, new Date(), 0);
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, reason);
+            throw recordLaunchFailure(record, response, reason, providerRequestKey);
         }
         SandboxLaunchData data = response.getData();
         if (recordMapper.updateLaunchSuccess(record.getId(), data.getSandboxId(), data.getEndpoint(),
@@ -454,8 +453,7 @@ public class TenantSandboxService {
             String failureReason = providerReason == null || providerReason.isBlank()
                 ? "tenant database sandbox launch failed" : providerReason.replace(dbPassword, "[redacted]");
             failureReason = failureReason.substring(0, Math.min(failureReason.length(), 500));
-            recordMapper.updateStatusToFailed(record.getId(), failureReason, new Date(), 0);
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, failureReason);
+            throw recordLaunchFailure(record, response, failureReason, providerRequestKey);
         }
         SandboxLaunchData data = response.getData();
         int updated = recordMapper.updateLaunchSuccess(record.getId(), data.getSandboxId(), data.getEndpoint(),
@@ -464,6 +462,26 @@ public class TenantSandboxService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.sandbox.changedDuringLaunch");
         }
         return new TenantSandboxView(record.getId(), data.getSandboxId(), data.getEndpoint());
+    }
+
+    private ResponseStatusException recordLaunchFailure(SsSandboxRecord record, SandboxResponse<?> response,
+                                                         String reason, String providerRequestKey) {
+        int updated = recordMapper.updateStatusToFailed(record.getId(), reason, new Date(), 0);
+        // Platform returns this exact response during template resolution, before it can create a sandbox.
+        if (updated == 1 && providerRequestKey != null && response != null
+                && response.getCode() == SandboxResponse.RESPONSE_ERROR && response.getData() == null
+                && TemplatePreparingException.CODE.equals(response.getMessage())) {
+            return new TemplatePreparingException();
+        }
+        return new ResponseStatusException(HttpStatus.BAD_GATEWAY, reason);
+    }
+
+    public static final class TemplatePreparingException extends ResponseStatusException {
+        public static final String CODE = "SANDBOX_TEMPLATE_PREPARING";
+
+        private TemplatePreparingException() {
+            super(HttpStatus.SERVICE_UNAVAILABLE, CODE);
+        }
     }
 
     /** Only a complete provider inventory and exact ownership can authorize command recovery. */
