@@ -22,6 +22,35 @@ jest.mock('@/models/common/useAppStore', () => {
   return { __esModule: true, default: store };
 });
 
+it('shows a sandbox tool card desktop action only when requested', () => {
+  const ref = { sandboxId: 'tool-sandbox', instance: 'vnc' };
+  act(() =>
+    useAppStore.setState({
+      sandboxesInfo: [
+        {
+          ...ref,
+          userCode: 'user',
+          sandboxType: 'tools',
+          status: 'RUNNING',
+          instanceEndpoints: { vnc: '/proxy/8081' },
+        },
+      ],
+    })
+  );
+  const tool = (title: string, input?: unknown) => (
+    <ToolCall
+      message={{ sessionId: 'chat' }}
+      messageListItemContent={{ substance: { title, input, status: '_DONE_' }, instanceRefs: [ref] }}
+    />
+  );
+  const view = render(tool('sandbox_acquire'));
+  expect(screen.queryByRole('button', { name: '查看桌面' })).not.toBeInTheDocument();
+  view.rerender(tool('sandbox_exec', { opts: {} }));
+  expect(screen.queryByRole('button', { name: '查看桌面' })).not.toBeInTheDocument();
+  view.rerender(tool('sandbox_exec', '{"opts":{"show_desktop":{}}}'));
+  expect(screen.getByRole('button', { name: '查看桌面' })).toBeInTheDocument();
+});
+
 it('opens a tool desktop inside its application without replacing the enclosing drawer', () => {
   sessionStorage.clear();
   useDesktopWorkspace.setState({ owners: {}, activeOwner: '', visible: false, panel: '', revision: 0 });

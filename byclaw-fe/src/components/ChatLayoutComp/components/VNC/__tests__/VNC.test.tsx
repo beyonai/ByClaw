@@ -73,6 +73,30 @@ test('shows the button when the latest tool message references a running desktop
   expect(await screen.findByTitle('远程桌面')).toBeInTheDocument();
 });
 
+test('offers a manual desktop only for a sandbox execution that requests it', async () => {
+  const refs = [{ sandboxId: 'a', instance: 'vnc' }];
+  const tool = (title: string, input: unknown) => ({
+    ...browserTool,
+    content: { instanceRefs: refs, substance: { title, input } },
+  });
+  const acquire = tool('sandbox_acquire', {});
+  const answer = {
+    ...browserAnswer,
+    messageList: [acquire, tool('sandbox_exec', { argv: ['wecom', 'contact', 'list'] })],
+  } as IMessage;
+  const view = render(<VNC sessionId="session" latestDigitalEmployeeMessage={answer} />);
+  expect(mockGetSandboxes).not.toHaveBeenCalled();
+
+  const requested = {
+    ...answer,
+    messageList: [acquire, tool('sandbox_exec', '{"opts":{"show_desktop":{}}}')],
+  } as IMessage;
+  view.rerender(<VNC sessionId="session" latestDigitalEmployeeMessage={requested} />);
+  fireEvent.click(await screen.findByTitle('远程桌面'));
+  expect(mockSelect).toHaveBeenCalledWith(owner, refs[0]);
+  expect(mockOpen).toHaveBeenCalledWith();
+});
+
 test.each([
   { ...runningSandbox('a'), status: 'STOPPED' },
   { ...runningSandbox('a'), instanceEndpoints: {} },

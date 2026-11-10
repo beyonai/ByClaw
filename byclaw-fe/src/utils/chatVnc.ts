@@ -213,15 +213,25 @@ const hasBrowserInput = (input: Record<string, unknown> | undefined) => {
 const isBrowserTool = (title: unknown) =>
   typeof title === 'string' && (title.includes('jarvis_run_flow') || title.includes('browser'));
 
+function requestsSandboxDesktop(input: unknown): boolean {
+  const showDesktop = parseObject(parseObject(input)?.opts)?.show_desktop;
+  return Boolean(showDesktop && typeof showDesktop === 'object' && !Array.isArray(showDesktop));
+}
+
+export function allowsDesktopEntry(tool: unknown): boolean {
+  const substance = parseObject(tool);
+  const title = substance?.title ?? tool;
+  if (title === 'sandbox_acquire') return false;
+  return title !== 'sandbox_exec' || requestsSandboxDesktop(substance?.input);
+}
+
 export function isDesktopOpeningToolMessage(message?: Partial<IMessageListItem> | null): boolean {
   if (String(message?.contentType) !== String(SSEMessageType.toolCall)) return false;
   const substance = parseObject(message?.content?.substance);
   if (substance?.title === 'sandbox_exec') {
-    const opts = parseObject(parseObject(substance.input)?.opts);
-    const showDesktop = opts?.show_desktop;
     return (
       substance.status === '_DONE_' &&
-      Boolean(showDesktop && typeof showDesktop === 'object' && !Array.isArray(showDesktop)) &&
+      requestsSandboxDesktop(substance.input) &&
       parseObject(substance.output)?.exitCode === 0
     );
   }

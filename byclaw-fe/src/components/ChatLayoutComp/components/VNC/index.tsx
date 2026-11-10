@@ -4,7 +4,7 @@ import { useRequest } from 'ahooks';
 import DesktopOutlined from '@ant-design/icons/DesktopOutlined';
 import useVncOpener from '@/hooks/useVncOpener';
 import useAppStore from '@/models/common/useAppStore';
-import { hasVncActivity } from '@/utils/chatVnc';
+import { allowsDesktopEntry, hasVncActivity } from '@/utils/chatVnc';
 import { desktopKey, listDesktops, normalizeInstanceRefs, resolveDesktop } from '@/utils/desktopInstances';
 import { registerDesktops, selectDesktop, useDesktopWorkspace } from '@/utils/desktopWorkspace';
 import type { IMessage } from '@/typescript/message';
@@ -34,7 +34,9 @@ export default function VNC({ sessionId, latestDigitalEmployeeMessage, ownerType
 
   const latest = latestDigitalEmployeeMessage;
   const refs = normalizeInstanceRefs(
-    [...(latest?.thinkList || []), ...(latest?.messageList || [])].flatMap((item) => item.content?.instanceRefs || [])
+    [...(latest?.thinkList || []), ...(latest?.messageList || [])]
+      .filter((item) => allowsDesktopEntry(item.content?.substance))
+      .flatMap((item) => item.content?.instanceRefs || [])
   );
   const checkKey =
     id && (refs.length || hasVncActivity(latest))

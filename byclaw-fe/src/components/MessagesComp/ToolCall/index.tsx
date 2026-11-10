@@ -1,3 +1,4 @@
+import { allowsDesktopEntry } from '@/utils/chatVnc';
 import useAppStore from '@/models/common/useAppStore';
 import { desktopKey, normalizeInstanceRefs, resolveDesktop } from '@/utils/desktopInstances';
 import useGlobal from '@/hooks/useGlobal';
@@ -97,7 +98,9 @@ const ToolCall: ToolCallComponent = (props) => {
   const { title, input, output, status, description } =
     typeof substance === 'string' ? ({ title: substance } as IToolCallSubstance) : substance || {};
 
-  const instanceRefs = normalizeInstanceRefs(props.messageListItemContent?.instanceRefs);
+  const instanceRefs = allowsDesktopEntry(substance)
+    ? normalizeInstanceRefs(props.messageListItemContent?.instanceRefs)
+    : [];
   const desktopRefsKey = instanceRefs.map(desktopKey).join();
   const canCheckDesktop = Boolean(props.message?.sessionId && instanceRefs.length);
   const directory = useAppStore((state) => (canCheckDesktop ? state.sandboxesInfo : undefined));
