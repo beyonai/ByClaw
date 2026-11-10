@@ -307,3 +307,8 @@ SET connector_name = '火山数字人口播视频',
     status_cd = '00A',
     update_time = CURRENT_TIMESTAMP
 WHERE connector_code = 'volcengine-digital-human';
+
+-- 禁用已下线且指向私网镜像的沙箱规格，防止外部部署登录时循环拉取失败 (#286)
+UPDATE byai.sandbox_service_spec
+SET enabled = 0
+WHERE service_key IN ('uiagent', 'byclaw-code-agent');
