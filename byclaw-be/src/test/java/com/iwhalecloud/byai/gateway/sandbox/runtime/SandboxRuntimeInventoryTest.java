@@ -52,6 +52,31 @@ class SandboxRuntimeInventoryTest {
         assertThat(inventory(null, local).current()).containsExactlyEntriesOf(Map.of("legacy-id", "RUNNING"));
     }
 
+    @Test void reusesASnapshotForNearbyQueries() {
+        SandboxRuntimeProvider local = mock(SandboxRuntimeProvider.class);
+        when(local.listSandboxesByMetadata(Map.of(), 1, 500)).thenReturn(SandboxRuntimePage.<SandboxRuntimeInstance>builder()
+            .items(List.of(SandboxRuntimeInstance.builder().sandboxId("sandbox").state("Running").build()))
+            .hasNext(false).build());
+        var inventory = inventory(null, local);
+
+        assertThat(inventory.currentForManagement()).containsEntry("sandbox", "RUNNING");
+        assertThat(inventory.currentForManagement()).containsEntry("sandbox", "RUNNING");
+        verify(local, times(1)).listSandboxesByMetadata(Map.of(), 1, 500);
+    }
+
+    @Test void currentInventoryObservesProviderChangesWithoutWaitingForTheManagementCache() {
+        SandboxRuntimeProvider local = mock(SandboxRuntimeProvider.class);
+        when(local.listSandboxesByMetadata(Map.of(), 1, 500)).thenReturn(
+            SandboxRuntimePage.<SandboxRuntimeInstance>builder()
+                .items(List.of(SandboxRuntimeInstance.builder().sandboxId("sandbox").state("Running").build()))
+                .hasNext(false).build(),
+            SandboxRuntimePage.<SandboxRuntimeInstance>builder().items(List.of()).hasNext(false).build());
+        var inventory = inventory(null, local);
+
+        assertThat(inventory.current()).containsEntry("sandbox", "RUNNING");
+        assertThat(inventory.current()).isEmpty();
+    }
+
     private SandboxRuntimeInventory inventory(PlatformRemoteGateway gateway, SandboxRuntimeProvider runtime) {
         var beans = new DefaultListableBeanFactory();
         if (gateway != null) beans.registerSingleton("gateway", gateway);

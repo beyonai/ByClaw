@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.gateway.sandbox.runtime;
 
 import com.iwhalecloud.byai.gateway.sandbox.platform.PlatformRemoteGateway;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -11,8 +12,16 @@ import org.springframework.stereotype.Component;
 @Component
 public class SandboxRuntimeInventory {
     private static final Logger LOG = LoggerFactory.getLogger(SandboxRuntimeInventory.class);
+    private static final long SNAPSHOT_TTL_NANOS = TimeUnit.SECONDS.toNanos(5);
     private final ObjectProvider<PlatformRemoteGateway> gateways;
     private final ObjectProvider<SandboxRuntimeProvider> runtimes;
+    private volatile Snapshot snapshot;
+
+    private record Snapshot(Map<String, String> states, long expiresAt) {
+        boolean isFresh() {
+            return expiresAt - System.nanoTime() > 0;
+        }
+    }
 
     public SandboxRuntimeInventory(ObjectProvider<PlatformRemoteGateway> gateways,
                                    ObjectProvider<SandboxRuntimeProvider> runtimes) {
@@ -21,10 +30,29 @@ public class SandboxRuntimeInventory {
     }
 
     public Map<String, String> current() {
+        return readInventory(false);
+    }
+
+    public Map<String, String> currentForManagement() {
+        Snapshot observed = snapshot;
+        if (observed != null && observed.isFresh()) return observed.states();
+        synchronized (this) {
+            observed = snapshot;
+            if (observed != null && observed.isFresh()) return observed.states();
+            return readInventory(true);
+        }
+    }
+
+    private Map<String, String> readInventory(boolean cacheForManagement) {
         try {
-            return load();
+            Map<String, String> states = load();
+            if (cacheForManagement) {
+                states = Map.copyOf(states);
+                snapshot = new Snapshot(states, System.nanoTime() + SNAPSHOT_TTL_NANOS);
+            }
+            return states;
         } catch (RuntimeException failure) {
-            LOG.warn("Active sandbox inventory unavailable; returning an empty management list ({})",
+            LOG.warn("Active sandbox inventory unavailable; returning an empty snapshot ({})",
                 failure.getClass().getSimpleName());
             return Map.of();
         }
@@ -41,7 +69,9 @@ public class SandboxRuntimeInventory {
             if (remote) {
                 Object value = gateway.call("sandbox", "runtime/list", Map.of("pageNo", pageNo, "pageSize", 500));
                 if (!(value instanceof Map<?, ?> snapshot)) throw new IllegalStateException("Invalid runtime snapshot");
-                if (Boolean.FALSE.equals(snapshot.get("available"))) return Map.of();
+                if (Boolean.FALSE.equals(snapshot.get("available"))) {
+                    throw new IllegalStateException("Runtime inventory is unavailable");
+                }
                 Object selected = snapshot.get("provider");
                 if (!(selected instanceof String) || (provider != null && !provider.equals(selected))) {
                     throw new IllegalStateException("Runtime changed while reading inventory");

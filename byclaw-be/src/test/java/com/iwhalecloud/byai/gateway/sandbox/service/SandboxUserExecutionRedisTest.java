@@ -63,7 +63,14 @@ class SandboxUserExecutionRedisTest {
         List<String> locks = List.of(lock(mappedUser, "user-tools"), lock(defaultUser, "configured-tools"),
             lock(independentUser, "byclaw-dsh"));
         SandboxService service = localService(mappedUser);
+        String mappedPreference = "byai:sandbox:preferred-service-key:" + mappedUser;
+        String defaultPreference = "byai:sandbox:preferred-service-key:" + defaultUser;
         try {
+            redis.opsForValue().set(mappedPreference, "user-tools", Duration.ofMinutes(2));
+            redis.opsForValue().set(defaultPreference, "configured-tools", Duration.ofMinutes(2));
+            assertThat(service.getPreferredServiceKey(mappedUser)).isEqualTo("user-tools");
+            assertThat(service.getPreferredServiceKey(defaultUser)).isEqualTo("configured-tools");
+            assertThat(service.getPreferredServiceKey(independentUser)).isNull();
             redis.opsForValue().set(marker(mappedUser), "shared-host-a", Duration.ofMinutes(2));
             redis.opsForValue().set(marker(defaultUser), "shared-host-b", Duration.ofMinutes(2));
 
@@ -88,6 +95,8 @@ class SandboxUserExecutionRedisTest {
         }
         finally {
             // Individual deletes are valid even when the random user keys occupy different cluster slots.
+            redis.delete(mappedPreference);
+            redis.delete(defaultPreference);
             markers.forEach(redis::delete);
             locks.forEach(redis::delete);
             redis.delete(lock(mappedUser, "byclaw-dsh"));

@@ -18,3 +18,7 @@ These are starting sizes, not benchmarked maxima. Fixed MicroVM templates use th
 Actual resource settings remain explicit administrative configuration: inspect the service's `serviceType` and `defaultProfileKey`, save its dedicated resource profile with `saveServiceProfile`, save the specification with `saveServiceSpec`, then rebuild its sandbox template. Applying presentation in the editor does not resize or release existing instances and does not modify profiles. Live deployments must validate real task execution before adopting lower limits.
 
 Cover files are bundled self-contained SVG assets under `public/tool-sandbox/covers/`. The apply action resolves them against the deployment's runtime public path; it needs the updated frontend deployed. The manifest's `coverImage` values are relative asset names, so administrative scripts must resolve them to that same public path before saving metadata.
+
+In the template editor, local PNG, JPEG and WebP covers up to 512 KB are stored as Base64 data URLs. Image URLs and site paths are stored as references. Save becomes available after the file finishes reading. If the same metadata is changed in both the form and Spec JSON, the changed form field takes precedence.
+
+The configuration drawer loads profiles and health settings when their tabs are first opened. The user inventory requests preferred service keys with the current page. The management API shares a five-second provider status snapshot across nearby searches and filters.
