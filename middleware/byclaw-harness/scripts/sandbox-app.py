@@ -64,7 +64,8 @@ location = {prefix}/_gateway_health {{ default_type text/plain; return 200 '{app
 location ^~ {prefix}/ {{
   proxy_pass http://127.0.0.1:{app['port']}/;
   proxy_http_version 1.1;
-  proxy_set_header Host $host;
+  proxy_set_header Host 127.0.0.1:{app['port']};
+  proxy_set_header X-Forwarded-Host $host;
   proxy_set_header Upgrade $http_upgrade;
   proxy_set_header Connection $app_connection;
   proxy_set_header X-Forwarded-Proto $scheme;

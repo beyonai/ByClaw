@@ -90,6 +90,7 @@ class SandboxAppTests(unittest.TestCase):
         config = app.route_config(result)
         self.assertIn('proxy_set_header Upgrade $http_upgrade', config)
         self.assertIn('proxy_buffering off', config)
+        self.assertIn('proxy_set_header Host 127.0.0.1:7860', config)
         self.assertIn('"./api/upload/limits"', config)
         self.assertNotIn('sub_filter', app.route_config(dict(result, name='demo')))
 

@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from urllib.parse import urlsplit
 
 SOURCE = Path('/opt/easel-source')
 WORKSPACE_ROOT = Path('/by')
@@ -319,6 +320,13 @@ def main() -> int:
     os.environ['CODEX_HOME'] = str(WORKSPACE_ROOT / '.codex')
     os.environ['EASEL_PROJECT_ROOT'] = str(WORKSPACE)
     os.environ['PYTHONPATH'] = str(WORKSPACE)
+    preview = urlsplit(os.environ.get('BYCLAW_APP_PUBLIC_BASE', ''))
+    if preview.scheme in ('http', 'https') and preview.netloc:
+        origins = [value for value in os.environ.get('EASEL_EXTRA_ORIGINS', '').split(',') if value]
+        origin = f'{preview.scheme}://{preview.netloc}'
+        if origin not in origins:
+            origins.append(origin)
+        os.environ['EASEL_EXTRA_ORIGINS'] = ','.join(origins)
     os.environ['PATH'] = str(VENV / 'bin') + ':' + os.environ.get('PATH', '')
     log('Easel source and image dependencies ready')
     subprocess.run(['/usr/local/bin/sandbox-app', 'init'], check=True)
