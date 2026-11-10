@@ -34,7 +34,10 @@ test('missing connector config renders a frontend action and blocks every provid
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async () => { calls++; throw new Error('unexpected network'); });
   const fs = filesystem();
-  fs.lstat = async () => undefined;
+  fs.lstat = async (path) => {
+    fs.reads.push(['lstat', path]);
+    return path === '/by/.connector-auth/.model/video.json' ? undefined : { type: 'file', size: 256 };
+  };
   const { tools } = mount(fs);
   const check = tools.get('digital_human_check_configuration');
   const result = await check.execute({});
@@ -58,6 +61,7 @@ test('missing connector config renders a frontend action and blocks every provid
     });
   }
   assert.equal(calls, 0);
+  assert.deepEqual(fs.reads, Array.from({ length: 5 }, () => ['lstat', '/by/.connector-auth/.model/video.json']));
 });
 
 test('standalone registration, description budgets, closed schemas and no credential parameters', () => {
@@ -75,7 +79,7 @@ test('standalone registration, description budgets, closed schemas and no creden
 });
 
 test('reads live config only via ctx.fs with opaque targets and a bounded byte read', async () => {
-  assert.equal(DEFAULT_CONFIG_PATH, '/by/.connector-auth/.model/digital-human.json');
+  assert.equal(DEFAULT_CONFIG_PATH, '/by/.connector-auth/.model/video.json');
   const fs = filesystem();
   assert.deepEqual(await readConfiguration(fs, DEFAULT_CONFIG_PATH), { ...credentials, securityToken: undefined });
   assert.deepEqual(fs.reads[0], ['lstat', DEFAULT_CONFIG_PATH]);
@@ -239,10 +243,11 @@ test('signing covers payload, action, date and optional security token', () => {
 
 test('package and sources have no other plugin dependencies or host filesystem bypass', async () => {
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.deepEqual(Object.keys(pkg.dependencies ?? {}), ['ali-oss']);
+  assert.deepEqual(Object.keys(pkg.dependencies ?? {}), ['@byclaw/by-framework']);
   for (const name of await readdir(new URL('../src/', import.meta.url))) {
     const source = await readFile(new URL(`../src/${name}`, import.meta.url), 'utf8');
-    assert.doesNotMatch(source, /node:fs|from ['"]@byclaw|byclaw\/session-setup/u);
-    if (name !== 'oss.js') assert.doesNotMatch(source, /process\.env/u);
+    assert.doesNotMatch(source, /node:fs|byclaw\/session-setup/u);
+    if (name !== 'backend.js') assert.doesNotMatch(source, /from ['"]@byclaw/u);
+    if (!['backend.js', 'index.js'].includes(name)) assert.doesNotMatch(source, /process\.env/u);
   }
 });

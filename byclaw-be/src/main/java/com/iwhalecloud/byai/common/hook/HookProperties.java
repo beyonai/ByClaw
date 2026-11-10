@@ -9,12 +9,10 @@ import java.util.Map;
 import java.util.Set;
 import lombok.Getter;
 import lombok.Setter;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 
-/** Deployment-owned subscriptions; bound only when outbound hooks are enabled. */
+/** 数据库拥有的订阅启动快照；仅在 Hook 开启时绑定订阅和凭据。 */
 @Getter
 @Setter
-@ConfigurationProperties(prefix = "byclaw.hooks", ignoreUnknownFields = false)
 public class HookProperties {
     private boolean enabled;
     private Defaults defaults = new Defaults();

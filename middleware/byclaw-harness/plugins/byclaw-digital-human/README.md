@@ -1,6 +1,6 @@
 # 火山单图音频驱动 DSH 插件
 
-独立 Cordis/DSH 插件，使用宿主 `tools`、`fs` 核心服务，以及阿里云 `ali-oss` SDK 生成 OSS V4 签名。
+独立 Cordis/DSH 插件，使用宿主 `tools`、`fs` 核心服务，以及 `@byclaw/by-framework` 的 Redis 客户端工厂。
 没有 `byclaw-integration`、`byclaw-image`、`byclaw-tts` 或共享媒体插件依赖，也不监听 ByClaw 专属事件。
 适配已核对的 DSH `0.2.1-rc.2` 文件系统接口；不安装或改动正在运行的 DSH。
 
@@ -12,11 +12,12 @@
 火山配置和本地素材通过插件上下文每次查找的 `ctx.get('fs')`（同一个 `ctx.fs` 核心服务）读取，
 支持文件实际位于远程工具环境的宿主。不会解析 `FsTarget.targetKey` 或使用 `node:fs`。
 
-部署配置仅允许 `configPath`，默认 `/by/.connector-auth/.model/digital-human.json`，
+部署配置允许 `configPath` 与当前用户身份 `userCode`。`configPath` 默认 `/by/.connector-auth/.model/video.json`，
+与后端数字人连接器生成路径一致；文件不存在时直接返回连接器未配置提示，不尝试其他文件名。
 与图片的 `.model/image.json`、语音的 `.model/tts.json` 使用同一目录约定。
 此路径属于用户连接器投影，必须由宿主隔离到当前用户；多租户宿主应将插件挂载到用户作用域，
 并提供该用户的文件系统能力与投影路径，不要在全局工具作用域暴露用户凭据。
-火山 AK/SK 由此投影提供。OSS 凭据由 DSH 宿主进程的环境变量提供。
+火山 AK/SK 由此投影提供；本地素材发布使用 Redis 中当前用户的后端登录态。
 
 ## 用户连接器与投影契约
 
@@ -79,7 +80,7 @@
 缺文件、符号链接、超限、非法 JSON、禁用、字段不匹配以及已知 `FS_*` 权限错误分别返回安全原因；
 未知异常不携带原始错误文本。创建、查询工具的配置异常及供应商鉴权失败也返回上述消息标记，
 供前端识别并显示“需要配置火山数字人视频连接器”按钮；配置完成前应停止重试。
-OSS 环境变量配置错误不使用此连接器标记，仍由部署环境配置。
+后端登录态或 Artifact 上传错误不使用此连接器标记；请检查当前用户登录、服务发现及后端部署配置。
 更新插件后须通过宿主重载插件或重启，使运行进程加载新代码；`--dump-config` 正确不代表运行中代码已更新。
 
 `mode` 为 `normal`、`loopy`、`loopyb`，全过程须一致，形象 ID 可以配合不同音频复用。
@@ -91,25 +92,46 @@ OSS 环境变量配置错误不使用此连接器标记，仍由部署环境配�
 应先核对供应商记录，不要直接重新提交。查询错误只需稍后查原任务。单次请求最多 60 秒，转发调用方取消信号。
 
 URL 入参为火山可访问的 HTTP(S) 地址，拒绝 data URL、内网 IP 和带用户名密码的 URL。
-本地路径入参先经 `ctx.fs` 读取，再上传 OSS。插件校验路径、格式标记和大小，火山最终校验素材内容。
+本地路径入参先经 `ctx.fs` 读取，再通过后端 Artifact 接口发布为限时公开访问的文件。插件校验路径、格式标记和大小，火山最终校验素材内容。
 
 普通模式最长音频 180 秒；灵动模式宠物 90 秒、真人 180 秒；大画幅灵动 45 秒，不支持宠物。
 请使用完整清晰无遮挡的正脸图片，避免多人、偏转、张嘴过大及有效人脸区域过小。
 
-## OSS 本地素材上传
+## Artifact 本地素材上传
 
-在启动 DSH 的进程环境中配置以下变量，已有运行实例需要重新启动以继承环境。
+`imagePath` / `audioPath` 保持原接口，不需要修改 `video-creation` Skill。插件先用 `ctx.fs` 读取媒体，
+再以 multipart 调用 `POST /open/api/v1/artifacts`（包含部署的后端前缀），使用 `publishMode=FILE`、
+`expiresInSeconds=86400`。成功后仅将 `previewUrl` 传给火山；当前用户 Token 和 Artifact 管理密钥均不传给供应商。
+不再使用 OSS，也不读取 `OSS_*` 环境变量。
 
-```bash
-export OSS_BUCKET='your-bucket'
-export OSS_REGION='cn-beijing'
-export OSS_ACCESS_KEY_ID='<阿里云 AK>'
-export OSS_ACCESS_KEY_SECRET='<阿里云 SK>'
-# 使用 STS 临时凭据时设置 OSS_SESSION_TOKEN
-```
+### 当前用户与后端地址
 
-`OSS_REGION` 填 Bucket 的实际地域，支持 `cn-beijing` 或 `oss-cn-beijing` 格式。
-使用 `imageUrl` / `audioUrl` 时无需 OSS 配置，`digital_human_check_configuration` 检查的是火山连接器投影。
+按 `project-cloud-knowledge` 的登录态读取规则，每次上传都从 Redis 获取最新 Token，不缓存、不回退宿主 `BEYOND_TOKEN`：
+
+1. 使用受信任的插件配置 `userCode`；单用户部署未配置时使用启动环境的 `USER_CODE`。
+2. `GET SHARE_BFM_USER_CODE_{userCode}` 得到内部用户 ID。
+3. `HGET user:{内部用户ID}:login:auth Beyond-Token` 得到当前登录 Token。
+4. 上传时发送 `Beyond-Token` 和 `X-User-Code`。这些值不作为模型可见参数。
+
+共享宿主通过 `byclaw-multi-host.mjs` 为每个用户的插件实例注入独立 `userCode`，不使用共享进程中的其他用户身份。
+自建多用户宿主也必须按此方式配置；单用户启动环境可设置 `USER_CODE`。
+
+后端地址按以下顺序解析：`BYCLAW_DSH_BASE_URL` → `BYAI_SERVICE_BASE_URL` → Redis 中
+`BE_DOMAINNAME`（默认 `ByaiService`）对应的服务实例。显式地址须包含实际 context path，例如 `/byaiService`；
+仅配置 origin 时使用 `/byaiService`。不会回退到硬编码的公网域名。
+
+Redis 复用项目 `@byclaw/by-framework` 的 `createRedis`，支持单机和 Cluster。连接由本次读取独立持有并关闭；
+只执行单键 GET/HGET/HGETALL，不更改既有键名、不运行跨槽脚本。使用现有 `REDIS_HOST`、`REDIS_PORT`、
+`REDIS_USERNAME`、`REDIS_PASSWORD`、`REDIS_DATABASE` 配置；集群使用 `REDIS_MODE=cluster` 和
+`REDIS_CLUSTER_HOST` / `REDIS_CLUSTER_NODES`。沿用框架要求：集群部署须已启用 `REDIS_KEY_SCHEMA_VERSION=v2`，
+插件不会自动切换键版本或迁移部署数据。Redis 读取最多 5 秒，失败只返回安全错误。
+
+### 公开访问与素材边界
+
+后端须配置 `ARTIFACT_PUBLIC_BASE_URL`，使返回的 `previewUrl` 是火山可直接访问的公网 HTTPS URL，
+并放通 `/artifact-preview/` 的 GET/HEAD。插件拒绝相对地址、内网地址、非 HTTPS URL、非 READY/FILE 结果，
+以及剩余有效期不足一小时的响应。请求的 24 小时公开期限须覆盖任务排队和实际读取时间；
+过期链接不可继续用于新任务。逻辑过期及物理回收由后端 Artifact 生命周期管理，不由插件定时删除。
 
 `imagePath` 支持 JPG/JPEG/PNG（10 MiB 以内），`audioPath` 支持 MP3/WAV（32 MiB 以内）。
 相对路径以会话初始工作区为基准，绝对路径也必须在该工作区内。读取需要支持 `readBytes` 的 `ctx.fs` 提供者。
@@ -117,9 +139,9 @@ export OSS_ACCESS_KEY_SECRET='<阿里云 SK>'
 例如，创建形象时传 `{"mode":"normal","imagePath":"assets/portrait.jpg"}`。获得形象 ID 后，提交视频生成时传
 `{"mode":"normal","resourceId":"your-resource-id","audioPath":"assets/voice.mp3"}`。
 
-插件把素材上传到 `digital-human/` 下的随机对象键。PUT 使用有效期 600 秒的 V4 签名，设置对象 ACL 为 `public-read`，
-火山接收无签名的公网 HTTPS 对象 URL。OSS 全局与 Bucket 的「阻止公共访问」必须允许此操作，上传身份需具备相应权限。
-对象公开读权限和存留时间由 OSS 管理。上传失败时工具不会提交火山任务。
+上传最多等待 60 秒，禁止重定向、自动重试；响应 JSON 最多 1 MiB。上传失败、取消或结果未知时不提交火山任务。
+响应错误不回显后端正文、Token、管理密钥或原始异常。URL 入参及查询工具不访问后端登录态或发布 Artifact；
+`digital_human_check_configuration` 仍只检查火山连接器投影，不证明后端发布或火山调用可用。
 
 ## 验证
 
@@ -131,7 +153,9 @@ DSH_NODE_MODULES=/absolute/path/to/dsh/node_modules node --test tests/runtime.te
 ```
 
 本地测试使用脱敏响应及模拟网络，不证明火山真实账号权限、素材接受率、模型工具选择或线上平台兼容性。
-测试使用 SDK 实际签名和模拟 OSS/火山网络响应。安装依赖使用国内 npm 镜像，运行时从已安装的依赖加载 SDK。
+测试使用模拟 Artifact/火山网络响应。安装依赖使用国内 npm 镜像，运行时不下载依赖。
+单机与真实 Cluster 验证可显式启用 `DIGITAL_HUMAN_REDIS_TEST_IMAGE=redis:7-alpine npm test`；
+该镜像须已本地预置（测试禁止拉取），测试创建独立临时容器并在结束时清理。
 
 ## 官方协议依据
 
@@ -139,7 +163,6 @@ DSH_NODE_MODULES=/absolute/path/to/dsh/node_modules node --test tests/runtime.te
 - [视频生成](https://docs.volcengine.com/docs/intelligent-vision-services/call-step2-video-generation?lang=zh)
 - [入参图片规则](https://docs.volcengine.com/docs/intelligent-vision-services/imported-para-meter-image-support-rule-description?lang=zh)
 - [签名方法](https://docs.volcengine.com/docs/6369/67269)
-- [OSS Node.js SDK 预签名上传](https://help.aliyun.com/zh/oss/developer-reference/upload-objects-using-a-signed-url-generated-with-oss-sdk-for-node-js)
 - [DSH 源码](https://github.com/deepseek-ai/deepseek-harness)，对应 `packages/fs/fs` 与工具注册接口。
 
 接口为 `CVSubmitTask` / `CVGetResult`、版本 `2022-08-31`、Region `cn-north-1`、Service `cv`；

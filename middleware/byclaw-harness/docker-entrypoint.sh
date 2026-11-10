@@ -64,12 +64,65 @@ if [[ "${1:-}" == tools ]]; then
     exec "${tool_env_server}"
 fi
 
+# Heap ceiling (MiB) for the shared host: 3/4 of the memory this container may use, the rest left to its ssh,
+# ws-proxy and CodeGraph children. Arguments: cgroup mount root, the process's cgroup file, meminfo.
+# The limit is the lowest one from the process's own cgroup (per the cgroup file; "/" when it is unreadable) up to
+# the mount root, cgroup v2 first, else the v1 memory controller; a level that does not exist under the mount root
+# (v1 without a cgroup namespace) is skipped. "max" or v1's huge "unlimited" value means no limit at that level;
+# physical memory caps the result. Fails when nothing is readable.
+multi_host_heap_mb() {
+    local limit='' value='' total='' base='' name='' dir='' found=''
+    for hierarchy in v2 v1; do
+        if [[ "${hierarchy}" == v2 ]]; then
+            base=$1 name=memory.max dir=/
+            [[ -r "$2" ]] && dir=$(awk -F: '$1 == "0" && $2 == "" { print $3; exit }' "$2")
+        else
+            base=$1/memory name=memory.limit_in_bytes dir=/
+            [[ -r "$2" ]] && dir=$(awk -F: '$2 ~ /(^|,)memory(,|$)/ { print $3; exit }' "$2")
+        fi
+        [[ "${dir}" == /* ]] || continue
+        dir=${dir%/}
+        while :; do
+            if [[ -r "${base}${dir}/${name}" ]]; then
+                found=1
+                read -r value <"${base}${dir}/${name}" || true
+                # cgroup v1 reports "no limit" as a page-rounded 2^63 (19 digits); like v2's "max", that is no limit.
+                if [[ "${value}" =~ ^[0-9]{1,18}$ ]] && { [[ -z "${limit}" ]] || ((value < limit)); }; then limit=${value}; fi
+            fi
+            [[ -n "${dir}" ]] || break
+            dir=${dir%/*}
+        done
+        [[ -n "${found}" ]] && break
+    done
+    if [[ -r "$3" ]]; then
+        value=$(awk '$1 == "MemTotal:" { print $2; exit }' "$3")
+        [[ "${value}" =~ ^[0-9]+$ ]] && total=$((value * 1024))
+    fi
+    if [[ -n "${total}" ]] && { [[ -z "${limit}" ]] || ((limit > total)); }; then limit=${total}; fi
+    [[ -n "${limit}" ]] && ((limit >= 1048576)) || return 1
+    echo $((limit / 1048576 * 3 / 4))
+}
+
 # Shared DSH host: one process serving many users (scripts/byclaw-multi-host.mjs).
 # It runs as the DSH user; each user context owns its own browser runtime, so
 # the root browser supervisor below is not involved.
 if [[ "${1:-}" == multi-host ]]; then
     shift
     launcher=/workspace/scripts/byclaw-multi-host.mjs
+    # Every user context shares this one main thread and heap. Node's default heap (~2 GB) runs out near 25 resident
+    # contexts; AsyncLocalStorage on async_hooks and a small young generation each cost the busy loop a large share.
+    # The heap ceiling follows the memory this container may actually use, so the host reports a heap failure
+    # instead of being killed by its memory limit first; with nothing readable, Node keeps its own default.
+    # A flag already present in NODE_OPTIONS wins. The flags go on the host's own command line, not into
+    # NODE_OPTIONS: the host's Node children (ws-proxy and others) must not inherit its heap size.
+    heap_mb=$(multi_host_heap_mb /sys/fs/cgroup /proc/self/cgroup /proc/meminfo) || heap_mb=''
+    host_node_flags=()
+    for flag in ${heap_mb:+--max-old-space-size=${heap_mb}} --experimental-async-context-frame --max-semi-space-size=64; do
+        [[ " ${NODE_OPTIONS:-} " == *" ${flag%%=*}"[=\ ]* ]] || host_node_flags+=("${flag}")
+    done
+    # Node does not reap orphans; each closed tool-environment connection leaves its ws-proxy behind.
+    pid1=()
+    [[ -x /usr/local/bin/byclaw-pid1 ]] && pid1=(/usr/local/bin/byclaw-pid1)
     if ((EUID == 0)); then
         host_root="${BYCLAW_MULTI_HOST_ROOT-/data/multi-host}"
         python3 - "${host_root}" <<'BYCLAW_SHARED_ROOT'
@@ -135,10 +188,10 @@ if __name__ == '__main__':
     account = pwd.getpwnam('byclaw')
     prepare_host_root(sys.argv[1], account.pw_uid, account.pw_gid)
 BYCLAW_SHARED_ROOT
-        exec setpriv --reuid=byclaw --regid=byclaw --init-groups \
-            env HOME=/home/byclaw node "${launcher}" "$@"
+        exec "${pid1[@]}" setpriv --reuid=byclaw --regid=byclaw --init-groups \
+            env HOME=/home/byclaw node "${host_node_flags[@]}" "${launcher}" "$@"
     fi
-    exec node "${launcher}" "$@"
+    exec "${pid1[@]}" node "${host_node_flags[@]}" "${launcher}" "$@"
 fi
 
 if [[ "${BYCLAW_DSH_PREPARED:-0}" != 1 && "${BYCLAW_DSH_PREPARE_ONLY:-0}" != 1 ]]; then

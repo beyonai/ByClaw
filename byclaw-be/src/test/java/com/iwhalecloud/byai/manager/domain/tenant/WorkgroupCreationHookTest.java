@@ -100,7 +100,7 @@ class WorkgroupCreationHookTest {
             exchange.sendResponseHeaders(204, -1); exchange.close();
         });
         server.start();
-        runner = new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, WorkgroupHooks.class)
+        runner = new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, com.iwhalecloud.byai.common.hook.HookDatabaseTestSupport.class, WorkgroupHooks.class)
             .withPropertyValues("byclaw.hooks.enabled=true", "byclaw.hooks.subscriptions.groups.event=workgroup.created",
                 "byclaw.hooks.subscriptions.groups.http.url=http://127.0.0.1:" + server.getAddress().getPort() + "/hook");
         var login = new LoginInfo(); login.setUserId(9007199254740995L); login.setEnterpriseId(42L); CurrentUserHolder.setLoginInfo(login);
@@ -219,11 +219,11 @@ class WorkgroupCreationHookTest {
     }
 
     @Test
-    void externalWorkgroupYamlMapsEventToConfiguredRequest(@org.junit.jupiter.api.io.TempDir java.nio.file.Path directory)
+    void databaseWorkgroupYamlMapsEventToConfiguredRequest(@org.junit.jupiter.api.io.TempDir java.nio.file.Path directory)
         throws Exception {
         var config = directory.resolve("workgroup-hooks.yaml");
         java.nio.file.Files.copy(java.nio.file.Path.of("config/examples/hooks.yaml"), config);
-        new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, WorkgroupHooks.class)
+        new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, com.iwhalecloud.byai.common.hook.HookDatabaseTestSupport.class, WorkgroupHooks.class)
             .withInitializer(new org.springframework.boot.test.context.ConfigDataApplicationContextInitializer())
             .withPropertyValues("spring.config.additional-location=" + config.toUri(), "byclaw.hooks.enabled=true",
                 "byclaw.hooks.subscriptions.registration-crm.enabled=false",

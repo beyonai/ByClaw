@@ -1,20 +1,29 @@
 # 配置式 HTTP Hook
 
-Hook 默认关闭。普通创建入口接入 `user.registered` v1 和 `workgroup.created` v1，在对应业务创建事务提交后异步发送 HTTP；不保存任务，默认不自动重试，可按订阅开启有界内存重试，不保证重启恢复，也没有管理页面。HTTP 结果不会修改业务接口响应。多个订阅独立执行，不保证发送顺序。
+Hook 默认关闭。普通创建入口接入 `user.registered` v1 和 `workgroup.created` v1，在对应业务创建事务提交后异步发送 HTTP；不保存任务，默认不自动重试，可按订阅开启有界内存重试，不保证重启恢复；配置可通过现有系统配置页面维护。HTTP 结果不会修改业务接口响应。多个订阅独立执行，不保证发送顺序。
 
 ## 启用与环境隔离
 
-配置示例：`config/examples/hooks.yaml`。复制到部署环境的外部配置目录后修改，不能将真实地址、认证信息提交到代码仓库。
+配置示例：`config/examples/hooks.json`（界面编辑推荐）或等价的 `config/examples/hooks.yaml`。将完整 JSON/YAML 保存到平台数据库 `byai.byai_system_config`，保留 `byclaw.hooks` 根节点：
 
-环境 A 无需增加配置；也可以显式设置 `BYCLAW_HOOKS_ENABLED=false`。关闭时不会绑定 Hook 订阅，不要求 URL 或 Token，不创建专用线程池和 HTTP 客户端。原有内部业务事件照常工作。
+| 字段 | 值 |
+| --- | --- |
+| `param_code` | `BYCLAW_HOOKS_CONFIG`，必须只有一条记录 |
+| `param_type` | JSON 使用 `json`，YAML 使用 `text` |
+| `param_name` | 出站 Hook 配置 |
+| `param_value` | 完整的 Hook JSON/YAML |
 
-环境 B 设置 `BYCLAW_HOOKS_ENABLED=true`（或将全局 `enabled` 改为 true），只启用需要的订阅。默认启用的注册示例需由部署系统注入 `REGISTRATION_HOOK_URL`、`REGISTRATION_HOOK_TOKEN`，在现有启动命令后追加：
+通过已有系统配置管理入口查看、新增和修改。接口继续返回原始配置内容，前端可直接编辑 JSON 后保存；沿用现有权限和读写行为，不为此配置增加屏蔽或特殊角色限制。
 
-```bash
---spring.config.additional-location=file:/etc/byclaw/hooks.yaml
-```
+无记录或数据库配置中 `byclaw.hooks.enabled=false` 时关闭 Hook，不绑定订阅，不要求 URL 或 Token，不创建专用线程池和 HTTP 客户端。原有内部业务事件照常工作。示例使用 `${BYCLAW_HOOKS_ENABLED:false}`，因此只有文档声明了该占位符时，部署环境中的 `BYCLAW_HOOKS_ENABLED` 才控制此开关。
 
-也可设置 `SPRING_CONFIG_ADDITIONAL_LOCATION=file:/etc/byclaw/hooks.yaml`。该选项追加 Spring 配置来源，不替换现有业务配置。这里使用必需文件，文件不存在时启动失败，避免误以为 Hook 已启用。外部文件由部署系统维护；修改文件后重启，当前版本不热更新。不要让环境 A 和 B 误用同一份启用配置。
+启用时，在数据库配置中将全局 `enabled` 改为 true，或保留示例占位符并注入 `BYCLAW_HOOKS_ENABLED=true`，只启用需要的订阅。默认启用的注册示例需由部署系统注入 `REGISTRATION_HOOK_URL`、`REGISTRATION_HOOK_TOKEN`。占位符在解析 JSON/YAML 后按 Spring 规则展开，支持 `${VARIABLE:default}` 和 Duration；关闭的订阅不解析未使用的凭据。正文常量保留字符串、数字、布尔、null、列表和对象类型。
+
+应用在数据库连接就绪后直接查询该记录，不经 Redis 系统配置缓存。配置只绑定到 Hook 对象，不导入全局 Spring Environment。开启的配置先校验字段、URL、认证及映射，再分配投递资源；重复记录、空文档、多文档或混入其他配置、绑定错误、未解析的必需占位符或无效订阅会导致启动失败。数据库读取失败也阻止启动，不回退到本地 YAML 或缓存中的旧配置。
+
+从外置 YAML 迁移时，将原文件完整内容保存到 `param_value`，也可以转换为等价 JSON，取消专门加载此文件的 `spring.config.additional-location` 或 `SPRING_CONFIG_ADDITIONAL_LOCATION` 配置；如果它还加载其他文件，只移除 Hook 文件。本地 `byclaw.hooks.*` 属性不会直接启用或覆盖数据库订阅。每个实例只在启动时读取一次，修改记录、清除 Redis 配置缓存或修改环境变量均不会热更新，需重启所有应采用新配置的实例。
+
+可沿用 `${HACU_API_HOOK_SECRET}` 等部署环境占位符。系统配置管理接口继续返回配置原文，通用配置查询及缓存行为沿用现有规则。加载器不打印 YAML 内容，解析及绑定异常不携带配置原文；语义校验只报告字段路径。仅改变配置存储位置不等于持久化 Hook 事件或重试任务。
 
 如果启用了服务端多个副本，每个副本都加载相同配置。Hook 仅由处理该次注册事务的实例发送，不通过 Redis Pub/Sub 广播给所有实例。
 
@@ -79,7 +88,7 @@ BE 数据库与租户 Node 之间没有分布式事务：Node 已创建成功后
 | `data.byaiSessionMemberId` | string | `byai_session_member.byai_session_member_id`，本次入群的成员记录主键，使用字符串避免长整数精度丢失 |
 | `data.invitedBy` | string/null | 保留既有字段名，取成员记录的 creatorId；链接加入时通常为加入者，不推断原邀请者 |
 
-可在外部配置中新增订阅（全局 Hook 开关也须启用）：
+可在数据库配置中新增订阅（全局 Hook 开关也须启用）：
 
 ```yaml
 byclaw:
@@ -112,7 +121,7 @@ byclaw:
 全局 `enabled` 默认为 false，所有投递都关闭。启用某个订阅前，按接收方协议配置 URL、认证、正文和重试策略；三个示例的认证与事件没有绑定关系，同一事件可以使用任一认证类型。
 
 - `none` 不生成认证头，不代表目标接口无需访问控制，只适用于接收方明确允许的匿名请求。
-- `bearer` 从外部配置读取 Token，发送 `Authorization: Bearer ...`。
+- `bearer` 从数据库配置读取 Token 或解析部署环境占位符，发送 `Authorization: Bearer ...`。
 - `hmac-sha256` 按 `canonical-fields` 拼接原文、计算签名，并按 `auth.headers` 生成认证头。示例中的 `hook-request-v1` 和 `X-Webhook-*` 只是可更换的演示值。
 
 示例全局启用后，注册订阅需要 `REGISTRATION_HOOK_TOKEN`。另外启用工作组订阅时，需要 `WORKGROUP_HOOK_SIGNING_SECRET`，并配置目标 URL；可用 `HOOK_CLIENT_ID` 设置调用方标识。真实配置放在部署环境中，不提交业务接收方的专用配置或秘密。
@@ -196,7 +205,7 @@ auth:
 
 ## 验证范围
 
-测试通过 Spring 外置配置加载、事务提交/回滚及回环 HTTP 验证通用行为。业务创建测试的外部数据库、Node 和授权依赖使用替身，不等于生产环境验收。
+测试通过独立 H2 中保存的 JSON/YAML、事务提交/回滚及回环 HTTP 验证通用行为，覆盖配置隔离、关闭状态、占位符、常量类型和 JSON 编辑读取。业务创建测试的外部数据库、Node 和授权依赖使用替身，不等于生产环境验收。
 
 ```bash
 mvn -B -f byclaw-be/pom.xml -Dtest=HookIntegrationTest,HookAuthenticationIntegrationTest,TenantCreationHookTest,UserRegistrationHookTest,WorkgroupCreationHookTest,GroupChatCreationAndInvitationTest test

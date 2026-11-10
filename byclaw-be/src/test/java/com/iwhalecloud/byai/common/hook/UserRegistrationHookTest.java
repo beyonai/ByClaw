@@ -127,7 +127,7 @@ class UserRegistrationHookTest {
         });
         server.start();
         try {
-            new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, UserRegistrationHookConfiguration.class)
+            new ApplicationContextRunner().withUserConfiguration(HookConfiguration.class, HookDatabaseTestSupport.class, UserRegistrationHookConfiguration.class)
                 .withPropertyValues("byclaw.hooks.enabled=true", "byclaw.hooks.subscriptions.registration.event=user.registered",
                     "byclaw.hooks.subscriptions.registration.http.url=http://127.0.0.1:"
                         + server.getAddress().getPort() + "/registered")

@@ -14,6 +14,16 @@ import {
   userPublicUrl, UserRegistry, webPrefix,
 } from './byclaw-multi-host.mjs'
 
+test('digital human Artifact uploads bind to the current shared-host user', () => {
+  const entries = [{ id: 'byclaw-digital-human', name: '@byclaw/byclaw-digital-human', config: { configPath: '/by/.connector-auth/.model/digital-human.json' } }]
+  for (const user of ['alice', 'bob']) {
+    const rows = composeUserOverlays(entries, user, `/private/${user}`, spec)
+    const plugin = rows.find(row => row.id === 'byclaw-digital-human')
+    assert.equal(plugin.config.userCode, user)
+    assert.equal(plugin.config.configPath, entries[0].config.configPath)
+  }
+})
+
 test('shared host imports the installed runtime once from its CLI anchor, independent of cwd', async t => {
   const root = await mkdtemp(join(tmpdir(), 'shared-host-runtime-'))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -37,8 +47,10 @@ test('shared host imports the installed runtime once from its CLI anchor, indepe
 test('shared host entrypoint uses compiled Node runtime without the source alias loader', async () => {
   const source = await readFile(new URL('../docker-entrypoint.sh', import.meta.url), 'utf8')
   const shared = source.slice(source.indexOf('if [[ "${1:-}" == multi-host ]]'), source.indexOf('if [[ "${BYCLAW_DSH_PREPARED'))
-  assert.match(shared, /exec node "\$\{launcher\}"/)
+  assert.match(shared, /exec "\$\{pid1\[@\]\}" node "\$\{host_node_flags\[@\]\}" "\$\{launcher\}"/)
   assert.doesNotMatch(shared, /tsx/)
+  // Node as PID 1 does not reap orphans (each closed tool-environment connection leaves its ws-proxy).
+  assert.match(shared, /pid1=\(\/usr\/local\/bin\/byclaw-pid1\)/)
 })
 
 test('module preloading deduplicates active rows without activating plugins or hiding import failures', async () => {

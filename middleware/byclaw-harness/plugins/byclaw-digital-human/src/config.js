@@ -1,5 +1,5 @@
 export const CONNECTOR_CODE = 'volcengine-digital-human';
-export const DEFAULT_CONFIG_PATH = '/by/.connector-auth/.model/digital-human.json';
+export const DEFAULT_CONFIG_PATH = '/by/.connector-auth/.model/video.json';
 const MAX_CONFIG_BYTES = 16 * 1024;
 const CONFIG_FAILURE = Symbol('digital-human-config-failure');
 const FS_CODES = new Set(['FS_NOT_FOUND', 'FS_NOT_DIRECTORY', 'FS_NOT_TEXT', 'FS_NOT_REGULAR_FILE', 'FS_TOO_LARGE',
