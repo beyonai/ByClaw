@@ -7,6 +7,11 @@ public final class InternalServiceRoutes {
         return scope(method, path) != null;
     }
     public static String scope(String method, String path) {
+        if ("GET".equals(method) && (path.matches("/internal/v1/tenants/[1-9][0-9]*/workgroups/[1-9][0-9]*/members/[1-9][0-9]*")
+            || path.matches("/internal/v1/tenants/[1-9][0-9]*/workgroups/[1-9][0-9]*/messages/[1-9][0-9]*/access/[1-9][0-9]*")
+            || path.matches("/internal/v1/tenants/[1-9][0-9]*/accounts/[1-9][0-9]*/workgroup-unread"))) {
+            return "workgroup:read";
+        }
         if ("POST".equals(method) && "/internal/v1/platform-operations".equals(path)) return "tenant:manage";
         if (path.matches("/internal/v1/tenants/[1-9][0-9]*/(?:enterprise|members)")) {
             if ("GET".equals(method)) return "tenant:read";

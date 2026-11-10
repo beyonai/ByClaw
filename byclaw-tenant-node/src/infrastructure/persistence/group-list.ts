@@ -27,7 +27,7 @@ export async function groupList(
         ORDER BY COALESCE(${latest("create_time")},s.update_time,s.create_time) DESC,s.session_id DESC LIMIT $3 OFFSET $4`,
       [tenantId, actor, size, (page - 1) * size],
     ),
-    read(`SELECT COUNT(*) AS total ${predicate}`, [tenantId, actor]),
+    read(`SELECT COUNT(*) AS total, COALESCE(SUM(${unread}), 0) AS total_unread_message_count ${predicate}`, [tenantId, actor]),
   ]);
   return {
     list: list.map((r) => ({
@@ -37,5 +37,7 @@ export async function groupList(
       unreadMentionCount: Number(r.unreadMentionCount),
     })),
     total: Number(count[0]!.total),
+    // 全量聚合与当前列表页分离，手机角标不能只统计已经加载的群。
+    totalUnreadMessageCount: Number(count[0]!.totalUnreadMessageCount),
   };
 }

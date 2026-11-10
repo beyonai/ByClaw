@@ -14,16 +14,6 @@ import {
   userPublicUrl, UserRegistry, webPrefix,
 } from './byclaw-multi-host.mjs'
 
-test('digital human Artifact uploads bind to the current shared-host user', () => {
-  const entries = [{ id: 'byclaw-digital-human', name: '@byclaw/byclaw-digital-human', config: { configPath: '/by/.connector-auth/.model/digital-human.json' } }]
-  for (const user of ['alice', 'bob']) {
-    const rows = composeUserOverlays(entries, user, `/private/${user}`, spec)
-    const plugin = rows.find(row => row.id === 'byclaw-digital-human')
-    assert.equal(plugin.config.userCode, user)
-    assert.equal(plugin.config.configPath, entries[0].config.configPath)
-  }
-})
-
 test('shared host imports the installed runtime once from its CLI anchor, independent of cwd', async t => {
   const root = await mkdtemp(join(tmpdir(), 'shared-host-runtime-'))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -1179,4 +1169,16 @@ test('the session database password never reaches a launch environment', () => {
   const values = launchEnvironmentValues({ KEEP: '1', BYCLAW_SESSION_DB_URL: 'postgres://u:secret@db' }, {}, 'u1')
   assert.equal(values.KEEP, '1')
   assert.equal(values.BYCLAW_SESSION_DB_URL, undefined)
+})
+
+test('each context is offered the Beyond-Token of its latest PUT, for BE calls while its user is logged out', () => {
+  const issued = host.contextTokenHolder({ BEYOND_TOKEN: ' first ' })
+  assert.equal(issued.current(), 'first')
+  issued.renew({ BEYOND_TOKEN: 'second' })
+  assert.equal(issued.current(), 'second')
+  // A PUT without a token keeps the last one.
+  issued.renew({})
+  issued.renew(undefined)
+  assert.equal(issued.current(), 'second')
+  assert.equal(host.contextTokenHolder(undefined).current(), undefined)
 })

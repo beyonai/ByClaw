@@ -1,4 +1,4 @@
-import { publicUrl, readJson } from './volcengine.js';
+import { randomUUID } from 'node:crypto';
 import { extname, isAbsolute } from 'node:path';
 
 const MIB = 1024 * 1024;
@@ -9,6 +9,18 @@ const formats = {
   '.mp3': { kind: 'audio', type: 'audio/mpeg', magic: (bytes) => bytes.toString('ascii', 0, 3) === 'ID3'
     || (bytes.length >= 4 && bytes[0] === 0xff && (bytes[1] & 0xe6) === 0xe2) },
 };
+
+function readOssConfig() {
+  const { OSS_BUCKET, OSS_REGION, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET, OSS_SESSION_TOKEN } = process.env;
+  const region = OSS_REGION?.replace(/^oss-/u, '');
+  if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/u.test(OSS_BUCKET ?? '')
+    || !/^[a-z]{2}-[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(region ?? '')
+    || !OSS_ACCESS_KEY_ID?.trim() || !OSS_ACCESS_KEY_SECRET?.trim()) {
+    throw new Error('DIGITAL_HUMAN_OSS_CONFIGURATION_REQUIRED: 请配置 OSS_BUCKET、OSS_REGION、OSS_ACCESS_KEY_ID 和 OSS_ACCESS_KEY_SECRET。');
+  }
+  return { bucket: OSS_BUCKET, region: `oss-${region}`, accessKeyId: OSS_ACCESS_KEY_ID,
+    accessKeySecret: OSS_ACCESS_KEY_SECRET, stsToken: OSS_SESSION_TOKEN || undefined, secure: true, authorizationV4: true };
+}
 
 async function readMedia(fs, workspace, path, kind, signal) {
   if (typeof workspace !== 'string' || !isAbsolute(workspace)) throw new Error('DIGITAL_HUMAN_WORKSPACE_REQUIRED');
@@ -34,47 +46,38 @@ async function readMedia(fs, workspace, path, kind, signal) {
   return { bytes, extension, contentType: format.type };
 }
 
-// Keep public source media available through queueing and provider fetches.
-export const ARTIFACT_TTL_SECONDS = 86400;
-
-export async function uploadMedia(fs, workspace, path, kind, resolveBackend, signal) {
+export async function uploadMedia(fs, workspace, path, kind, signal) {
   signal?.throwIfAborted();
+  const config = readOssConfig();
   const { bytes, extension, contentType } = await readMedia(fs, workspace, path, kind, signal);
-  const backend = await resolveBackend(signal);
-  const form = new FormData();
-  form.set('file', new Blob([bytes], { type: contentType }), `digital-human${extension}`);
-  form.set('publishMode', 'FILE');
-  form.set('expiresInSeconds', String(ARTIFACT_TTL_SECONDS));
+  const key = `digital-human/${randomUUID()}${extension}`;
+  const headers = { 'content-type': contentType, 'x-oss-object-acl': 'public-read' };
+  let signedUrl;
+  try {
+    const { default: OSS } = await import('ali-oss');
+    const client = new OSS(config);
+    signedUrl = new URL(await client.signatureUrlV4('PUT', 600, { headers }, key));
+    if (signedUrl.origin !== `https://${config.bucket}.${config.region}.aliyuncs.com`) throw new Error('Unexpected OSS endpoint');
+  } catch {
+    throw new Error('DIGITAL_HUMAN_OSS_SIGN_FAILED: 请检查 OSS SDK 和环境变量。');
+  }
+
   const timeout = AbortSignal.timeout(60000);
   const uploadSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   uploadSignal.throwIfAborted();
   let response;
   try {
-    response = await fetch(backend.url, { method: 'POST', redirect: 'error', signal: uploadSignal,
-      headers: { 'Beyond-Token': backend.token, 'X-User-Code': backend.userCode }, body: form });
+    response = await fetch(signedUrl, { method: 'PUT', headers, body: bytes, signal: uploadSignal, redirect: 'error' });
+    await response.body?.cancel();
   } catch {
     signal?.throwIfAborted();
-    throw new Error('DIGITAL_HUMAN_ARTIFACT_UPLOAD_UNCERTAIN: 上传结果未知，请先检查已发布的 Artifact；不会自动重试或提交火山任务。');
+    throw new Error('DIGITAL_HUMAN_OSS_UPLOAD_UNCERTAIN: 上传结果未知，请先检查 OSS 中的对象。');
   }
   if (!response.ok) {
-    await response.body?.cancel().catch(() => {});
-    throw new Error(`DIGITAL_HUMAN_ARTIFACT_UPLOAD_FAILED: HTTP ${response.status}`);
-  }
-  let result;
-  try {
-    const payload = await readJson(response);
-    result = payload.data;
-    if (![0, '0'].includes(payload.code) || result?.status !== 'READY' || result.kind !== 'FILE'
-      || typeof result.artifactId !== 'string' || !result.artifactId
-      || typeof result.previewUrl !== 'string' || !result.previewUrl.startsWith('https://')
-      || typeof result.expiresAt !== 'string' || Date.parse(result.expiresAt) < Date.now() + 3600000
-      || !Number.isFinite(Date.parse(result.expiresAt))) throw new Error('Invalid publication');
-    publicUrl(result.previewUrl);
-  } catch {
-    signal?.throwIfAborted();
-    throw new Error('DIGITAL_HUMAN_ARTIFACT_INVALID_RESPONSE: 需要 READY 文件、公网 HTTPS 预览地址及至少一小时剩余有效期；请检查 ARTIFACT_PUBLIC_BASE_URL。');
+    const code = response.headers.get('x-oss-ec');
+    const detail = /^\d{4}-\d{8}$/u.test(code ?? '') ? `，OSS ${code}` : '';
+    throw new Error(`DIGITAL_HUMAN_OSS_UPLOAD_FAILED: HTTP ${response.status}${detail}`);
   }
   signal?.throwIfAborted();
-  // Never forward the management accessKey or the user's login token to Volcengine.
-  return result.previewUrl;
+  return `${signedUrl.origin}${signedUrl.pathname}`;
 }

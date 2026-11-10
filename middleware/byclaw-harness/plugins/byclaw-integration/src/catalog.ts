@@ -43,6 +43,8 @@ export interface LoadAuthorizedByClawResourcesOptions {
   /** Discovery needs only group summaries; dependencies are loaded at execution time. */
   includeGroupMembers?: boolean
   onResourceLoadError?: (resourceId: string, error: unknown) => void
+  /** The token BE issued for this context, used when the user is not logged in. */
+  fallbackToken?: () => Promise<string | undefined> | string | undefined
 }
 
 /** Inputs for resolving one expert group's own leader runtime. */
@@ -221,7 +223,7 @@ export async function loadAuthorizedByClawResources(
   if (!Number.isInteger(concurrency) || concurrency < 1) {
     throw new Error('ByClaw snapshotConcurrency must be a positive integer')
   }
-  const authorization = await resolveByClawAuthorization(options.redis, userCode)
+  const authorization = await resolveByClawAuthorization(options.redis, userCode, options.fallbackToken)
   const effectiveResourceIds = authorization.resourceIds.filter(id => !options.excludedResourceIds?.has(id)
     && (options.resourceIds === undefined || options.resourceIds.has(id)))
   const reportResourceError = (resourceId: string, error: unknown): void => {

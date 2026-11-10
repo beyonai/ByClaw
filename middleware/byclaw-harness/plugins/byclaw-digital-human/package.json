@@ -9,8 +9,8 @@
   "engines": { "node": ">=22.19.0" },
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "build": "node --check src/index.js && node --check src/config.js && node --check src/volcengine.js && node --check src/artifact.js && node --check src/backend.js"
+    "build": "node --check src/index.js && node --check src/config.js && node --check src/volcengine.js && node --check src/oss.js"
   },
-  "dependencies": { "@byclaw/by-framework": "1.6.0" },
+  "dependencies": { "ali-oss": "6.23.0" },
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
 }

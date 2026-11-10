@@ -123,7 +123,6 @@ export const USER_ROW_OVERLAYS = {
   'storage-json': (user, home) => ({ root: join(home, 'storages') }),
   'attachment-local': (user, home) => ({ dshHome: home }),
   'byclaw-credentials': (user, home) => ({ dshHome: home, userCode: user }),
-  'byclaw-digital-human': user => ({ userCode: user }),
   'byclaw-bash-provider': user => ({
     userCode: user,
     workspaceOnToolEnvironment: true,
@@ -256,6 +255,20 @@ export function renewLaunchEnvironment(ctx, env, user) {
   if (typeof toolEnv?.setLaunchEnvironment !== 'function') return false
   toolEnv.setLaunchEnvironment(toolLaunchEnvironment(env, user))
   return true
+}
+
+/**
+ * The Beyond-Token BE issued with a context's latest PUT (it mints a new one each time), offered to the
+ * context as `byclawContextToken`: byclaw-integration falls back to it when the user is logged out.
+ * @param env - the booting PUT's `env`.
+ * @returns `{ current(), renew(env) }`; a PUT without a token keeps the previous one.
+ */
+export function contextTokenHolder(env) {
+  let token = env?.BEYOND_TOKEN?.trim() || undefined
+  return {
+    current: () => token,
+    renew(next) { token = next?.BEYOND_TOKEN?.trim() || token },
+  }
 }
 
 export function renewUserToken(ctx, config, env) {
@@ -1463,6 +1476,7 @@ export async function verifyUserStorageHome(config, user, request, inspect = lst
  * @param tokenSource - `{ current() }`: the user's current Beyond-Token, offered to the byclaw-be backend.
  */
 async function bootUserContext(config, user, request, hooks, tokenSource) {
+  const issuedToken = contextTokenHolder(request.env)
   const started = performance.now()
   let previous = started
   const phase = name => {
@@ -1537,6 +1551,8 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
       hostCtx.provide('webStartup', webStartupValues(spec))
       // The byclaw-be backend asks here when BE rejects the token it holds (see dsh-tool-env's BE_TOKEN_SOURCE).
       if (config.toolEnvBackend === 'byclaw-be' && tokenSource !== undefined) hostCtx.provide('byclawBeTokenSource', tokenSource)
+      // BE calls made while the user is logged out (a scheduled turn) use the token BE issued with the PUT.
+      hostCtx.provide('byclawContextToken', issuedToken)
       await hostCtx.plugin(PluginPackages, { resolution })
     })
     if (config.toolEnvBackend === 'none') installChatOnlyPolicy(ctx)
@@ -1569,7 +1585,7 @@ async function bootUserContext(config, user, request, hooks, tokenSource) {
       // BE mints the user's BEYOND_TOKEN for every PUT; the byclaw-be backend keeps
       // using the one from boot otherwise, which expires long before a resident
       // context goes away (then every launch of B is a 401).
-      renew: request => { renewUserToken(ctx, config, request.env); renewLaunchEnvironment(ctx, request.env, request.managed ? request.userCode : user) },
+      renew: request => { issuedToken.renew(request.env); renewUserToken(ctx, config, request.env); renewLaunchEnvironment(ctx, request.env, request.managed ? request.userCode : user) },
     }
     if (request.managed) {
       const deadline = Date.now() + 60_000

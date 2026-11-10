@@ -86,6 +86,19 @@ describe("BE query compatibility", () => {
     expect(sql).not.toContain("m.recalled_at IS NULL");
     expect(parameters).toEqual(["10", "20", 20, 20]);
   });
+  it('returns a tenant-wide unread aggregate independently of the requested page', async () => {
+    const { query, repository } = setup();
+    query.mockImplementationOnce(async () => []).mockImplementationOnce(async () => [
+      { total: '20', total_unread_message_count: '87' },
+    ]);
+    const result = await repository.groups('20', 2, 1);
+    expect(result.totalUnreadMessageCount).toBe(87);
+    const [aggregateSql, parameters] = query.mock.calls[1]!;
+    expect(aggregateSql).toContain('SUM(');
+    expect(aggregateSql).toContain('u.last_read_message_id');
+    expect(aggregateSql).not.toContain('LIMIT');
+    expect(parameters).toEqual(['10', '20']);
+  });
   it("excludes recalled search hits even without a keyword and parameterizes user input", async () => {
     const { query, repository } = setup();
     await repository.messages({

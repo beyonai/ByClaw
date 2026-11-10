@@ -158,10 +158,10 @@ public class TransactionAdviceConfig {
                     }
                 }
                 if (targetClass != null && java.util.Set.of(
-                    "com.iwhalecloud.byai.state.domain.mobilepush.MobilePushService",
-                    "com.iwhalecloud.byai.state.domain.mobilepush.MobilePushAuthority")
+                    "com.iwhalecloud.byai.state.domain.groupchat.integration.WorkgroupUnreadService",
+                    "com.iwhalecloud.byai.state.domain.groupchat.integration.WorkgroupMessageAccessService")
                     .contains(ClassUtils.getUserClass(targetClass).getName())) {
-                    // 通知编排及 Node 权限读取会访问远端，不应持有聊天数据库事务。
+                    // 通用群事实读取可能访问 Node，不应持有共享数据库事务。
                     return notSurpportedTx;
                 }
                 // Forwarding coordination performs remote control and file I/O; stores explicitly own short transactions.
