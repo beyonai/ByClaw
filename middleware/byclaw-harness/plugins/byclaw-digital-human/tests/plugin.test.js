@@ -243,10 +243,11 @@ test('signing covers payload, action, date and optional security token', () => {
 
 test('package and sources have no other plugin dependencies or host filesystem bypass', async () => {
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.deepEqual(Object.keys(pkg.dependencies ?? {}), ['ali-oss']);
+  assert.deepEqual(Object.keys(pkg.dependencies ?? {}), ['@byclaw/by-framework']);
   for (const name of await readdir(new URL('../src/', import.meta.url))) {
     const source = await readFile(new URL(`../src/${name}`, import.meta.url), 'utf8');
-    assert.doesNotMatch(source, /node:fs|from ['"]@byclaw|byclaw\/session-setup/u);
-    if (name !== 'oss.js') assert.doesNotMatch(source, /process\.env/u);
+    assert.doesNotMatch(source, /node:fs|byclaw\/session-setup/u);
+    if (name !== 'backend.js') assert.doesNotMatch(source, /from ['"]@byclaw/u);
+    if (!['backend.js', 'index.js'].includes(name)) assert.doesNotMatch(source, /process\.env/u);
   }
 });

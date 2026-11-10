@@ -117,6 +117,7 @@ export const USER_ROW_OVERLAYS = {
   'storage-json': (user, home) => ({ root: join(home, 'storages') }),
   'attachment-local': (user, home) => ({ dshHome: home }),
   'byclaw-credentials': (user, home) => ({ dshHome: home, userCode: user }),
+  'byclaw-digital-human': user => ({ userCode: user }),
   'byclaw-bash-provider': user => ({
     userCode: user,
     workspaceOnToolEnvironment: true,
