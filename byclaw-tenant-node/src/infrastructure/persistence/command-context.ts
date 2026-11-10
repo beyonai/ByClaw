@@ -4,6 +4,7 @@ import type { SqlRow, SqlSession } from "../../application/database-ports.js";
 import { DomainError } from "../../domain/errors.js";
 import { first, insert, nextId } from "./sql-utils.js";
 import { readGroupCandidate } from "./group-candidate.js";
+import { isLegacyDirectSession, requireWritableDirectTask } from "./group-direct-task.js";
 
 /** 命令事务内的资源与权限上下文；BE 已验租户成员，Node 再验会话归属和群内角色。 */
 export class CommandContext {
@@ -68,6 +69,32 @@ export class CommandContext {
       )
         return;
       if (!(await this.member())) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+      if (
+        [
+          "PUBLISH_TASK",
+          "SAVE_PENDING_PUBLICATION",
+          "DELETE_PENDING_PUBLICATION",
+          "CHECKPOINT_PUBLICATION",
+        ].includes(this.command.operation)
+      ) {
+        const direct = await first(
+          this.db,
+          "SELECT initiator_user_id,target_agent_id FROM byai.byai_group_chat_task WHERE task_session_id=$1 AND group_session_id=$2 AND status='PRIVATE'",
+          [this.command.payload.taskSessionId, this.command.sessionId],
+        );
+        if (direct) {
+          if (direct.initiatorUserId !== this.command.userId)
+            throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+          await requireWritableDirectTask(
+            this.db,
+            this.command.enterpriseId,
+            this.command.sessionId,
+            this.command.userId,
+            direct.targetAgentId,
+            this.command.payload.taskSessionId,
+          );
+        }
+      }
     } else {
       if (session.creatorId !== this.command.userId)
         throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
@@ -90,7 +117,7 @@ export class CommandContext {
       }
       const task = await first(
         this.db,
-        "SELECT group_session_id,initiator_user_id FROM byai.byai_group_chat_task WHERE task_session_id=$1",
+        "SELECT group_session_id,initiator_user_id,target_agent_id,status,turn_status FROM byai.byai_group_chat_task WHERE task_session_id=$1",
         [this.command.sessionId],
       );
       if (task) {
@@ -101,6 +128,25 @@ export class CommandContext {
         );
         if (!group || task.initiatorUserId !== this.command.userId)
           throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+        if (task.status === "PRIVATE" || task.turnStatus === "PRIVATE") {
+          if (this.command.operation === "DELETE_SESSION")
+            throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+          await requireWritableDirectTask(
+            this.db,
+            this.command.enterpriseId,
+            task.groupSessionId,
+            this.command.userId,
+            task.targetAgentId,
+            this.command.sessionId,
+          );
+        }
+      } else if (
+        !candidate &&
+        session.sessionType === "h_as" &&
+        session.parentSessionId &&
+        (await isLegacyDirectSession(this.db, this.command.sessionId, session.parentSessionId))
+      ) {
+        throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
       }
     }
   }

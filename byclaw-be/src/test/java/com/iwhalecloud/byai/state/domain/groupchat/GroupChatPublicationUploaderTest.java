@@ -43,6 +43,44 @@ class GroupChatPublicationUploaderTest extends I18nTestSupport {
     private final GroupChatPublicationUploader uploader = new GroupChatPublicationUploader(userFS, datasets, store);
 
     @Test
+    void privatePublicationExposesOnlyTheDraftIdInSharedFilePaths() throws Exception {
+        ByaiGroupChatPendingPublication card = pending();
+        card.setSourceFilesJson("[\"/by/.sessions/60/a.md\"]");
+        when(userFS.read(anyString())).thenReturn(new ByteArrayInputStream(new byte[] {1}));
+        when(datasets.uploadFiles(any(), eq(777L), anyString(), anyString(), eq(false), eq(false), eq(false),
+            eq(false), isNull(), any())).thenAnswer(call -> uploaded(call.getArgument(2) + "/a.md"));
+
+        var files = uploader.upload(card, 777L, true, (cloud, json) -> {
+            assertThat(cloud).isEqualTo(777L);
+            card.setUploadedFilesJson(json);
+        });
+        assertThat(files.getFirst().getFilePath()).matches("/group-task-results/private/100/0/[0-9a-f-]{36}/a\\.md");
+        assertThat(uploader.upload(card, 777L, true, (cloud, json) -> {})).isEqualTo(files);
+        verify(userFS).read("/by/.sessions/60/a.md");
+    }
+
+    @Test
+    void privateRetryAfterLostCheckpointNeverOverwritesTheFirstFile() throws Exception {
+        ByaiGroupChatPendingPublication card = pending();
+        card.setSourceFilesJson("[\"/by/.sessions/60/a.md\"]");
+        var stored = new java.util.HashSet<String>();
+        when(userFS.read(anyString())).thenAnswer(call -> new ByteArrayInputStream(new byte[] {1}));
+        when(datasets.uploadFiles(any(), eq(777L), anyString(), anyString(), eq(false), eq(false), eq(false),
+            eq(false), isNull(), any())).thenAnswer(call -> {
+                String path = call.getArgument(2) + "/a.md";
+                if (!stored.add(path)) throw new IllegalStateException("file already exists");
+                return uploaded(path);
+            });
+        assertThatThrownBy(() -> uploader.upload(card, 777L, true, (cloud, json) -> {
+            throw new IllegalStateException("checkpoint lost");
+        })).hasMessage("checkpoint lost");
+        String retry = uploader.upload(card, 777L, true, (cloud, json) -> card.setUploadedFilesJson(json))
+            .getFirst().getFilePath();
+        assertThat(stored).hasSize(2).contains(retry);
+        assertThat(uploader.upload(card, 777L, true, (cloud, json) -> {}).getFirst().getFilePath()).isEqualTo(retry);
+    }
+
+    @Test
     void uploadsToBoundCloudAndRetrySkipsAlreadyUploadedFile() throws Exception {
         ByaiGroupChatPendingPublication pending = pending();
         when(userFS.read(anyString())).thenAnswer(invocation -> new ByteArrayInputStream(new byte[] {1, 2}));

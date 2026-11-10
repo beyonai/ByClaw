@@ -67,7 +67,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
 import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
 
-/** 群聊任务提升、查询、取消以及一次性完成发布用例。 */
+/** 群聊任务的生命周期及成果发布，私聊会话可按草稿多次发布。 */
 @Service
 public class GroupChatTaskService {
     @Autowired
@@ -181,7 +181,7 @@ public class GroupChatTaskService {
 
     public List<ByaiGroupChatTask> list(Long groupSessionId) {
         groupAuthorizationService.requireCurrentUserMember(groupSessionId);
-        List<ByaiGroupChatTask> result = taskMapper.selectByGroup(groupSessionId);
+        List<ByaiGroupChatTask> result = taskMapper.selectVisibleByGroup(groupSessionId, CurrentUserHolder.getCurrentUserId());
         result.forEach(task -> task.setExecutionBackend("REMOTE"));
         if (coordinationService != null) result.forEach(coordinationService::attach);
         return result;
@@ -201,19 +201,27 @@ public class GroupChatTaskService {
         taskAuthorizationService.requireInitiator(taskId);
         // 文件转存及最终提交共用任务行锁；继续对话、取消和替换必须等待本次发布结束。
         task = taskMapper.selectWithRedisLock(taskId);
+        boolean privateConversation = task != null && "PRIVATE".equals(task.getStatus());
         Long pendingId = request == null ? null : request.getPendingPublicationId();
+        if (privateConversation && (pendingId == null || pendingId <= 0)) {
+            throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.confirmOnly"));
+        }
         if (pendingId != null && (request.getText() != null
             || (request.getFiles() != null && !request.getFiles().isEmpty()))) {
             throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.confirmOnly"));
         }
-        ByaiGroupChatTaskPublication existing = publicationMapper.selectById(taskId);
+        ByaiGroupChatTaskPublication existing = privateConversation ? publicationMapper.selectPrivate(taskId, pendingId)
+            : publicationMapper.selectById(taskId);
         if (existing != null) {
             if (pendingId != null && !pendingId.equals(existing.getPendingPublicationId())) {
                 throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.outdated"));
             }
             return response(existing);
         }
-        if (task == null || !"ACTIVE".equals(task.getStatus()) || "RUNNING".equals(task.getTurnStatus())) {
+        if (privateConversation) {
+            // 历史回执仍可读取；新群消息必须由当前仍有权限的原群员工署名。
+            taskAuthorizationService.requirePrivateAgent(task, task.getTargetAgentId());
+        } else if (task == null || !"ACTIVE".equals(task.getStatus()) || "RUNNING".equals(task.getTurnStatus())) {
             throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.notReady"));
         }
         List<GroupChatTaskFile> files = request == null || request.getFiles() == null
@@ -226,8 +234,13 @@ public class GroupChatTaskService {
             }
             text = pending.getTextContent();
             List<String> sources = JSON.parseArray(pending.getSourceFilesJson(), String.class);
-            files = sources.isEmpty() ? Collections.emptyList()
-                : publicationUploader.upload(pending, projectCloudResourceId(task));
+            if (sources.isEmpty()) {
+                files = Collections.emptyList();
+            } else {
+                Long cloudId = projectCloudResourceId(task);
+                files = privateConversation ? publicationUploader.upload(pending, cloudId, true)
+                    : publicationUploader.upload(pending, cloudId);
+            }
         }
         if (StringUtils.isBlank(text) && files.isEmpty()) {
             throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.contentRequired"));
@@ -246,8 +259,17 @@ public class GroupChatTaskService {
         publication.setTextContent(text);
         publication.setFilesJson(JSON.toJSONString(files));
         publication.setCreateTime(new Date());
-        publicationMapper.insert(publication);
+        if (privateConversation) {
+            publicationMapper.insertPrivate(publication);
+        } else {
+            publicationMapper.insert(publication);
+        }
         createGroupMessage(task, text, "TASK_RESULT", files, messageId, mentions);
+        if (privateConversation) {
+            // 私聊只消费这份草稿；继续对话和后续发布不依赖本次群消息。
+            pendingStore.clear(task, messageId);
+            return response(publication);
+        }
         if (taskMapper.publish(taskId, messageId, publication.getPublisherUserId(), new Date()) != 1) {
             throw new IllegalStateException(I18nUtil.get("groupchat.publication.stateChanged"));
         }
@@ -315,7 +337,7 @@ public class GroupChatTaskService {
     private ByaiGroupChatTask requireActiveCancellation(Long taskId) {
         taskAuthorizationService.requireCanceller(taskId);
         ByaiGroupChatTask task = taskMapper.selectWithRedisLock(taskId);
-        if (task == null || (!"ACTIVE".equals(task.getStatus()) && !"PRIVATE".equals(task.getStatus()))) {
+        if (task == null || !"ACTIVE".equals(task.getStatus())) {
             throw new IllegalArgumentException(I18nUtil.get("groupchat.task.noLongerActive"));
         }
         return task;
@@ -466,7 +488,10 @@ public class GroupChatTaskService {
         message.setSessionId(task.getGroupSessionId());
         ByaiSession group = sessionService.findById(task.getGroupSessionId());
         message.setProjectId(group == null ? null : group.getProjectId());
-        message.setMessageRef(task.getSourceMessageId());
+        // 历史私聊的 source_message_id 是创建时的群历史边界，不是本次发布引用的消息。
+        boolean privateConversation = "PRIVATE".equals(task.getStatus());
+        Long replyTo = privateConversation ? null : task.getSourceMessageId();
+        message.setMessageRef(replyTo);
         message.setMessageContent(StringUtils.defaultString(content));
         message.setCreatorId(task.getTargetAgentId());
         // 群任务回执和结果与普通群回复使用相同的发言者身份字段。
@@ -479,9 +504,11 @@ public class GroupChatTaskService {
         metadata.put("scene", "GROUP_CHAT");
         metadata.put("kind", kind);
         metadata.put("targetAgentId", task.getTargetAgentId());
-        metadata.put("taskId", task.getTaskSessionId());
-        metadata.put("sourceMessageId", task.getSourceMessageId());
-        metadata.put("publisherUserId", "TASK_RESULT".equals(kind) ? CurrentUserHolder.getCurrentUserId() : null);
+        if (!privateConversation) {
+            metadata.put("taskId", task.getTaskSessionId());
+            metadata.put("publisherUserId", "TASK_RESULT".equals(kind) ? CurrentUserHolder.getCurrentUserId() : null);
+        }
+        if (replyTo != null) metadata.put("sourceMessageId", replyTo);
         metadata.put("files", files);
         if (mentions != null) {
             metadata.put("resourceList", mentions.resourceList());
@@ -497,13 +524,17 @@ public class GroupChatTaskService {
         event.put("sessionId", String.valueOf(task.getGroupSessionId()));
         event.put("messageId", String.valueOf(messageId));
         event.put("topicId", String.valueOf(message.getTopicId()));
-        event.put("messageRef", task.getSourceMessageId());
-        event.put("replyToMessageId", task.getSourceMessageId());
-        event.put("replyTo", buildReplySummary(task.getGroupSessionId(), task.getSourceMessageId()));
+        if (replyTo != null) {
+            event.put("messageRef", replyTo);
+            event.put("replyToMessageId", replyTo);
+            event.put("replyTo", buildReplySummary(task.getGroupSessionId(), replyTo));
+        }
         event.put("targetAgentId", task.getTargetAgentId());
-        event.put("taskId", String.valueOf(task.getTaskSessionId()));
-        // 与 context 历史消息保持相同字段和字符串 ID 类型。
-        event.put("initiatorUserId", task.getInitiatorUserId() == null ? null : String.valueOf(task.getInitiatorUserId()));
+        if (!privateConversation) {
+            // 与 context 历史保持相同字段和 ID 类型，私聊来源仅记录在服务端回执。
+            event.put("taskId", String.valueOf(task.getTaskSessionId()));
+            event.put("initiatorUserId", task.getInitiatorUserId() == null ? null : String.valueOf(task.getInitiatorUserId()));
+        }
         event.put("kind", kind);
         event.put("content", content);
         if (mentions != null) {

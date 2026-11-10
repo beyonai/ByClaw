@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.interfaces.controller.chat;
 
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
+
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatInternalSessionAccess;
 
 import java.io.IOException;
@@ -76,6 +78,8 @@ import org.springframework.web.multipart.MultipartFile;
 @RequestMapping("/chat")
 @Tag(name = "对话接口", description = "数字助理对话相关接口")
 public class AssistantChatController {
+    @Autowired
+    private GroupChatTaskAuthorizationService groupTaskAccess;
 
     private static final Logger logger = LoggerFactory.getLogger(AssistantChatController.class);
 
@@ -124,6 +128,7 @@ public class AssistantChatController {
             throw new BdpRuntimeException(I18nUtil.get("assistant.chat.message.id.not.empty"));
         }
         ByaiMessageHotDto byaiMessageHotDto = byaiMessageHotService.findById(Long.valueOf(messageId));
+        if (byaiMessageHotDto != null) groupTaskAccess.requireDirectRead(byaiMessageHotDto.getSessionId());
         return ResponseUtil.successResponse(byaiMessageHotDto);
     }
 
@@ -341,6 +346,8 @@ public class AssistantChatController {
      */
     @PostMapping("/updateMessageStructById")
     public ResponseUtil<ByaiMessage> updateMessageStructById(@RequestBody MessageStructDto messageStructDto) {
+        ByaiMessageHotDto message = byaiMessageHotService.findById(messageStructDto.getMessageId());
+        if (message != null) groupTaskAccess.requireDirectMessageWrite(message.getSessionId());
         ByaiMessage byaiMessage = assistantChatApplicationService.updateMessageStructById(messageStructDto);
         return ResponseUtil.successResponse(byaiMessage);
     }
@@ -360,6 +367,8 @@ public class AssistantChatController {
     @GetMapping(value = "/getTraceIdByMessageId")
     public ResponseUtil<String> getTraceIdByMessageId(
         @Parameter(description = "消息ID", required = true) @RequestParam(name = "messageId") Long messageId) {
+        ByaiMessageHotDto message = byaiMessageHotService.findById(messageId);
+        if (message != null) groupTaskAccess.requireDirectRead(message.getSessionId());
         return ResponseUtil.successResponse(assistantChatApplicationService.getTraceIdByMessageId(messageId));
     }
 

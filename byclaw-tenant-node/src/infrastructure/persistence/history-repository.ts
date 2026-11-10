@@ -6,6 +6,7 @@ import { groupNameExists } from "./group-name.js";
 import type { SqlSession } from "../../application/database-ports.js";
 import type { HistoryRepository, MessageFilter, Row } from "../../application/history.js";
 import { readGroupCandidate } from "./group-candidate.js";
+import { findDirectTask, rankedDirectTasks, requireGroupAgent } from "./group-direct-task.js";
 
 const camel = (row: Row): Row =>
   Object.fromEntries(
@@ -48,12 +49,14 @@ export class SqlHistoryRepository implements HistoryRepository {
   invitation(actor: string, token: string) {
     return invitationPreview(this.db, this.tenantId, actor, token);
   }
-  async publication(taskId: string) {
+  async publication(taskId: string, privatePendingId?: string) {
     return (
       (
         await this.read(
-          "SELECT * FROM byai.byai_group_chat_task_publication WHERE task_session_id=$1",
-          [taskId],
+          privatePendingId
+            ? "SELECT * FROM byai.byai_group_chat_private_publication WHERE task_session_id=$1 AND pending_publication_id=$2"
+            : "SELECT * FROM byai.byai_group_chat_task_publication WHERE task_session_id=$1",
+          privatePendingId ? [taskId, privatePendingId] : [taskId],
         )
       )[0] ?? null
     );
@@ -79,6 +82,16 @@ export class SqlHistoryRepository implements HistoryRepository {
           [sessionId, userId, this.tenantId],
         )
       )[0] ?? null
+    );
+  }
+  async activeDirectTaskId(
+    groupId: string,
+    actor: string,
+    agentId: string,
+  ): Promise<string | null> {
+    await requireGroupAgent(this.db, groupId, agentId, this.tenantId);
+    return (
+      (await findDirectTask(this.db, this.tenantId, groupId, actor, agentId))?.taskSessionId ?? null
     );
   }
   /** 失效成员会被移除，因此以当前租户原群中是否存在该真人成员行判断成员身份。 */
@@ -194,10 +207,13 @@ export class SqlHistoryRepository implements HistoryRepository {
   groups(actor: string, page: number, size: number) {
     return groupList((sql, args) => this.read(sql, args), this.tenantId, actor, page, size);
   }
-  tasks(sessionId: string) {
+  tasks(sessionId: string, actor?: string) {
     return this.read(
-      "SELECT * FROM byai.byai_group_chat_task WHERE group_session_id=$1 ORDER BY create_time DESC,task_session_id DESC",
-      [sessionId],
+      `SELECT t.* FROM byai.byai_group_chat_task t WHERE t.group_session_id=$3 AND (
+        (t.status<>'PRIVATE' AND t.turn_status<>'PRIVATE') OR
+        t.task_session_id IN (SELECT task_session_id FROM (${rankedDirectTasks}) ranked WHERE preference=1)
+       ) ORDER BY t.create_time DESC,t.task_session_id DESC`,
+      [this.tenantId, actor ?? null, sessionId],
     );
   }
   async task(taskId: string) {

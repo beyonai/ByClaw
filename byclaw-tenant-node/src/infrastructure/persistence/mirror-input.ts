@@ -8,6 +8,7 @@ import { text } from "../../domain/values.js";
 import { first, insert } from "./sql-utils.js";
 import { nextSequence } from "./message-fields.js";
 import { readGroupCandidate } from "./group-candidate.js";
+import { isLegacyDirectSession, requireWritableDirectTask } from "./group-direct-task.js";
 /** 复用用户消息行保存 INPUT 身份与摘要，校验会话访问后同步更新群话题和提及索引。 */
 export class MirrorInputWriter {
   constructor(
@@ -80,7 +81,7 @@ export class MirrorInputWriter {
       }
       const task = await first(
         this.db,
-        "SELECT group_session_id,initiator_user_id,status FROM byai.byai_group_chat_task WHERE task_session_id=$1",
+        "SELECT group_session_id,initiator_user_id,status,target_agent_id FROM byai.byai_group_chat_task WHERE task_session_id=$1",
         [event.sessionId],
       );
       if (task) {
@@ -95,6 +96,22 @@ export class MirrorInputWriter {
           task.initiatorUserId !== event.payload.userId
         )
           throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+        if (task.status === "PRIVATE")
+          await requireWritableDirectTask(
+            this.db,
+            this.enterpriseId,
+            task.groupSessionId,
+            event.payload.userId,
+            task.targetAgentId,
+            event.sessionId,
+          );
+      } else if (
+        !candidate &&
+        session.sessionType === "h_as" &&
+        session.parentSessionId &&
+        (await isLegacyDirectSession(this.db, event.sessionId, session.parentSessionId))
+      ) {
+        throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
       }
     }
   }
@@ -107,20 +124,22 @@ export class MirrorInputWriter {
     const candidate = await readGroupCandidate(this.db, event.sessionId);
     const task = await first(
       this.db,
-      "SELECT group_session_id,source_message_id,initiator_user_id FROM byai.byai_group_chat_task WHERE task_session_id=$1",
+      "SELECT group_session_id,source_message_id,initiator_user_id,(status='PRIVATE') AS private_chat FROM byai.byai_group_chat_task WHERE task_session_id=$1",
       [event.sessionId],
     );
     const source = task ?? candidate;
     if (source) {
       if (source.initiatorUserId !== event.payload.userId)
         throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
-      const previous = await first(
-        this.db,
-        "SELECT message_id FROM byai.byai_message WHERE session_id=$1 AND enterprise_id=$2 AND usage=1 LIMIT 1",
-        [event.sessionId, this.enterpriseId],
-      );
-      // Node public IDs and BE private input IDs belong to different ranges; freeze the public cutoff here.
-      const latest = previous
+      const currentGroupBoundary =
+        task?.privateChat ||
+        (await first(
+          this.db,
+          "SELECT message_id FROM byai.byai_message WHERE session_id=$1 AND enterprise_id=$2 AND usage=1 LIMIT 1",
+          [event.sessionId, this.enterpriseId],
+        ));
+      // 私聊每轮均读取当时的群上下文，首次输入也不依赖创建会话时的最后一条群消息。
+      const latest = currentGroupBoundary
         ? await first(
             this.db,
             "SELECT MAX(message_id)::text AS message_id FROM byai.byai_message WHERE session_id=$1 AND enterprise_id=$2",
@@ -129,7 +148,7 @@ export class MirrorInputWriter {
         : null;
       metadata.groupPublicContext = {
         groupSessionId: String(source.groupSessionId),
-        beforeMessageId: previous
+        beforeMessageId: currentGroupBoundary
           ? (BigInt(latest?.messageId ?? "0") + 1n).toString()
           : String(source.sourceMessageId),
       };

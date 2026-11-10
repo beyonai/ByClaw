@@ -45,9 +45,10 @@ export function historyRoutes(app: FastifyInstance, service: HistoryService) {
   app.post("/internal/v1/group-chats/project-access", async (req) =>
     service.groupProjectAccess(actor(req), requireId(body(req).projectId)),
   );
-  app.get<{ Params: { taskId: string } }>(
+  app.get<{ Params: { taskId: string }; Querystring: { pendingPublicationId?: string } }>(
     "/internal/v1/group-chat/tasks/:taskId/publication",
-    async (req) => service.publication(actor(req), req.params.taskId),
+    async (req) =>
+      service.publication(actor(req), req.params.taskId, req.query.pendingPublicationId),
   );
   app.post("/internal/v1/assiman/getMessages", async (req) => {
     const b = body(req);

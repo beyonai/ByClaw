@@ -55,9 +55,11 @@ public class LegacyForwardSourceAuthorityReader implements ForwardSourceAuthorit
         var metadata = map(message.getMetadata()); var related = map(message.getRelatedResources());
         List<Map<String,Object>> publicationFiles = List.of();
         if ("GROUP_CHAT".equals(metadata.get("scene")) && "TASK_RESULT".equals(metadata.get("kind"))) {
-            var publication = publications.selectOne(new LambdaQueryWrapper<ByaiGroupChatTaskPublication>()
-                .eq(ByaiGroupChatTaskPublication::getTaskSessionId,id(metadata.get("taskId")))
-                .eq(ByaiGroupChatTaskPublication::getGroupSessionId,sourceId).eq(ByaiGroupChatTaskPublication::getMessageId,selectedId));
+            // 私聊成果不公开会话 ID，使用所选群消息对应的确认回执解析附件。
+            var publication = metadata.get("taskId") == null ? publications.selectPrivateByMessage(sourceId, selectedId)
+                : publications.selectOne(new LambdaQueryWrapper<ByaiGroupChatTaskPublication>()
+                    .eq(ByaiGroupChatTaskPublication::getTaskSessionId,id(metadata.get("taskId")))
+                    .eq(ByaiGroupChatTaskPublication::getGroupSessionId,sourceId).eq(ByaiGroupChatTaskPublication::getMessageId,selectedId));
             if (publication == null) throw unresolved();
             publicationFiles = ForwardSourceProjection.publicationFiles(publication, publication.getPendingPublicationId()==null?null:pending.selectById(publication.getTaskSessionId()));
         }

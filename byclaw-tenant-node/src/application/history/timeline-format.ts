@@ -39,8 +39,12 @@ export async function displayMessages(
       ),
     ),
   );
+  // 只有显式关联任务的群消息或被引用消息才需补充发起人和旧成果类型。
+  const hasTask = [...rows, ...byId.values()].some(
+    (row) => !isSnapshotOnly(row.metadata) && objectJson(row.metadata).taskId != null,
+  );
   const tasks = new Map(
-    (rows.length ? await repository.tasks(rows[0]!.sessionId) : []).map((r) => [
+    (hasTask ? await repository.tasks(rows[0]!.sessionId, actor) : []).map((r) => [
       r.taskSessionId,
       r,
     ]),

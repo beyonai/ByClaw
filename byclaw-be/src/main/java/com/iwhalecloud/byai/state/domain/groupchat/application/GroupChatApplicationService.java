@@ -1069,16 +1069,25 @@ public class GroupChatApplicationService {
 
     @Transactional
     public ByaiSession createDirectSession(Long groupSessionId, Long agentId) {
-        ByaiSession group = authorizationService.requireGroup(groupSessionId);
-        authorizationService.requireCurrentUserMember(groupSessionId);
-        if (memberService.findSessionMember(groupSessionId, MemObjType.AGENT.name(), agentId) == null) {
+        // 旧接口仍返回会话实体，与任务入口共用同一绑定和历史。
+        return sessionService.findById(createDirectTask(groupSessionId, agentId).getTaskSessionId());
+    }
+
+    private ByaiSessionMember requireDirectMember(Long groupId, Long agentId) {
+        ByaiSessionMember member = agentId == null ? null : memberService.findSessionMember(groupId, MemObjType.AGENT.name(), agentId);
+        if (member == null) {
             throw new IllegalArgumentException(I18nUtil.get("groupchat.member.agentMissing"));
         }
+        return member;
+    }
+
+    private ByaiSession saveDirectSession(ByaiSession group, Long userId, Long agentId) {
+        Long groupSessionId = group.getSessionId();
         ByaiSession direct = new ByaiSession();
         direct.setSessionId(sequenceService.nextVal());
         direct.setParentSessionId(groupSessionId);
         direct.setProjectId(group.getProjectId());
-        direct.setCreatorId(CurrentUserHolder.getCurrentUserId());
+        direct.setCreatorId(userId);
         direct.setEnterpriseId(group.getEnterpriseId());
         direct.setObjectId(agentId);
         direct.setSessionType(SessionType.H_AS.getCode());
@@ -1096,38 +1105,66 @@ public class GroupChatApplicationService {
         boundary.setExtId(sequenceService.nextVal());
         boundary.setSessionId(direct.getSessionId());
         boundary.setExtParamCode("group_source_boundary_message_id");
-        Long latest = messageMapper.selectBySessionId(groupSessionId).stream()
-            .map(ByaiMessage::getMessageId)
-            .filter(Objects::nonNull)
-            .max(Long::compareTo)
-            .orElse(0L);
-        boundary.setExtParamValue(String.valueOf(latest));
+        Long latest = messageMapper.selectLatestMessageId(groupSessionId);
+        boundary.setExtParamValue(String.valueOf(latest == null ? 0L : latest));
         sessionExtService.save(boundary);
         return direct;
     }
 
-    /** 私聊任务复用单聊会话，只新增群任务记录，不进入群任务执行与发布链路。 */
+    /** 成员列表的私聊入口在原群中按发起人和员工复用同一会话。 */
     @Transactional
     public ByaiGroupChatTask createDirectTask(Long groupSessionId, Long agentId) {
-        ByaiSession direct = createDirectSession(groupSessionId, agentId);
-        ByaiSessionMember agent = memberService.findSessionMember(groupSessionId, MemObjType.AGENT.name(), agentId);
-        Long latest = messageMapper.selectBySessionId(groupSessionId).stream()
-            .map(ByaiMessage::getMessageId)
-            .filter(Objects::nonNull)
-            .max(Long::compareTo)
-            .orElse(0L);
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        if (userId == null || userId <= 0) throw new IllegalArgumentException(I18nUtil.get("groupchat.loginRequired"));
+        // 与成员变更、解散共用群锁；绑定、会话和扩展一起提交，失败后可安全重新打开。
+        sessionService.lockById(groupSessionId);
+        ByaiSession group = authorizationService.requireGroup(groupSessionId);
+        authorizationService.requireCurrentUserMember(groupSessionId);
+        ByaiSessionMember agent = requireDirectMember(groupSessionId, agentId);
+        ByaiGroupChatTask task = groupChatTaskMapper.selectBoundDirect(groupSessionId, userId, agentId);
+        if (task != null) return restorePrivateSession(task);
+        task = groupChatTaskMapper.selectEarliestPrivate(groupSessionId, userId, agentId);
+        if (task == null) {
+            ByaiSession legacy = groupChatTaskMapper.selectLegacyDirectSession(groupSessionId, userId, agentId);
+            ByaiSession session = legacy == null ? saveDirectSession(group, userId, agentId) : legacy;
+            task = savePrivateTask(session, agent);
+            if (legacy != null) restorePrivateSession(task);
+        } else {
+            restorePrivateSession(task);
+        }
+        groupChatTaskMapper.insertDirectBinding(task);
+        return task;
+    }
+
+    /** 历史客户端可以关闭或取消私聊，在原会话上恢复聊天及消息历史。 */
+    private ByaiGroupChatTask restorePrivateSession(ByaiGroupChatTask task) {
+        Date now = new Date();
+        groupChatTaskMapper.restoreClosedDirectSession(task.getTaskSessionId(), now);
+        if ("CANCELLED".equals(task.getStatus())) {
+            if (groupChatTaskMapper.restoreCancelledPrivate(task.getTaskSessionId(), now) != 1) {
+                throw new IllegalStateException(I18nUtil.get("groupchat.task.noLongerActive"));
+            }
+            task.setStatus("PRIVATE");
+            task.setUpdateTime(now);
+        }
+        return task;
+    }
+
+    private ByaiGroupChatTask savePrivateTask(ByaiSession direct, ByaiSessionMember agent) {
+        Date now = new Date();
         ByaiGroupChatTask task = new ByaiGroupChatTask();
         task.setTaskSessionId(direct.getSessionId());
-        task.setGroupSessionId(groupSessionId);
-        task.setSourceMessageId(latest);
+        task.setGroupSessionId(direct.getParentSessionId());
+        // 表字段非空；私聊没有触发群消息，历史边界单独保存在会话扩展中。
+        task.setSourceMessageId(0L);
         task.setDispatchId(sequenceService.nextVal());
-        task.setInitiatorUserId(CurrentUserHolder.getCurrentUserId());
-        task.setTargetAgentId(agentId);
-        task.setTaskName("与" + (agent == null || StringUtils.isBlank(agent.getMemName()) ? "数字员工" : agent.getMemName()) + "的私聊");
+        task.setInitiatorUserId(direct.getCreatorId());
+        task.setTargetAgentId(direct.getObjectId());
+        task.setTaskName("与" + StringUtils.defaultIfBlank(agent.getMemName(), "数字员工") + "的私聊");
         task.setStatus("PRIVATE");
         task.setTurnStatus("PRIVATE");
-        task.setCreateTime(new Date());
-        task.setUpdateTime(new Date());
+        task.setCreateTime(now);
+        task.setUpdateTime(now);
         groupChatTaskMapper.insert(task);
         return task;
     }

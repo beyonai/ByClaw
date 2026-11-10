@@ -55,6 +55,8 @@ class SessionApplicationServiceTest {
     @BeforeEach
     void setUp() {
         sessionApplicationService = new SessionApplicationService();
+        ReflectionTestUtils.setField(sessionApplicationService, "groupTaskAccess",
+            org.mockito.Mockito.mock(com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService.class));
         ReflectionTestUtils.setField(sessionApplicationService, "sessionService", sessionService);
         ReflectionTestUtils.setField(sessionApplicationService, "sessionTitleService", sessionTitleService);
         ReflectionTestUtils.setField(sessionApplicationService, "sessionExtService", sessionExtService);

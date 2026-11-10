@@ -38,10 +38,22 @@ assert.deepEqual(await new GroupTaskPublicationState(table).select(command()), b
 assert.equal(await state.select(command({}, { sessionId: 'changed' })), undefined)
 assert.equal(await state.select(command({}, { userCode: 'other-user' })), undefined)
 
+// A direct session may prepare successive drafts without ever receiving a group dispatch.
+const direct = { groupPrivatePublication: { taskSessionId: binding.taskId, groupSessionId: '27', enterpriseId: '19' } }
+const directBinding = { ...binding, privateGroupId: '27', enterpriseId: '19' }
+assert.deepEqual(await state.select(command(direct)), directBinding)
+table.records.set('old-dsh-key', { binding })
+assert.deepEqual(await new GroupTaskPublicationState(table).select(command()), directBinding)
+await assert.rejects(state.select(command({
+  groupPrivatePublication: { ...direct.groupPrivatePublication, enterpriseId: '21' },
+})), /不一致/u)
+await assert.rejects(state.select(command(direct, { sessionId: '999' })), /不一致/u)
+
 const integrationManifest = JSON.parse(readFileSync(new URL('../../byclaw-integration/package.json', import.meta.url), 'utf8'))
 assert.equal(integrationManifest.dependencies['@byclaw/dsh-group-task-publication'], undefined)
 const integrationSource = readFileSync(new URL('../../byclaw-integration/src/index.ts', import.meta.url), 'utf8')
-assert.ok(integrationSource.includes("ctx.serial('byclaw/session-setup'"))
+const setupSource = readFileSync(new URL('../../byclaw-integration/src/todo-execution-setup.ts', import.meta.url), 'utf8')
+assert.ok(setupSource.includes("await ctx.serial('byclaw/session-setup'"))
 assert.doesNotMatch(integrationSource, /groupTaskPublication|dsh-group-task-publication/)
 
 // Lifecycle checks start with empty durable storage, independent of the state-selection cases.

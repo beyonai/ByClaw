@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.state.application.service.chat;
 
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatInternalSessionAccess;
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
+import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.InputStream;
 import java.net.URLConnection;
@@ -50,6 +53,8 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
  */
 @Service
 public class ChatFileArtifactApplicationService {
+    @Autowired
+    private GroupChatTaskAuthorizationService groupTaskAccess;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ChatFileArtifactApplicationService.class);
 
@@ -250,6 +255,10 @@ public class ChatFileArtifactApplicationService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "chat.file.artifact.session.not.exist");
         }
         GroupChatInternalSessionAccess.requirePublic(session);
+        if (session.getParentSessionId() != null && SessionType.H_AS.getCode().equals(session.getSessionType())) {
+            // 项目级文件权限不能授予群成员私聊中的原始附件访问权。
+            groupTaskAccess.requireDirectRead(sessionId);
+        }
         if (canViewSession(session)) {
             return session;
         }

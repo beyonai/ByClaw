@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.Date;
 import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
@@ -31,12 +32,14 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
+import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTaskPublication;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskPublicationMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatRecallMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
@@ -45,6 +48,7 @@ import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatActiveTaskException;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCandidateSessionService;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTurnCoordinator;
+import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessageRejectedException;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatGatewayExecutor;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
@@ -241,6 +245,29 @@ class GroupChatTurnCoordinatorTest extends I18nTestSupport {
         assertNotEquals(a.getCandidateSessionId(), otherUser.getCandidateSessionId());
         assertEquals(otherUser.getCandidateSessionId(), coordinator.enqueueUser(10L, 24L, 21L, 9L, 2L)
             .getCandidateSessionId());
+    }
+
+    @Test
+    void quotingAnExplicitPrivatePublicationStartsAFreshPublicGroupConversation() {
+        ByaiMessage reference = new ByaiMessage();
+        reference.setMessageId(20L);
+        reference.setSessionId(10L);
+        reference.setUsage(2);
+        reference.setMessageContent("已公开的成果");
+        reference.setMetadata("{\"scene\":\"GROUP_CHAT\",\"kind\":\"TASK_RESULT\"}");
+        when(messages.selectByMessageId(20L)).thenReturn(reference);
+        when(messages.selectVisibleGroupMessage(10L, 20L)).thenReturn(reference);
+        var receipts = mock(ByaiGroupChatTaskPublicationMapper.class);
+        ReflectionTestUtils.setField(coordinator, "publicationMapper", receipts);
+        when(receipts.selectPrivateByMessage(10L, 20L))
+            .thenReturn(new ByaiGroupChatTaskPublication());
+        ByaiGroupChatTurn turn = coordinator.enqueueUser(10L, 21L, 20L, 9L, 2L);
+        assertEquals(21L, turn.getRootMessageId());
+        assertNotEquals(60L, turn.getCandidateSessionId());
+        assertEquals("已公开的成果", JSON.parseObject(turn.getInputContent()).getJSONObject("本次引用消息").getString("content"));
+        when(receipts.selectPrivateByMessage(10L, 20L)).thenReturn(null);
+        assertThatThrownBy(() -> coordinator.enqueueUser(10L, 22L, 20L, 9L, 2L))
+            .isInstanceOf(GroupChatMessageRejectedException.class);
     }
 
     @Test

@@ -77,6 +77,19 @@ class GroupChatTaskAgentHandoffTest extends I18nTestSupport {
     }
 
     @Test
+    void privateConversationAcceptsOnlyItsInitiatorAndDesignatedGroupEmployee() {
+        task.setStatus("PRIVATE");
+        task.setTargetAgentId(41L);
+        when(tasks.selectBoundDirect(10L, 30L, 41L)).thenReturn(task);
+        assertThat(guard.beforeTurn(60L, 41L, null)).isNull();
+        verify(groups).requireCurrentUserMember(10L);
+        assertThatThrownBy(() -> guard.beforeTurn(60L, 40L, null)).isInstanceOf(IllegalArgumentException.class);
+        task.setInitiatorUserId(31L);
+        assertThatThrownBy(() -> guard.beforeTurn(60L, 41L, null)).hasMessageContaining("Only task initiator");
+        verify(lifecycle, never()).startTurn(60L);
+    }
+
+    @Test
     void authorizedMemberCanTakeOverWithoutChangingTaskOwner() {
         assertThat(guard.beforeTurn(60L, 41L, null)).isEqualTo(101L);
         assertThat(task.getTargetAgentId()).isEqualTo(40L);

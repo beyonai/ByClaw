@@ -11,6 +11,9 @@ function setup() {
   const repo: HistoryRepository = {
     groupProjectAccess: vi.fn(async () => ({ bound: true, canRead: true })),
     groupNameExists: vi.fn(async () => false),
+    invitation: vi.fn(async () => ({})),
+    publication: vi.fn(async () => null),
+    activeDirectTaskId: vi.fn(async () => null),
     session: vi.fn(async (id: string) => ({
       sessionId: id,
       enterpriseId: "10",

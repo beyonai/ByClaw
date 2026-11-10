@@ -71,6 +71,20 @@ export class HistoryAccess {
           extensions.find((row) => row.extParamCode === GROUP_COORDINATION_SCOPE)?.extParamValue,
         );
         session.targetAgentId = task.targetAgentId;
+        if (task.status === "PRIVATE") {
+          if (session.creatorId !== actor) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+          const active = await this.repository.activeDirectTaskId(
+            task.groupSessionId,
+            actor,
+            task.targetAgentId,
+          );
+          // 此字段仅来自已鉴权的私聊根任务，不能由客户端、扩展字段或子会话继承。
+          if (active != null && String(active) === String(sessionId))
+            session.groupDirectTask = {
+              groupSessionId: task.groupSessionId,
+              targetAgentId: task.targetAgentId,
+            };
+        }
         if (scope) session.groupCoordination = scope;
       } else if (candidate) {
         const extensions = await this.repository.extensions(sessionId);

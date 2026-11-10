@@ -269,6 +269,41 @@ try {
   assert.equal((await execute({ text: 'x', taskId: 'forged' })).isError, true)
   respond = () => Response.json({ code: -1, msg: 'Task is not active' })
   assert.equal((await execute({ text: 'x' })).isError, true)
+  // User confirmations consume drafts in BE. The plugin only prepares the next card
+  // and never calls complete or rewrites a source file, even when its path is reused.
+  const privateAgent = { id: 'direct-chat' }
+  let privateScope
+  fibers.push(await ctx.plugin(Object.assign(inner => { privateScope = createScope(inner, privateAgent) }, { inject: ['tools'] })))
+  tools.mount(privateScope.ctx, { ...binding, privateGroupId: '27', enterpriseId: '19' })
+  const privateSchema = ctx.tools.schemas(privateAgent).find(tool => tool.name === 'prepare_group_task_publication')
+  assert.ok(privateSchema.description.length <= 250 && privateSchema.description.includes('同一私聊可多次发布'))
+  for (const schema of [schemas[0], privateSchema]) {
+    for (const trigger of ['发到群里', '发到工作组', '发布到群里', '发布到工作组', '优先调用本工具']) {
+      assert.ok(schema.description.includes(trigger), trigger)
+    }
+  }
+  const previousCallCount = calls.length
+  for (const draft of ['401', '402']) {
+    respond = () => Response.json({ code: 0, data: { ...data, pendingPublicationId: draft } })
+    const result = await ctx.tools.execute({ callId: ToolCallId('private-' + draft), name: privateSchema.name,
+      arguments: { text: '成果 ' + draft, sourcePaths: ['/by/REPORT.md'] }, agent: privateAgent, signal })
+    assert.equal(result.isError, false)
+    assert.equal(calls.at(-1).url, `https://be.test/byaiService/group-chat/tasks/${binding.taskId}/pending-publication`)
+    assert.equal(calls.at(-1).options.headers.get('X-Enterprise-Id'), '19')
+    assert.deepEqual(calls.at(-1).body, { text: '成果 ' + draft, sourcePaths: ['/by/REPORT.md'] })
+  }
+  assert.equal(calls.length, previousCallCount + 2)
+  assert.equal(readFileSync(join(byRoot, 'REPORT.md'), 'utf8'), 'real output')
+  await privateScope.dispose()
+  const sharedClient = new GroupTaskPublicationClient({
+    baseUrl: 'https://be.test', userCode: binding.userCode, resolveSourcePath, byRoot, timeoutMs: 10000,
+    resolveAuthHeaders: async () => ({ 'Beyond-Token': token, 'X-Enterprise-Id': '19' }),
+    fetchImpl: async (_url, options) => {
+      assert.equal(options.headers.has('X-Enterprise-Id'), false)
+      return Response.json({ code: 0, data })
+    },
+  })
+  await sharedClient.prepare({ ...binding, privateGroupId: '27' }, { text: '个人空间群成果' }, signal)
   await hacuScope.dispose()
   assert.equal(ctx.tools.schemas(hacuAgent).length, 0)
   await normalScope.dispose()

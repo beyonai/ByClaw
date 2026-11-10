@@ -176,10 +176,17 @@ export class SqlForwardSourceAuthorityReader {
       publicationFiles: [],
     };
     if (metadata.scene === "GROUP_CHAT" && metadata.kind === "TASK_RESULT") {
-      const [publication] = await this.rows(
-        "SELECT * FROM byai.byai_group_chat_task_publication WHERE group_session_id=$1 AND message_id=$2 AND task_session_id=$3",
-        [sourceSessionId, selectedMessageId, requireId(metadata.taskId)],
-      );
+      // 私聊发布的群消息只展示确认成果。转发时用原群和唯一消息 ID 读取其不可变回执。
+      const [publication] =
+        metadata.taskId == null
+          ? await this.rows(
+              "SELECT * FROM byai.byai_group_chat_private_publication WHERE group_session_id=$1 AND message_id=$2",
+              [sourceSessionId, selectedMessageId],
+            )
+          : await this.rows(
+              "SELECT * FROM byai.byai_group_chat_task_publication WHERE group_session_id=$1 AND message_id=$2 AND task_session_id=$3",
+              [sourceSessionId, selectedMessageId, requireId(metadata.taskId)],
+            );
       if (!publication) return unresolved();
       authority.publicationFiles = entries(parse(publication.filesJson, []));
       if (

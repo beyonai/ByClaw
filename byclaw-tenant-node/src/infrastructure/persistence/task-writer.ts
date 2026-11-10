@@ -90,6 +90,8 @@ export async function changeTask(context: CommandContext): Promise<void> {
   if (!task || task.initiatorUserId !== command.userId)
     throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
   if (command.operation === "UPDATE_TASK") {
+    if (task.status === "PRIVATE" || task.turnStatus === "PRIVATE")
+      throw new DomainError("INVALID_TASK_STATUS");
     if (
       !["ACTIVE", "PUBLISHED", "CANCELLED"].includes(p.status) ||
       !["WAITING_USER", "RUNNING", "FAILED"].includes(p.turnStatus ?? task.turnStatus)
@@ -105,13 +107,23 @@ export async function changeTask(context: CommandContext): Promise<void> {
     return;
   }
   if (command.operation === "DELETE_PENDING_PUBLICATION") {
+    if (task.status === "PRIVATE") {
+      const deleted = await first(
+        db,
+        "DELETE FROM byai.byai_group_chat_pending_publication WHERE task_session_id=$1 AND pending_publication_id=$2 RETURNING task_session_id",
+        [taskId, requireId(p.pendingPublicationId)],
+      );
+      if (!deleted) throw new DomainError("PENDING_PUBLICATION_CHANGED");
+      return;
+    }
     await db.query(
       "DELETE FROM byai.byai_group_chat_pending_publication WHERE task_session_id=$1",
       [taskId],
     );
     return;
   }
-  if (task.status !== "ACTIVE") throw new DomainError("TASK_NOT_ACTIVE");
+  if (task.status !== "ACTIVE" && task.status !== "PRIVATE")
+    throw new DomainError("TASK_NOT_ACTIVE");
   if (
     !Array.isArray(p.sourcePaths) ||
     p.sourcePaths.length > 100 ||
@@ -126,6 +138,16 @@ export async function changeTask(context: CommandContext): Promise<void> {
   if (
     p.expectedPendingPublicationId !== undefined &&
     existing?.pendingPublicationId !== requireId(p.expectedPendingPublicationId)
+  )
+    throw new DomainError("PENDING_PUBLICATION_CHANGED");
+  if (
+    task.status === "PRIVATE" &&
+    (existing?.pendingPublicationId === p.pendingPublicationId ||
+      (await first(
+        db,
+        "SELECT 1 FROM byai.byai_group_chat_private_publication WHERE task_session_id=$1 AND pending_publication_id=$2",
+        [taskId, requireId(p.pendingPublicationId)],
+      )))
   )
     throw new DomainError("PENDING_PUBLICATION_CHANGED");
   if (!String(p.text ?? "").trim() && !p.sourcePaths.length)

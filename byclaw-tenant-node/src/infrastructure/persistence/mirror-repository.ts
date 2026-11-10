@@ -39,7 +39,10 @@ class SqlMirrorTransaction implements MirrorTransaction {
       ? null
       : await first(
           this.db,
-          "SELECT t.group_session_id FROM byai.byai_group_chat_task t JOIN byai.byai_session s ON s.session_id=t.task_session_id WHERE t.task_session_id=$1 AND s.enterprise_id=$2",
+          `SELECT COALESCE(t.group_session_id,s.parent_session_id) AS group_session_id FROM byai.byai_session s
+            LEFT JOIN byai.byai_group_chat_task t ON t.task_session_id=s.session_id
+            WHERE s.session_id=$1 AND s.enterprise_id=$2 AND (t.task_session_id IS NOT NULL OR
+              EXISTS(SELECT 1 FROM byai.byai_session_ext x WHERE x.session_id=s.session_id AND x.ext_param_code='group_source_session_id' AND x.ext_param_value=s.parent_session_id::text))`,
           [sessionId, this.enterpriseId],
         );
     const groupId = candidate?.groupSessionId ?? task?.groupSessionId;

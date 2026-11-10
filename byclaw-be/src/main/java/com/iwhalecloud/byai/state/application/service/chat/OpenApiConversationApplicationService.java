@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.chat;
 
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
+
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
@@ -41,6 +43,8 @@ import java.util.concurrent.Callable;
  */
 @Service
 public class OpenApiConversationApplicationService {
+    @Autowired
+    private GroupChatTaskAuthorizationService groupTaskAccess;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(OpenApiConversationApplicationService.class);
 
@@ -327,6 +331,7 @@ public class OpenApiConversationApplicationService {
      * @return PageInfo
      */
     public PageInfo<ByaiMessage> qryMessagesByQo(MessageHotPageQo messageHotPageQo) {
+        groupTaskAccess.requireDirectRead(messageHotPageQo.getSessionId());
         return byaiMessageHotService.selectByPageQo(messageHotPageQo);
     }
 }

@@ -806,6 +806,8 @@ public class RouteService {
         String actionType = chatDto.getActionType() == null ? ActionType.ASK_AGENT : chatDto.getActionType();
         String parentMessageId = "-1";
         Map<String, Object> gatewayParams = params == null ? new HashMap<>() : new HashMap<>(params);
+        // 私聊发布工具的作用域只由下方装饰器根据已鉴权的群会话记录授予。
+        gatewayParams.remove("groupPrivatePublication");
         gatewayParams.put("requestId", ChatChainLog.requestId(ctx));
         gatewayParams.put("cwd", workspace);
         if (ActionType.ASK_AGENT.equals(actionType)

@@ -1,5 +1,6 @@
 import type { SessionRepository } from "../../application/session-queries.js";
 import type { SqlSession } from "../../application/database-ports.js";
+import { directSessionsOfGroup, rankedDirectTasks } from "./group-direct-task.js";
 /** 个人会话 SQL 查询；排除关闭、路由中及群任务私有会话，避免混入普通列表。 */
 export class SqlSessionRepository implements SessionRepository {
   constructor(
@@ -8,8 +9,10 @@ export class SqlSessionRepository implements SessionRepository {
   ) {}
   async children(actor: string, parentId: string, page: number, size: number) {
     const params = [this.enterpriseId, actor, parentId];
-    const where =
-      "enterprise_id=$1 AND creator_id=$2 AND parent_session_id=$3 AND COALESCE(state,'ACTIVE') NOT IN('CLOSED','GROUP_CHAT_ROUTING','GROUP_TASK_CANDIDATE','GROUP_CHAT_DISPATCH')";
+    const where = `enterprise_id=$1 AND creator_id=$2 AND parent_session_id=$3 AND COALESCE(state,'ACTIVE') NOT IN('CLOSED','GROUP_CHAT_ROUTING','GROUP_TASK_CANDIDATE','GROUP_CHAT_DISPATCH')
+      AND ((NOT EXISTS(SELECT 1 FROM byai.byai_group_chat_task t WHERE t.task_session_id=byai_session.session_id AND (t.status='PRIVATE' OR t.turn_status='PRIVATE'))
+        AND session_id NOT IN (${directSessionsOfGroup}))
+        OR session_id IN (SELECT task_session_id FROM (${rankedDirectTasks}) ranked WHERE preference=1))`;
     const [total] = await this.db.query(
       `SELECT COUNT(*) AS count FROM byai.byai_session WHERE ${where}`,
       params,
@@ -43,7 +46,9 @@ export class SqlSessionRepository implements SessionRepository {
     }
     if (parentSessionId) {
       params.push(parentSessionId);
-      where += ` AND parent_session_id=$${params.length}`;
+      where += ` AND parent_session_id=$${params.length} AND NOT EXISTS(
+        SELECT 1 FROM byai.byai_session_ext x WHERE x.session_id=byai_session.session_id
+          AND x.ext_param_code='group_source_session_id' AND x.ext_param_value=byai_session.parent_session_id::text)`;
     } else {
       where += " AND parent_session_id IS NULL";
     }

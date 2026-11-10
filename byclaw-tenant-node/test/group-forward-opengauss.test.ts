@@ -5,6 +5,8 @@ import { readFile } from "node:fs/promises";
 import { validateScript } from "../src/infrastructure/schema/script-validator.js";
 
 const names = [
+  "byai_group_chat_direct_binding",
+  "byai_group_chat_private_publication",
   "byai_session_member",
   "byai_group_chat_forward_request",
   "byai_group_chat_forward_target",
@@ -17,7 +19,7 @@ const names = [
 describe("forwarding update execution contract", () => {
   it("accepts the approved tenant increment through the existing strict UPDATE validator", async () => {
     const sql = await readFile(
-      new URL("../../deploy/migrations/versions/V0.6.0/tenant/V0.6.0__ddl.sql", import.meta.url),
+      new URL("../../deploy/migrations/versions/V0.7.0/tenant/V0.7.0__ddl.sql", import.meta.url),
       "utf8",
     );
     expect(() =>
@@ -102,10 +104,10 @@ describe.skipIf(!pgUrl)(
         const runner = new SchemaTaskRunner(schemaPorts(connection, files as any, be as any));
         async function apply(kind: "baseline" | "update") {
           const directory = kind === "baseline" ? "baseline" : "updates";
-          bytes = await readFile(new URL(`../${directory}/V0.6.0__${kind}.zip`, import.meta.url));
+          bytes = await readFile(new URL(`../${directory}/V0.7.0__${kind}.zip`, import.meta.url));
           const manifest = JSON.parse(
             await readFile(
-              new URL(`../${directory}/V0.6.0__${kind}__manifest.json`, import.meta.url),
+              new URL(`../${directory}/V0.7.0__${kind}__manifest.json`, import.meta.url),
               "utf8",
             ),
           );
@@ -115,13 +117,13 @@ describe.skipIf(!pgUrl)(
               fencingToken: state.fencingToken,
               operationType: kind === "baseline" ? "INIT" : "UPDATE",
               fromVersion: audited,
-              targetVersion: "V0.6.0",
+              targetVersion: "V0.7.0",
               bundleDigest: sha256(bytes),
               scripts: [
                 {
-                  version: "V0.6.0",
+                  version: "V0.7.0",
                   parentVersion: audited,
-                  path: `${kind === "baseline" ? "baseline" : "versions"}/V0.6.0/__ddl.sql`,
+                  path: `${kind === "baseline" ? "baseline" : "versions"}/V0.7.0/__ddl.sql`,
                   sha256: manifest.sqlSha256,
                 },
               ],
@@ -144,7 +146,7 @@ describe.skipIf(!pgUrl)(
         await admin.query("DROP SCHEMA byai CASCADE");
         const old = await readFile(
           new URL(
-            "../../deploy/migrations/versions/V0.5.0/tenant/V0.5.0__baseline__ddl.sql",
+            "../../deploy/migrations/versions/V0.6.0/tenant/V0.6.0__baseline__ddl.sql",
             import.meta.url,
           ),
           "utf8",
@@ -158,7 +160,7 @@ describe.skipIf(!pgUrl)(
         const parent = {
           protocolVersion: 1,
           enterpriseId: "1",
-          version: "V0.5.0",
+          version: "V0.6.0",
           catalogDigest: await catalogDigest(db),
           scriptDigest: sha256(old),
         };
@@ -173,7 +175,7 @@ describe.skipIf(!pgUrl)(
               "SELECT table_name FROM information_schema.tables WHERE table_schema='byai'",
             )
           ).length,
-        ).toBe(18);
+        ).toBe(20);
         await expect(
           db.query(
             "INSERT INTO byai.byai_group_chat_forward_request(request_id,enterprise_id,actor_user_id,backend,source_session_id,client_request_id,mode,request_hash,snapshot_version,frozen_json) VALUES(1,1,1,'GUESS',1,'x','SINGLE','hash',1,'{}')",

@@ -335,6 +335,21 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
         ByaiGroupChatExecution execution = turn == null
             ? executionMapper.selectByCandidateSessionId(context.sessionId) : turn;
         if (execution == null) {
+            if (context.tenantContext == null && taskMapper != null) {
+                ByaiGroupChatTask direct = taskMapper.selectById(context.sessionId);
+                if (direct != null && "PRIVATE".equals(direct.getStatus())) {
+                    if (context.assistantChatDto == null || !Objects.equals(context.userId, direct.getInitiatorUserId())) {
+                        throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.identityMismatch"));
+                    }
+                    taskAuthorizationService.requirePrivateAgent(direct, context.assistantChatDto.getAgentId());
+                    // 无群派发轮次的单聊只能获得草稿工具，普通对话的上下文和凭据路由保持原样。
+                    gatewayParams.put("groupPrivatePublication", Map.of("taskSessionId", context.sessionId.toString(),
+                        "groupSessionId", direct.getGroupSessionId().toString()));
+                    if ("prepare_group_task_publication".equals(context.assistantChatDto.getMessageIntent())) {
+                        return decorateText(content, text -> promptBuilder.appendPublicationPreparation(text, context.sessionId));
+                    }
+                }
+            }
             return content;
         }
         boolean dispatchedTurn = turn != null || Objects.equals(execution.getTraceId(), context.traceId);

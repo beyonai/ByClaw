@@ -34,15 +34,18 @@ public class GroupChatPendingPublicationService {
 
     public GroupChatPendingPublicationResponse current(Long taskId) {
         ByaiGroupChatTask task = authorization.requireInitiator(taskId);
-        return "ACTIVE".equals(task.getStatus()) ? store.response(store.find(taskId)) : null;
+        return acceptsDraft(task) ? store.response(store.find(taskId)) : null;
     }
 
     @Transactional
     public GroupChatPendingPublicationResponse prepare(Long taskId, GroupChatPendingPublicationRequest request) {
         authorization.requireInitiator(taskId);
         ByaiGroupChatTask task = tasks.selectWithRedisLock(taskId);
-        if (task == null || !"ACTIVE".equals(task.getStatus())) {
+        if (!acceptsDraft(task)) {
             throw new IllegalArgumentException(I18nUtil.get("groupchat.task.inactive"));
+        }
+        if ("PRIVATE".equals(task.getStatus())) {
+            authorization.requirePrivateAgent(task, task.getTargetAgentId());
         }
         Long expectedId = request == null ? null : request.getExpectedPendingPublicationId();
         if (expectedId != null) {
@@ -70,5 +73,9 @@ public class GroupChatPendingPublicationService {
         pending.setCreateTime(new Date());
         store.replace(task, pending);
         return store.response(pending);
+    }
+
+    private boolean acceptsDraft(ByaiGroupChatTask task) {
+        return task != null && ("ACTIVE".equals(task.getStatus()) || "PRIVATE".equals(task.getStatus()));
     }
 }

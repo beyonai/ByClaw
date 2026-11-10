@@ -9,6 +9,7 @@ import com.iwhalecloud.byai.manager.mapper.showcase.ByaiShowcaseMapper;
 import com.iwhalecloud.byai.state.application.service.session.SessionApplicationService;
 import com.iwhalecloud.byai.state.application.service.taskplan.TaskPlanApplicationService;
 import com.iwhalecloud.byai.state.domain.file.service.FileService;
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
 import com.iwhalecloud.byai.state.domain.message.service.MemoryMessageService;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
@@ -43,6 +44,7 @@ class MessageServiceBeanWiringTest extends com.iwhalecloud.byai.common.i18n.I18n
 
     private void registerDependencies(AnnotationConfigApplicationContext context) {
         registerMock(context, "memoryMessageService", MemoryMessageService.class);
+        registerMock(context, "groupTaskAccess", GroupChatTaskAuthorizationService.class);
         registerMock(context, "byaiSystemConfigService", ByaiSystemConfigService.class);
         registerMock(context, "sequenceService", SequenceService.class);
         registerMock(context, "sessionApplicationService", SessionApplicationService.class);

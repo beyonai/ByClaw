@@ -11,7 +11,7 @@ import lombok.Data;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 
-/** 可多轮处理并由发起人一次性发布的群聊任务。 */
+/** 群聊任务或成员私聊，正式任务按任务完成，私聊按确认的草稿发布。 */
 @Data
 @TableName("byai_group_chat_task")
 public class ByaiGroupChatTask {

@@ -176,7 +176,7 @@ BE 每次核验 ACTIVE 租户成员，并生成 tenantMemberUserIds；邀请/转
 | CLAIM_TASK                                            | taskSessionId；仅发起人可将 QUEUED 任务或候选执行原子领取为 RUNNING，返回 claimed，重复领取不会启动第二次执行                                                                                |
 | UPDATE_TASK                                           | taskSessionId、status(ACTIVE/CANCELLED)、turnStatus(RUNNING/WAITING_USER/FAILED)                                                                                                             |
 | SAVE_PENDING_PUBLICATION / DELETE_PENDING_PUBLICATION | taskSessionId、pendingPublicationId、text、sourcePaths / taskSessionId                                                                                                                       |
-| PUBLISH_TASK                                          | taskSessionId、id、messageId、text、files[]、pendingPublicationId?、metadata?；仅发起人，非 RUNNING；发布消息、publication、PUBLISHED 状态与待发布清理同事务                                 |
+| PUBLISH_TASK                                          | taskSessionId、text、files[]、pendingPublicationId、metadata。正式任务支持无草稿完成，私聊须指定当前草稿版本，有提及归一化时传 preparedText 原文。                                         |
 
 API 路径对应 `command-routes.ts` 和 OpenAPI。HTTP 正常结果是**事务已提交**的原始结果；同 requestId 同内容不重做，冲突拒绝。命令结果使用既有 byai_session_ext 的 `node_command:<requestId>` 保存，与业务变更同事务；不新增幂等/回执表。重投离群/删除命令也可返回原结果。
 
@@ -297,8 +297,8 @@ BE 公共路径保持不变。带租户上下文的群消息、群管理与任�
 | 能力               | Node 内部接口（省略 `/internal/v1`）                      | 操作                                                                                         |
 | ------------------ | --------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | 修改群昵称         | `PATCH /group-chats/:id/members/me/nickname`              | `SET_NICKNAME`，`nickname`                                                                   |
-| 从群创建私聊       | `POST /group-chats/:id/direct-sessions`                   | `CREATE_DIRECT_SESSION`，`agentId`；返回 `data` 会话                                         |
-| 从群创建私聊任务   | `POST /group-chats/:id/direct-tasks`                      | `CREATE_DIRECT_TASK`，`agentId`；返回 `data` `status=PRIVATE` 的群任务                       |
+| 打开群内私聊（兼容入口） | `POST /group-chats/:id/direct-sessions`              | `CREATE_DIRECT_SESSION`，传 `agentId`，沿用固定私聊并返回原会话 DTO 的 `data.sessionId`          |
+| 打开群内员工私聊   | `POST /group-chats/:id/direct-tasks`                      | `CREATE_DIRECT_TASK`，传 `agentId`，返回同一发起人和员工在本群的固定 PRIVATE 会话             |
 | 创建/续期邀请      | `POST /group-chats/:id/invitations`                       | `CREATE_INVITATION`，BE 生成 8 位 `token`；返回 `data.token/expiresAt`                       |
 | 预览邀请码         | `POST /group-chats/invitations/validate`                  | body `{token}`；仅当前租户成员可访问                                                         |
 | 凭邀请码入群       | `POST /group-chats/:id/join`                              | `JOIN_GROUP`，`token/joinLinkAuthorized/memName`；事务内复查邀请及群状态                     |
@@ -313,9 +313,13 @@ BE 公共路径保持不变。带租户上下文的群消息、群管理与任�
 
 以上写入均使用完整 `TenantCommand` 信封；路径、operation、actor 与 payload 必须一致。查询补充 `GET /group-chats/:id/management`（含解散后的成员快照）、`GET /group-chat/tasks/:taskId/cancellation`（取消权限校验）与 `GET /group-chat/tasks/:taskId/publication`（发起人查询已发布结果）。
 
-邀请记录复用群扩展表，不单独建表。私聊记录来源群、目标 Agent 和创建时的消息边界，仅创建者可读取。取消、解散和撤回先在 Node 关闭任务，再由 BE 停止发起人的运行；迟到终态不会重新发布到群。外部停止失败会返回错误，重复取消/撤回可重试停止。
+邀请记录复用群扩展表。正式任务的取消、解散和撤回先在 Node 关闭任务，再由 BE 停止发起人的运行。外部停止失败会返回错误，重复取消或撤回可重试停止。
 
-本次不修改或执行数据库脚本、不重新生成 baseline。部署者需要保证租户库已有原群聊/任务/待发布表、确认表及 Node 原有字段。BE 和 Node 应一起更新；数据库结构由部署者升级后再联调。
+群内员工私聊在当前租户按原群、发起人、员工绑定一个会话。`direct-sessions` 和 `direct-tasks` 共用该绑定。首次进入时选择创建最早的历史 PRIVATE 记录，创建时间相同时选择较小的任务 ID。只有已取消的旧私聊时沿用原 ID 恢复。如果旧接口只创建了会话，会按相同顺序找到带原群来源标记的会话，为它补上 PRIVATE 任务。群任务列表仅向发起人展示固定私聊，历史副本的消息仍可读取。同群的发起人和员工都在群内时，`GET /sessions/:id` 为可继续发送的私聊返回 `groupDirectTask: { groupSessionId, targetAgentId }`，两项均为字符串 ID。普通聊天输入每轮从当时已提交的群消息确定历史边界。员工回答保存在私聊中。
+
+私聊在等待输入时也可准备成果。更新草稿可传 `expectedPendingPublicationId`，删除草稿须提供待删除的 `pendingPublicationId`。确认时 Node 检查当前版本、原文及对应源文件的云盘上传检查点，将已确认的正文与授权附件写为独立群消息。私聊成果文件按 `/group-task-results/private/{pendingPublicationId}/{index}/` 归档。任务保持 PRIVATE。查回执使用 `GET /group-chat/tasks/:taskId/publication?pendingPublicationId=...`。首次提交返回 `data.newlyPublished=true`，同一命令或同一草稿再次确认返回原结果和 `false`。之后准备的新草稿保留自己的版本。
+
+BE 和 Node 一起升级，租户运行门禁校验 V0.7.0 基线或更新包中的 `byai_group_chat_direct_binding` 和 `byai_group_chat_private_publication` 字段及唯一约束。
 
 群历史 `context` 的最新消息超过字符预算时，返回保留消息 ID、资源和附件的有界正文预览（标明截断），避免空页阻断历史分页。原始消息不改写，使用该消息 ID 作为 beforeMessageId 可继续读取更早消息。
 

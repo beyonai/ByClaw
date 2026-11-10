@@ -7,6 +7,110 @@
         ORDER BY create_time DESC, task_session_id DESC
     </select>
 
+    <!-- 兼容尚未建立绑定的历史会话；先按创建时间，再按全局会话 ID 稳定选取。 -->
+    <sql id="privateSessionExists">
+        EXISTS (SELECT 1 FROM byai_session s WHERE s.session_id = t.task_session_id
+            AND s.session_type = 'h_as' AND s.parent_session_id = t.group_session_id
+            AND s.creator_id = t.initiator_user_id AND s.object_id = t.target_agent_id)
+    </sql>
+
+    <sql id="privateOrLegacyCancelled">
+        (t.status = 'PRIVATE' OR (t.status = 'CANCELLED' AND t.turn_status = 'PRIVATE'))
+    </sql>
+
+    <!-- 旧 direct-sessions 写入来源扩展，但不创建任务；候选或派发会话不能被收作成员私聊。 -->
+    <sql id="legacyDirectSession">
+        s.session_type = 'h_as' AND s.parent_session_id IS NOT NULL AND COALESCE(s.state, 'ACTIVE') IN ('ACTIVE', 'CLOSED')
+        AND EXISTS (SELECT 1 FROM byai_session_ext e WHERE e.session_id = s.session_id
+            AND e.ext_param_code = 'group_source_session_id' AND e.ext_param_value = CAST(s.parent_session_id AS VARCHAR(32)))
+        AND NOT EXISTS (SELECT 1 FROM byai_group_chat_task t WHERE t.task_session_id = s.session_id)
+        AND NOT EXISTS (SELECT 1 FROM byai_group_chat_execution x WHERE x.candidate_session_id = s.session_id)
+        AND NOT EXISTS (SELECT 1 FROM byai_group_chat_turn r WHERE r.candidate_session_id = s.session_id
+            OR r.gateway_session_id = CAST(s.session_id AS VARCHAR(32)))
+    </sql>
+
+    <select id="selectLegacyDirectSession" resultType="com.iwhalecloud.byai.manager.entity.session.ByaiSession">
+        SELECT s.* FROM byai_session s WHERE s.parent_session_id = #{groupId} AND s.creator_id = #{userId}
+          AND s.object_id = #{agentId} AND <include refid="legacyDirectSession"/>
+        ORDER BY s.create_time, s.session_id LIMIT 1
+    </select>
+
+    <sql id="directOwners">
+        SELECT t.task_session_id, t.group_session_id, t.initiator_user_id FROM byai_group_chat_task t
+        WHERE <include refid="privateOrLegacyCancelled"/>
+        UNION ALL
+        SELECT s.session_id, s.parent_session_id, s.creator_id FROM byai_session s
+        WHERE <include refid="legacyDirectSession"/>
+    </sql>
+
+    <select id="selectDirectOwner" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask">
+        SELECT * FROM (<include refid="directOwners"/>) direct WHERE direct.task_session_id = #{sessionId}
+    </select>
+
+    <!-- 不指定会话的历史分页在 COUNT/LIMIT 前排除无权访问的私聊，以免泄露正文及分页记录数。 -->
+    <select id="selectReadableHistoryPage" resultType="com.iwhalecloud.byai.common.message.entity.ByaiMessage">
+        SELECT m.* FROM byai_message m WHERE NOT EXISTS (
+            SELECT 1 FROM (<include refid="directOwners"/>) direct
+            WHERE direct.task_session_id = m.session_id AND (direct.initiator_user_id != #{actorId} OR NOT EXISTS (
+                SELECT 1 FROM byai_session g JOIN byai_session_member member ON member.session_id = g.session_id
+                WHERE g.session_id = direct.group_session_id AND g.session_type = 'hs_as'
+                  AND COALESCE(g.state, 'ACTIVE') != 'GROUP_DISSOLVED' AND member.mem_obj_type = 'USER'
+                  AND member.mem_obj_id = #{actorId}
+            ))
+        )
+        <if test="qo.creatorId != null">AND m.creator_id = #{qo.creatorId}</if>
+        ORDER BY m.create_time DESC, m.message_id DESC
+    </select>
+
+    <select id="selectVisibleByGroup" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask">
+        SELECT * FROM (
+            SELECT t.*, ROW_NUMBER() OVER (
+                PARTITION BY CASE WHEN t.turn_status = 'PRIVATE' THEN 'PRIVATE' ELSE t.status END,
+                    t.initiator_user_id, t.target_agent_id
+                ORDER BY CASE WHEN b.task_session_id IS NULL THEN 1 ELSE 0 END,
+                    CASE WHEN t.status = 'PRIVATE' THEN 0 ELSE 1 END, t.create_time, t.task_session_id
+            ) AS private_rank
+            FROM byai_group_chat_task t
+            LEFT JOIN byai_group_chat_direct_binding b ON b.task_session_id = t.task_session_id
+            WHERE t.group_session_id = #{groupSessionId}
+              AND ((t.status != 'PRIVATE' AND t.turn_status != 'PRIVATE')
+                OR (<include refid="privateOrLegacyCancelled"/> AND t.initiator_user_id = #{userId}
+                    AND <include refid="privateSessionExists"/>))
+        ) visible
+        WHERE (status != 'PRIVATE' AND turn_status != 'PRIVATE') OR private_rank = 1
+        ORDER BY create_time DESC, task_session_id DESC
+    </select>
+
+    <select id="selectBoundDirect" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask">
+        SELECT t.* FROM byai_group_chat_direct_binding b JOIN byai_group_chat_task t ON t.task_session_id = b.task_session_id
+            AND t.group_session_id = b.group_session_id AND t.initiator_user_id = b.initiator_user_id
+            AND t.target_agent_id = b.target_agent_id
+        WHERE b.group_session_id = #{groupId} AND b.initiator_user_id = #{userId} AND b.target_agent_id = #{agentId}
+          AND <include refid="privateOrLegacyCancelled"/> AND <include refid="privateSessionExists"/>
+    </select>
+
+    <select id="selectEarliestPrivate" resultType="com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask">
+        SELECT t.* FROM byai_group_chat_task t
+        WHERE t.group_session_id = #{groupId} AND t.initiator_user_id = #{userId} AND t.target_agent_id = #{agentId}
+          AND <include refid="privateOrLegacyCancelled"/> AND <include refid="privateSessionExists"/>
+        ORDER BY CASE WHEN t.status = 'PRIVATE' THEN 0 ELSE 1 END, t.create_time, t.task_session_id LIMIT 1
+    </select>
+
+    <insert id="insertDirectBinding">
+        INSERT INTO byai_group_chat_direct_binding (group_session_id, initiator_user_id, target_agent_id, task_session_id)
+        VALUES (#{groupSessionId}, #{initiatorUserId}, #{targetAgentId}, #{taskSessionId})
+    </insert>
+
+    <update id="restoreCancelledPrivate">
+        UPDATE byai_group_chat_task SET status = 'PRIVATE', update_time = #{now}
+        WHERE task_session_id = #{taskId} AND status = 'CANCELLED' AND turn_status = 'PRIVATE'
+    </update>
+
+    <update id="restoreClosedDirectSession">
+        UPDATE byai_session SET state = 'ACTIVE', update_time = #{now}
+        WHERE session_id = #{taskId} AND state = 'CLOSED'
+    </update>
+
     <update id="completeTurn">
         UPDATE byai_group_chat_task SET turn_status = #{turnStatus}, update_time = #{now}
         WHERE task_session_id = #{taskSessionId} AND status = 'ACTIVE'
@@ -49,6 +153,6 @@
 
     <update id="cancel">
         UPDATE byai_group_chat_task SET status = 'CANCELLED', update_time = #{now}
-        WHERE task_session_id = #{taskSessionId} AND status IN ('ACTIVE', 'PRIVATE')
+        WHERE task_session_id = #{taskSessionId} AND status = 'ACTIVE'
     </update>
 </mapper>

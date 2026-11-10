@@ -4,19 +4,29 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { GroupTaskPublicationClient, type GroupTaskPublicationBinding } from './client.ts'
 
-export const GROUP_TASK_PUBLICATION_DESCRIPTION = '用户要求发布任务成果或修改待发布内容时，准备向来源群发布的正文和附件，等待用户确认。每次调用整体替换待发布内容；正文和附件至少提供一项。此操作不上传附件、不发送群消息、不完成任务。成功后说明待确认，不能声称已发布。附件须为当前用户可读取且实际存在的 /by/ 绝对文件路径，不接受 URL、目录、相对路径或客户端本机路径。'
+export const GROUP_TASK_PUBLICATION_DESCRIPTION = '用户要求“发到群里”“发到工作组”“发布到群里”“发布到工作组”，或以类似说法要求发布成果时，优先调用本工具，为用户准备发往来源群的正文和附件，等待用户确认。用户要求修改待发布内容时也使用本工具。每次调用整体替换待发布内容；正文和附件至少提供一项。此操作不上传附件、不发送群消息、不完成任务。成功后说明待确认，不能声称已发布。附件须为当前用户可读取且实际存在的 /by/ 绝对文件路径，不接受 URL、目录、相对路径或客户端本机路径。'
+const PRIVATE_PUBLICATION_DESCRIPTION = GROUP_TASK_PUBLICATION_DESCRIPTION
+  + '同一私聊可多次发布。确认后可准备新卡片，已发布的成果不受影响。'
 
 /** Register once per Agent context; DSH disposes the registration with that context. */
 export class GroupTaskPublicationTools {
-  private readonly mounted = new WeakSet<Context>()
+  private readonly mounted = new WeakMap<Context, { binding: GroupTaskPublicationBinding }>()
 
   constructor(private readonly client: GroupTaskPublicationClient) {}
 
   mount(ctx: Context, binding: GroupTaskPublicationBinding, owner?: Context): void {
-    if (this.mounted.has(ctx)) return
+    const mounted = this.mounted.get(ctx)
+    if (mounted) {
+      if (mounted.binding.userCode !== binding.userCode || mounted.binding.taskId !== binding.taskId) {
+        throw new Error('发布工具与当前会话身份不一致。')
+      }
+      mounted.binding = binding
+      return
+    }
+    const session = { binding }
     const tool: ToolDefinition = {
       name: 'prepare_group_task_publication',
-      description: GROUP_TASK_PUBLICATION_DESCRIPTION,
+      description: binding.privateGroupId === undefined ? GROUP_TASK_PUBLICATION_DESCRIPTION : PRIVATE_PUBLICATION_DESCRIPTION,
       // Raw input schemas own validation; Zod enforces limits and rejects undeclared model fields.
       parameters: {
         type: 'object',
@@ -38,7 +48,7 @@ export class GroupTaskPublicationTools {
         },
         render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
       },
-      execute: (args, exec) => this.client.prepare(binding, args, exec.signal),
+      execute: (args, exec) => this.client.prepare(session.binding, args, exec.signal),
     }
     if (owner === undefined) {
       ctx.tools.register(tool)
@@ -52,6 +62,6 @@ export class GroupTaskPublicationTools {
       })
       ctx.effect(() => () => dispose())
     }
-    this.mounted.add(ctx)
+    this.mounted.set(ctx, session)
   }
 }

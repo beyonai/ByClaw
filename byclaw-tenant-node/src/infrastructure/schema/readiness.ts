@@ -90,6 +90,22 @@ const requiredColumns: Record<string, string[]> = {
   ],
   byai_group_chat_pending_publication: ["task_session_id", "text_content"],
   byai_group_chat_task_publication: ["task_session_id", "message_id", "pending_publication_id"],
+  byai_group_chat_direct_binding: [
+    "group_session_id",
+    "initiator_user_id",
+    "target_agent_id",
+    "task_session_id",
+  ],
+  byai_group_chat_private_publication: [
+    "group_session_id",
+    "task_session_id",
+    "pending_publication_id",
+    "message_id",
+    "publisher_user_id",
+    "text_content",
+    "files_json",
+    "create_time",
+  ],
   byai_group_chat_topic: ["topic_id", "group_session_id"],
   byai_group_chat_mention: ["group_session_id", "message_id", "mentioned_user_id"],
 };
@@ -138,6 +154,10 @@ export class SchemaReadiness {
       "SELECT c.relname AS name FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='byai' AND i.indisunique AND i.indisvalid",
     );
     const required = [
+      "pk_group_chat_direct_binding",
+      "uk_group_chat_direct_binding_session",
+      "pk_group_chat_private_publication",
+      "uk_group_chat_private_pub_message",
       "uq_forward_request_actor_key",
       "uq_forward_request_tenant",
       "uq_forward_target_group",

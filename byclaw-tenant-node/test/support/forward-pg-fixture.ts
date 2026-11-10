@@ -19,7 +19,7 @@ export async function forwardFixture() {
   await sql(
     await readFile(
       new URL(
-        "../../../deploy/migrations/versions/V0.6.0/tenant/V0.6.0__baseline__ddl.sql",
+        "../../../deploy/migrations/versions/V0.7.0/tenant/V0.7.0__baseline__ddl.sql",
         import.meta.url,
       ),
       "utf8",

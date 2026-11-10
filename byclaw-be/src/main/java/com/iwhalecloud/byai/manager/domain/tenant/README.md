@@ -48,6 +48,14 @@ Java 到 Node 的独立协议 mapper 保持版本号和分页为 JSON 数字；�
 
 管理端侧栏的租户管理、租户数据源与沙箱页的租户资源也受此开关控制。关闭时沙箱页使用用户资源，不请求租户列表或显示租户启动入口；开关变化后重新加载对应资源，旧列表请求不得覆盖新空间的结果。HACU 开启多租户时仍保留默认企业 ID `1` 的切换项，默认企业使用普通空间，不携带租户请求头。
 
+## 群内员工私聊与成果发布
+
+员工资料卡调用 `POST /group-chats/{groupId}/direct-tasks`。同一群、发起人和员工绑定一个私聊 ID，反复进入或并发打开会返回这个 ID。兼容入口 `POST /group-chats/{groupId}/direct-sessions` 返回同一 ID 的会话对象。升级前已有多条私聊时，入口优先复用最早的有效私聊，发起人可以查看原有历史。提问和回答使用私聊 ID 走 `LLM_MESSAGE`，不创建群消息，也不触发 CHAT/TASK 分类。
+
+用户要求准备成果时，Harness 的 `prepare_group_task_publication` 调用 `POST /group-chat/tasks/{taskId}/pending-publication`。同一私聊只保留一张待确认卡，替换正文或附件清单会产生新的 `pendingPublicationId`。确认时，前端只向 `POST /group-chat/tasks/{taskId}/complete` 提交用户看到的卡片 ID。已确认的版本返回原群消息，即使后来已有新草稿；被替换且从未确认的版本不能发布。首次确认只向群里发送选定成果，前端返回群并定位这条消息。会话保持 `PRIVATE`，下一份成果独立确认。普通群任务继续使用原有的单次完成流程。
+
+更新需先在平台库和租户库应用 V0.7.0 中的 `byai_group_chat_direct_binding` 和 `byai_group_chat_private_publication` 表及其约束，再更新 Node、BE、Harness 插件和 HACU 前端。从 V0.6.0 升级时执行 V0.7.0 增量。替换基线 ZIP 只影响此后初始化的租户。
+
 ## ACS + NAS 租户删除
 
 删除和重建沙箱通过平台统一生命周期接口执行，不再调用 OpenSandbox 专属删除接口。删除租户须确认所有 Node 和数据库沙箱均已消失，再清理存储；规格声明 persistent 卷时调用平台 NAS 租户内容清理接口，等待成功后才删除租户业务关系。清理未完成或失败时保留删除任务并重试，不回退到 BE 本地目录。

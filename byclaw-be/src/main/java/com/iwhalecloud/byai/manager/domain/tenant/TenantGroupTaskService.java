@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.tenant;
 
 import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatPublicationUploader;
@@ -33,7 +34,8 @@ public class TenantGroupTaskService {
         String groupId = task.path("groupSessionId").asText();
         Map<String, Object> payload = new HashMap<>();
         payload.put("taskSessionId", taskId.toString());
-        payload.put("pendingPublicationId", Long.toString(cn.hutool.core.util.IdUtil.getSnowflakeNextId()));
+        String pendingId = Long.toString(cn.hutool.core.util.IdUtil.getSnowflakeNextId());
+        payload.put("pendingPublicationId", pendingId);
         payload.put("text", request.getText() == null ? "" : request.getText().trim());
         payload.put("sourcePaths", request.getSourcePaths() == null ? java.util.List.of()
             : request.getSourcePaths().stream().map(GroupChatPublicationUploader::validateSourcePath).distinct().toList());
@@ -41,6 +43,11 @@ public class TenantGroupTaskService {
             payload.put("expectedPendingPublicationId", request.getExpectedPendingPublicationId().toString());
         data.write(tenant, "POST", "/tasks/" + taskId + "/pending-publication", groupId, "SAVE_PENDING_PUBLICATION", payload);
         JsonNode pending = data.read(tenant, "group-chat/tasks/" + taskId + "/pending-publication");
+        // 写入与回读之间可能有另一台设备保存或确认卡片，不能把其他版本当成本次准备结果。
+        if ("PRIVATE".equals(task.path("status").asText()) && (pending == null
+            || !pendingId.equals(pending.path("pendingPublicationId").asText()))) {
+            throw new IllegalStateException(I18nUtil.get("tenant.publication.outdated"));
+        }
         if (pending != null && !pending.isNull()) {
             JSONObject event = new JSONObject();
             event.put("type", "GROUP_CHAT_TASK_EVENT");

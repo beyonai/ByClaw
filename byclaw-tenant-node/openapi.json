@@ -126,6 +126,7 @@
     "/internal/v1/group-chats/{id}/direct-sessions": {
       "post": {
         "summary": "CREATE_DIRECT_SESSION",
+        "description": "兼容入口。与 CREATE_DIRECT_TASK 打开同一固定私聊，返回原会话 DTO 的 data.sessionId。",
         "parameters": [
           {
             "$ref": "#/components/parameters/enterprise"
@@ -233,6 +234,7 @@
     "/internal/v1/group-chats/{id}/direct-tasks": {
       "post": {
         "summary": "CREATE_DIRECT_TASK",
+        "description": "按当前租户、群、发起人和员工打开固定的 PRIVATE 会话。在同一群事务内绑定历史私聊或创建并绑定新会话。",
         "parameters": [
           {
             "$ref": "#/components/parameters/enterprise"
@@ -677,6 +679,7 @@
       },
       "post": {
         "summary": "SAVE_PENDING_PUBLICATION",
+        "description": "发起人可为闲置的 PRIVATE 私聊准备成果，每次提交使用新的 pendingPublicationId。替换指定草稿时提供 expectedPendingPublicationId。",
         "parameters": [
           {
             "$ref": "#/components/parameters/enterprise"
@@ -1122,7 +1125,7 @@
     },
     "/internal/v1/group-chat/tasks/{taskId}/publication": {
       "get": {
-        "summary": "任务发起人读取已发布结果；未发布返回 null。",
+        "summary": "任务发起人读取已发布结果，未发布返回 null。",
         "parameters": [
           {
             "$ref": "#/components/parameters/enterprise"
@@ -1140,6 +1143,12 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "pendingPublicationId",
+            "in": "query",
+            "description": "私聊必填，选择该版本的不可变发布回执。正式任务按 taskId 读取唯一回执。",
+            "schema": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" }
           }
         ],
         "responses": {
@@ -1698,6 +1707,7 @@
       },
       "get": {
         "summary": "Accessible session",
+        "description": "可继续发送的群内私聊在发起人、目标员工仍在群内时包含顶层 groupDirectTask 对象，其 groupSessionId 和 targetAgentId 均为字符串 ID。",
         "parameters": [
           {
             "$ref": "#/components/parameters/enterprise"
@@ -3934,6 +3944,7 @@
     "/internal/v1/group-chats/{id}/tasks/{taskId}/publication": {
       "post": {
         "summary": "PUBLISH_TASK",
+        "description": "私聊必须确认当前 pendingPublicationId，preparedText 为提及归一化前的草稿原文。首次提交结果含 data.newlyPublished=true，重放返回原群消息和 false。正式任务维持一次性发布。",
         "parameters": [
           {
             "$ref": "#/components/parameters/enterprise"

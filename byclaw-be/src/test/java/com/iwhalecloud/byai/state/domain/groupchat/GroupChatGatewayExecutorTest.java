@@ -235,6 +235,34 @@ class GroupChatGatewayExecutorTest extends I18nTestSupport {
     }
 
     @Test
+    void memberPrivateConversationRegistersOnlyItsOwnPublicationContext() {
+        when(executions.selectByCandidateSessionId(60L)).thenReturn(null);
+        ByaiGroupChatTask direct = new ByaiGroupChatTask();
+        direct.setTaskSessionId(60L);
+        direct.setGroupSessionId(10L);
+        direct.setStatus("PRIVATE");
+        direct.setInitiatorUserId(30L);
+        direct.setTargetAgentId(40L);
+        when(tasks.selectById(60L)).thenReturn(direct);
+        ChatProcessContext context = new ChatProcessContext(null, new AssistantChatDto());
+        context.sessionId = 60L;
+        context.userId = 30L;
+        context.assistantChatDto.setAgentId(40L);
+        Map<String, Object> reference = Map.of("conversationKey", "60", "beforeMessageId", "80");
+        Map<String, Object> params = new HashMap<>(Map.of("groupChat", reference));
+        assertThat(executor.decorate(context, "继续讨论", params)).isEqualTo("继续讨论");
+        assertThat(params.get("groupPrivatePublication")).isEqualTo(Map.of("taskSessionId", "60", "groupSessionId", "10"));
+        assertThat(params.get("groupChat")).isSameAs(reference);
+        verifyNoInteractions(historyFiles);
+
+        context.assistantChatDto.setMessageIntent("prepare_group_task_publication");
+        assertThat((String) executor.decorate(context, "发布到群聊", params)).contains("prepare_group_task_publication")
+            .doesNotContain("task-delivery.json", "group-chat-disposition.json");
+        context.userId = 31L;
+        assertThatThrownBy(() -> executor.decorate(context, "越权", params)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void onlyActivePrivateTaskFollowupsReceiveDeliveryReminderWithoutReclassification() {
         execution.setStatus("CONVERSATION");
         ByaiGroupChatTask task = new ByaiGroupChatTask();

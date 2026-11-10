@@ -43,6 +43,7 @@ import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTurn;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatExecutionMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskPublicationMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTurnMapper;
 import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatRecallMapper;
 import com.iwhalecloud.byai.manager.mapper.message.ByaiMessageMapper;
@@ -64,6 +65,8 @@ public class GroupChatTurnCoordinator {
     @Autowired
     @org.springframework.context.annotation.Lazy
     private GroupChatTaskService taskService;
+    @Autowired
+    private ByaiGroupChatTaskPublicationMapper publicationMapper;
     private static final Logger log = LoggerFactory.getLogger(GroupChatTurnCoordinator.class);
     @Autowired
     private ByaiGroupChatRecallMapper recalls;
@@ -146,11 +149,15 @@ public class GroupChatTurnCoordinator {
                     }
                     if (anchor == null) {
                         ByaiMessage visible = messages.selectVisibleGroupMessage(group, reply);
-                        if (visible == null || !Integer.valueOf(1).equals(visible.getUsage())) {
+                        if (visible == null) {
                             throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.reply.unauthorized"));
                         }
-                        // 普通群消息尚无 Agent 会话；撤回后不能把旧正文作为新会话的原始需求。
-                        root = visible.isRecalled() ? source : reply;
+                        if (Integer.valueOf(1).equals(visible.getUsage())) {
+                            // 普通群消息尚无 Agent 会话；撤回后不能把旧正文作为新会话的原始需求。
+                            root = visible.isRecalled() ? source : reply;
+                        } else if (!isPrivatePublication(group, visible)) {
+                            throw new GroupChatMessageRejectedException(I18nUtil.get("groupchat.reply.unauthorized"));
+                        }
                     }
                     else {
                         root = anchor.getRootMessageId();
@@ -166,6 +173,14 @@ public class GroupChatTurnCoordinator {
             return enqueue(group, root, source, source, user, agent, "USER", user, message.getMessageContent(),
                 metadata(message), null, 0, preferred, quoted);
         });
+    }
+
+    private boolean isPrivatePublication(Long groupId, ByaiMessage message) {
+        // 私聊成果只作为公开引用，群内新请求仍以自己的消息开辟独立会话。
+        JSONObject metadata = metadata(message);
+        return Integer.valueOf(2).equals(message.getUsage()) && "GROUP_CHAT".equals(metadata.getString("scene"))
+            && "TASK_RESULT".equals(metadata.getString("kind"))
+            && publicationMapper.selectPrivateByMessage(groupId, message.getMessageId()) != null;
     }
 
     /** A multi-mention is one new task; quoted messages supply context without reopening an earlier task. */

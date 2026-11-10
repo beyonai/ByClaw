@@ -43,6 +43,8 @@ class MessageServiceTest extends com.iwhalecloud.byai.common.i18n.I18nTestSuppor
         taskPlanApplicationService = mock(TaskPlanApplicationService.class);
         conversationOutlineDisplayService = mock(ConversationOutlineDisplayService.class);
         service = new MessageService();
+        ReflectionTestUtils.setField(service, "groupTaskAccess",
+            mock(com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService.class));
         ReflectionTestUtils.setField(service, "sessionService", mock(SessionService.class));
         ReflectionTestUtils.setField(service, "byaiMessageHotService", byaiMessageHotService);
         ReflectionTestUtils.setField(service, "showcaseService", showcaseService);

@@ -36,7 +36,7 @@ public class GroupChatTaskDeliveryService {
     public GroupChatTaskDeliveryResponse current(Long taskId) {
         // 先核验任务发起人和当前群成员资格，再使用登录上下文中的用户空间。
         ByaiGroupChatTask task = authorization.requireInitiator(taskId);
-        // 私聊等非进行中任务不参与交付与发布，直接返回未交付，避免读取 UserFS。
+        // 只有进行中的正式任务维护交付信号；私聊通过显式草稿发布。
         if (!"ACTIVE".equals(task.getStatus())) {
             return new GroupChatTaskDeliveryResponse(taskId.toString(), false);
         }

@@ -11,6 +11,8 @@ import { publicationIdSchema } from './ids.ts'
 export interface GroupTaskPublicationBinding {
   readonly taskId: string
   readonly userCode: string
+  readonly privateGroupId?: string
+  readonly enterpriseId?: string
 }
 
 const inputSchema = z.object({
@@ -178,6 +180,9 @@ export class GroupTaskPublicationClient {
     try {
       headers = new Headers(await this.options.resolveAuthHeaders())
       if (!headers.get('Beyond-Token')?.trim()) throw new Error('missing-login-token')
+      // Select the verified tenant on every prepare call, including resumed private sessions.
+      if (binding.enterpriseId !== undefined) headers.set('X-Enterprise-Id', binding.enterpriseId)
+      else if (binding.privateGroupId !== undefined) headers.delete('X-Enterprise-Id')
       headers.set('content-type', 'application/json')
     } catch {
       throw new Error('当前运行环境的 BE 用户认证不可用，请恢复登录后再操作。')

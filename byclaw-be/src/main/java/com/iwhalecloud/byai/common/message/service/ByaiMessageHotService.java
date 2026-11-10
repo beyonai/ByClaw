@@ -1,6 +1,8 @@
 package com.iwhalecloud.byai.common.message.service;
 
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatRecallProjection;
+import com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatTaskMapper;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.github.pagehelper.Page;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -34,6 +36,8 @@ import org.springframework.stereotype.Service;
 @Slf4j
 @Service
 public class ByaiMessageHotService {
+    @Autowired
+    private ByaiGroupChatTaskMapper groupTasks;
     @Autowired
     private com.iwhalecloud.byai.common.lock.TransactionalRedisLockService businessLocks;
 
@@ -155,7 +159,12 @@ public class ByaiMessageHotService {
      */
     public PageInfo<ByaiMessage> selectByPageQo(MessageHotPageQo byaiMessageQo) {
         Page<ByaiMessage> page = PageHelper.startPage(byaiMessageQo.getPageNum(), byaiMessageQo.getPageSize());
-        byaiMessageMapper.selectByPageQo(byaiMessageQo);
+        if (byaiMessageQo.getSessionId() == null) {
+            // 无会话限制的 OpenAPI 分页也不能返回其他成员的私聊。
+            groupTasks.selectReadableHistoryPage(byaiMessageQo, CurrentUserHolder.getCurrentUserId());
+        } else {
+            byaiMessageMapper.selectByPageQo(byaiMessageQo);
+        }
         GroupChatRecallProjection projection = new GroupChatRecallProjection();
         page.replaceAll(projection::display);
         return PageHelperUtil.toPageInfo(page);

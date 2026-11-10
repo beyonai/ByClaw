@@ -87,14 +87,19 @@ export class GroupHistory extends HistoryAccess {
     const task = await this.repository.task(taskId);
     if (!task) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
     await this.access(actor, task.groupSessionId, true);
+    if (task.status === "PRIVATE" || task.turnStatus === "PRIVATE")
+      throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
     const member = await this.repository.member(task.groupSessionId, actor);
     if (task.initiatorUserId !== actor && !["OWNER", "ADMIN"].includes(member?.userRole))
       throw new DomainError("FORBIDDEN");
     return task;
   }
-  async publication(actor: string, taskId: string) {
-    await this.task(actor, taskId);
-    const row = await this.repository.publication(taskId);
+  async publication(actor: string, taskId: string, pendingPublicationId?: string) {
+    const task = await this.task(actor, taskId);
+    const row = await this.repository.publication(
+      taskId,
+      task.status === "PRIVATE" ? requireId(pendingPublicationId) : undefined,
+    );
     return row
       ? {
           taskId,
@@ -197,9 +202,13 @@ export class GroupHistory extends HistoryAccess {
   async tasks(actor: string, sessionId: string) {
     await this.access(actor, sessionId, true);
     return Promise.all(
-      (await this.repository.tasks(sessionId)).map(async (task) => {
+      (await this.repository.tasks(sessionId, actor)).map(async (task) => {
         const scope = await this.coordination(task.taskSessionId);
-        return { ...task, executionBackend: "REMOTE", ...(scope ? { groupCoordination: scope } : {}) };
+        return {
+          ...task,
+          executionBackend: "REMOTE",
+          ...(scope ? { groupCoordination: scope } : {}),
+        };
       }),
     );
   }
@@ -209,6 +218,12 @@ export class GroupHistory extends HistoryAccess {
     if (!task) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
     await this.access(actor, task.groupSessionId, true);
     if (task.initiatorUserId !== actor) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
+    if (
+      task.status === "PRIVATE" &&
+      (await this.repository.activeDirectTaskId(task.groupSessionId, actor, task.targetAgentId)) !==
+        taskId
+    )
+      throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
     const scope = await this.coordination(taskId);
     return { ...task, ...(scope ? { groupCoordination: scope } : {}) };
   }
@@ -220,7 +235,7 @@ export class GroupHistory extends HistoryAccess {
   }
   async pending(actor: string, taskId: string) {
     const task = await this.task(actor, taskId);
-    if (task.status !== "ACTIVE") return null;
+    if (task.status !== "ACTIVE" && task.status !== "PRIVATE") return null;
     const row = await this.repository.pending(taskId);
     return row
       ? {

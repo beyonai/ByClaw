@@ -114,6 +114,15 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         params.remove("groupDispatch");
         params.remove("tenantGroupTask");
         params.remove("tenantGroupCandidate");
+        params.remove("groupPrivatePublication");
+        if (session.get("groupDirectTask") instanceof Map<?, ?> direct) {
+            String groupId = String.valueOf(direct.get("groupSessionId"));
+            if (!groupId.matches("[1-9][0-9]*") || request.getAgentId() == null
+                || !request.getAgentId().toString().equals(String.valueOf(direct.get("targetAgentId")))) throw forbidden();
+            // 权限来自 Node 的会话查询；仅绑定这次私聊，不把它加入群任务执行或广播。
+            params.put("groupPrivatePublication", Map.of("taskSessionId", request.getSessionId().toString(),
+                "groupSessionId", groupId, "enterpriseId", Long.toString(tenant.enterpriseId())));
+        }
         Object dispatchValue = session.get("groupDispatch");
         if (dispatchValue instanceof Map<?, ?> dispatch) {
             if (!"1".equals(dispatch.get("schemaVersion"))
@@ -173,6 +182,11 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         if (context == null || context.tenantContext == null) return content;
         // 复用本次授权检查返回的名单，不把可由客户端伪造的成员数据保存在 extParams 中。
         List<?> groupMembers = validateRequest(context.tenantContext, context.assistantChatDto);
+        if (context.assistantChatDto.getExtParams().get("groupPrivatePublication") instanceof Map<?, ?> direct) {
+            gatewayParams.put("groupPrivatePublication", direct);
+            return "prepare_group_task_publication".equals(context.assistantChatDto.getMessageIntent())
+                ? decorateText(content, text -> prompts.appendPublicationPreparation(text, context.sessionId)) : content;
+        }
         Object scope = context.assistantChatDto.getExtParams().get("groupCoordination");
         if (!(scope instanceof Map<?, ?> map)) {
             Object dispatch = context.assistantChatDto.getExtParams().get("groupDispatch");

@@ -38,8 +38,10 @@ export class GroupTaskPublicationState {
     private readonly domain?: Domain<typeof publicationDomainSpec>,
   ) {
     // Legacy rows are keyed by DSH session ID; their trusted binding carries the business identity.
-    for (const [, record] of table.entries()) {
-      this.bindings.set(businessSessionKey(record.binding), record.binding)
+    for (const [storedKey, record] of table.entries()) {
+      const key = businessSessionKey(record.binding)
+      // Prefer the business record regardless of traversal order; legacy Agent rows lack tenant routing.
+      if (storedKey === key || !this.bindings.has(key)) this.bindings.set(key, record.binding)
     }
   }
 
@@ -60,7 +62,7 @@ export class GroupTaskPublicationState {
       })
       const saved = this.bindings.get(key)
       const binding = resolveGroupTaskPublicationBinding(saved, command)
-      if (binding !== undefined && this.table.get(key) === undefined) {
+      if (binding !== undefined && (this.table.get(key) === undefined || binding !== saved)) {
         await this.table.put(key, { binding })
         this.bindings.set(key, binding)
       }

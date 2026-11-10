@@ -30,10 +30,11 @@ export interface HistoryRepository {
   ): Promise<{ bound: boolean; canRead: boolean }>;
   groupNameExists(actor: string, name: string): Promise<boolean>;
   invitation(actor: string, token: string): Promise<Row>;
-  publication(taskId: string): Promise<Row | null>;
+  publication(taskId: string, privatePendingId?: string): Promise<Row | null>;
   acknowledgements(sessionId: string, messageIds: string[]): Promise<Row[]>;
   session(id: string): Promise<Row | null>;
   member(sessionId: string, userId: string): Promise<Row | null>;
+  activeDirectTaskId(groupId: string, actor: string, agentId: string): Promise<string | null>;
   groupMemberApiKey(sessionId: string, userId: string): Promise<string | null>;
   groupMemberId(sessionId: string, userId: string): Promise<string | null>;
   members(sessionId: string): Promise<Row[]>;
@@ -41,7 +42,7 @@ export interface HistoryRepository {
   messages(filter: MessageFilter): Promise<Row[]>;
   countMessages(filter: MessageFilter): Promise<number>;
   groups(actor: string, page: number, size: number): Promise<{ list: Row[]; total: number }>;
-  tasks(sessionId: string): Promise<Row[]>;
+  tasks(sessionId: string, actor?: string): Promise<Row[]>;
   task(taskId: string): Promise<Row | null>;
   candidate?(sessionId: string): Promise<Row | null>;
   pending(taskId: string): Promise<Row | null>;

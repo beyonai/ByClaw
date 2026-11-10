@@ -10,6 +10,8 @@
 
 当 `extraPayload.groupChat.conversationKey` 和 `extraPayload.groupChat.childSessionId` 同时为非空字符串或正的安全整数时启用工具。taskId 只取 `command.header.sessionId`。本插件在自己的 `byclaw_group_publications` 存储域中按 userCode 和业务 `command.header.sessionId` 保存启用状态。首次启用后，切换 `agent_id`、重新创建 DSH 会话、后续消息省略 `groupChat`、插件重新加载或进程重启，都会保留启用状态。不同用户和业务会话彼此隔离。旧记录按其中保存的 taskId 和 userCode 读取，使用时复制到业务会话键；DSH 创建时间不再参与启用判断。已经存在的普通会话可在后续符合条件的消息到来时启用。
 
+通过 `direct-tasks` 打开的私聊也可以使用工具。BE 从已鉴权的私聊记录生成 `groupPrivatePublication`，其中的私聊 ID 必须与命令头一致。插件保存来源群和租户绑定，在恢复会话或准备下一份租户草稿时沿用 `X-Enterprise-Id`。私聊无需发送群 @ 消息，也不参与 CHAT/TASK 判定。
+
 宿主在 Agent setup 和复用会话接收输入前等待该事件，包括后台团队运行期间的追问。状态持久化先于工具注册，并在工厂发布新建或恢复的 Agent 前完成。工具只通过目标 Agent context 注册；重复 setup 不会重复注册，Agent 销毁或发布插件卸载时会注销工具。加载插件不注册全局模型工具，也不请求 BE。
 
 ## 实现分工
@@ -28,7 +30,9 @@
 
 `text` 是完整替换的正文，最多 100000 字符；`sourcePaths` 是完整替换的附件列表，最多 100 个路径，每项 1–4096 字符。非空白正文或至少一个路径必须满足一项，拒绝未声明的参数。附件必须是当前用户挂载的 `/by/` 根目录内可读取的普通文件。宿主映射支持本地测试目录，发送给 BE 的仍是原始虚拟路径。在用户树位于独立工具环境的共享 DSH 宿主上，附件经上下文的文件系统在工具环境中检查。原始 JSON Schema 保留长度限制，Zod 在执行时强制校验；当前 DSH PTC 渲染器可能将有长度限制的入参类型表示为 `unknown`。
 
-每次调用都通过宿主回调刷新登录请求头，要求存在 `Beyond-Token`，并设置 JSON Content-Type。`groupChat.contextToken` 不作为认证凭证。请求只发送一次 POST，地址为服务前缀下的 `/group-chat/tasks/{taskId}/pending-publication`；仅配置域名时补上 `/byaiService`。BE 校验 ACTIVE 状态、发起人身份和当前群成员资格，并在提交后推送私有卡片。
+每次调用都通过宿主回调刷新登录请求头，要求存在 `Beyond-Token`，并设置 JSON Content-Type。`groupChat.contextToken` 不作为认证凭证。请求只发送一次 POST，地址为服务前缀下的 `/group-chat/tasks/{taskId}/pending-publication`；仅配置域名时补上 `/byaiService`。BE 校验进行中的群任务或私聊、发起人身份和当前群成员资格，并在提交后推送私有卡片。
+
+同一私聊最多有一张未确认卡，每次准备整体替换该卡正文和附件清单。用户确认指定卡片版本后，可以在原会话继续准备下一份成果。工具只校验源文件，BE 在确认时读取文件当时的内容，按卡片版本转存到独立目录。后续发布复用同一个文件名也不会覆盖之前已经发布的附件。
 
 成功必须同时满足 HTTP 成功、`ResponseUtil.code` 为数字 `0` 或字符串 `"0"`，以及响应数据有效且 taskId 转为字符串后匹配。数字形式的任务和卡片 ID 必须为正的安全整数，更大的 ID 必须以上游字符串传入。只返回 `taskId`、`pendingPublicationId`、`text`、`sourcePaths` 和未经转换的 `createTime`；仅附件卡片的 `text` 可以为 `null`。已知业务错误返回安全的说明，不返回原始诊断或凭证。
 

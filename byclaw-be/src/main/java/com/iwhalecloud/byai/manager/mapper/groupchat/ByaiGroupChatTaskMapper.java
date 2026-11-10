@@ -11,6 +11,9 @@ import org.apache.ibatis.annotations.Options;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.iwhalecloud.byai.common.message.qo.MessageHotPageQo;
 
 @Mapper
 public interface ByaiGroupChatTaskMapper extends BaseMapper<ByaiGroupChatTask> {
@@ -21,6 +24,25 @@ public interface ByaiGroupChatTaskMapper extends BaseMapper<ByaiGroupChatTask> {
     ByaiGroupChatTask selectWithRedisLock(@Param("taskId") Long taskId);
 
     List<ByaiGroupChatTask> selectByGroup(@Param("groupSessionId") Long groupSessionId);
+
+    List<ByaiGroupChatTask> selectVisibleByGroup(@Param("groupSessionId") Long groupSessionId, @Param("userId") Long userId);
+
+    ByaiGroupChatTask selectBoundDirect(@Param("groupId") Long groupId, @Param("userId") Long userId, @Param("agentId") Long agentId);
+
+    ByaiGroupChatTask selectEarliestPrivate(@Param("groupId") Long groupId, @Param("userId") Long userId,
+        @Param("agentId") Long agentId);
+
+    int insertDirectBinding(ByaiGroupChatTask task);
+
+    int restoreCancelledPrivate(@Param("taskId") Long taskId, @Param("now") Date now);
+
+    int restoreClosedDirectSession(@Param("taskId") Long taskId, @Param("now") Date now);
+
+    ByaiSession selectLegacyDirectSession(@Param("groupId") Long groupId, @Param("userId") Long userId, @Param("agentId") Long agentId);
+
+    ByaiGroupChatTask selectDirectOwner(@Param("sessionId") Long sessionId);
+
+    List<ByaiMessage> selectReadableHistoryPage(@Param("qo") MessageHotPageQo query, @Param("actorId") Long actorId);
 
     int completeTurn(@Param("taskSessionId") Long taskSessionId, @Param("traceId") String traceId,
         @Param("turnStatus") String turnStatus, @Param("now") Date now);

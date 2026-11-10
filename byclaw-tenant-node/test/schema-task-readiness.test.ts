@@ -40,6 +40,22 @@ const columns = {
   ],
   byai_group_chat_pending_publication: ["task_session_id", "text_content"],
   byai_group_chat_task_publication: ["task_session_id", "message_id", "pending_publication_id"],
+  byai_group_chat_direct_binding: [
+    "group_session_id",
+    "initiator_user_id",
+    "target_agent_id",
+    "task_session_id",
+  ],
+  byai_group_chat_private_publication: [
+    "group_session_id",
+    "task_session_id",
+    "pending_publication_id",
+    "message_id",
+    "publisher_user_id",
+    "text_content",
+    "files_json",
+    "create_time",
+  ],
   byai_group_chat_topic: ["topic_id", "group_session_id"],
   byai_group_chat_mention: ["group_session_id", "message_id", "mentioned_user_id"],
 };
@@ -100,6 +116,10 @@ Object.assign(columns, {
   ],
 });
 const indexes = [
+  "pk_group_chat_direct_binding",
+  "uk_group_chat_direct_binding_session",
+  "pk_group_chat_private_publication",
+  "uk_group_chat_private_pub_message",
   "uq_forward_request_actor_key",
   "uq_forward_request_tenant",
   "uq_forward_target_group",
@@ -117,7 +137,9 @@ const indexes = [
 
 function setup(missing?: string, changeDuringVerification = false) {
   const rows = Object.entries(columns).flatMap(([table_name, names]) =>
-    names.filter((name) => name !== missing).map((column_name) => ({ table_name, column_name })),
+    names
+      .filter((name) => name !== missing && table_name !== missing)
+      .map((column_name) => ({ table_name, column_name })),
   );
   const db = {
     query: async (sql: string) => {
@@ -145,6 +167,17 @@ function setup(missing?: string, changeDuringVerification = false) {
 }
 
 describe("group task schema readiness", () => {
+  it.each([
+    "byai_group_chat_direct_binding",
+    "byai_group_chat_private_publication",
+    "pk_group_chat_direct_binding",
+    "uk_group_chat_direct_binding_session",
+    "pk_group_chat_private_publication",
+    "uk_group_chat_private_pub_message",
+  ])("rejects a schema missing employee-chat storage %s", async (missing) => {
+    const { readiness } = setup(missing);
+    await expect(readiness.check()).rejects.toThrow("BUSINESS_SCHEMA_INCOMPATIBLE");
+  });
   it.each(["current_turn_id", "current_turn_trace_id"])(
     "rejects a baseline missing %s",
     async (column) => {

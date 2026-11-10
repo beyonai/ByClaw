@@ -44,12 +44,21 @@ public class GroupChatPublicationUploader {
     }
 
     public List<GroupChatTaskFile> upload(ByaiGroupChatPendingPublication pending, Long cloudResourceId) {
-        return upload(pending, cloudResourceId,
+        return upload(pending, cloudResourceId, false);
+    }
+
+    public List<GroupChatTaskFile> upload(ByaiGroupChatPendingPublication pending, Long cloudResourceId, boolean privateConversation) {
+        return upload(pending, cloudResourceId, privateConversation,
             (id, uploaded) -> store.checkpoint(pending.getPendingPublicationId(), id, uploaded));
     }
 
     /** 租户调用方将上传进度写入 Node，文件处理继续复用同一套校验。 */
     public List<GroupChatTaskFile> upload(ByaiGroupChatPendingPublication pending, Long cloudResourceId,
+        java.util.function.BiConsumer<Long, String> checkpoint) {
+        return upload(pending, cloudResourceId, false, checkpoint);
+    }
+
+    public List<GroupChatTaskFile> upload(ByaiGroupChatPendingPublication pending, Long cloudResourceId, boolean privateConversation,
         java.util.function.BiConsumer<Long, String> checkpoint) {
         if (pending.getCloudResourceId() != null && !pending.getCloudResourceId().equals(cloudResourceId)) {
             throw new IllegalArgumentException(I18nUtil.get("groupchat.publication.driveChanged"));
@@ -67,8 +76,11 @@ public class GroupChatPublicationUploader {
                 files = uploaded.getJSONArray(source).toJavaList(GroupChatTaskFile.class);
             } else {
                 // 每份卡片、每个附件使用独立目录；重试不覆盖其他任务或其他版本的成果。
-                String directory = "/group-task-results/" + pending.getTaskSessionId() + "/"
-                    + pending.getPendingPublicationId() + "/" + index;
+                // 私聊附件公开后仍只暴露草稿标识，不通过云盘路径暴露私聊会话。
+                String owner = privateConversation ? "private" : pending.getTaskSessionId().toString();
+                String directory = "/group-task-results/" + owner + "/" + pending.getPendingPublicationId() + "/" + index;
+                // 远端写入可能成功而本地 checkpoint 未提交；下次尝试独占新路径，保留上次已写出的文件。
+                if (privateConversation) directory += "/" + java.util.UUID.randomUUID();
                 files = uploadOne(source, cloudResourceId, directory);
                 uploaded.put(source, files);
                 checkpoint.accept(cloudResourceId, uploaded.toJSONString());

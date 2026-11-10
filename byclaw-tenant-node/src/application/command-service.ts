@@ -26,6 +26,23 @@ export class CommandService {
       if (previous) {
         if (previous.hash !== command.requestHash || previous.userId !== command.userId)
           throw new DomainError("IDEMPOTENCY_CONFLICT");
+        if (
+          command.operation === "CREATE_DIRECT_TASK" ||
+          command.operation === "CREATE_DIRECT_SESSION"
+        ) {
+          // 升级前存下的命令回执可能指向历史副本。重新进入仍通过同一群锁解析固定会话。
+          await this.requireExecution();
+          await tx.authorize(command);
+          return tx.apply(command);
+        }
+        if (
+          command.operation === "PUBLISH_TASK" &&
+          typeof previous.result.data?.newlyPublished === "boolean"
+        ) {
+          // 回执内容不可变，当前请求没有再次发消息。私聊发布重放也须验证原群及员工成员资格。
+          await tx.authorize(command);
+          return { ...previous.result, data: { ...previous.result.data, newlyPublished: false } };
+        }
         if (Array.isArray(previous.result.data?.savedMembers)) {
           return { ...previous.result, data: { ...previous.result.data, savedMembers: [] } };
         }

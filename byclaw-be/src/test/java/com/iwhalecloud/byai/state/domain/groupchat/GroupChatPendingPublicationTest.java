@@ -153,6 +153,27 @@ class GroupChatPendingPublicationTest extends I18nTestSupport {
     }
 
     @Test
+    void aPrivateConversationCanPrepareAndRecoverItsCardWithoutPublishing() {
+        task.setStatus("PRIVATE");
+        task.setTurnStatus("PRIVATE");
+        when(store.find(60L)).thenReturn(record(100L));
+
+        assertThat(pending.prepare(60L, request("private result")).getText()).isEqualTo("private result");
+        assertThat(pending.current(60L).getPendingPublicationId()).isEqualTo(100L);
+        assertThat(task.getStatus()).isEqualTo("PRIVATE");
+        verifyNoInteractions(messages, events, publications, uploader);
+    }
+
+    @Test
+    void privatePublicationRequiresAnExplicitCardEvenWhenTextIsProvided() {
+        task.setStatus("PRIVATE");
+        GroupChatTaskCompleteRequest inline = new GroupChatTaskCompleteRequest();
+        inline.setText("private conversation history");
+        assertThatThrownBy(() -> completion.complete(60L, inline)).hasMessageContaining("pendingPublicationId only");
+        verifyNoInteractions(messages, publications, uploader, events);
+    }
+
+    @Test
     void prepareDuringTurnReplacesWholeContentAndChangesIdWithoutUploading() {
         task.setTurnStatus("RUNNING");
         GroupChatPendingPublicationRequest request = request("first");

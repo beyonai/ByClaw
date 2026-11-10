@@ -78,6 +78,8 @@ export class TraditionalHistory extends HistoryAccess {
         let source: Row | null = null;
         if (
           task?.sourceMessageId &&
+          task.status !== "PRIVATE" &&
+          task.turnStatus !== "PRIVATE" &&
           task.groupSessionId &&
           task.initiatorUserId === row.creatorId
         ) {

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.session;
 
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
+
 import java.util.Date;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -44,6 +46,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 public class SessionApplicationService {
+    @Autowired
+    private GroupChatTaskAuthorizationService groupTaskAccess;
 
     @Value("${thread.pool.core-size:10}")
     private int corePoolSize;
@@ -237,7 +241,8 @@ public class SessionApplicationService {
      */
     @Transactional
     public void removeConversation(Long sessionId) {
-
+        // 先检验固定私聊，再删除计划、消息或扩展，保持重复打开时的历史完整。
+        groupTaskAccess.requireDeletableSession(sessionId);
         // 删除任务计划，步骤和事件由数据库外键级联删除
         taskPlanApplicationService.deleteBySessionId(sessionId);
 

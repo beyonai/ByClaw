@@ -49,16 +49,16 @@ describe("packaged V0.5.0 tenant baseline", () => {
   });
 });
 
-describe("candidate V0.6.0 tenant bundles", () => {
+describe.each(["V0.6.0", "V0.7.0"])("candidate %s tenant bundles", (version) => {
   it.each(["baseline", "update"] as const)(
     "ships exact %s SQL, complete catalog and honest capture provenance",
     async (kind) => {
       const directory = kind === "baseline" ? "baseline" : "updates";
-      const stem = `V0.6.0__${kind}`;
+      const stem = `${version}__${kind}`;
       const bytes = await readFile(new URL(`../${directory}/${stem}.zip`, import.meta.url));
       const source = await readFile(
         new URL(
-          `../../deploy/migrations/versions/V0.6.0/tenant/V0.6.0${kind === "baseline" ? "__baseline" : ""}__ddl.sql`,
+          `../../deploy/migrations/versions/${version}/tenant/${version}${kind === "baseline" ? "__baseline" : ""}__ddl.sql`,
           import.meta.url,
         ),
       );
@@ -77,13 +77,13 @@ describe("candidate V0.6.0 tenant bundles", () => {
         task({
           operationType: kind === "baseline" ? "INIT" : "UPDATE",
           fromVersion: parent,
-          targetVersion: "V0.6.0",
+          targetVersion: version,
           bundleDigest: sha256(bytes),
           scripts: [
             {
-              version: "V0.6.0",
+              version,
               parentVersion: parent,
-              path: `${prefix}/V0.6.0/__ddl.sql`,
+              path: `${prefix}/${version}/__ddl.sql`,
               sha256: sha256(source),
             },
           ],
@@ -91,7 +91,7 @@ describe("candidate V0.6.0 tenant bundles", () => {
         bytes,
       );
       expect(validated[0].manifest).toEqual(manifest);
-      expect((await unzipBundle(bytes)).get(`${prefix}/V0.6.0/__ddl.sql`)).toEqual(source);
+      expect((await unzipBundle(bytes)).get(`${prefix}/${version}/__ddl.sql`)).toEqual(source);
       expect(manifest.objects).toEqual(
         expect.arrayContaining(
           [

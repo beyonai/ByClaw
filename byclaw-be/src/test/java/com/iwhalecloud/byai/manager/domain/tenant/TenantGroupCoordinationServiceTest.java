@@ -497,6 +497,36 @@ class TenantGroupCoordinationServiceTest extends I18nTestSupport {
         return request;
     }
 
+    @Test
+    void privateTaskAuthorizesOnlyItsEmployeeAndDoesNotEnterGroupClassification() {
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/50"), eq(null), any()))
+            .thenReturn(Map.of("groupDirectTask", Map.of("groupSessionId", "30", "targetAgentId", "42")));
+        var ctx = new ChatProcessContext(OutputStream.nullOutputStream(), request(42L));
+        ctx.tenantContext = tenant;
+        ctx.sessionId = 50L;
+        ctx.assistantChatDto.setExtParams(Map.of("groupPrivatePublication", Map.of("groupSessionId", "999"),
+            "groupDispatch", Map.of("executionId", "404")));
+        Map<String, Object> gateway = new HashMap<>();
+        assertThat(service.decorate(ctx, "在干嘛", gateway)).isEqualTo("在干嘛");
+        assertThat(gateway).containsOnlyKeys("groupPrivatePublication");
+        assertThat(gateway.get("groupPrivatePublication")).isEqualTo(Map.of("groupSessionId", "30",
+            "taskSessionId", "50", "enterpriseId", String.valueOf(tenant.enterpriseId())));
+        assertThat(ctx.assistantChatDto.getExtParams()).doesNotContainKeys("groupDispatch", "tenantGroupTask");
+        ctx.assistantChatDto.setMessageIntent("prepare_group_task_publication");
+        assertThat(service.decorate(ctx, "发布成果", gateway).toString()).contains("prepare_group_task_publication");
+        assertThatThrownBy(() -> service.validateRequest(request(43L))).isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
+    void ordinarySessionCannotAuthorizePublicationBySupplyingPrivateScope() {
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/50"), eq(null), any()))
+            .thenReturn(Map.of("sessionId", "50"));
+        var req = request(42L);
+        req.setExtParams(Map.of("groupPrivatePublication", Map.of("taskSessionId", "50", "groupSessionId", "30")));
+        service.validateRequest(req);
+        assertThat(req.getExtParams()).doesNotContainKey("groupPrivatePublication");
+    }
+
     private Map<String, Object> scope(String mode) {
         return Map.of("schemaVersion", "byclaw.group-coordination/v1", "mode", mode,
             "groupSessionId", "30", "taskSessionId", "50", "coordinatorAgentId", "90", "allowedAgentIds", List.of("42", "43"));

@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.message;
 
+import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatTaskAuthorizationService;
+
 import com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatInternalSessionAccess;
 
 import static com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum.FORWARD_TYPE;
@@ -106,6 +108,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @Slf4j
 public class MessageService {
+    @Autowired
+    private GroupChatTaskAuthorizationService groupTaskAccess;
 
     @Autowired
     private MemoryMessageService memoryMessageService;
@@ -158,6 +162,7 @@ public class MessageService {
         MessageHotQo messageHotQo = new MessageHotQo();
         messageHotQo.setMessageIds(distinctForwardMsgIds);
         List<ByaiMessageHotDto> forwardMessages = byaiMessageHotService.findByQo(messageHotQo);
+        requireReadableMessages(forwardMessages);
         return processForwardMessages(byaiMessageHotDto, forwardMessages);
     }
 
@@ -244,7 +249,7 @@ public class MessageService {
      * @return 分页消息列表，包含代理头像信息
      */
     public PageInfo<ByaiMessageHotDtoDto> getMessages(MessageQo messageQo) {
-        GroupChatInternalSessionAccess.requirePublic(sessionService.findById(messageQo.getSessionId()));
+        requireReadableSession(messageQo.getSessionId());
 
         MessageHotPageQo messageHotPageQo = new MessageHotPageQo();
         messageHotPageQo.setPageNum(messageQo.getPageNum().intValue());
@@ -285,7 +290,7 @@ public class MessageService {
         if (messageQo == null || messageQo.getSessionId() == null || messageQo.getSessionId() <= 0) {
             throw new BdpRuntimeException(I18nUtil.get("assistant.man.session.id.not.empty"));
         }
-        GroupChatInternalSessionAccess.requirePublic(sessionService.findById(messageQo.getSessionId()));
+        requireReadableSession(messageQo.getSessionId());
         return conversationOutlineDisplayService.enrich(
             byaiMessageHotService.selectConversationOutline(messageQo.getSessionId()));
     }
@@ -355,7 +360,7 @@ public class MessageService {
 
         ByaiMessageHotDto byaiMessageHotDto = byaiMessageHotService.findById(messageId);
 
-        GroupChatInternalSessionAccess.requirePublic(sessionService.findById(byaiMessageHotDto.getSessionId()));
+        requireReadableSession(byaiMessageHotDto.getSessionId());
         ForwardMessageDtoDto forwardMessageDto = new ForwardMessageDtoDto();
         BeanUtils.copyProperties(byaiMessageHotDto, forwardMessageDto);
         // 转发历史记录
@@ -369,10 +374,18 @@ public class MessageService {
         MessageHotQo messageHotQo = new MessageHotQo();
         messageHotQo.setMessageIds(messageIds);
         List<ByaiMessageHotDto> history = byaiMessageHotService.findByQo(messageHotQo);
-        for (ByaiMessageHotDto message : history) {
-            GroupChatInternalSessionAccess.requirePublic(sessionService.findById(message.getSessionId()));
-        }
+        requireReadableMessages(history);
         return history;
+    }
+
+    private void requireReadableMessages(List<ByaiMessageHotDto> messages) {
+        messages.stream().map(ByaiMessageHotDto::getSessionId).distinct().forEach(this::requireReadableSession);
+    }
+
+    private void requireReadableSession(Long sessionId) {
+        if (sessionId == null) return;
+        GroupChatInternalSessionAccess.requirePublic(sessionService.findById(sessionId));
+        groupTaskAccess.requireDirectRead(sessionId);
     }
 
     /**
@@ -674,6 +687,8 @@ public class MessageService {
     @Transactional
     public void deleteMessage(String messageId) {
         Long parsedMessageId = Long.parseLong(messageId);
+        ByaiMessageHotDto message = byaiMessageHotService.findById(parsedMessageId);
+        if (message != null) groupTaskAccess.requireDirectMessageWrite(message.getSessionId());
         taskPlanApplicationService.deleteByMessageId(parsedMessageId);
         byaiMessageHotService.deleteById(parsedMessageId);
     }
@@ -916,7 +931,7 @@ public class MessageService {
                 return buildErrorHtml("消息不存在，messageId: " + messageId);
             }
 
-            GroupChatInternalSessionAccess.requirePublic(sessionService.findById(byaiMessageHotDto.getSessionId()));
+            requireReadableSession(byaiMessageHotDto.getSessionId());
             // 直接获取消息内容
             String content = byaiMessageHotDto.getMessageContent();
             if (StringUtils.isBlank(content)) {
@@ -1037,7 +1052,7 @@ public class MessageService {
     }
 
     public Map<String, Object> getMessageCountAndPosition(MessageQo messageQo) {
-        GroupChatInternalSessionAccess.requirePublic(sessionService.findById(messageQo.getSessionId()));
+        requireReadableSession(messageQo.getSessionId());
         return memoryMessageService.getMessageCountAndPosition(messageQo);
     }
 

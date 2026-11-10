@@ -31,10 +31,15 @@ public class GroupChatTaskChatGuard {
     public Long beforeTurn(Long sessionId, Long agentId, String requestTraceId) {
         ByaiGroupChatTask task = taskMapper.selectById(sessionId);
         if (task == null) {
+            // 只有经群入口认领并补齐任务的旧单聊可继续写；其余历史仍允许发起人查看。
+            if (sessionId != null && taskMapper.selectDirectOwner(sessionId) != null) {
+                throw new IllegalArgumentException(I18nUtil.get("groupchat.task.privateHistoryReadOnly"));
+            }
             return null;
         }
         if ("PRIVATE".equals(task.getStatus())) {
-            // 私聊任务只作为会话入口，不参与群任务轮次准入与发布。
+            // 私聊沿用普通聊天轮次；每次仍需核验原发起人、员工和当前群成员关系。
+            authorizationService.requirePrivateAgent(task, agentId);
             return null;
         }
         authorizationService.requireActiveAgent(sessionId, agentId);
