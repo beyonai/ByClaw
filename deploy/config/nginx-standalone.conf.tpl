@@ -72,6 +72,31 @@ server {
         }
     }
 
+    # Anonymous application previews only. Fixed cloud domain and fixed gateway
+    # port prevent callers from selecting arbitrary upstream hosts or ports.
+    location ~ "^/sandbox-apps/(?<app_sandbox>sbx-[a-z0-9-]{8,100})(?<app_path>/a/[0-9a-f]{32}/.*)$" {
+        set $app_upstream 8082-${app_sandbox}.cn-beijing.sandbox.aliyuncs.com;
+        proxy_pass https://$app_upstream$app_path$is_args$args;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_name $app_upstream;
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+        proxy_set_header Host $app_upstream;
+        proxy_set_header Cookie "";
+        proxy_set_header Authorization "";
+        proxy_set_header Beyond-Token "";
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_hide_header Content-Disposition;
+        proxy_hide_header Set-Cookie;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_redirect ~^/a/(.*)$ /sandbox-apps/$app_sandbox/a/$1;
+    }
+
+    location /sandbox-apps/ { return 404; }
+
     location /v1/sandboxes {
         proxy_pass {{PROXY_SANDBOXES}};
 
