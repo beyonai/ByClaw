@@ -132,3 +132,10 @@ codex exec --skip-git-repo-check --json '只回复 CODEX_READY'
   Docker 布局检查通过。本机无 Docker，新镜像构建、SSH/browser/Nginx 联合启动、
   模板渲染和真实平台会话仍需在构建机与临时实例验收。历史 Easel 镜像的线上通过
   记录不能代替本次 coding 结构调整后的验收。
+
+## 用户服务器发布
+
+可选的直接 SSH/SCP 部署沿用个人参数和当前 coding 租约，使用 `server-ssh` 与
+`server-deploy` Skill。部署参数默认不进入普通工具进程，启用后仅由 coding 专用执行
+入口传递，私钥只在实例本地临时目录使用。配置、权限边界及双镜像发布要求见
+[个人服务器部署](SERVER_DEPLOY.md)。这不是已经发布或完成真实 ECS 验收的证明。
