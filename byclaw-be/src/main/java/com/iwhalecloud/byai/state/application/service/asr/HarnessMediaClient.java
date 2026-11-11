@@ -42,7 +42,7 @@ public class HarnessMediaClient {
     private final OkHttpClient http = new OkHttpClient.Builder().connectTimeout(Duration.ofSeconds(15))
         .callTimeout(Duration.ofSeconds(120)).readTimeout(Duration.ofSeconds(120)).build();
 
-    private final OkHttpClient sharedHttp = http.newBuilder().followRedirects(false).build();
+    private final OkHttpClient directHttp = http.newBuilder().followRedirects(false).build();
 
     public HarnessMediaClient(SandboxIngressEndpointResolver endpoints, SandboxIngressRuntimeResolver runtimes,
         HarnessMediaAuthorizationService authorization, ObjectMapper mapper,
@@ -113,15 +113,18 @@ public class HarnessMediaClient {
             }
             endpoint = baseBuilder.build().toString();
             var target = runtime.buildTargetUrl(endpoint, path, null);
-            Request.Builder builder = new Request.Builder().url(target).header("Beyond-Token", token)
+            Request.Builder builder = new Request.Builder().url(target)
                 .post(RequestBody.create(mapper.writeValueAsBytes(body), MediaType.get("application/json")));
             runtime.customizeRequest(builder, new SandboxIngressRequestContext(SandboxIngressInstanceType.UNKNOWN,
                 route.instance(), login.getUserCode(), endpoint, "POST", path, null, target, token, login, Map.of()));
+            route.headers().forEach(builder::header);
+            builder.header("Beyond-Token", token);
             if (route.shared()) {
-                route.headers().forEach(builder::header);
-                builder.header("Cookie", "byclaw_web_token=" + route.webToken()).header("Beyond-Token", token);
+                builder.header("Cookie", "byclaw_web_token=" + route.webToken());
             }
-            try (Response response = (route.shared() ? sharedHttp : http).newCall(builder.build()).execute()) {
+            // Provider credentials and shared cookies belong to this endpoint.
+            OkHttpClient transport = route.shared() || !route.headers().isEmpty() ? directHttp : http;
+            try (Response response = transport.newCall(builder.build()).execute()) {
                 if (response.body() == null) throw unavailable();
                 byte[] bytes = response.body().byteStream().readNBytes(maxResponseBytes + 1);
                 if (bytes.length > maxResponseBytes) throw unavailable();

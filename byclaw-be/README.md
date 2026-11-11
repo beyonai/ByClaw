@@ -1018,12 +1018,14 @@ model connection failures mark that model as failing; successful debugging still
 Access requires ownership of the uploaded file. Transcription delegates to the
 Harness plugin at `/api/byclaw/asr/transcribe`; the plugin chooses the enabled
 global default ASR model and the provider adapter. For the default ASR routing,
-the backend uses the current user's shared `byclaw-dsh` binding when present and
-otherwise resolves the exclusive `openclaw` endpoint. Deployments can select a
-different logical instance with `asr.sandbox.instance`. The backend forwards the
-current Redis login token and authenticates shared requests with the bound
-context's web cookie and provider ingress headers. A running, configured Harness
-instance is required.
+the backend uses the current user's shared `byclaw-dsh` binding when present.
+For an exclusive sandbox it prefers the configured logical instance (default
+`openclaw`) and accepts the native `byclaw-dsh` endpoint on an exclusive DSH sandbox
+when the default endpoint is absent. Deployments can select a different logical
+instance with `asr.sandbox.instance`. The backend forwards the current Redis login
+token and the selected sandbox's provider ingress headers. Shared requests also
+carry the bound context's web cookie. A running, configured Harness instance is
+required.
 
 Model defaults are independent for every model type, including `ASR`, `TTS`, and
 future types. `GET /new/model/getDefaultModelId?modelType=ASR` resolves a type's default.

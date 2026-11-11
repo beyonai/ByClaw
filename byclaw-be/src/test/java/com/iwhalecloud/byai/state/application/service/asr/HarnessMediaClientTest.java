@@ -104,6 +104,30 @@ class HarnessMediaClientTest extends I18nTestSupport {
         assertThat(requestBody.get().path("audioBase64").asText()).isEqualTo("SUQz");
     }
 
+    @Test
+    void transcribesThroughExclusiveDshWhenOnlyItsNativeEndpointExists() {
+        var exclusive = SandboxInfo.builder().sandboxType("byclaw-dsh")
+            .instanceEndpoints(Map.of("byclaw-dsh", endpoint)).build();
+        when(sandboxes.sandboxInfo("user42")).thenReturn(List.of(exclusive));
+
+        assertThat(client.transcribe(audio(), null)).containsEntry("text", "识别后的语音");
+        assertThat(runtimeInstance.get()).isEqualTo("byclaw-dsh");
+        assertThat(gatewayCookie.get()).isNull();
+    }
+
+    @Test
+    void sendsTheExclusiveBindingsProviderHeadersWithoutOverridingUserAuthentication() {
+        var exclusive = SandboxInfo.builder().sandboxType("byclaw-dsh")
+            .instanceEndpoints(Map.of("openclaw", endpoint))
+            .endpointHeaders(Map.of("e2b-traffic-access-token", "private-ingress", "Beyond-Token", "wrong-user"))
+            .build();
+        when(sandboxes.sandboxInfo("user42")).thenReturn(List.of(exclusive));
+
+        assertThat(client.transcribe(audio(), null)).containsEntry("text", "识别后的语音");
+        assertThat(trafficToken.get()).isEqualTo("private-ingress");
+        assertThat(token.get()).isEqualTo("user-session-token");
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void transcribesThroughSharedDshEvenIfAnExclusiveBindingAlsoExists(boolean hasExclusiveBinding) {

@@ -55,10 +55,27 @@ public class SandboxIngressEndpointResolver {
             if (StringUtils.isNotBlank(endpoint)) {
                 log.debug("Matched ingress endpoint: userCode={}, instance={}, sandboxId={}, endpoint={}",
                     userCode, instance, sandboxInfo != null ? sandboxInfo.getSandboxId() : null, endpoint);
-                return new Endpoint(instance, endpoint, false, null, Map.of());
+                return exclusiveEndpoint(sandboxInfo, instance, endpoint);
+            }
+        }
+        if (preferSharedDsh && SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(instance)) {
+            String dsh = SandboxLaunchRouting.BYCLAW_DSH_SANDBOX_TYPE;
+            for (SandboxInfo sandbox : sandboxes) {
+                if (sandbox == null || Boolean.TRUE.equals(sandbox.getIsShared()) || !dsh.equals(sandbox.getSandboxType())) {
+                    continue;
+                }
+                String endpoint = resolveInstanceEndpoint(sandbox.getInstanceEndpoints(), dsh);
+                if (endpoint != null) {
+                    return exclusiveEndpoint(sandbox, dsh, endpoint);
+                }
             }
         }
         throw new IllegalStateException("No sandbox endpoint found for userCode=" + userCode + ", instance=" + instance);
+    }
+
+    private Endpoint exclusiveEndpoint(SandboxInfo sandbox, String instance, String endpoint) {
+        Map<String, String> headers = sandbox.getEndpointHeaders();
+        return new Endpoint(instance, endpoint, false, null, headers == null ? Map.of() : headers);
     }
 
     public record Endpoint(String instance, String endpoint, boolean shared, String webToken, Map<String, String> headers) {}

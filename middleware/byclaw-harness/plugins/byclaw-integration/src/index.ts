@@ -587,9 +587,9 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
   // ...and nothing a context does while booting may start B: boot-time projections and session
   // directories wait in the tool-environment facade until a turn connects B.
   const lazyEnvironment = config.workspaceOnToolEnvironment ? lazyToolEnvironment(ctx) : undefined
-  const userFiles = config.workspaceOnToolEnvironment
-    ? (lazyEnvironment === undefined ? toolEnvironmentFiles(ctx) : lazyToolEnvironmentFiles(lazyEnvironment, toolEnvironmentFiles(ctx)))
-    : undefined
+  const toolFiles = config.workspaceOnToolEnvironment ? toolEnvironmentFiles(ctx) : undefined
+  const userFiles = toolFiles === undefined || lazyEnvironment === undefined
+    ? toolFiles : lazyToolEnvironmentFiles(lazyEnvironment, toolFiles)
   const agentSkillRoot = config.agentSkillRoot?.trim()
     ? resolve(config.agentSkillRoot.trim())
     : userFiles === undefined ? AGENT_SKILLS_ROOT : agentSkillRootFor(byRoot)
@@ -1089,14 +1089,13 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       resolveMediaModel: (type, modelId) => resolvePluginMediaModel(redis, type, { modelId, decrypt: decryptByClawAuthToken, ...mediaModelOptions }),
       // Tools writing or checking a user's files (generated images and speech, task attachments) are
       // tool calls: they use the tool environment itself, starting it like any other tool.
-      ...(config.workspaceOnToolEnvironment
-        ? { userFiles: toolEnvironmentFiles(ctx), artifactIo: mediaArtifactIo(toolEnvironmentFiles(ctx)) }
-        : {}),
+      ...(toolFiles === undefined ? {} : { userFiles: toolFiles, artifactIo: mediaArtifactIo(toolFiles) }),
     }
+    // A user-triggered ASR needs the real workspace even when the tool environment is cold.
     const voiceRuntime = new ByClawVoiceRuntime({
       byRoot, userCode,
       resolveModel: type => resolvePluginMediaModel(redis, type, { decrypt: decryptByClawAuthToken, ...mediaModelOptions }),
-      ...(userFiles === undefined ? {} : { files: userFiles }),
+      ...(toolFiles === undefined ? {} : { files: toolFiles }),
     })
     const mountVoiceHttp = () => {
       const web = (ctx.get('webServer') ?? ctx.get('httpServer')) as VoiceWebHost | undefined
@@ -1109,7 +1108,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
           logArchiveFailure: (stage, code) => {
             ctx.logger.warn(`[byclaw-asr] archive failed stage=${stage} code=${code} toolEnvironmentConnected=${lazyEnvironment?.connected ?? 'unknown'}`)
           },
-          ...(userFiles === undefined ? {} : { files: userFiles }),
+          ...(toolFiles === undefined ? {} : { files: toolFiles }),
         }) })
         const disposeTts = web.register({ kind: 'exact', path: '/api/byclaw/tts/debug', handler: createTtsDebugHttpHandler({
           authHeaders,

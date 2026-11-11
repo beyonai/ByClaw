@@ -104,6 +104,48 @@ try {
     check((await readdir(b.toHost(join(byRoot, '.sessions', 'http1', 'asr')))).length === 1, 'ASR HTTP audio lands on B')
   } finally { await new Promise(resolve => server.close(resolve)) }
 
+  // The first explicit ASR request/turn uses the active tool filesystem; startup stays lazy.
+  const integrationSource = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8')
+  const voiceRuntimeOptions = integrationSource.split('const voiceRuntime = new ByClawVoiceRuntime({')[1]?.split('const mountVoiceHttp')[0]
+  const asrHandlerOptions = integrationSource.split("path: '/api/byclaw/asr/transcribe', handler: createVoiceHttpHandler({")[1]?.split('const disposeTts')[0]
+  check(voiceRuntimeOptions?.includes('{ files: toolFiles }'), 'voice runtime uses the active tool filesystem')
+  check(asrHandlerOptions?.includes('{ files: toolFiles }'), 'ASR HTTP uses the active tool filesystem')
+  const environment = { connected: false, async whenConnected() {} }
+  let toolStarts = 0
+  const coldCtx = { get(name) {
+    const provider = b.ctx.get(name)
+    if (name !== 'subprocess') return provider
+    return { spawn(spec) {
+      if (!environment.connected) { environment.connected = true; toolStarts++ }
+      return provider.spawn(spec)
+    } }
+  } }
+  const activeFiles = toolEnvironmentFiles(coldCtx)
+  const bootFiles = lazyToolEnvironmentFiles(environment, activeFiles)
+  await bootFiles.ensureDirectory(join(byRoot, 'startup-projection'))
+  check(toolStarts === 0, 'boot-time filesystem work does not start the tool environment')
+  const coldHandler = createVoiceHttpHandler({ byRoot, files: activeFiles,
+    authHeaders: async () => ({ 'Beyond-Token': 'token' }), resolveModel: async () => model,
+    transcribe: async () => ({ text: 'cold manual', provider: 'VOLCENGINE', model: 'bigmodel' }) })
+  const coldServer = createServer(coldHandler)
+  await new Promise(resolve => coldServer.listen(0, '127.0.0.1', resolve))
+  try {
+    const response = await fetch(`http://127.0.0.1:${coldServer.address().port}/`, { method: 'POST',
+      headers: { 'Beyond-Token': 'token' },
+      body: JSON.stringify({ audioBase64: voice.audioBase64, mimeType: 'audio/mpeg', sessionId: 'cold-http' }) })
+    check(response.status === 200 && (await response.json()).text === 'cold manual', 'first manual ASR succeeds')
+    check(toolStarts === 1, 'manual ASR starts the tool environment once')
+    check((await readdir(b.toHost(join(byRoot, '.sessions', 'cold-http', 'asr')))).length === 1, 'cold manual ASR archives on B')
+  } finally { await new Promise(resolve => coldServer.close(resolve)) }
+
+  environment.connected = false
+  const coldVoice = new ByClawVoiceRuntime({ byRoot, userCode: 'alice', files: activeFiles,
+    resolveModel: async () => model,
+    transcribe: async () => ({ text: 'cold turn', provider: 'VOLCENGINE', model: 'bigmodel' }) })
+  check((await coldVoice.prepare(command, 'cold-turn', new AbortController().signal)).transcript === 'cold turn', 'first voice turn transcribes')
+  check(toolStarts === 2, 'voice admission starts the tool environment once')
+  check((await readdir(b.toHost(join(byRoot, '.sessions', 'cold-turn', 'asr')))).length === 2, 'cold voice turn retains its archive and transcript cache')
+
   // Manual ASR archive failures are diagnosable without exposing storage details.
   const denied = () => { throw Object.assign(new Error('private filesystem details'), { code: 'EACCES' }) }
   for (const [archiveFiles, stage, code] of [
