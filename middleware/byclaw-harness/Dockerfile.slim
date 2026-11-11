@@ -195,6 +195,7 @@ COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/subagent/to
 COPY --from=plugin-builder --chown=byclaw:byclaw /workspace/packages/subagent/tool-subagent/lib/ /workspace/packages/subagent/tool-subagent/lib/
 COPY middleware/byclaw-harness/scripts/verify-by-framework-runtime.mjs /usr/local/lib/byclaw/verify-by-framework-runtime.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/prune-dsh-profile.mjs /tmp/prune-dsh-profile.mjs
+COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/prepare-tool-helper-env.mjs /workspace/scripts/prepare-tool-helper-env.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/link-dsh-installation-peers.mjs /tmp/link-dsh-installation-peers.mjs
 COPY --chown=byclaw:byclaw middleware/byclaw-harness/scripts/byclaw-multi-host.mjs middleware/byclaw-harness/scripts/byclaw-managed-host.mjs middleware/byclaw-harness/scripts/verify-shared-runtime.mjs /workspace/scripts/
 # The build decisions the plugin-builder folded together. This stage starts from
@@ -247,6 +248,7 @@ RUN set -eux; \
     grep -q 'delegationToolNames' /workspace/packages/subagent/tool-subagent/lib/index.js; \
     node -e "const pty=require('node-pty');if(typeof pty.spawn!=='function')process.exit(1)"; \
     cd /workspace; \
+    node scripts/prepare-tool-helper-env.mjs /workspace "${BYCLAW_DSH_MANAGED_HOME}/profiles/web"; \
     node scripts/verify-shared-runtime.mjs /workspace "${BYCLAW_DSH_MANAGED_HOME}/profiles/web"; \
     rm -f /tmp/prune-dsh-profile.mjs /tmp/link-dsh-installation-peers.mjs /tmp/byclaw-prepared-workspace.yaml
 
@@ -311,6 +313,7 @@ RUN ln -sf ../lib/node_modules/@wecom/cli/bin/wecom.js /opt/nvm/current/bin/weco
 USER byclaw
 WORKDIR /workspace
 COPY --from=profile-builder --chown=byclaw:byclaw /opt/byclaw/dsh-managed/ /opt/byclaw/dsh-managed/
+COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/ssh/ssh/lib/ /workspace/packages/ssh/ssh/lib/
 COPY --from=profile-builder --chown=byclaw:byclaw /workspace/scripts/byclaw-multi-host.mjs /workspace/scripts/byclaw-managed-host.mjs /workspace/scripts/verify-shared-runtime.mjs /workspace/scripts/
 COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/src/ /workspace/packages/boot/app-boot/src/
 COPY --from=profile-builder --chown=byclaw:byclaw /workspace/packages/boot/app-boot/lib/ /workspace/packages/boot/app-boot/lib/
