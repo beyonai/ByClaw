@@ -90,6 +90,6 @@ export async function probeResidualProcesses(alias: string, timeoutMs = 20_000, 
 }
 
 /** Short description for a log line. */
-export function describeResidual(processes: readonly ResidualProcess[], limit = 3): string {
+export function describeResidual(processes: ReadonlyArray<Pick<ResidualProcess, 'pid' | 'comm'>>, limit = 3): string {
   return processes.slice(0, limit).map(process => `${process.comm}[${String(process.pid)}]`).join(', ') + (processes.length > limit ? ', …' : '')
 }

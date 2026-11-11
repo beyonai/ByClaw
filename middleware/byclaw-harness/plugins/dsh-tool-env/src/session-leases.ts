@@ -26,6 +26,8 @@ export class ToolSessionLeases<T extends ToolLeaseData = ToolLeaseData> {
   private last: T | undefined
   private readonly scope = new AsyncLocalStorage<string>()
   private readonly fallback = `operation:${randomUUID()}`
+  /** Held while processes left on B outlive every session; see {@link holdResidual}. */
+  private readonly residual = `residual:${randomUUID()}`
 
   constructor(private readonly settings: Settings, private readonly request: Request<T>, private readonly invalidated: () => void) {
     this.holderId = settings.holderId ?? randomUUID()
@@ -102,10 +104,20 @@ export class ToolSessionLeases<T extends ToolLeaseData = ToolLeaseData> {
     return this.last
   }
 
+  /**
+   * Hold (or return) one extra lease for processes left on B that no session or
+   * stream accounts for (`cmd &`): without it Platform sees no holder once the
+   * turns ended and reclaims B under them. Holding twice is one lease.
+   */
+  async holdResidual(hold: boolean): Promise<void> {
+    if (hold) await this.acquireSession(this.residual)
+    else await this.finishSession(this.residual)
+  }
+
   async pause(destroy = false): Promise<void> {
     // Explicit release returns this context's tokens only. Platform checks all other holders.
-    const keys = [...this.owned.keys()]
-    await this.serial(async () => { for (const key of keys) await this.release(key, destroy) })
+    // Read the keys inside the queue, so an acquisition queued before this pause is returned too.
+    await this.serial(async () => { for (const key of [...this.owned.keys()]) await this.release(key, destroy) })
   }
 
   async dispose(): Promise<void> {

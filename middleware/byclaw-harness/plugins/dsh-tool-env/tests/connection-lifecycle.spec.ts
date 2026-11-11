@@ -254,4 +254,70 @@ describe('tool environment idle lifecycle', () => {
     await vi.advanceTimersByTimeAsync(1)
     expect(backend.pause).toHaveBeenCalledTimes(1)
   })
+
+  describe('processes left on B after a session', () => {
+    let hold: ReturnType<typeof vi.fn>
+    beforeEach(() => {
+      hold = vi.fn().mockResolvedValue(undefined)
+      backend.holdResidual = hold
+    })
+
+    it('holds a lease when a session ends with processes still on B and returns it once they exit', async () => {
+      await ssh.request('spawn', { argv: ['bash'] }, z.string())
+      residual = async () => [{ pid: 42, comm: 'node' }]
+      await ssh.finishSession('session-a')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(hold.mock.calls).toEqual([[true]])
+      await vi.advanceTimersByTimeAsync(100)
+      expect(hold.mock.calls).toEqual([[true], [true]])
+      expect(backend.pause).not.toHaveBeenCalled()
+      residual = async () => []
+      await vi.advanceTimersByTimeAsync(100)
+      expect(hold.mock.calls.at(-1)).toEqual([false])
+      expect(backend.pause).toHaveBeenCalledTimes(1)
+    })
+
+    it('holds nothing when a session ends without processes left on B', async () => {
+      await ssh.request('spawn', { argv: ['bash'] }, z.string())
+      await ssh.finishSession('session-a')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(hold).not.toHaveBeenCalled()
+    })
+
+    it('does not probe B for a session that ends while B is not connected, or is destroyed', async () => {
+      const probe = vi.fn(async () => [{ pid: 42, comm: 'node' }])
+      residual = probe
+      await ssh.finishSession('session-a')
+      await ssh.request('spawn', { argv: ['bash'] }, z.string())
+      await ssh.finishSession('session-b', true)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(probe).not.toHaveBeenCalled()
+      expect(hold).not.toHaveBeenCalled()
+    })
+
+    it('returns the lease once remaining processes pass the limit', async () => {
+      ;(ssh as unknown as { options: { busy: { residualMaxMs: number } } }).options.busy.residualMaxMs = 250
+      await ssh.request('spawn', { argv: ['bash'] }, z.string())
+      residual = async () => [{ pid: 42, comm: 'sleep' }]
+      await ssh.finishSession('session-a')
+      await vi.advanceTimersByTimeAsync(200)
+      expect(backend.pause).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(100)
+      expect(hold.mock.calls.at(-1)).toEqual([false])
+      expect(backend.pause).toHaveBeenCalledTimes(1)
+    })
+
+    it('returns a lease taken while a pause started', async () => {
+      await ssh.request('spawn', { argv: ['bash'] }, z.string())
+      const answer = Promise.withResolvers<void>()
+      hold.mockReturnValueOnce(answer.promise)
+      residual = async () => [{ pid: 42, comm: 'node' }]
+      await ssh.finishSession('session-a')
+      await vi.advanceTimersByTimeAsync(0)
+      await ssh.dispose()
+      answer.resolve()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(hold.mock.calls).toEqual([[true], [false]])
+    })
+  })
 })
