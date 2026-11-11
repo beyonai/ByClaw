@@ -36,6 +36,7 @@ test('C01-C08 uses allowlisted context, original project/session roots, persona 
   assert.ok(!prepared.persona.includes('shared-skill'), 'no hand-written Skill index in employee rules')
   const manifest = codingRunManifest(prepared, 'user1-s1-1001-codex', 'm1')
   assert.equal(manifest.home, '/by/.sessions/s1/executors/1001/codex-home')
+  assert.equal(manifest.prepareAgentSkills, true, 'every production run prepares current agent Skills inside its tool lease')
   assert.ok(!JSON.stringify(manifest).includes(target.text))
 })
 

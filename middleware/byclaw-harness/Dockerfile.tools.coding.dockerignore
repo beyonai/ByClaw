@@ -1,6 +1,11 @@
 # Only image inputs; never credentials, local dependencies or user workspaces.
 **
 !middleware/
+!middleware/builtin/
+!middleware/builtin/skills/
+!middleware/builtin/skills/**
+!middleware/builtin/python-clis/
+!middleware/builtin/python-clis/**
 !middleware/byclaw-harness/
 !middleware/byclaw-harness/tool-sandbox/
 !middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh
@@ -23,3 +28,17 @@
 !middleware/byclaw-harness/templates/easel/preview.conf
 !middleware/byclaw-harness/templates/easel/easel-source-5c12e42.tar.gz
 !middleware/byclaw-harness/templates/easel/easel-source-5c12e42.tar.gz.sha256
+!middleware/byclaw-harness/plugins/
+!middleware/byclaw-harness/plugins/byclaw-integration/
+!middleware/byclaw-harness/plugins/byclaw-integration/scripts/
+!middleware/byclaw-harness/plugins/byclaw-integration/scripts/prepare-agent-skills.mjs
+!middleware/byclaw-harness/plugins/byclaw-integration/src/
+!middleware/byclaw-harness/plugins/byclaw-integration/src/skill-sync.ts
+!middleware/byclaw-harness/plugins/byclaw-integration/src/generation-paths.ts
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/.venv
+**/*.egg-info
+**/build
+**/dist

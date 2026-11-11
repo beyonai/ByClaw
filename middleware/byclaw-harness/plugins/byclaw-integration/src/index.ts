@@ -1161,8 +1161,6 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       prepareContext: async (command, target, lease) => {
         const template = await templateRuntime.prepareEmployee(`byclaw-employee-${target.resourceId}`, groupCoordinationFromExtra(command.extraPayload))
         lease.signal.throwIfAborted()
-        const skills = (await skillRuntime.employeeSkills(template)).map(skill => ({ ...skill,
-          path: skillDirectories?.visiblePath(skill.path) ?? skill.path }))
         const setup: ByClawCodingSetup = { command, host: { ...sessionHost,
           userFiles: codingLeaseFileChecks(lease.sandbox, lease.actor, lease.leaseId, lease.workspaceRoot, lease.signal) } }
         await ctx.serial('byclaw/coding-setup', setup)
@@ -1170,7 +1168,8 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
         const savedCwd = sessionMetadata.get(String(command.header.sessionId))?.identity.cwd
         const previousCwd = await codingPreviousCwd(lease, String(command.header.sessionId), target.resourceId)
           ?? (savedCwd !== undefined && /^\/by\/\.shared\/project_-?\d+$/u.test(savedCwd) ? savedCwd : undefined)
-        return prepareCodingContext(command, target, { ...template, persona: `${template.persona}\n\n${SKILL_CREATOR_POLICY}` }, skills, setup.publication, previousCwd)
+        // The current coding lease resolves builtins and current agent associations itself.
+        return prepareCodingContext(command, target, { ...template, persona: `${template.persona}\n\n${SKILL_CREATOR_POLICY}` }, [], setup.publication, previousCwd)
       },
       emitFileChanges: async (command, context, payload, workspace) => {
         const rootSessionId = String(command.header.sessionId)

@@ -4,7 +4,9 @@ FROM ${BROWSER_IMAGE} AS coding-core
 USER root
 ARG TARGETARCH
 RUN test "${TARGETARCH}" = amd64
-ENV CODEX_HOME=/home/byclaw/.codex
+ENV CODEX_HOME=/home/byclaw/.codex \
+    BYCLAW_SKILLS_DIR=/opt/byclaw/builtin/skills \
+    BYCLAW_AGENT_SKILLS_PREPARER=/usr/local/lib/byclaw/agent-skills/scripts/prepare-agent-skills.mjs
 
 COPY middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh /tmp/configure-cn-sources.sh
 COPY middleware/byclaw-harness/tool-sandbox/codex.release.json /tmp/codex.release.json
@@ -22,6 +24,26 @@ RUN set -eu; \
 
 RUN install -d -m 0700 -o byclaw -g byclaw "${CODEX_HOME}"
 COPY --chown=byclaw:byclaw --chmod=0600 middleware/byclaw-harness/tool-sandbox/codex.config.toml /home/byclaw/.codex/config.toml
+COPY --chown=byclaw:byclaw middleware/builtin/skills/ /opt/byclaw/builtin/skills/
+COPY --chown=byclaw:byclaw middleware/builtin/python-clis/ /opt/byclaw/builtin/python-clis/
+RUN python3 -m pip install --no-cache-dir --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+      "by-framework==0.2.2.dev10" \
+      /opt/byclaw/builtin/python-clis/kbcli \
+      /opt/byclaw/builtin/python-clis/groksearchcli \
+      /opt/byclaw/builtin/python-clis/callcli \
+      "/opt/byclaw/builtin/python-clis/dbcli[all]" \
+    && python3 -m pip check \
+    && python3 -c 'from by_framework.core.discovery import DiscoveryClient' \
+    && python3 "${BYCLAW_SKILLS_DIR}/by-knowledge-manager/scripts/by_knowledge_manager.py" --help >/dev/null \
+    && kbcli --help >/dev/null && groksearchcli --help >/dev/null \
+    && callcli --help >/dev/null && dbcli --help >/dev/null
+COPY middleware/byclaw-harness/plugins/byclaw-integration/scripts/prepare-agent-skills.mjs /usr/local/lib/byclaw/agent-skills/scripts/prepare-agent-skills.mjs
+COPY middleware/byclaw-harness/plugins/byclaw-integration/src/skill-sync.ts middleware/byclaw-harness/plugins/byclaw-integration/src/generation-paths.ts /usr/local/lib/byclaw/agent-skills/src/
+RUN npm install --prefix /usr/local/lib/byclaw/agent-skills --registry=https://registry.npmmirror.com \
+      --ignore-scripts --no-audit --no-fund --save-exact js-yaml@4.2.0 \
+    && test -s "${BYCLAW_SKILLS_DIR}/skill-creator/SKILL.md" \
+    && node --experimental-transform-types --input-type=module -e 'await import(process.env.BYCLAW_AGENT_SKILLS_PREPARER)' \
+    && rm -rf /root/.npm
 COPY middleware/byclaw-harness/tool-sandbox/coding.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
 COPY --chmod=0755 middleware/byclaw-harness/scripts/sandbox-app.py /usr/local/bin/sandbox-app
 COPY --chmod=0755 middleware/byclaw-harness/scripts/sandbox-template.py /usr/local/bin/sandbox-template

@@ -5,12 +5,13 @@
 ```text
 Worker → 原执行路由 → 申请 coding 租约
                        ↓
-Harness 已有授权模板 / 入站上下文 / SkillRuntime
+Harness 已有授权模板 / 入站上下文
                        ↓ 确定性转换，不调用 DSH 模型
 coding-workspace.py〔在实际 coding 租约中执行〕
   ├─ 镜像默认配置 → 专用 config.toml
   ├─ 员工规范、原 Skill 创建规范 → AGENTS.md + developer_instructions
-  ├─ 有效共享 Skill → home/skills 软链接 + config 启停
+  ├─ 工具侧查询、下载 agent 关联 Skill + 镜像内置 Skill
+  │      → home/skills 软链接 + config 启停
   ├─ 本轮问题、背景、文件引用 → CLI stdin
   └─ 原 cwd + threadId → Codex exec / exec resume
                        ↓
@@ -28,7 +29,7 @@ coding-workspace.py〔在实际 coding 租约中执行〕
 | 群与任务背景 | 复用入站群快照、任务上下文、groupHistoryPath；长背景由 Codex 按原文件读取 |
 | 最近聊天 | 携带请求中的最近 20 条 user/assistant 历史；超限提示；后续原生续聊保留 Codex 自己的历史 |
 | 附件、共享文件、云盘 | 传原路径与资源引用，本地直接读，远程由已有 Skill 按需读；不预下载全部资产 |
-| Skill | 使用当前员工的有效集合和本地覆盖；共享目录必须已挂载到 coding 实例，不复制、不生成索引 |
+| Skill | 内置项随 coding 镜像提供；每轮按 employeeId 查询关联资源与版本，工具侧下载完整目录、复用同版本缓存，不复制 Harness 本地缓存、不生成手工索引 |
 | 配置与认证 | 每轮从镜像默认配置生成专用配置；保留 CODEX_AUTH 和原模型/地址参数覆盖，不将密钥写入提示词 |
 
 ```text
@@ -39,6 +40,8 @@ coding-workspace.py〔在实际 coding 租约中执行〕
     byclaw-session.json                 身份摘要、threadId、cwd、home
     sessions/...                        Codex 原生历史
 /by/.file_changes/{sessionId}/files/     原 v2 文件详情快照
+/by/.byclaw/skills/{resourceId}/{code}/  当前用户的关联 Skill 版本缓存
+/opt/byclaw/builtin/skills/             镜像内置 Skill
 ```
 
 同一用户、会话、员工串行执行，并以实例内 OS 文件锁保护配置和原生历史；不同会话/员工使用独立 home。后续请求省略项目字段时沿用已记录项目目录。原生记录缺失或 cwd 改变时明确报告重建。此机制不防止不同员工同时修改同一项目源码。
@@ -57,8 +60,9 @@ coding-workspace.py〔在实际 coding 租约中执行〕
 | `src/index.ts` | 组合已有能力、可选扩展、原 3016 发送 |
 | `src/coding-context.ts` | 白名单上下文、原目录映射、租约文件查询、执行清单 |
 | `src/coding-router.ts` | 原队列内准备、执行、接收文件摘要、调用成果回调 |
-| `scripts/coding-workspace.py` | 专用配置、Skill 链接、原生续聊、文件快照 |
-| `src/template-runtime.ts`、`src/skill-runtime.ts` | 无 DSH Agent 的授权模板及有效 Skill 准备入口 |
+| `scripts/coding-workspace.py` | 调用工具侧准备程序、专用配置、Skill 链接、原生续聊、文件快照 |
+| `scripts/prepare-agent-skills.mjs`、`src/skill-sync.ts` | 原 HTTP 接口查询 agent 关联资源，复用版本检查、下载与原子缓存 |
+| `src/template-runtime.ts` | 无 DSH Agent 的授权模板准备入口；原 SkillRuntime 继续服务 DSH |
 | `src/session-extensions.ts` | 通用 `byclaw/coding-setup` 可选扩展事件 |
 | `../group-task-publication/src/index.ts` | 复用原任务绑定和客户端 |
 
@@ -66,9 +70,9 @@ Python 脚本随插件包分发，从模块资源路径读取，在工具沙箱�
 
 ## 部署前提与验证
 
-无需新增必填环境变量。重新构建 Harness 主镜像；coding 镜像已有 Python 3.11+、Codex 0.167.0、共享挂载和 Skill 所需依赖时可复用。Python 使用标准库 `tomllib`，不安装新 Python 包。
+重新构建 Harness 主镜像与 coding 工具镜像，并更新目标实例。工具镜像设置 `BYCLAW_SKILLS_DIR` 和 `BYCLAW_AGENT_SKILLS_PREPARER`，安装固定版本 YAML 解析器、共享 Python CLI 和 by-framework。用户身份、认证及后端地址沿用原执行环境，无需新增每个 agent 的环境变量。
 
-特别核对：Harness 本地缓存的关联 Skill 不一定已经出现在 coding 的 `/by/.byclaw/skills`。本实现只映射路径，缺少真实挂载会报 `EXECUTION_SKILL_MOUNT_MISSING`；不能把路径映射当作挂载成功。云盘 Skill 的命令、身份、认证环境与网络也须在 coding 实例可用。
+关联 Skill 在当前工具租约下载，不再依赖 Harness 本地缓存与 coding 挂载同路径。准备失败则停止，不启动 CLI。有效集合为内置项加当前关联项；撤销关联后下一轮移除引用，其他员工未关联的缓存不会进入原生加载目录。缓存准备使用用户级文件锁，配置与续聊仍使用原执行身份锁。云盘等业务命令的服务连接、运行环境和授权仍需单独验证，不能把 Skill 文件可读当成业务请求已通过。
 
 在完整 DSH workspace 中运行：
 
@@ -77,8 +81,13 @@ pnpm --filter @byclaw/dsh-integration run typecheck
 pnpm --filter @byclaw/dsh-integration run build
 pnpm --filter @byclaw/dsh-integration run verify:coding-router
 pnpm --filter @byclaw/dsh-integration run verify:coding-context
+pnpm --filter @byclaw/dsh-integration run verify:agent-skills
 pnpm --filter @byclaw/dsh-group-task-publication run verify
 ```
+
+2026-11-11 本次本地验证：新准备程序 9 项 HTTP/ZIP 测试、路由/上下文 38 项、镜像声明 10 项通过；runner 10 项通过、1 项因 Windows 软链接权限跳过，原 DSH 懒加载源码回归通过。路由测试通过临时加载器直接使用仓库的真实 AgentTeams group-context 源码，不代表完整插件构建。新增 npm/Python 依赖已从国内源实际安装，Python CLI 入口及知识库 CLI 的 `--help` 通过；Windows 的 groksearchcli.exe 启动器受应用控制策略限制，Python 入口验证不代表该启动器通过。
+
+本机缺少完整 DSH workspace，类型检查及完整构建未通过；共享资源检查 6/7 通过，原兼容链接因 Windows 检出为文本而失败，两个原镜像布局检查受 Windows 路径格式阻塞。没有 Docker/可用 Linux 环境，尚未构建新镜像或验证云端 API、Linux 软链接、实际 Skill 业务请求。
 
 补充真实锁定版本检查（只使用隔离临时目录与测试数据）：
 

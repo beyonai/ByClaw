@@ -131,6 +131,88 @@ class WorkspaceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'SKILL_MOUNT_MISSING'):
             self.run_cli()
 
+    def test_tool_preparation_runs_before_cli_and_failure_stops_execution(self):
+        self.manifest['prepareAgentSkills'] = True
+        observed = []
+        def preparation(manifest, root):
+            observed.append((manifest['employeeId'], root))
+            manifest['skills'] = []
+        with patch.object(runner, 'prepare_agent_skills', preparation):
+            self.run_cli(lambda *_: self.assertEqual(len(observed), 1))
+        self.assertEqual(observed, [('1001', self.by)])
+        with patch.object(runner, 'prepare_agent_skills', side_effect=ValueError('EXECUTION_SKILL_AUTH_FAILED')):
+            with patch.object(runner.subprocess, 'Popen') as cli:
+                with self.assertRaisesRegex(ValueError, 'SKILL_AUTH_FAILED'):
+                    runner.run(self.manifest, 'task', self.by)
+                cli.assert_not_called()
+
+    def test_actual_preparer_child_receives_identity_and_existing_environment(self):
+        program = self.root / 'prepare-fixture.mjs'
+        program.write_text('''
+import assert from 'node:assert/strict';
+assert.equal(process.argv[2], '1001');
+assert.equal(process.env.BEYOND_TOKEN, 'synthetic-auth');
+assert.ok(process.argv[3]);
+process.stdout.write(JSON.stringify({skills:[]}));
+''', encoding='utf-8')
+        with patch.dict(os.environ, dict(BYCLAW_AGENT_SKILLS_PREPARER=str(program), BEYOND_TOKEN='synthetic-auth')):
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                runner.prepare_agent_skills(self.manifest, self.by)
+        self.assertEqual(self.manifest['skills'], [])
+        self.assertIn('skills-ready', output.getvalue())
+        self.assertNotIn('synthetic-auth', output.getvalue())
+        program.write_text('process.stderr.write("private credential diagnostic\\nEXECUTION_SKILL_AUTH_FAILED\\n");process.exit(1)', encoding='utf-8')
+        with patch.dict(os.environ, dict(BYCLAW_AGENT_SKILLS_PREPARER=str(program))):
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(ValueError, '^EXECUTION_SKILL_AUTH_FAILED$'):
+                    runner.prepare_agent_skills(self.manifest, self.by)
+
+    def test_missing_preparer_fails_instead_of_using_empty_skills(self):
+        with patch.dict(os.environ, dict(BYCLAW_AGENT_SKILLS_PREPARER='')):
+            with self.assertRaisesRegex(ValueError, 'SKILL_PREPARER_MISSING'):
+                runner.prepare_agent_skills(self.manifest, self.by)
+
+    def test_cancel_preparation_terminates_child_and_releases_cache_lock(self):
+        class Child:
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            stopped = False
+            def communicate(child):
+                raise KeyboardInterrupt()
+            def poll(child):
+                return 130 if child.stopped else None
+            def terminate(child):
+                child.stopped = True
+            def wait(child, timeout=None):
+                return 130
+        child = Child()
+        program = self.root / 'cancel-fixture.mjs'
+        program.touch()
+        with patch.dict(os.environ, dict(BYCLAW_AGENT_SKILLS_PREPARER=str(program))):
+            with patch.object(runner.subprocess, 'Popen', return_value=child), contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(KeyboardInterrupt):
+                    runner.prepare_agent_skills(self.manifest, self.by)
+        self.assertTrue(child.stopped)
+        with runner.identity_lock(self.by / '.byclaw' / '.agent-skills.lock'):
+            pass
+
+    def test_effective_skill_view_removes_revoked_links_between_tasks(self):
+        source = self.root / 'source'
+        source.mkdir()
+        (source / 'SKILL.md').write_text('---\nname: associated-demo\ndescription: fixture\n---\n', encoding='utf-8')
+        self.manifest['skills'] = [dict(name='associated-demo', path=str(source / 'SKILL.md'), enabled=True)]
+        try:
+            self.run_cli()
+        except OSError as error:
+            if os.name == 'nt' and getattr(error, 'winerror', None) == 1314:
+                self.skipTest('Windows account lacks symlink privilege; verify native links in the Linux image')
+            raise
+        link = self.home / 'skills' / 'associated-demo'
+        self.assertTrue(link.is_symlink())
+        self.manifest['skills'] = []
+        self.run_cli()
+        self.assertFalse(link.is_symlink())
+
     def test_oversized_scan_never_invents_deletions(self):
         before = ({'unseen.txt': dict(size=1, text='a')}, True)
         output = io.StringIO()

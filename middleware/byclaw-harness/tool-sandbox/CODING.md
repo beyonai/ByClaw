@@ -14,6 +14,10 @@
 
 ## 1. 本次文件
 
+本次 Skill 升级需同时发布 coding 工具镜像与 Harness 主镜像。coding 镜像包含完整内置 Skill、共享 Python CLI 和 `by-framework==0.2.2.dev10`；执行前由 `prepare-agent-skills.mjs` 按当前 `employeeId` 查询关联资源，复用版本缓存并下载完整 Skill 目录，再生成会话专用的原生 Skill 引用。准备发生在每次任务中，原启动入口不变。认证沿用当前用户执行环境，失败不继续调用 Codex。
+
+本次 Skill 升级先使用独立候选 tag，例如 `D0.6.0_coding-skills-r1`，验证后按正式标签 `D0.6.0_coding` 发布。主镜像也使用新 tag；更新两个模板后释放目标旧实例。内置 Skill 的脚本文件随镜像提供，专门依赖或后端服务连接仍须按该 Skill 的要求验收。
+
 | 文件 | 用途 |
 |---|---|
 | `../Dockerfile.tools.coding`、同名 `.dockerignore` | 构建镜像；只允许必要源码进入构建上下文 |
@@ -113,7 +117,7 @@ codex exec --skip-git-repo-check --json '只回复 CODEX_READY'
 
 镜像已内置配置，可直接调用原生 **`codex`**；工具启动入口不生成配置。手工调用沿用 CLI 默认权限或明确传入参数；Harness 固定路由通过随插件分发的 Python runner 准备专用配置，使用原有免交互权限策略，并接收上下文、共享 Skill 和文件回传。验收时用 `--model` / `-c` 覆盖一次，并核对网关实际收到的地址和模型。
 
-指定员工固定路由已新增到 Harness 源码，部署配置与验收见 [Codex 固定路由](../plugins/byclaw-integration/CODING-ROUTING.zh.md)。需要重新构建并部署 Harness 主镜像；本工具镜像可复用。镜像上架本身不会自动把用户消息交给 Codex。
+指定员工固定路由的部署配置与验收见 [Codex 固定路由](../plugins/byclaw-integration/CODING-ROUTING.zh.md)。本次 Skill 准备改动需重新构建两类镜像；镜像上架本身不会自动把用户消息交给 Codex。
 
 ## 5. 本次验证范围
 

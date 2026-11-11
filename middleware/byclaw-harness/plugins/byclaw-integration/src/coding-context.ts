@@ -110,6 +110,7 @@ export function codingRunManifest(prepared: CodingContext, identity: string, mes
   const home = posix.join(prepared.workspace.sessionRoot, 'executors', prepared.employeeId, 'codex-home')
   const manifest = { version: 1, identity: createHash('sha256').update(identity).digest('hex'), messageId,
     employeeId: prepared.employeeId, workspace: prepared.workspace, home, persona: prepared.persona, skills: prepared.skills,
+    prepareAgentSkills: true,
     publication: prepared.publication === undefined ? undefined : { description: prepared.publication.description } }
   if (Buffer.byteLength(JSON.stringify(manifest)) > 96 * 1024) throw new Error('EXECUTION_CONFIG_TOO_LARGE')
   return manifest

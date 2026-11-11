@@ -130,6 +130,29 @@ class CodingInstallationTest(unittest.TestCase):
 
 
 class CodingPackagingTest(unittest.TestCase):
+    def test_coding_image_packages_builtin_skills_and_standalone_agent_downloader(self):
+        dockerfile = (HARNESS / 'Dockerfile.tools.coding').read_text()
+        ignore = (HARNESS / 'Dockerfile.tools.coding.dockerignore').read_text().splitlines()
+        self.assertIn('COPY --chown=byclaw:byclaw middleware/builtin/skills/ /opt/byclaw/builtin/skills/', dockerfile)
+        self.assertIn('BYCLAW_SKILLS_DIR=/opt/byclaw/builtin/skills', dockerfile)
+        self.assertIn('!middleware/builtin/skills/**', ignore)
+        self.assertIn('COPY --chown=byclaw:byclaw middleware/builtin/python-clis/ /opt/byclaw/builtin/python-clis/', dockerfile)
+        self.assertIn('!middleware/builtin/python-clis/**', ignore)
+        self.assertIn('"by-framework==0.2.2.dev10"', dockerfile)
+        self.assertIn('--index-url https://pypi.tuna.tsinghua.edu.cn/simple', dockerfile)
+        self.assertIn('by-knowledge-manager/scripts/by_knowledge_manager.py" --help', dockerfile)
+        for command in ('kbcli', 'groksearchcli', 'callcli', 'dbcli'):
+            self.assertIn(command + ' --help', dockerfile)
+        prefix = 'middleware/byclaw-harness/plugins/byclaw-integration/'
+        for path in ('scripts/prepare-agent-skills.mjs', 'src/skill-sync.ts', 'src/generation-paths.ts'):
+            self.assertIn(prefix + path, dockerfile)
+            self.assertIn('!' + prefix + path, ignore)
+            self.assertTrue((HARNESS / 'plugins/byclaw-integration' / path).is_file())
+        self.assertIn('--registry=https://registry.npmmirror.com', dockerfile)
+        self.assertIn('--ignore-scripts --no-audit --no-fund --save-exact js-yaml@4.2.0', dockerfile)
+        self.assertNotIn('prepare-agent-skills', (HARNESS / 'scripts/tool-slim-entrypoint.sh').read_text(),
+                         'preparation is per task, not per sandbox boot')
+
     def test_template_and_image_declare_the_same_contract_and_capabilities(self):
         manifest = json.loads((HARNESS / 'tool-sandbox/coding.capabilities.json').read_text())
         spec = json.loads((HARNESS / 'tool-sandbox/coding.platform.spec.example.json').read_text())

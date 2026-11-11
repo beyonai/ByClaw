@@ -208,7 +208,8 @@ export class ByClawExecutionRouter {
       if (!firstActivity) { firstActivity = true; log('first_activity', 'success', executionStarted) }
     }, event => {
       if (event.type === 'byclaw.workspace') {
-        const statuses: Record<string, string> = { waiting: '等待同一员工会话的前轮执行结束', resumed: '已续接 Codex 会话',
+        const statuses: Record<string, string> = { waiting: '等待共享执行锁', resumed: '已续接 Codex 会话',
+          'skills-started': '准备内置 Skill 和当前员工关联 Skill', 'skills-ready': '员工 Skill 已准备，未变化的版本复用缓存',
           created: '已准备 Codex 工作空间', recreated: '原生状态缺失或工作目录变化，重建 Codex 会话', partial: '文件变更扫描不完整，部分文件未纳入展示' }
         const detail = statuses[String(event.status)]
         if (detail) emit({ kind: 'progress', id: `workspace-${sequence + 1}`, title: 'Codex 上下文', phase: 'success', detail })

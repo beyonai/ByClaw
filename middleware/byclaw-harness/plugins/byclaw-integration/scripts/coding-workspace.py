@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import stat
 import subprocess
 import sys
@@ -180,6 +181,41 @@ def setup_config(manifest, home, cwd, default_config):
     atomic_text(home / 'AGENTS.md', manifest['persona'] + '\n')
 
 
+def prepare_agent_skills(manifest, root):
+    """Resolve Skills inside this lease, with the original user launch environment."""
+    program = os.environ.get('BYCLAW_AGENT_SKILLS_PREPARER')
+    if not program or not Path(program).is_file():
+        raise ValueError('EXECUTION_SKILL_PREPARER_MISSING')
+    cache = root / '.byclaw'
+    safe_directory(cache, root)
+    emit('byclaw.workspace', status='skills-started')
+    # Multiple employees may update the same user's version cache concurrently.
+    with identity_lock(cache / '.agent-skills.lock'):
+        child = subprocess.Popen(['node', '--experimental-transform-types', program, manifest['employeeId'], str(root)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8')
+        try:
+            output, errors = child.communicate()
+            if child.returncode != 0:
+                labels = re.findall(r'^EXECUTION_SKILL_[A-Z_]+$', errors, re.MULTILINE)
+                raise ValueError(labels[-1] if labels else 'EXECUTION_SKILL_PREPARE_FAILED')
+            data = json.loads(output)
+            skills = data.get('skills')
+            if not isinstance(skills, list):
+                raise ValueError('EXECUTION_SKILL_PREPARE_FAILED')
+            manifest['skills'] = skills
+        finally:
+            if child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait()
+            child.stdout.close()
+            child.stderr.close()
+    emit('byclaw.workspace', status='skills-ready', count=len(manifest['skills']))
+
+
 EXCLUDED = {'.git', 'node_modules', '.venv', '__pycache__', 'executors', '.file_changes'}
 MAX_FILES = 10000
 MAX_TEXT = 256 * 1024
@@ -304,6 +340,8 @@ def run(manifest, prompt, root):
     default_config = default_home / 'config.toml'
     home, cwd = prepare(manifest, root)
     with identity_lock(home / '.execution.lock'):
+        if manifest.get('prepareAgentSkills'):
+            prepare_agent_skills(manifest, root)
         setup_config(manifest, home, cwd, default_config)
         thread = resume_id(home, manifest['identity'], cwd)
         emit('byclaw.workspace', status='resumed' if thread else 'created')
@@ -358,9 +396,15 @@ def run(manifest, prompt, root):
 
 
 def main():
+    # Let the existing finally blocks stop preparation/CLI children on user cancellation.
+    def stop_execution(*_):
+        raise KeyboardInterrupt()
+    signal.signal(signal.SIGTERM, stop_execution)
     try:
         manifest = json.loads(sys.argv[1])
         return run(manifest, sys.argv[2], Path(sys.argv[3]))
+    except KeyboardInterrupt:
+        return 130
     except Exception as error:
         # Never print the JSON manifest, prompt, configuration, or arbitrary transport exception.
         label = str(error)
