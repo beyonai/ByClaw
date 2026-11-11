@@ -2,8 +2,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { prepareCodingContext, codingPreviousCwd, codingRunManifest, codingFinalOutput, codingLeaseFileChecks } from '../src/coding-context.ts'
 import { ByClawExecutionRouter } from '../src/coding-router.ts'
+
+test('the published plugin includes the workspace runner read during module import', () => {
+  const [archive] = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], {
+    cwd: new URL('../', import.meta.url), encoding: 'utf8',
+  }))
+  assert.ok(archive.files.some(file => file.path === 'scripts/coding-workspace.py'))
+})
 
 const command = (messageId = 'm1', sessionId = 's1') => ({
   header: { userCode: 'user1', sessionId, messageId, metadata: { project_info: { project_id: '8', project_name: 'Test Project' } } },

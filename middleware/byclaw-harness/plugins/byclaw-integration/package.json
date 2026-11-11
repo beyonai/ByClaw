@@ -32,6 +32,7 @@
   "files": [
     "lib",
     "scripts/repair-legacy-session.mjs",
+    "scripts/coding-workspace.py",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
