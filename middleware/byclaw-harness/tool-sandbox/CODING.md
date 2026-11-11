@@ -1,6 +1,16 @@
-# Codex 工具沙箱（暂不安装 Claude）
+# Coding 工具沙箱：Codex、应用预览与项目模板
 
 在 `coding-sandbox-hs` 上制作独立工具沙箱 B。父镜像沿用 browser 的 SSH、文件和浏览器能力。本节只说明工具镜像；Harness 固定路由见 [实施说明](../plugins/byclaw-integration/CODING-ROUTING.zh.md)。
+
+通用层提供 Codex、Nginx 和 `sandbox-app` 预览，purpose 继续为 `coding`。
+`templates/` 保存内置应用的源码声明、初始化逻辑和环境要求；Easel 是其中一个模板，
+没有独立的 Easel 沙箱契约或日期版镜像依赖。默认构建包含其过渡期媒体环境，
+`--target coding-core` 可构建不带应用模板的通用层。增加模板不要求修改执行路由。
+
+沙箱启动仅准备 Nginx，再进入原 SSH/browser 启动流程；不会自动复制任何应用到
+用户工作区，也不在启动时安装包。使用 `sandbox-template list` 查看内置模板，
+`sandbox-template init easel` 显式创建项目。详见 [应用预览](APP_PREVIEW.md) 和
+[Easel 模板](../templates/easel/README.md)。
 
 ## 1. 本次文件
 
@@ -25,12 +35,13 @@ git diff --check
 本机有 Docker 时可构建（父镜像由构建机从 81 Harbor 拉取）：
 
 ```bash
+IMAGE='<candidate-image:tag>'
 docker build --platform linux/amd64 \
   -f middleware/byclaw-harness/Dockerfile.tools.coding \
-  -t byclaw-coding:D0.6.0_coding-r2 .
+  -t "$IMAGE" .
 ```
 
-按《工具沙箱全流程教程》步骤 02—10：提交并推送分支 → 平台“拉取 ByClaw” → “构建 Harness 镜像”选择本 Dockerfile → Tag `D0.6.0_coding-r2` → 推送北京 ACR。若下拉框没有本文件，需给构建平台补选项。记录提交号、镜像 digest、CLI 版本。
+按《工具沙箱全流程教程》步骤 02—10：提交并推送分支 → 平台“拉取 ByClaw” → “构建 Harness 镜像”选择本 Dockerfile → 使用独立候选 Tag 验证，再按正式标签 `D0.6.0_coding` 发布 → 推送北京 ACR。若下拉框没有本文件，需给构建平台补选项。记录提交号、镜像 digest、CLI 版本。
 
 两个 Codex 包由国内镜像下载并校验锁定的 SHA-512，安装目录 `/opt/byclaw/codex`。失败即中止，不回退其他来源。固定版本不等于已通过业务兼容验收；首次发布需完成后面的真实请求测试。
 
@@ -50,11 +61,12 @@ docker build --platform linux/amd64 \
 
 保留有效 browser Spec 的 SSH 身份、网络、持久卷和资源配置。8080 是私有 SSH-over-WebSocket，8081 是平台认证浏览器。保存后重建云模板，用新实例验证；旧实例不会自动更新。共享主环境场景继续按教程步骤 22—24 检查宿主映射和目标用户准入。
 
-Spec 使用原工具入口 `/usr/local/bin/byclaw-tool-slim-entrypoint tools`。模型和地址在构建时写入配置文件，启动时不再生成配置：
+Spec 使用 `/usr/local/bin/byclaw-coding-entrypoint tools`，准备 Nginx 后委托原工具入口
+`/usr/local/bin/byclaw-tool-slim-entrypoint tools`。模型和地址在构建时写入配置文件，启动时不再生成配置：
 
 ```text
 构建镜像：复制 codex.config.toml → /home/byclaw/.codex/config.toml
-启动沙箱：平台注入 CODEX_AUTH → 原工具入口启动 SSH、浏览器
+启动沙箱：平台注入 CODEX_AUTH → 准备 Nginx → 原工具入口启动 SSH、浏览器
 执行任务：sandbox_exec 调用 codex → 读取配置文件和密钥环境变量
 ```
 
@@ -75,9 +87,15 @@ codex exec --skip-git-repo-check --model '其他模型ID' \
 
 这是独立工具镜像：不要直接替换 Harness 主镜像。`BYCLAW_AGENT_EXECUTION_MAP` 配置在处理请求的 Harness 主环境，通过已有沙箱目录选择 coding；不放到本工具镜像实现分流。
 
-### 从 r1 更新到 r2
+8082 为应用预览网关。IP/域名入口通过部署参数 BYCLAW_APP_PUBLIC_BASE 配置，
+不写死服务器地址。ByClaw 和 byclaw-middleware 分别维护部署模板时，两边都需包含
+对应路由。现有 5 分钟空闲回收策略不变，应用链接不表示永久发布。
 
-旧镜像内置配置仍引用原认证变量名，仅修改个人参数不会更新镜像。发布本次代码后，使用 `D0.6.0_coding-r2` 重新构建并推送镜像；个人参数新增并启用 `CODEX_AUTH`，值填写原网关密钥。后台用本示例更新 image 和 env 占位符，保存后重建云模板，使用新实例验收。不要把旧实例仍可运行当作新配置已生效。
+当前正式标签与 runtimeVersion 统一为 `D0.6.0_coding`，与仓库
+`D0.6.0_<purpose>` 约定一致；这不是新产物已发布的证明。原 r1/r2 产物不含
+新预览入口，不可仅将新版 Spec 的启动命令套用在旧镜像上。必须完成候选构建、
+验证和推送，再更新明确选定的服务与云模板，使用新实例验收。候选标签、源码
+提交和镜像 digest 记录在发布记录中，不依赖调试日期标签；已有实例不自动更新。
 
 ## 4. 同一租约内验收
 
@@ -100,6 +118,13 @@ codex exec --skip-git-repo-check --json '只回复 CODEX_READY'
 ## 5. 本次验证范围
 
 - 测试覆盖内置配置的 TOML 解析与认证引用、镜像配置打包、归档路径、版本与校验拒绝、离线安装及平台声明一致性。
-- 两个实际 npm 制品已从国内源下载，SHA-512、包版本和解包检查通过；尚未在 Linux 中运行。
-- 本机无 Docker，镜像构建、SSH 会话、浏览器继承和真实网关调用均待构建平台/沙箱验收。
-- 既有 `docker-browser-layout-verify.sh` 在本机 Windows 的路径匹配处失败；需在 Linux 构建机补跑两个原镜像布局检查。运行时下载源检查依赖 Linux/Bash，也需在该环境补跑。
+- 两个实际 npm 制品已从国内源下载并校验，在 Linux 运行锁定的 Codex 0.167.0，
+  通过原生 exec/resume、专用配置、结构化结果和 Skill 发现/撤销测试；使用本地
+  Responses 测试服务，不代表真实网关或模型验收。
+- 原分支的路由/上下文源码测试及 Python 工作区测试通过。本地缺少完整插件依赖，
+  前者通过临时模块映射加载仓库真实 group-context.ts，没有替换业务函数；不等于
+  完整插件安装、类型检查或构建通过。
+- Coding 配置/制品、网关启动、模板初始化、环境隔离与预览路由测试通过；两项
+  Docker 布局检查通过。本机无 Docker，新镜像构建、SSH/browser/Nginx 联合启动、
+  模板渲染和真实平台会话仍需在构建机与临时实例验收。历史 Easel 镜像的线上通过
+  记录不能代替本次 coding 结构调整后的验收。
