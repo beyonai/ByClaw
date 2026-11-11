@@ -1,5 +1,5 @@
 /** Codex exec JSONL. Public item snapshots are separate from the terminal answer. */
-import { codingPublicText, summarizeCodingDiagnostic, type CodingDiagnosticSummary } from './coding-diagnostics.ts'
+import { codingPublicText, redactSshPrivateKeys, summarizeCodingDiagnostic, type CodingDiagnosticSummary } from './coding-diagnostics.ts'
 
 export interface CodingEvent {
   kind: 'progress' | 'tool'
@@ -55,7 +55,7 @@ export class CodexEventAdapter {
     if (this.activeTools.size) throw new Error('CODEX_TOOLS_INCOMPLETE')
     const answer = this.explicitAnswer ?? this.answer
     if (!answer.trim()) throw new Error('CODEX_EMPTY_ANSWER')
-    return answer
+    return redactSshPrivateKeys(answer)
   }
 
   /** Settle outstanding tool cards when the process fails or is cancelled. */

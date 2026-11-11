@@ -1,6 +1,11 @@
+/** Best-effort PEM redaction; authorization still grants Codex access to the task-local key. */
+export function redactSshPrivateKeys(value: string): string {
+  return value.replace(/-----BEGIN (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:OPENSSH |RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----|$)/gu, '[REDACTED SSH PRIVATE KEY]')
+}
+
 /** Bounded public text and allowlisted diagnostics; never persist raw CLI stderr. */
 export function codingPublicText(value: string, maxLength = 4096): string {
-  return value
+  return redactSshPrivateKeys(value)
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/gu, '')
     .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/gu, '')
     .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/giu, '$1[REDACTED]@')
