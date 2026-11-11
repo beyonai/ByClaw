@@ -84,6 +84,9 @@ public class SandboxService {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+    @Autowired
+    private org.springframework.jdbc.datasource.DataSourceTransactionManager sandboxTransactionManager;
+
     private static final AtomicInteger RECONCILE_POOL_SEQUENCE = new AtomicInteger(1);
 
     /** 沙箱状态：运行中 */
@@ -302,6 +305,8 @@ public class SandboxService {
         }
         String preferred = getPreferredServiceKey(userCode);
         if (preferred != null) {
+            sandboxRecordMapper.cancelPendingReconcileRestarts(userCode, preferred, null, null,
+                manualReleaseReason(userCode), new Date());
             try {
                 SsSandboxRecord active = sandboxRecordMapper.selectActiveByUserAndResource(userCode, preferred, null);
                 if (active != null) {
@@ -448,6 +453,12 @@ public class SandboxService {
      * @return 沙箱启动响应数据
      */
     private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing) {
+        return launchSandboxInternal(userCode, resourceId, routing, null);
+    }
+
+    private SandboxLaunchData launchSandboxInternal(String userCode, Long resourceId, SandboxLaunchRouting routing,
+        Long pendingRestartId) {
+        checkReconcileCancellation();
         String lockKey = buildLaunchLockKey(userCode, routing);
         String lockValue = UUID.randomUUID().toString();
         boolean locked = false;
@@ -461,6 +472,14 @@ public class SandboxService {
                 throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.busy"));
             }
 
+            if (pendingRestartId != null) {
+                SsSandboxRecord pending = sandboxRecordMapper.selectPendingReconcileRestart(pendingRestartId);
+                if (pending == null) {
+                    return null;
+                }
+                sandboxMetadataCache.evict(userCode, routing.getSandboxType());
+                checkReconcileCancellation();
+            }
             // 双重检查：在锁内再次查询，防止并发请求重复创建沙箱
             SsSandboxRecord existingRecord = sandboxRecordMapper.selectActiveByUserAndResource(userCode,
                 routing.getSandboxType(), routing.getEffectiveResourceId());
@@ -471,6 +490,11 @@ public class SandboxService {
                 return buildLaunchData(existingRecord);
             }
             if (existingRecord != null) {
+                if (com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.isActive()
+                    && STATUS_STARTING.equals(existingRecord.getStatus())
+                    && StringUtils.isBlank(existingRecord.getSandboxId()) && isStaleStartingRecord(existingRecord)) {
+                    return doLaunchSandbox(userCode, resourceId, routing, false, existingRecord);
+                }
                 if (releaseStaleStartingRecordIfNecessary(existingRecord)) {
                     LOGGER.warn("已清理陈旧启动中沙箱记录，重新拉起默认沙箱：{}", sandboxRef(existingRecord));
                     return doLaunchSandbox(userCode, resourceId, routing);
@@ -479,7 +503,7 @@ public class SandboxService {
                 throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.busy"));
             }
 
-            return doLaunchSandbox(userCode, resourceId, routing);
+            return doLaunchSandbox(userCode, resourceId, routing, false, null, pendingRestartId);
         }
         finally {
             if (locked) {
@@ -648,6 +672,17 @@ public class SandboxService {
 
     private SandboxLaunchData doLaunchSandbox(String userCode, Long resourceId, SandboxLaunchRouting routing,
         boolean skipReusableSandbox) {
+        return doLaunchSandbox(userCode, resourceId, routing, skipReusableSandbox, null);
+    }
+
+    private SandboxLaunchData doLaunchSandbox(String userCode, Long resourceId, SandboxLaunchRouting routing,
+        boolean skipReusableSandbox, SsSandboxRecord pendingRecord) {
+        return doLaunchSandbox(userCode, resourceId, routing, skipReusableSandbox, pendingRecord, null);
+    }
+
+    private SandboxLaunchData doLaunchSandbox(String userCode, Long resourceId, SandboxLaunchRouting routing,
+        boolean skipReusableSandbox, SsSandboxRecord pendingRecord, Long pendingRestartId) {
+        checkReconcileCancellation();
         // 校验运行中沙箱数量是否超过系统参数上限
         checkRunningSandboxLimit();
 
@@ -679,51 +714,89 @@ public class SandboxService {
         request.setEnvs(envs);
         request.setUserInfo(launchContext.getUserInfo());
         request.setSkipReusableSandbox(skipReusableSandbox);
-        String gatewayToken = launchContext.getGatewayToken();
+        String gatewayToken = pendingRecord != null ? pendingRecord.getGatewayToken() : launchContext.getGatewayToken();
+        if (pendingRecord != null && StringUtils.isNotBlank(gatewayToken)) {
+            envs.put("gateway_token", gatewayToken);
+            envs.put("OPENCLAW_GATEWAY_TOKEN", gatewayToken);
+        }
 
         Date now = new Date();
-        SsSandboxRecord record = new SsSandboxRecord();
-        record.setResourceId(routing.getEffectiveResourceId());
-        record.setUserCode(userCode);
-        record.setSandboxType(launchContext.getSandboxType());
-        record.setServiceType(resolveRecordServiceType(effectiveSpec, launchContext.getSandboxType()));
-        record.setProfileKey(resolveRecordProfileKey(effectiveSpec, routing.getProfileKey()));
-        record.setResourceRequests(toJsonOrNull(effectiveSpec != null ? effectiveSpec.getResourceRequests() : null));
-        record.setResourceLimits(toJsonOrNull(effectiveSpec != null ? effectiveSpec.getResourceLimits() : null));
-        record.setStatus(STATUS_STARTING);
-        record.setGatewayToken(gatewayToken);
-        record.setAutoRelease(autoRelease);
-        record.setLeasePolicy(leasePolicy.name());
-        record.setLastAccessTime(now);
-        record.setCreateTime(now);
-        record.setUpdateTime(now);
-        record.setVersion(0);
-        record.setLockVersion(0);
-        try {
-            sandboxRecordMapper.insert(record);
-            LOGGER.info("已插入沙箱启动记录：{}", sandboxRef(record));
-        }
-        catch (DuplicateKeyException e) {
-            SsSandboxRecord existingRecord = sandboxRecordMapper.selectActiveByUserAndResource(userCode,
-                launchContext.getSandboxType(), routing.getEffectiveResourceId());
-            if (existingRecord != null && STATUS_RUNNING.equals(existingRecord.getStatus())
-                && StringUtils.isNotBlank(existingRecord.getEndpoint())) {
-                LOGGER.info("插入沙箱记录发生唯一键冲突，复用已有沙箱：{}", sandboxRef(existingRecord));
-                sandboxMetadataCache.put(toSandboxInfo(existingRecord));
-                return buildLaunchData(existingRecord);
+        SsSandboxRecord record = pendingRecord != null ? pendingRecord : new SsSandboxRecord();
+        if (pendingRecord == null) {
+            record.setResourceId(routing.getEffectiveResourceId());
+            record.setUserCode(userCode);
+            record.setSandboxType(launchContext.getSandboxType());
+            record.setServiceType(resolveRecordServiceType(effectiveSpec, launchContext.getSandboxType()));
+            record.setProfileKey(resolveRecordProfileKey(effectiveSpec, routing.getProfileKey()));
+            record.setResourceRequests(toJsonOrNull(effectiveSpec != null ? effectiveSpec.getResourceRequests() : null));
+            record.setResourceLimits(toJsonOrNull(effectiveSpec != null ? effectiveSpec.getResourceLimits() : null));
+            record.setStatus(STATUS_STARTING);
+            record.setGatewayToken(gatewayToken);
+            record.setAutoRelease(autoRelease);
+            record.setLeasePolicy(leasePolicy.name());
+            record.setLastAccessTime(now);
+            record.setCreateTime(now);
+            record.setUpdateTime(now);
+            record.setVersion(0);
+            record.setLockVersion(0);
+            checkReconcileCancellation();
+            try {
+                if (!insertLaunchRecord(record, pendingRestartId)) {
+                    return null;
+                }
+                LOGGER.info("已插入沙箱启动记录：{}", sandboxRef(record));
             }
-            LOGGER.warn("插入沙箱记录发生唯一键冲突，用户编码：{}，沙箱类型：{}，资源ID：{}，已有记录：{}",
-                userCode, launchContext.getSandboxType(), routing.getEffectiveResourceId(),
-                existingRecord == null ? null : sandboxRef(existingRecord));
-            throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.busy"));
-        }
+            catch (DuplicateKeyException e) {
+                SsSandboxRecord existingRecord = sandboxRecordMapper.selectActiveByUserAndResource(userCode,
+                    launchContext.getSandboxType(), routing.getEffectiveResourceId());
+                if (existingRecord != null && STATUS_RUNNING.equals(existingRecord.getStatus())
+                    && StringUtils.isNotBlank(existingRecord.getEndpoint())) {
+                    LOGGER.info("插入沙箱记录发生唯一键冲突，复用已有沙箱：{}", sandboxRef(existingRecord));
+                    sandboxMetadataCache.put(toSandboxInfo(existingRecord));
+                    return buildLaunchData(existingRecord);
+                }
+                LOGGER.warn("插入沙箱记录发生唯一键冲突，用户编码：{}，沙箱类型：{}，资源ID：{}，已有记录：{}",
+                    userCode, launchContext.getSandboxType(), routing.getEffectiveResourceId(),
+                    existingRecord == null ? null : sandboxRef(existingRecord));
+                throw new BdpRuntimeException(I18nUtil.get("sandbox.launch.busy"));
+            }
 
+        }
         request.setMetadata(buildLaunchMetadata(record));
 
         LOGGER.info("调用生命周期服务启动沙箱，记录：{}，envKeys：{}", sandboxRef(record),
             launchContext.getEnvs() == null ? List.of() : launchContext.getEnvs().keySet());
+        checkReconcileCancellation();
         SandboxResponse<SandboxLaunchData> response = sandboxLifecycleFacade.launchSandbox(request);
+        if (com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.isActive()) {
+            if (response == null || (response.isSuccess() && response.getData() == null)) {
+                throw new IllegalStateException("Sandbox launch outcome unknown; retain STARTING for recovery");
+            }
+            return com.iwhalecloud.byai.common.concurrent.SandboxReconcileCompletion.complete(
+                () -> finishLaunch(userCode, routing, record, gatewayToken, response, false));
+        }
+        return finishLaunch(userCode, routing, record, gatewayToken, response, true);
+    }
 
+    private boolean insertLaunchRecord(SsSandboxRecord record, Long pendingRestartId) {
+        if (pendingRestartId == null) {
+            return sandboxRecordMapper.insert(record) > 0;
+        }
+        // Serialize manual cancellation with reservation of the replacement. Never hold this transaction over HTTP.
+        var transaction = new org.springframework.transaction.support.TransactionTemplate(sandboxTransactionManager);
+        transaction.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        transaction.setTimeout(5);
+        return Boolean.TRUE.equals(transaction.execute(status -> {
+            if (sandboxRecordMapper.selectPendingReconcileRestart(pendingRestartId) == null) {
+                return false;
+            }
+            checkReconcileCancellation();
+            return sandboxRecordMapper.insert(record) > 0;
+        }));
+    }
+
+    private SandboxLaunchData finishLaunch(String userCode, SandboxLaunchRouting routing, SsSandboxRecord record,
+        String gatewayToken, SandboxResponse<SandboxLaunchData> response, boolean allowRemoteCleanup) {
         if (response == null || !response.isSuccess() || response.getData() == null) {
             String errorMsg = response != null ? StringUtils.defaultIfBlank(response.getMessage(), "启动失败") : "响应为空";
             LOGGER.error("启动沙箱失败，记录：{}，原因：{}", sandboxRef(record), errorMsg);
@@ -737,7 +810,7 @@ public class SandboxService {
 
         SandboxLaunchData launchData = response.getData();
         String boundGatewayToken = StringUtils.defaultIfBlank(launchData.getGatewayToken(),
-            resolveLaunchGatewayToken(userCode, launchContext.getSandboxType(), launchData.getSandboxId(),
+            resolveLaunchGatewayToken(userCode, record.getSandboxType(), launchData.getSandboxId(),
                 gatewayToken));
         Map<String, String> instanceEndpoints = customizeLaunchInstanceEndpoints(launchData, boundGatewayToken);
         String endpoint = SandboxEndpointRecordSupport.resolvePrimaryEndpoint(instanceEndpoints);
@@ -764,8 +837,10 @@ public class SandboxService {
         record.setNextRenewAt(nextRenewAt);
         record.setLastAccessTime(lastAccessTime);
         if (updated == 0) {
-            LOGGER.warn("沙箱启动完成后记录状态已变化，准备释放刚创建的远端沙箱：{}", sandboxRef(record));
-            cleanupLaunchedSandboxAfterRecordReleased(record);
+            LOGGER.warn("沙箱启动完成后记录状态已变化，跳过绑定：{}，允许远端补偿：{}", sandboxRef(record), allowRemoteCleanup);
+            if (allowRemoteCleanup) {
+                cleanupLaunchedSandboxAfterRecordReleased(record);
+            }
             return null;
         }
         incrementVersions(record, true);
@@ -1205,6 +1280,8 @@ public class SandboxService {
             sandboxType = routing.getSandboxType();
             effectiveResourceIds.add(routing.getEffectiveResourceId());
         }
+        sandboxRecordMapper.cancelPendingReconcileRestarts(userCode, sandboxType, effectiveResourceIds,
+            null, releaseReason, new Date());
         List<SsSandboxRecord> records = sandboxRecordMapper.selectRunningByUserAndResources(userCode,
             sandboxType, effectiveResourceIds);
         if (records == null || records.isEmpty()) {
@@ -1232,6 +1309,10 @@ public class SandboxService {
             throw new BdpRuntimeException("租户沙箱只能由租户开通流程管理");
         }
         String releaseReason = manualReleaseReason(record.getUserCode());
+        if (sandboxRecordMapper.cancelPendingReconcileRestarts(record.getUserCode(), record.getSandboxType(), null,
+            record.getId(), releaseReason, new Date()) > 0) {
+            sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
+        }
         if (STATUS_STARTING.equals(record.getStatus())) {
             markStartingSandboxReleased(record, releaseReason);
             return;
@@ -1628,6 +1709,9 @@ public class SandboxService {
         ExecutorService executorService = Executors.newFixedThreadPool(concurrency, newReconcileThreadFactory());
         AtomicInteger remainingRecords = new AtomicInteger(Math.max(1, reconcileMaxRecordsPerRun));
         long deadline = System.currentTimeMillis() + Math.max(1L, reconcileMaxDurationMs);
+        List<SandboxLifecycleJobReport> groupReports = new ArrayList<>();
+        List<java.util.concurrent.atomic.AtomicBoolean> finishedGroups = new ArrayList<>();
+        List<java.util.concurrent.atomic.AtomicBoolean> startedGroups = new ArrayList<>();
         try {
             List<SandboxReconcileGroup> groups = sandboxRecordMapper.selectReconcileGroups(
                 Math.max(1, reconcileGroupLimit));
@@ -1644,7 +1728,21 @@ public class SandboxService {
                     || StringUtils.isBlank(group.getSandboxType())) {
                     continue;
                 }
-                tasks.add(() -> reconcileGroup(group, remainingRecords, deadline));
+                SandboxLifecycleJobReport progress = new SandboxLifecycleJobReport("reconcile-group");
+                var finished = new java.util.concurrent.atomic.AtomicBoolean();
+                var started = new java.util.concurrent.atomic.AtomicBoolean();
+                startedGroups.add(started);
+                groupReports.add(progress);
+                finishedGroups.add(finished);
+                tasks.add(() -> {
+                    started.set(true);
+                    try {
+                        return runReconcileGroup(group, remainingRecords, deadline, progress);
+                    }
+                    finally {
+                        finished.set(true);
+                    }
+                });
             }
 
             for (Future<SandboxLifecycleJobReport> future : executorService.invokeAll(tasks,
@@ -1653,7 +1751,7 @@ public class SandboxService {
                     continue;
                 }
                 try {
-                    report.merge(future.get());
+                    future.get();
                 }
                 catch (ExecutionException e) {
                     LOGGER.error("沙箱一致性检测分组任务异常", e.getCause());
@@ -1666,10 +1764,28 @@ public class SandboxService {
         }
         finally {
             executorService.shutdownNow();
+            for (int index = 0; index < groupReports.size(); index++) {
+                boolean finished = finishedGroups.get(index).get();
+                SandboxLifecycleJobReport snapshot = groupReports.get(index).snapshot();
+                if (!finished) {
+                    snapshot.markCancelled();
+                    if (startedGroups.get(index).get()) {
+                        snapshot.markInFlight();
+                    }
+                }
+                report.merge(snapshot);
+            }
             if (reconcileJobLockEnabled && locked) {
-                RedisUtil.releaseLock(SANDBOX_RECONCILE_JOB_LOCK_KEY, lockValue);
+                try {
+                    RedisUtil.releaseLock(SANDBOX_RECONCILE_JOB_LOCK_KEY, lockValue);
+                }
+                catch (RuntimeException e) {
+                    // An interrupted Redis release must not discard the already captured report. The lock has a TTL.
+                    LOGGER.warn("沙箱一致性检测锁释放失败，保留本轮统计并等待锁过期", e);
+                }
             }
         }
+        LOGGER.debug("沙箱一致性检测取消分组：{}，未确认结束分组：{}", report.getCancelledGroups(), report.getInFlightGroups());
         LOGGER.debug("沙箱一致性检测完成，候选 {} 个，扫描 {} 个，重拉 {} 个，保持 {} 个，失败 {} 个，重拉记录：{}，保持记录：{}，失败记录：{}",
             total, report.getScannedCount(), report.getAffectedCount(), report.getSkippedCount(), report.getFailedCount(),
             report.getAffectedSandboxes(), report.getSkippedSandboxes(), report.getFailedSandboxes());
@@ -1687,20 +1803,58 @@ public class SandboxService {
         };
     }
 
-    private SandboxLifecycleJobReport reconcileGroup(SandboxReconcileGroup group, AtomicInteger remainingRecords,
+    private SandboxLifecycleJobReport runReconcileGroup(SandboxReconcileGroup group, AtomicInteger remainingRecords,
         long deadline) {
-        SandboxLifecycleJobReport groupReport = new SandboxLifecycleJobReport("reconcile-group");
+        return runReconcileGroup(group, remainingRecords, deadline, new SandboxLifecycleJobReport("reconcile-group"));
+    }
+
+    private SandboxLifecycleJobReport runReconcileGroup(SandboxReconcileGroup group, AtomicInteger remainingRecords,
+        long deadline, SandboxLifecycleJobReport progress) {
+        com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.setDeadline(deadline);
+        try {
+            checkReconcileCancellation();
+            return reconcileGroup(group, remainingRecords, deadline, progress);
+        }
+        catch (RuntimeException e) {
+            if (!(e instanceof java.util.concurrent.CancellationException) && !isReconcileCancelled(e)) {
+                throw e;
+            }
+            LOGGER.debug("沙箱一致性检测分组已取消，userCode：{}，sandboxType：{}", group.getUserCode(), group.getSandboxType());
+            progress.markCancelled();
+            return progress;
+        }
+        finally {
+            com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.clear();
+        }
+    }
+
+    private static boolean isReconcileCancelled(Throwable failure) {
+        return com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.isCancelled(failure);
+    }
+
+    private static void checkReconcileCancellation() {
+        checkReconcileCancellation(null);
+    }
+
+    private static void checkReconcileCancellation(Throwable failure) {
+        com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.check(failure);
+    }
+
+    private SandboxLifecycleJobReport reconcileGroup(SandboxReconcileGroup group, AtomicInteger remainingRecords,
+        long deadline, SandboxLifecycleJobReport groupReport) {
         int batchLimit = reserveReconcileRecordLimit(remainingRecords);
         if (batchLimit <= 0 || System.currentTimeMillis() >= deadline) {
             return groupReport;
         }
 
+        checkReconcileCancellation();
         List<SsSandboxRecord> records = sandboxRecordMapper.selectReconcileSandboxesByGroup(group.getUserCode(),
             group.getSandboxType(), null, null, batchLimit);
         if (records == null || records.isEmpty()) {
             return groupReport;
         }
         groupReport.addScannedCount(records.size());
+        checkReconcileCancellation();
         Map<String, SandboxRuntimeInstance> remoteBySandboxId = listRemoteSandboxesByGroup(group);
         if (remoteBySandboxId == null) {
             records.forEach(record -> groupReport.addFailedSandbox(sandboxRef(record)));
@@ -1710,19 +1864,38 @@ public class SandboxService {
             group.getUserCode(), group.getSandboxType(), records.size(), remoteBySandboxId.size());
 
         for (SsSandboxRecord record : records) {
+            checkReconcileCancellation();
             if (System.currentTimeMillis() >= deadline) {
                 groupReport.addSkippedSandbox(sandboxRef(record));
                 continue;
             }
             try {
+                if (STATUS_RELEASED.equals(record.getStatus())) {
+                    resumePendingReconcileRestart(record, groupReport);
+                    continue;
+                }
+                if (STATUS_STARTING.equals(record.getStatus()) && StringUtils.isBlank(record.getSandboxId())) {
+                    if (isStaleStartingRecord(record)) {
+                        resumeIncompleteLaunch(record, groupReport);
+                    }
+                    else {
+                        groupReport.addSkippedSandbox(sandboxRef(record));
+                    }
+                    continue;
+                }
                 SandboxRuntimeInstance remoteInstance = remoteBySandboxId.get(record.getSandboxId());
                 reconcileRecordFromRemoteMap(record, remoteInstance, groupReport);
             }
+            catch (java.util.concurrent.CancellationException e) {
+                throw e;
+            }
             catch (Exception e) {
+                checkReconcileCancellation(e);
                 groupReport.addFailedSandbox(sandboxRef(record));
                 LOGGER.error("沙箱一致性检测异常：{}", sandboxRef(record), e);
             }
         }
+        checkReconcileCancellation();
         logRemoteOrphans(group, records, remoteBySandboxId);
         return groupReport;
     }
@@ -1746,8 +1919,10 @@ public class SandboxService {
         int pageNo = 1;
         int pageSize = Math.max(1, reconcileRemotePageSize);
         while (true) {
+            checkReconcileCancellation();
             SandboxResponse<SandboxRuntimePage<SandboxRuntimeInstance>> response =
                 sandboxLifecycleFacade.listSandboxesByMetadata(metadata, pageNo, pageSize);
+            checkReconcileCancellation();
             if (response == null || !response.isSuccess() || response.getData() == null) {
                 LOGGER.warn("沙箱一致性检测远端分页查询失败，metadata：{}，pageNo：{}，原因：{}",
                     metadata, pageNo, response != null ? response.getMessage() : "响应为空");
@@ -1794,6 +1969,7 @@ public class SandboxService {
         SandboxLifecycleJobReport report) {
         LOGGER.warn("沙箱一致性检测发现远端沙箱不存在或不可复用，准备重新拉起：{}，remoteState={}",
             sandboxRef(record), remoteInstance != null ? remoteInstance.getState() : null);
+        checkReconcileCancellation();
         int marked = sandboxRecordMapper.markReleased(record.getId(), RELEASE_REASON_REMOTE_MISSING,
             new Date(), record.getLockVersion());
         if (marked == 0) {
@@ -1802,18 +1978,54 @@ public class SandboxService {
             return;
         }
         incrementVersions(record, true);
-        sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
-        SandboxLaunchData launchData = sandboxUserContextRunner.callAsUser(record.getUserCode(),
-            () -> launchSandbox(record.getUserCode(), record.getResourceId()));
-        if (launchData != null && StringUtils.isNotBlank(launchData.getEndpoint())) {
-            report.addAffectedSandbox(sandboxRef(record) + " -> newSandboxId=" + launchData.getSandboxId());
-            LOGGER.info("沙箱一致性检测重拉成功，旧记录：{}，新sandboxId：{}，新endpoint：{}",
-                sandboxRef(record), launchData.getSandboxId(), launchData.getEndpoint());
+        if (com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.isActive()) {
+            com.iwhalecloud.byai.common.concurrent.SandboxReconcileCompletion.complete(() -> {
+                sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
+                return null;
+            });
+        }
+        else {
+            sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
+        }
+        checkReconcileCancellation();
+        resumePendingReconcileRestart(record, report);
+    }
+
+    private void resumeIncompleteLaunch(SsSandboxRecord record, SandboxLifecycleJobReport report) {
+        checkReconcileCancellation();
+        SandboxLaunchData data = sandboxUserContextRunner.callAsUser(record.getUserCode(), () -> {
+            String serviceKey = StringUtils.isNotBlank(record.getProfileKey())
+                ? record.getSandboxType() + "-" + record.getProfileKey() : record.getSandboxType();
+            return launchSandboxInternal(record.getUserCode(), record.getResourceId(),
+                new SandboxLaunchRouting(serviceKey, record.getResourceId()));
+        });
+        if (data != null) {
+            report.addAffectedSandbox(sandboxRef(record));
         }
         else {
             report.addFailedSandbox(sandboxRef(record));
-            LOGGER.warn("沙箱一致性检测重拉失败，旧记录：{}", sandboxRef(record));
         }
+    }
+
+    private void resumePendingReconcileRestart(SsSandboxRecord record, SandboxLifecycleJobReport report) {
+        checkReconcileCancellation();
+        // The launch path rechecks this durable intent under its per-resource lock.
+        SandboxLaunchData data = sandboxUserContextRunner.callAsUser(record.getUserCode(),
+            () -> launchPendingReconcileSandbox(record));
+        if (data != null) {
+            report.addAffectedSandbox(sandboxRef(record));
+        }
+        else {
+            report.addSkippedSandbox(sandboxRef(record));
+        }
+    }
+
+    SandboxLaunchData launchPendingReconcileSandbox(SsSandboxRecord record) {
+        checkReconcileCancellation();
+        String serviceKey = StringUtils.isNotBlank(record.getProfileKey())
+            ? record.getSandboxType() + "-" + record.getProfileKey() : record.getSandboxType();
+        SandboxLaunchRouting routing = new SandboxLaunchRouting(serviceKey, record.getResourceId());
+        return launchSandboxInternal(record.getUserCode(), record.getResourceId(), routing, record.getId());
     }
 
     private void logRemoteOrphans(SandboxReconcileGroup group, List<SsSandboxRecord> records,
@@ -1842,7 +2054,11 @@ public class SandboxService {
             // 1. Terminal states (failed/error/terminated/etc.) - cleanup immediately
             // 2. Pending state for more than 30 minutes - likely creation timeout
             for (SandboxRuntimeInstance orphan : remoteBySandboxId.values()) {
-                if (orphan == null || dbBySandboxId.containsKey(orphan.getSandboxId())) {
+                checkReconcileCancellation();
+                if (orphan == null || dbBySandboxId.containsKey(orphan.getSandboxId())
+                    || records.stream().anyMatch(record -> STATUS_STARTING.equals(record.getStatus())
+                        && StringUtils.isBlank(record.getSandboxId()) && orphan.getMetadata() != null
+                        && Objects.equals(String.valueOf(record.getId()), orphan.getMetadata().get("recordId")))) {
                     continue;
                 }
                 if (orphan.getCreatedAt() == null) {
@@ -2190,6 +2406,7 @@ public class SandboxService {
             removeRemoteSandboxOrThrow(record, reason);
         }
         catch (Exception e) {
+            checkReconcileCancellation(e);
             LOGGER.error("清理远端沙箱异常：{}，reason={}", sandboxRef(record), reason, e);
         }
         if (clearLocalBinding) {
@@ -2199,6 +2416,7 @@ public class SandboxService {
     }
 
     private void removeRemoteSandboxOrThrow(SsSandboxRecord record, String reason) {
+        checkReconcileCancellation();
         if (record == null || StringUtils.isBlank(record.getSandboxId())) {
             return;
         }
@@ -2215,9 +2433,11 @@ public class SandboxService {
                 stateMessage = detail.getStatus().getMessage() != null ? detail.getStatus().getMessage() : "";
             }
         } catch (Exception e) {
+            checkReconcileCancellation(e);
             LOGGER.debug("查询沙箱状态失败（继续删除）：{}，error={}", sandboxRef(record), e.getMessage());
         }
 
+        checkReconcileCancellation();
         SandboxResponse<Void> response = sandboxLifecycleFacade.removeSandbox(toSandboxInfo(record));
         if (response == null || !response.isSuccess()) {
             String message = response != null ? response.getMessage() : "响应为空";

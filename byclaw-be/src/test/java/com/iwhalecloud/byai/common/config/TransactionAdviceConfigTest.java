@@ -25,6 +25,55 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 class TransactionAdviceConfigTest {
 
     @Test
+    void jwtSigningVerificationAndRefreshDoNotBorrowConnections() throws Exception {
+        DataSource dataSource = mock(DataSource.class);
+        TransactionAdviceConfig config = new TransactionAdviceConfig();
+        ReflectionTestUtils.setField(config, "transactionManager", new DataSourceTransactionManager(dataSource));
+        var keys = java.security.KeyPairGenerator.getInstance("RSA");
+        keys.initialize(2048);
+        var pair = keys.generateKeyPair();
+        var target = new com.iwhalecloud.byai.common.jwt.JwtService();
+        ReflectionTestUtils.setField(target, "privateKey", pair.getPrivate());
+        ReflectionTestUtils.setField(target, "jwtParser", io.jsonwebtoken.Jwts.parserBuilder()
+            .setSigningKey(pair.getPublic()).build());
+        ProxyFactory factory = new ProxyFactory(target);
+        factory.setProxyTargetClass(true);
+        factory.addAdvice(config.getAdvisor());
+        var service = (com.iwhalecloud.byai.common.jwt.JwtService) factory.getProxy();
+        var payload = java.util.Map.of("userCode", "test-user");
+        String token = service.createJwt(payload, 1, java.util.concurrent.TimeUnit.HOURS);
+        assertThat(service.verifyJwt(token, com.alibaba.fastjson.JSONObject.class).getString("userCode"))
+            .isEqualTo("test-user");
+        service.createJwt(payload);
+        service.generateRefreshJwt(payload);
+        for (Method method : target.getClass().getDeclaredMethods()) {
+            if (java.lang.reflect.Modifier.isPublic(method.getModifiers())) {
+                assertThat(config.getAdvisor().getTransactionAttributeSource()
+                    .getTransactionAttribute(method, target.getClass()).getPropagationBehavior())
+                    .as(method.toString()).isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+            }
+        }
+        verifyNoInteractions(dataSource);
+    }
+
+    @Test
+    void jdkFeignProxyMethodsDoNotBorrowConnections() throws Exception {
+        DataSource dataSource = mock(DataSource.class);
+        TransactionAdviceConfig config = new TransactionAdviceConfig();
+        ReflectionTestUtils.setField(config, "transactionManager", new DataSourceTransactionManager(dataSource));
+        Class<?> type = com.iwhalecloud.byai.common.feign.client.FeignWhaleAgentService.class;
+        Object target = java.lang.reflect.Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] {type},
+            (proxy, method, args) -> null);
+        ProxyFactory factory = new ProxyFactory(target);
+        factory.addAdvice(config.getAdvisor());
+        Object service = factory.getProxy();
+        for (Method method : type.getDeclaredMethods()) {
+            method.invoke(service, new Object[method.getParameterCount()]);
+        }
+        verifyNoInteractions(dataSource);
+    }
+
+    @Test
     void authorizationQueueOwnsItsGrantTransactionAndCheckpoints() throws Exception {
         TransactionAdviceConfig config = new TransactionAdviceConfig();
         ReflectionTestUtils.setField(config, "transactionManager", mock(DataSourceTransactionManager.class));

@@ -74,6 +74,12 @@ public interface SsSandboxRecordMapper {
                                @Param("releaseTime") Date releaseTime,
                                @Param("lockVersion") Integer lockVersion);
 
+    SsSandboxRecord selectPendingReconcileRestart(@Param("id") Long id);
+
+    int cancelPendingReconcileRestarts(@Param("userCode") String userCode,
+        @Param("sandboxType") String sandboxType, @Param("resourceIds") List<Long> resourceIds,
+        @Param("id") Long id, @Param("reason") String reason, @Param("now") Date now);
+
     int markReleased(@Param("id") Long id,
                      @Param("reason") String reason,
                      @Param("releaseTime") Date releaseTime,

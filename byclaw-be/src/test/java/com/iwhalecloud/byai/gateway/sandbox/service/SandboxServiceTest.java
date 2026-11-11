@@ -49,6 +49,111 @@ import static org.mockito.Mockito.when;
 class SandboxServiceTest {
 
     @Test
+    void cancelledReconcileDoesNotStartAndClearsItsScopedDeadline() {
+        SandboxService service = new SandboxService();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        ReflectionTestUtils.setField(service, "sandboxRecordMapper", mapper);
+        SandboxReconcileGroup group = new SandboxReconcileGroup();
+        group.setUserCode("user001");
+        group.setSandboxType("openclaw");
+        try {
+            Thread.currentThread().interrupt();
+            ReflectionTestUtils.invokeMethod(service, "runReconcileGroup", group,
+                new java.util.concurrent.atomic.AtomicInteger(1), Long.MAX_VALUE);
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        }
+        finally {
+            Thread.interrupted();
+        }
+        ReflectionTestUtils.invokeMethod(service, "runReconcileGroup", group,
+            new java.util.concurrent.atomic.AtomicInteger(1), 0L);
+        verifyNoInteractions(mapper);
+        // A completed job must not leave its deadline on a reused worker thread.
+        ReflectionTestUtils.invokeMethod(service, "checkReconcileCancellation");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void cancellationDuringRemotePageStopsFurtherPagesRestartAndOrphanCleanup(boolean interrupt) {
+        SandboxService service = new SandboxService();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxLifecycleFacade facade = mock(SandboxLifecycleFacade.class);
+        ReflectionTestUtils.setField(service, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(service, "sandboxLifecycleFacade", facade);
+        ReflectionTestUtils.setField(service, "reconcileRecordLimitPerGroup", 10);
+        ReflectionTestUtils.setField(service, "reconcileRemotePageSize", 200);
+        SandboxReconcileGroup group = new SandboxReconcileGroup();
+        group.setUserCode("user001");
+        group.setSandboxType("openclaw");
+        when(mapper.selectReconcileSandboxesByGroup(eq("user001"), eq("openclaw"), isNull(), isNull(), eq(10)))
+            .thenReturn(List.of(new SsSandboxRecord()));
+        when(facade.listSandboxesByMetadata(any(), eq(1), eq(200))).thenAnswer(invocation -> {
+            if (interrupt) {
+                Thread.currentThread().interrupt();
+            }
+            else {
+                com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.setDeadline(0L);
+            }
+            return SandboxResponse.success(new SandboxRuntimePage<SandboxRuntimeInstance>(
+                List.of(SandboxRuntimeInstance.builder().sandboxId("orphan").build()), 1, 200, true));
+        });
+        try {
+            ReflectionTestUtils.invokeMethod(service, "runReconcileGroup", group,
+                new java.util.concurrent.atomic.AtomicInteger(10), Long.MAX_VALUE);
+        }
+        finally {
+            Thread.interrupted();
+        }
+        verify(facade).listSandboxesByMetadata(any(), eq(1), eq(200));
+        org.mockito.Mockito.verifyNoMoreInteractions(facade);
+        verify(mapper).selectReconcileSandboxesByGroup(eq("user001"), eq("openclaw"), isNull(), isNull(), eq(10));
+        org.mockito.Mockito.verifyNoMoreInteractions(mapper);
+    }
+
+    @Test
+    void interruptionAfterReleaseDoesNotRestartOrCleanOrphans() {
+        SandboxService service = new SandboxService();
+        SsSandboxRecordMapper mapper = mock(SsSandboxRecordMapper.class);
+        SandboxLifecycleFacade facade = mock(SandboxLifecycleFacade.class);
+        SandboxUserContextRunner runner = mock(SandboxUserContextRunner.class);
+        ReflectionTestUtils.setField(service, "sandboxRecordMapper", mapper);
+        ReflectionTestUtils.setField(service, "sandboxLifecycleFacade", facade);
+        ReflectionTestUtils.setField(service, "sandboxUserContextRunner", runner);
+        SandboxMetadataCache cache = mock(SandboxMetadataCache.class);
+        ReflectionTestUtils.setField(service, "sandboxMetadataCache", cache);
+        ReflectionTestUtils.setField(service, "reconcileRecordLimitPerGroup", 10);
+        ReflectionTestUtils.setField(service, "reconcileRemotePageSize", 200);
+        SandboxReconcileGroup group = new SandboxReconcileGroup();
+        group.setUserCode("user001");
+        group.setSandboxType("openclaw");
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(1L);
+        record.setSandboxId("missing");
+        record.setLockVersion(0);
+        when(mapper.selectReconcileSandboxesByGroup(eq("user001"), eq("openclaw"), isNull(), isNull(), eq(10)))
+            .thenReturn(List.of(record));
+        var orphan = SandboxRuntimeInstance.builder().sandboxId("orphan").state("Failed")
+            .createdAt(OffsetDateTime.now().minusHours(1)).build();
+        when(facade.listSandboxesByMetadata(any(), eq(1), eq(200)))
+            .thenReturn(SandboxResponse.success(new SandboxRuntimePage<>(List.of(orphan), 1, 200, false)));
+        when(mapper.markReleased(eq(1L), eq("release.remote.missing"), any(Date.class), eq(0)))
+            .thenAnswer(invocation -> {
+                Thread.currentThread().interrupt();
+                return 1;
+            });
+        try {
+            ReflectionTestUtils.invokeMethod(service, "runReconcileGroup", group,
+                new java.util.concurrent.atomic.AtomicInteger(10), Long.MAX_VALUE);
+        }
+        finally {
+            Thread.interrupted();
+        }
+        verifyNoInteractions(runner);
+        verify(facade).listSandboxesByMetadata(any(), eq(1), eq(200));
+        org.mockito.Mockito.verifyNoMoreInteractions(facade);
+    }
+
+    @Test
     void userLaunch_rejectsTenantSandboxSpecBeforeCreatingRecord() {
         SandboxLaunchContextFactory contextFactory = mock(SandboxLaunchContextFactory.class);
         SsSandboxRecordMapper recordMapper = mock(SsSandboxRecordMapper.class);
@@ -887,14 +992,14 @@ class SandboxServiceTest {
             assertThat(CurrentUserHolder.getCurrentUserCode()).isEqualTo("user001");
             assertThat(CurrentUserHolder.getCurrentUserName()).isEqualTo("User One");
             return launchData;
-        }).when(sandboxService).launchSandbox("user001", SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        }).when(sandboxService).launchPendingReconcileSandbox(any(SsSandboxRecord.class));
 
         SandboxLifecycleJobReport report = sandboxService.reconcileSandboxes();
 
         assertThat(report.getAffectedCount()).isEqualTo(1);
         assertThat(CurrentUserHolder.getLoginInfo()).isNull();
         verify(loginApplicationService).getLoginInfo("user001");
-        verify(sandboxService).launchSandbox("user001", SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        verify(sandboxService).launchPendingReconcileSandbox(record);
     }
 
     @Test

@@ -92,6 +92,14 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
                 info.getSandboxId(), endpoints, info.getRemoteExpiresAt());
             return SandboxResponse.success(data);
         } catch (Exception e) {
+            com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.check(e);
+            if (com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.isActive()) {
+                for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+                    if (cause instanceof java.io.IOException || cause instanceof feign.RetryableException) {
+                        throw new IllegalStateException("Sandbox launch outcome unknown; retain STARTING for recovery", e);
+                    }
+                }
+            }
             log.error("Failed to launch sandbox by provider={}, user={}, type={}: {}",
                 runtimeProvider.providerType(), request.getUserCode(), request.getSandboxType(), e.getMessage(), e);
             return SandboxResponse.error(e.getMessage());

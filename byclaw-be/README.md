@@ -976,3 +976,56 @@ Progress is permission checked. Managers can see aggregate counts and retry; ord
 Processing uses batched membership/authorization queries, differential grant updates, single-resource Redis hash-field changes, bounded workers, heartbeat leases and revision fences. Grants and the cache checkpoint commit atomically; pending replacements restrict removed recipients without granting new recipients early. Existing manual authorization jobs finish first, while new manual submissions wait until resource synchronization is resolved. Missing authorization fields, explicit `false`, and empty scopes retain their existing semantics. Cleanup-only requests do not report absent personal assistants as incomplete configuration, because they do not request new bindings. Organization/post grants remain rules instead of permanently converting to per-user grants; membership-change cache refresh uses the existing user-organization event path.
 
 Apply the release's incremental migration before starting these application classes. Do not replay older initialization SQL or whole historical migrations against an existing environment. Deploy all backend instances together: previous versions do not understand the pending authorization guard or V3 task states. The new worker can recover unfinished legacy jobs; old workers cannot claim V3 tasks.
+
+### Sandbox reconcile cancellation and transactions
+
+WhaleAgent Feign operations and all `JwtService` methods use `NOT_SUPPORTED` in the
+name-based global transaction advice. Remote sandbox operations and JWT signing or
+verification must not acquire a JDBC connection merely to enter those methods.
+Other business services retain their existing transaction rules.
+
+Each reconcile worker shares its round deadline with nested launch and cleanup calls.
+An interruption or expired deadline stops further pages, records, launches and orphan
+deletions. Wrapped `InterruptedException` failures retain the interruption signal;
+workers do not clear it to continue business operations. The deadline scope is removed
+when the worker exits. Requests already in flight still depend on their client timeout
+and cancellation behavior; this change does not provide remote-operation rollback or
+change executor shutdown/job-lock coordination.
+
+Reconcile cancellation stops new remote work, but known launch responses are finalized
+on a bounded, dedicated local completion executor. Its threads inherit neither the
+worker's interrupt flag nor its cancellation deadline; the current login and datasource
+are explicitly bound and cleared for each completion. Callers wait at most five seconds;
+interrupting that wait does not cancel an already submitted result write. The queue and
+worker count are bounded. If completion fails or cannot be queued, the durable DB state
+remains eligible for recovery; completion is not a remote rollback mechanism.
+
+The existing record schema provides recovery without a migration:
+
+- `STARTING` records without a sandbox ID participate in reconcile. After the existing
+  120-second stale-start threshold, reconciliation retries the same record and metadata,
+  retains its gateway credentials, and uses the existing remote idempotency key.
+- A latest `RELEASED` record with reason `release.remote.missing` represents an unfinished
+  replacement request. Any newer record for that user/service/resource supersedes it,
+  including a later manually stopped or failed attempt. Manual stop and preferred-service
+  removal cancel this intent. Immediately before reserving a new `STARTING` record, a
+  short transaction locks and rechecks the intent; no HTTP call runs in that transaction.
+- Known success/failure responses receive their normal local lifecycle update. Missing
+  responses, interrupted operations and network failures retain a recoverable attempt
+  rather than being assumed to be explicit remote rejection.
+
+Per-group progress is synchronized and aggregated from snapshots even when `invokeAll`
+cancels a Future. Already completed counts survive cancellation. `cancelledGroups` and
+`inFlightGroups` distinguish cancellation from workers not yet confirmed finished at the
+snapshot; returned reports do not mutate when a late worker finishes. These are group
+execution counters, not remote-operation completion guarantees.
+
+Focused regression commands (from the workspace root):
+
+```bash
+mvn -o -B -f ByClaw/byclaw-be/pom.xml -Dtest=TransactionAdviceConfigTest,SandboxServiceTest,SandboxReconcileRecoveryTest,SandboxReconcileCompletionTest,FeignWhaleAgentRequestInterceptorTest,StandardSandboxLifecycleServiceTest,WhaleAgentSandboxRuntimeProviderTest verify
+python3 ByClaw/byclaw-be/src/test/python/test_sandbox_reconcile_queries.py
+```
+
+The Python tests execute mapper selection predicates in an in-memory SQLite fixture;
+they do not validate openGauss row locks, query plans, or live WhaleAgent idempotency.

@@ -60,6 +60,28 @@ class StandardSandboxLifecycleServiceTest {
     }
 
     @Test
+    void reconcileNetworkFailureRetainsUnknownOutcomeInsteadOfReturningExplicitRejection() {
+        when(valueOperations.setIfAbsent(any(), any(), any())).thenReturn(true);
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        when(specRepository.findByServiceKeyAndProfile("openclaw", null)).thenReturn(java.util.Optional.of(spec));
+        when(specProcessor.buildCreateRequest("user001", "openclaw", null, null, spec))
+            .thenReturn(CreateSandboxRequest.builder().build());
+        when(runtimeProvider.findReusable("user001", "openclaw"))
+            .thenThrow(new IllegalStateException(new java.io.IOException("response lost")));
+        SandboxLaunchRequest request = new SandboxLaunchRequest();
+        request.setUserCode("user001");
+        request.setSandboxType("openclaw");
+        com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.setDeadline(Long.MAX_VALUE);
+        try {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.launchSandbox(request))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("unknown");
+        }
+        finally {
+            com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.clear();
+        }
+    }
+
+    @Test
     void launchSandbox_ignoresRedisMetadataAndCreatesFromSpec() {
         String cacheKey = "byai:worker:sandbox:user001:openclaw";
         String lockKey = cacheKey + ":create-lock";

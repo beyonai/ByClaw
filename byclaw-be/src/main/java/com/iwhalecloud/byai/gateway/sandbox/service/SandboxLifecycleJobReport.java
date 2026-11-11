@@ -1,7 +1,6 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -17,6 +16,8 @@ public class SandboxLifecycleJobReport {
     private int affectedCount;
     private int skippedCount;
     private int failedCount;
+    private int cancelledGroups;
+    private int inFlightGroups;
     private final List<String> affectedSandboxes = new ArrayList<>();
     private final List<String> skippedSandboxes = new ArrayList<>();
     private final List<String> failedSandboxes = new ArrayList<>();
@@ -29,62 +30,91 @@ public class SandboxLifecycleJobReport {
         return jobName;
     }
 
-    public int getTotalCandidates() {
+    public synchronized int getTotalCandidates() {
         return totalCandidates;
     }
 
-    public void setTotalCandidates(int totalCandidates) {
+    public synchronized void setTotalCandidates(int totalCandidates) {
         this.totalCandidates = totalCandidates;
     }
 
-    public int getScannedCount() {
+    public synchronized int getScannedCount() {
         return scannedCount;
     }
 
-    public void addScannedCount(int count) {
+    public synchronized void addScannedCount(int count) {
         this.scannedCount += count;
     }
 
-    public int getAffectedCount() {
+    public synchronized int getAffectedCount() {
         return affectedCount;
     }
 
-    public int getSkippedCount() {
+    public synchronized int getSkippedCount() {
         return skippedCount;
     }
 
-    public int getFailedCount() {
+    public synchronized int getFailedCount() {
         return failedCount;
     }
 
-    public List<String> getAffectedSandboxes() {
-        return Collections.unmodifiableList(affectedSandboxes);
+    public synchronized List<String> getAffectedSandboxes() {
+        return List.copyOf(affectedSandboxes);
     }
 
-    public List<String> getSkippedSandboxes() {
-        return Collections.unmodifiableList(skippedSandboxes);
+    public synchronized List<String> getSkippedSandboxes() {
+        return List.copyOf(skippedSandboxes);
     }
 
-    public List<String> getFailedSandboxes() {
-        return Collections.unmodifiableList(failedSandboxes);
+    public synchronized List<String> getFailedSandboxes() {
+        return List.copyOf(failedSandboxes);
     }
 
-    public void addAffectedSandbox(String sandboxRef) {
+    public synchronized void addAffectedSandbox(String sandboxRef) {
         affectedCount++;
         addSample(affectedSandboxes, sandboxRef);
     }
 
-    public void addSkippedSandbox(String sandboxRef) {
+    public synchronized void addSkippedSandbox(String sandboxRef) {
         skippedCount++;
         addSample(skippedSandboxes, sandboxRef);
     }
 
-    public void addFailedSandbox(String sandboxRef) {
+    public synchronized void addFailedSandbox(String sandboxRef) {
         failedCount++;
         addSample(failedSandboxes, sandboxRef);
     }
 
+    public synchronized int getCancelledGroups() { return cancelledGroups; }
+
+    public synchronized int getInFlightGroups() { return inFlightGroups; }
+
+    public synchronized void markCancelled() { cancelledGroups = 1; }
+
+    public synchronized void markInFlight() { inFlightGroups = 1; }
+
+    public synchronized SandboxLifecycleJobReport snapshot() {
+        SandboxLifecycleJobReport copy = new SandboxLifecycleJobReport(jobName);
+        copy.totalCandidates = totalCandidates;
+        copy.scannedCount = scannedCount;
+        copy.affectedCount = affectedCount;
+        copy.skippedCount = skippedCount;
+        copy.failedCount = failedCount;
+        copy.cancelledGroups = cancelledGroups;
+        copy.inFlightGroups = inFlightGroups;
+        copy.affectedSandboxes.addAll(affectedSandboxes);
+        copy.skippedSandboxes.addAll(skippedSandboxes);
+        copy.failedSandboxes.addAll(failedSandboxes);
+        return copy;
+    }
+
     public void merge(SandboxLifecycleJobReport other) {
+        if (other != null) {
+            mergeSnapshot(other.snapshot());
+        }
+    }
+
+    private synchronized void mergeSnapshot(SandboxLifecycleJobReport other) {
         if (other == null) {
             return;
         }
@@ -93,6 +123,8 @@ public class SandboxLifecycleJobReport {
         affectedCount += other.affectedCount;
         skippedCount += other.skippedCount;
         failedCount += other.failedCount;
+        cancelledGroups += other.cancelledGroups;
+        inFlightGroups += other.inFlightGroups;
         other.affectedSandboxes.forEach(item -> addSample(affectedSandboxes, item));
         other.skippedSandboxes.forEach(item -> addSample(skippedSandboxes, item));
         other.failedSandboxes.forEach(item -> addSample(failedSandboxes, item));

@@ -31,6 +31,27 @@ class FeignWhaleAgentRequestInterceptorTest {
         WhaleAgentUserContextHolder.clear();
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void cancelledReconcileCannotDispatchNestedFeignRequests(boolean interrupt) {
+        JwtService jwtService = mock(JwtService.class);
+        FeignWhaleAgentRequestInterceptor interceptor = interceptor(jwtService);
+        com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation
+            .setDeadline(interrupt ? Long.MAX_VALUE : 0L);
+        try {
+            if (interrupt) {
+                Thread.currentThread().interrupt();
+            }
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> interceptor.doIntercept(new RequestTemplate()))
+                .isInstanceOf(java.util.concurrent.CancellationException.class);
+            org.mockito.Mockito.verifyNoInteractions(jwtService);
+        }
+        finally {
+            Thread.interrupted();
+            com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.clear();
+        }
+    }
+
     @Test
     void doIntercept_usesUserCodeFallbackWhenLoginInfoMissing() {
         JwtService jwtService = mock(JwtService.class);

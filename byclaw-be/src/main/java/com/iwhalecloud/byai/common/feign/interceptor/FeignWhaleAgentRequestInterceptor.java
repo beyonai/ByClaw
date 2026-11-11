@@ -25,6 +25,7 @@ public class FeignWhaleAgentRequestInterceptor extends AbstractFeignRequestInter
 
     @Override
     protected void doIntercept(RequestTemplate requestTemplate) {
+        com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.check(null);
         ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         if (attributes != null) {
             HttpServletRequest request = attributes.getRequest();

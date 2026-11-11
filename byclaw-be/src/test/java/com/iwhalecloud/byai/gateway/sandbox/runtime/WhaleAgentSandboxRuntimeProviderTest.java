@@ -36,6 +36,24 @@ import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 class WhaleAgentSandboxRuntimeProviderTest {
 
     @Test
+    void reusableLookupDoesNotSwallowWrappedInterruption() {
+        FeignWhaleAgentService client = mock(FeignWhaleAgentService.class);
+        WhaleAgentSandboxRuntimeProvider provider = new WhaleAgentSandboxRuntimeProvider(client);
+        when(client.listSandboxes(any())).thenThrow(new IllegalStateException(new InterruptedException("cancelled")));
+        com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.setDeadline(Long.MAX_VALUE);
+        try {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> provider.findReusable("user001", "openclaw"))
+                .isInstanceOf(java.util.concurrent.CancellationException.class);
+            org.assertj.core.api.Assertions.assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        }
+        finally {
+            Thread.interrupted();
+            com.iwhalecloud.byai.common.concurrent.SandboxReconcileCancellation.clear();
+        }
+        verify(client, never()).launchSandbox(any());
+    }
+
+    @Test
     void create_usesFeignAndMapsLaunchPayload() {
         FeignWhaleAgentService feignWhaleAgentService = mock(FeignWhaleAgentService.class);
         WhaleAgentSandboxRuntimeProvider provider = new WhaleAgentSandboxRuntimeProvider(feignWhaleAgentService);

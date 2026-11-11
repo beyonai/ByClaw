@@ -135,6 +135,15 @@ public class TransactionAdviceConfig {
         NameMatchTransactionAttributeSource source = new NameMatchTransactionAttributeSource() {
             @Override
             public TransactionAttribute getTransactionAttribute(Method method, Class<?> targetClass) {
+                // JWT operations are in-memory; remote WhaleAgent calls must not borrow JDBC connections.
+                // Feign targets can be JDK proxies, so match the interface rather than a generated class name.
+                if ((targetClass != null && (
+                    com.iwhalecloud.byai.common.jwt.JwtService.class.isAssignableFrom(ClassUtils.getUserClass(targetClass))
+                    || com.iwhalecloud.byai.common.feign.client.FeignWhaleAgentService.class.isAssignableFrom(targetClass)))
+                    || com.iwhalecloud.byai.common.feign.client.FeignWhaleAgentService.class
+                        .isAssignableFrom(method.getDeclaringClass())) {
+                    return notSurpportedTx;
+                }
                 if (targetClass != null && ClassUtils.getUserClass(targetClass).getName().equals(
                     "com.iwhalecloud.byai.manager.application.service.auth.AuthorizationTaskService")) {
                     // Queue checkpoints commit independently; only the worker's explicit template owns grant writes.
