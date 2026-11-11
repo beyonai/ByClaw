@@ -131,8 +131,9 @@ export class ByClawExecutionRouter {
       if (previous.fingerprint !== fingerprint) throw new Error('EXECUTION_REQUEST_CONFLICT')
       return previous.promise
     }
-    const timeout = Number(env.CODEX_EXEC_TIMEOUT_MS ?? 300000)
-    if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 900000) throw new Error('EXECUTION_INVALID_TIMEOUT')
+    // Zero leaves the whole task open until completion, cancellation or failure.
+    const timeout = Number(env.CODEX_EXEC_TIMEOUT_MS ?? 0)
+    if (!Number.isInteger(timeout) || (timeout !== 0 && timeout < 1000) || timeout > 2_147_483_647) throw new Error('EXECUTION_INVALID_TIMEOUT')
     const control = new AbortController()
     const queued = this.queues.get(identity) ?? Promise.resolve()
     const queuedAt = performance.now()
@@ -154,7 +155,7 @@ export class ByClawExecutionRouter {
   private async execute(command: AskAgentCommand, context: AgentContext, target: ExecutionTarget, identity: string, executionType: ExecutionType, control: AbortController, timeout: number, queuedAt: number): Promise<ExecutionResult> {
     const definition = EXECUTION_DEFINITIONS[executionType]
     if (definition.executor !== 'codex') throw new Error(`EXECUTOR_NOT_IMPLEMENTED:${executionType}`)
-    const signal = AbortSignal.any([control.signal, AbortSignal.timeout(timeout)])
+    const signal = timeout === 0 ? control.signal : AbortSignal.any([control.signal, AbortSignal.timeout(timeout)])
     const check = () => { if (context.isCancelRequested?.()) control.abort(new Error('EXECUTION_CANCELLED')) }
     check()
     const timer = setInterval(check, 50)

@@ -141,6 +141,48 @@ test('timeout and shutdown abort remote execution', async () => {
   await delay(10); await g.router.close(); await rejected
   await assert.rejects(g.run(command('11444401', 'new')), /EXECUTION_ROUTER_CLOSED/)
 })
+test('default and zero timeout keep tasks open without a whole-task deadline', async t => {
+  const deadline = t.mock.method(AbortSignal, 'timeout', () => { throw new Error('unexpected whole-task deadline') })
+  for (const timeout of [undefined, '0']) {
+    const started = Promise.withResolvers(), finish = Promise.withResolvers()
+    let settled = false
+    const f = fixture({ environment: { BYCLAW_AGENT_EXECUTION_MAP: '{"11444401":"CODEX_CLI"}',
+      ...(timeout === undefined ? {} : { CODEX_EXEC_TIMEOUT_MS: timeout }) },
+      execute: async ({ onStdout, signal }) => {
+        started.resolve()
+        await finish.promise
+        assert.equal(signal.aborted, false)
+        onStdout(completed('long task completed'))
+        return { exitCode: 0, stdout: '', stderr: '' }
+      } })
+    const running = f.run().finally(() => { settled = true })
+    await started.promise
+    assert.equal(settled, false)
+    assert.equal(f.router.activeCount, 1)
+    assert.equal(deadline.mock.callCount(), 0)
+    finish.resolve()
+    assert.equal((await running).finalAnswer, 'long task completed')
+    assert.deepEqual(f.releases, [false])
+    assert.equal(f.router.activeCount, 0)
+  }
+})
+
+test('explicit long deadlines are supported and invalid timer values reject before allocation', async t => {
+  const timeoutSignal = new AbortController()
+  const deadline = t.mock.method(AbortSignal, 'timeout', () => timeoutSignal.signal)
+  for (const value of ['36000000', '2147483647']) {
+    const f = fixture({ environment: { BYCLAW_AGENT_EXECUTION_MAP: '{"11444401":"CODEX_CLI"}', CODEX_EXEC_TIMEOUT_MS: value } })
+    assert.equal((await f.run()).finalAnswer, '6')
+    assert.equal(deadline.mock.calls.at(-1).arguments[0], Number(value))
+  }
+  for (const value of ['-1', '999', '1000.5', 'NaN', 'Infinity', '2147483648']) {
+    const f = fixture({ environment: { BYCLAW_AGENT_EXECUTION_MAP: '{"11444401":"CODEX_CLI"}', CODEX_EXEC_TIMEOUT_MS: value } })
+    await assert.rejects(f.run(), /EXECUTION_INVALID_TIMEOUT/)
+    assert.equal(f.calls.length, 0)
+    assert.equal(f.dshCalls, 0)
+  }
+})
+
 test('JSONL handles partial lines, interim commentary, tool cards and final-line draining', () => {
   const events = [], adapter = new CodexEventAdapter(event => events.push(event))
   const text = jsonl(

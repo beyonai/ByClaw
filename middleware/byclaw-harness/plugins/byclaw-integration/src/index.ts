@@ -284,7 +284,7 @@ export const Config: z<Config> = z.object({
   model: z.string(),
   workerId: z.string(),
   agentExecutionMap: z.string().default('{}'),
-  codexExecTimeoutMs: z.natural().min(1000).max(900000).default(300000),
+  codexExecTimeoutMs: z.union([z.const(0), z.natural().min(1000).max(2_147_483_647)]).default(0),
   workspaceOnToolEnvironment: z.boolean().default(false),
   byRoot: z.string(),
   dshHome: z.string(),
@@ -1148,7 +1148,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       const ssh = ctx.get('ssh') as ExecutionToolEnvironment | undefined
       return {
         BYCLAW_AGENT_EXECUTION_MAP: ssh?.environmentValue?.('BYCLAW_AGENT_EXECUTION_MAP') ?? config.agentExecutionMap ?? '{}',
-        CODEX_EXEC_TIMEOUT_MS: ssh?.environmentValue?.('CODEX_EXEC_TIMEOUT_MS') ?? String(config.codexExecTimeoutMs ?? 300000),
+        CODEX_EXEC_TIMEOUT_MS: ssh?.environmentValue?.('CODEX_EXEC_TIMEOUT_MS') ?? String(config.codexExecTimeoutMs ?? 0),
       }
     }
     execution = new ByClawExecutionRouter({
