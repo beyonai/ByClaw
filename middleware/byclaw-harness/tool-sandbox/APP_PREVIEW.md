@@ -37,8 +37,13 @@ Use the existing `sandbox_exec` lease; no new tool or openUrl field is needed.
 After the application is ready, run:
 
 ```bash
-sandbox-app expose --name my-app --port 7860 --sandbox-id <current-lease-sandboxId>
+sandbox-app expose --name my-app --port 7860
 ```
+
+The platform's tool execution layer supplies `E2B_SANDBOX_ID` from the current
+compatible MicroVM lease. Codex and its child commands inherit it automatically;
+no instance ID from chat history or the shared Harness host is needed. For manual
+execution outside that layer, pass `--sandbox-id <current-lease-sandboxId>`.
 
 A template may specify an explicit compatibility profile, e.g. `--profile easel`.
 Profiles come from image-owned template files, not from user project directories.
