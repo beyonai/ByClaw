@@ -13,8 +13,11 @@ provide a compatible runtime. The engine's private library path is scoped to
 the database entrypoint and `omm` login shells, leaving MicroVM system tools
 on Debian's libraries.
 
-CI builds this variant as `byclaw-tenant-opengauss`, separately from
-`byclaw-opengauss`. Changes to this directory or the BE tenant entrypoint
+CI builds this variant as `byclaw-tenant-opengauss` for `linux/amd64`.
+The default OpenGauss 6.0.3 engine image contains x86-64 binaries. An ARM64
+build requires a compatible ARM64 engine image supplied via `BASE_IMAGE`
+and must pass the same runtime checks before it is published.
+Changes to this directory or the BE tenant entrypoint
 trigger the tenant image build. Select the tenant image explicitly in the
 tenant service configuration; this directory move does not switch existing
 deployments automatically.

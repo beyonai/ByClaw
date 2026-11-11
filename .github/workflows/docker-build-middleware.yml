@@ -82,7 +82,8 @@ jobs:
             context: .
             dockerfile: middleware/tenant/opengauss/Dockerfile
             changed: tenant_opengauss
-            platforms: linux/amd64,linux/arm64
+            # The bundled OpenGauss 6.0.3 engine is x86-64.
+            platforms: linux/amd64
           - service: byclaw-minio
             context: middleware/minio
             changed: minio
