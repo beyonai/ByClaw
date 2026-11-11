@@ -1,8 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { deploymentEnvironment, isDeploymentParameter } from '../src/deployment-environment.ts'
+import { deploymentConfigured, deploymentEnvironment, isDeploymentParameter, loadDeploymentCredentials } from '../src/deployment-environment.ts'
 import { ToolSandboxManager } from '../src/catalog.ts'
 
 describe('deployment credential delivery', () => {
+  it('loads live user credentials even when cloud startup environment has no deployment fields', async () => {
+    let current: Record<string, string> = { BYCLAW_DEPLOY_HOST: 'example.invalid', BYCLAW_DEPLOY_PRIVATE_KEY: 'synthetic-current-user' }
+    const references: string[] = []
+    const resolve = async (name: string) => { references.push(name); return current[name] === undefined ? undefined : { value: current[name] } }
+    const first = await loadDeploymentCredentials(resolve)
+    expect(deploymentConfigured(first)).toBe(true)
+    expect(first.BYCLAW_DEPLOY_PRIVATE_KEY).toBe('synthetic-current-user')
+    expect(references).toHaveLength(7)
+    current = { ...current, BYCLAW_DEPLOY_ENABLED: '0' }
+    expect(deploymentConfigured(await loadDeploymentCredentials(resolve))).toBe(false)
+    current = {}
+    expect(deploymentConfigured(await loadDeploymentCredentials(resolve))).toBe(false)
+  })
   it('accepts an enabled target/key pair, respects explicit pauses and forwards only connection fields', () => {
     for (const value of [undefined, '', '0', 'true']) {
       expect(() => deploymentEnvironment(value === undefined ? {} : { BYCLAW_DEPLOY_ENABLED: value })).toThrow('DEPLOYMENT_NOT_ENABLED')
