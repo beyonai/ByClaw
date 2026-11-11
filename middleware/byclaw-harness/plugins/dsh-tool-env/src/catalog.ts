@@ -175,9 +175,13 @@ export class ToolSandboxManager {
     const lease = this.owned(actor, leaseId)
     const { handle } = lease
     if (handle.closing || !argv.length || argv.some(v => typeof v !== 'string' || v.includes('\0'))) throw new Error('INVALID_EXECUTION')
+    // Bind only this command tree to its actual lease, never the Harness host or
+    // a prior allocation. Other providers retain their existing environment.
+    const sandboxId = /^(?:microvm--[a-z0-9-]+--)?(sbx-[a-zA-Z0-9-]{8,100})$/u.exec(lease.public.sandboxId ?? '')?.[1]
+    const command = sandboxId === undefined ? argv : ['/usr/bin/env', `E2B_SANDBOX_ID=${sandboxId}`, ...argv]
     handle.inflight++; lease.inflight++
     const running = (async () => {
-      try { return await (await handle.runtime).execute(argv, cwd, signal, `${actor}:${leaseId}`, onStdout) }
+      try { return await (await handle.runtime).execute(command, cwd, signal, `${actor}:${leaseId}`, onStdout) }
       finally { handle.inflight--; lease.inflight-- }
     })()
     const executions = this.executions.get(actor) ?? new Set<Promise<SandboxResult>>()
