@@ -332,9 +332,9 @@ builds require the deployment's valid license; do not embed credentials or licen
 files in this build context or claim successful game output from module checks.
 
 
-### Slim image read_image native dependencies
+### read_image native dependencies
 
-`Dockerfile.slim` materializes the installed, pinned Sharp dependency closure at
+`Dockerfile`, `Dockerfile.extensions` and `Dockerfile.slim` materialize the installed, pinned Sharp dependency closure at
 `attachment-local/node_modules`. A long-lived profile resolver can preserve that
 logical package path; pnpm's adjacent virtual-store dependency links are outside
 its lookup chain, causing `detect-libc` and native optional packages to disappear
@@ -348,4 +348,4 @@ profile resolver and real attachment/filesystem image tool, reads a fixed PNG,
 resizes and re-encodes it, then validates dimensions and pixel values. The native
 probe also retains symlink paths to catch the original dependency-layout failure.
 Run the matching `materialize-image-runtime.test.mjs` and
-`verify-read-image-runtime.test.mjs` tests before publishing a changed slim image.
+`verify-read-image-runtime.test.mjs` tests before publishing a changed image.

@@ -303,7 +303,7 @@ describe('ByClawBeBackend', () => {
     expect(fake.calls.every(call => call.token === 'jwt-u1')).toBe(true)
     const keys = await identity.keys()
     // What B's sshd script reads from its environment: the public key line and the base64 host key.
-    expect(fake.privateParams.get('BYCLAW_TOOL_ENV_AUTHORIZED_KEY')?.value).toBe(keys.authorizedKey)
+    expect(fake.privateParams.get('BYCLAW_TOOL_ENV_AUTHORIZED_KEY')?.value).toBe(keys.authorizedKey.split(' ').slice(0, 2).join(' '))
     expect(fake.privateParams.get('BYCLAW_TOOL_ENV_HOST_KEY')?.value).toBe(Buffer.from(keys.hostPrivateKey).toString('base64'))
     expect(fake.calls[1]?.body).toMatchObject({ key: 'BYCLAW_TOOL_ENV_AUTHORIZED_KEY', enabled: true })
     expect(fake.calls[1]?.body['paramId']).toBeUndefined()
@@ -314,11 +314,11 @@ describe('ByClawBeBackend', () => {
     await new ByClawBeBackend({ ...config, publishKeys: true }, new ToolEnvIdentity(join(dir, 'state')), () => {}).ensure()
     expect(fake.calls.map(call => call.path)).toEqual(['/byaiService/userPrivateParam/list?keyword=BYCLAW_TOOL_ENV_&pageSize=50', '/byaiService/sandbox/launchByUserCode'])
 
-    // A stale value is replaced in place, by paramId, since keys are unique per user.
+    // A stale value is replaced in place, by paramId, since keys are unique per user; the pair is written together.
     fake.privateParams.set('BYCLAW_TOOL_ENV_HOST_KEY', { paramId: 101, value: 'old-value' })
     fake.calls.length = 0
     await new ByClawBeBackend({ ...config, publishKeys: true }, new ToolEnvIdentity(join(dir, 'state')), () => {}).ensure()
-    expect(fake.calls[1]?.body).toMatchObject({ paramId: 101, key: 'BYCLAW_TOOL_ENV_HOST_KEY' })
+    expect(fake.calls[2]?.body).toMatchObject({ paramId: 101, key: 'BYCLAW_TOOL_ENV_HOST_KEY' })
     expect(fake.privateParams.get('BYCLAW_TOOL_ENV_HOST_KEY')?.value).toBe(Buffer.from(keys.hostPrivateKey).toString('base64'))
 
     // BE's last four characters cannot tell one OpenSSH key from another of the same kind
@@ -332,6 +332,17 @@ describe('ByClawBeBackend', () => {
     expect(fake.calls.map(call => call.path).filter(path => path.endsWith('/save'))).toHaveLength(2)
     expect(fake.privateParams.get('BYCLAW_TOOL_ENV_HOST_KEY')?.value).toBe(Buffer.from(keys.hostPrivateKey).toString('base64'))
     await access(join(dir, 'state', 'published-keys.json'))
+
+    // Another runtime of the same user published its own pair after this state did: its private key
+    // looks alike, but the public key does not, so this runtime writes its pair back before launching.
+    const other = new ToolEnvIdentity(join(dir, 'other-state'))
+    await new ByClawBeBackend({ ...config, publishKeys: true }, other, () => {}).ensure()
+    expect(fake.privateParams.get('BYCLAW_TOOL_ENV_AUTHORIZED_KEY')?.value).not.toBe(keys.authorizedKey.split(' ').slice(0, 2).join(' '))
+    fake.calls.length = 0
+    await new ByClawBeBackend({ ...config, publishKeys: true }, new ToolEnvIdentity(join(dir, 'state')), () => {}).ensure()
+    expect(fake.calls.map(call => call.path).filter(path => path.endsWith('/save'))).toHaveLength(2)
+    expect(fake.privateParams.get('BYCLAW_TOOL_ENV_AUTHORIZED_KEY')?.value).toBe(keys.authorizedKey.split(' ').slice(0, 2).join(' '))
+    expect(fake.privateParams.get('BYCLAW_TOOL_ENV_HOST_KEY')?.value).toBe(Buffer.from(keys.hostPrivateKey).toString('base64'))
   })
 
   it('does not touch private parameters unless asked to', async () => {

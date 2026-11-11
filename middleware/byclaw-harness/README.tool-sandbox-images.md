@@ -12,6 +12,8 @@ Build from the repository root on host53 for `linux/amd64`. Dockerfile parents u
 
 GDScript is provided by Godot. There is no separate GDScript image or service.
 
+A's `glob` and `grep` run in the tool sandbox as `rg` from `PATH`: the shared host sets `BYCLAW_RIPGREP_PATH=rg`, because the ripgrep packaged in A's installation does not exist here. `Dockerfile.tools` keeps the parent's `rg` and `Dockerfile.tools.base-slim` installs `ripgrep`; both run `rg --version` at build time.
+
 Use `192.168.0.81:8080/byclaw/byclaw-harness-tools:<tag>` for Dockerfile parent defaults and pin the tested digest for release builds. Keep exact donor-image digests, source SHA manifests, image/rootfs sizes, registry digests and validation logs with the release receipt. A changed canonical tag must not silently retarget an existing sandbox; validate a new template and update only the explicitly selected aliyun83 service configuration. Existing running instances retain their lifecycle.
 
 For a reviewed browser supervisor or viewer-asset correction, `Dockerfile.tools.browser --target browser-runtime-update` can reuse an already validated slim browser through an immutable `INSTALLED_BROWSER_IMAGE` digest. Both this target and the complete browser build copy the current noVNC page and its connection bridge directly from this repository, after inherited viewer assets. Verify the already-built local image from the repository root with the following command. Set `IMAGE` to the image to inspect, preferably by its tested immutable digest.

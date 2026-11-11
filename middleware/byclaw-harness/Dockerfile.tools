@@ -40,6 +40,8 @@ RUN set -eux; \
     cmp "${profile_ssh}/lib/helper.js" /workspace/packages/ssh/ssh/lib/helper.js; \
     rm -rf "${profile_ssh}"; \
     ln -s /workspace/packages/ssh/ssh "${profile_ssh}"; \
+    # A's glob/grep run here as `rg` from PATH (BYCLAW_RIPGREP_PATH on the shared host).
+    rg --version; \
     # Everything the helper imports must still resolve, from both paths, as the login user.
     cd /workspace/packages/ssh/ssh; \
     TRACE_OUT=/tmp/tool-env-resolved.txt TRACE_HOOK=/tmp/tool-env-docker/trace-hook.mjs node /tmp/tool-env-docker/trace-main.mjs; \

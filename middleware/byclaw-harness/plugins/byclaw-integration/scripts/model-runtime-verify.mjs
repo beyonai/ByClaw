@@ -736,6 +736,32 @@ try {
   if (!String(error).includes('local provider and model')) throw error
 }
 
+// A fresh process (a host restart) restores the route a resumed agent asks for, without a selection first.
+{
+  const restoredRegistrations = []
+  const restartedCtx = { ...ctx, llm: { registerAdapter(routes) {
+    const registration = { routes: [...routes] }
+    restoredRegistrations.push(registration)
+    const dispose = () => undefined
+    dispose.replace = next => { registration.routes = [...next] }
+    return dispose
+  } } }
+  const restarted = new ByClawDynamicModelRuntime(restartedCtx, redis, { provider: 'static-fallback', model: 'fallback-model' })
+  await restarted.restoreRoute('baiying-m-20010925')
+  assert.equal(restoredRegistrations.length, 1, 'restoring a route must register the adapter')
+  assert.deepEqual(restoredRegistrations[0].routes, ['baiying-m-20010925'])
+  const reads = redisReads
+  await restarted.restoreRoute('baiying-m-20010925')
+  assert.equal(redisReads, reads, 'a registered route must not be read again')
+  // Other providers, routes no model id reproduces, and unknown models leave the registration alone.
+  for (const provider of ['deepseek', 'baiying-m-', 'baiying-m-Upper', 'baiying-m-99999999']) await restarted.restoreRoute(provider)
+  assert.deepEqual(restoredRegistrations[0].routes, ['baiying-m-20010925'])
+  // A model that is gone is not looked up again on the agent's next request.
+  const afterUnknown = redisReads
+  await restarted.restoreRoute('baiying-m-99999999')
+  assert.equal(redisReads, afterUnknown, 'an unrestorable route must not be read again right away')
+}
+
 const runtime = new ByClawDynamicModelRuntime(ctx, redis, { provider: 'static-fallback', model: 'fallback-model' })
 const employee = await runtime.resolve('employee:1', '20010925')
 if (employee.provider !== 'baiying-m-20010925' || employee.model !== 'deepseek-v4-flash'

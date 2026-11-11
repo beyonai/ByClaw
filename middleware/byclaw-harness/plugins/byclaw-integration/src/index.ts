@@ -804,6 +804,16 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       llmRequestLogLevel: config.llmRequestLogLevel,
       resolveRequestApiKey: sessionId => workspaceRegistry.requestApiKey(sessionId),
     })
+    // An agent resumed in this process after a host restart asks for the route its session last used.
+    const restoreRoutes = models
+    ctx.on('agent/created', ({ agent }) => {
+      agent.ctx.on('agent/request', async (_payload, next) => {
+        const config = await next()
+        if (typeof config.provider === 'string') await restoreRoutes.restoreRoute(config.provider)
+        return config
+      }, { prepend: true })
+      return undefined
+    })
     installBrowserText(ctx)
     if (modelRouting.enabled) {
       await startup.measure('model-catalog', () => installByClawModelCatalog(ctx, models!, modelRouting.modelIds))

@@ -55,6 +55,10 @@ const DEFAULT_MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024
 const DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET = 2048 * 2048
 const DEFAULT_REQUEST_IMAGE_MAX_BYTES = 1024 * 1024
 const PROVIDER_PREFIX = 'baiying-m-'
+/** Suffix of a model's native adaptive-thinking route next to its ordinary one. */
+const ADAPTIVE_ROUTE_SUFFIX = ':adaptive'
+/** How long a route that could not be restored is left alone before its model is read again. */
+const UNRESTORABLE_ROUTE_RETRY_MS = 60_000
 
 export type ByClawModelProtocol = 'openai-completions' | 'openai-responses' | 'anthropic-messages'
 
@@ -896,7 +900,7 @@ function materialize(
         // `:` cannot occur in byClawProviderKey() output, so the internal mode
         // route cannot collide with a real model id that happens to end in an
         // adaptive-looking suffix.
-        const adaptiveRoute = `${route}:adaptive`
+        const adaptiveRoute = `${route}${ADAPTIVE_ROUTE_SUFFIX}`
         return {
           selection: { ...selection, provider: adaptiveRoute },
           profile: createProfile(adaptiveRoute, undefined),
@@ -947,6 +951,8 @@ export class ByClawDynamicModelRuntime {
   private readonly reasonings = new Map<string, ResolvedByClawReasoning>()
   private readonly lastGood = new Map<string, ByClawModelSelection>()
   private readonly routeModelIds = new Map<string, string>()
+  /** Routes that could not be restored, with when to ask again: a deleted model is not read on every request. */
+  private readonly unrestorable = new Map<string, number>()
   private registration: AdapterRegistrationHandle | undefined
   private readonly adapter: PiAiAdapter
   private readonly fallback: ByClawModelSelection | undefined
@@ -1028,6 +1034,33 @@ export class ByClawDynamicModelRuntime {
       return { ...this.fallback }
     }
     throw new Error(`byclaw-dsh could not resolve an AI model for ${bindingId}, and no fallback is configured`)
+  }
+
+  /**
+   * Register a route this process has not resolved yet. An agent resumed after a host restart
+   * asks for the route its session last used, which the new process registers only when something
+   * selects that model again; until then every request of the agent fails for want of an adapter.
+   * @param provider - the route an agent request is about to use.
+   */
+  async restoreRoute(provider: string): Promise<void> {
+    if (!this.redisModelsEnabled || this.profiles.has(provider) || !provider.startsWith(PROVIDER_PREFIX)) return
+    const adaptive = provider.endsWith(ADAPTIVE_ROUTE_SUFFIX)
+    const route = adaptive ? provider.slice(0, -ADAPTIVE_ROUTE_SUFFIX.length) : provider
+    const key = route.slice(PROVIDER_PREFIX.length)
+    const modelId = key.startsWith('neg-') ? `-${key.slice('neg-'.length)}` : key
+    // The route name normalises the model id; only an id it reproduces exactly is the one it came from.
+    if (byClawProviderKey(modelId) !== route) return
+    if ((this.unrestorable.get(provider) ?? 0) > Date.now()) return
+    const model = await this.readExplicit(modelId).catch((error: unknown) => {
+      this.ctx.logger.warn(`byclaw-dsh: restoring model route ${provider} failed: ${String(error)}`)
+      return undefined
+    })
+    if (model === undefined) {
+      this.unrestorable.set(provider, Date.now() + UNRESTORABLE_ROUTE_RETRY_MS)
+      return
+    }
+    this.unrestorable.delete(provider)
+    this.publish(`restored:${provider}`, model, adaptive ? 'adaptive' : undefined)
   }
 
   /** Register the classifier's environment connection independently of Redis and conversation bindings.

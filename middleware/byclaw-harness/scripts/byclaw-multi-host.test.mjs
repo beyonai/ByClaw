@@ -176,6 +176,21 @@ test('overlays merge per-user additions into the composed row config', () => {
   assert.equal(byId['byclaw-dsh'], undefined)
 })
 
+test('each context boot consumes commands under its own worker id', () => {
+  const entries = [{ id: 'byclaw-dsh', name: '@byclaw/dsh-integration', config: {} }]
+  const [first] = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...spec, workerInstance: 'a1b2c3d4' })
+  const [second] = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...spec, workerInstance: 'e5f6a7b8' })
+  assert.match(first.config.workerId, /^byclaw-dsh-multi-[0-9a-f]{12}-a1b2c3d4-u1$/)
+  assert.notEqual(first.config.workerId, second.config.workerId)
+  // A managed host restarted within the same placement must not come back under the dead process's name either.
+  const managed = { ...spec, managed: true, userCode: 'u1', instanceId: 'i1', mappingId: 'm1', generation: 3, workerAgentType: 'BYCLAW_DSH_SHARED_ctx_3' }
+  const [before] = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...managed, workerInstance: 'a1b2c3d4' })
+  const [after] = composeUserOverlays(entries, 'u1', '/r/users/u1/dsh-home', { ...managed, workerInstance: 'e5f6a7b8' })
+  assert.equal(before.config.workerId, 'byclaw-shared-i1-m1-3-a1b2c3d4')
+  assert.notEqual(before.config.workerId, after.config.workerId)
+  assert.deepEqual(before.config.agentTypes, ['BYCLAW_DSH_SHARED_ctx_3'])
+})
+
 test('every plugin that reads or writes the user tree does so in the tool environment', () => {
   // The host has no user tree of its own: a plugin left on node:fs here fails (or writes nowhere useful).
   const rows = ['byclaw-dsh', 'byclaw-bash-provider', 'agent-teams', 'better-sidebar', 'iron-rules',
@@ -1025,6 +1040,137 @@ test('purpose marketplace templates come from the trusted user launch environmen
   const [row] = composeUserOverlays(entries, 'u1', '/r/u1', configured)
   assert.deepEqual(row.config.templates, templates)
   assert.throws(() => composeUserOverlays(entries, 'u1', '/r/u1', { ...configured, env: { ...configured.env, BYCLAW_TOOL_ENV_CATALOG: JSON.stringify([templates[0], { ...templates[1], serviceKey: templates[0].serviceKey }]) } }), /CATALOG/)
+})
+
+test('listed users store sessions in the database, everyone else keeps files', () => {
+  const entries = [
+    { id: 'session-persistence-jsonl', name: 'jsonl', config: { root: '/x' } },
+    { id: 'session-persistence-db', name: 'db', disabled: true },
+  ]
+  const config = host.readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_SESSION_DB_URL: 'postgres://db', BYCLAW_SESSION_DB_USERS: 'u1, u2' })
+  const rows = user => composeUserOverlays(entries, user, `/home/${user}`, { sessionDb: host.sessionDbFor(config, user) })
+    .filter(row => row.id.startsWith('session-persistence'))
+  assert.deepEqual(rows('u1'), [
+    { id: 'session-persistence-jsonl', config: { root: join('/home/u1', 'sessions') } },
+    { id: 'session-persistence-jsonl', disabled: true },
+    { id: 'session-persistence-db', disabled: false, config: { connectionString: 'postgres://db', userCode: 'u1' } },
+  ])
+  assert.deepEqual(rows('u3'), [{ id: 'session-persistence-jsonl', config: { root: join('/home/u3', 'sessions') } }])
+  assert.equal(host.sessionDbFor({ sessionDbUrl: undefined, sessionDbUsers: ['*'] }, 'u1'), undefined)
+  assert.deepEqual(host.sessionDbFor({ sessionDbUrl: 'postgres://db', sessionDbUsers: ['*'] }, 'u9'), { url: 'postgres://db' })
+})
+
+test('listed users keep storage units in the database too; spills go to the tool environment', () => {
+  const entries = [
+    { id: 'storage-json', name: 'json', config: { root: '/x' } },
+    { id: 'storage-domain', name: 'domain', config: { backend: 'json', routes: { keep: 'json' } } },
+    { id: 'storage-db', name: 'db', disabled: true },
+    { id: 'spill-local', name: 'spill-local' },
+    { id: 'spill-tool-env', name: 'spill-tool-env', disabled: true },
+  ]
+  const config = host.readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_SESSION_DB_URL: 'postgres://db', BYCLAW_SESSION_DB_USERS: 'u1' })
+  const rows = (user, spec = {}) => composeUserOverlays(entries, user, `/home/${user}`, { sessionDb: host.sessionDbFor(config, user), ...spec })
+    .filter(row => /^(storage-(db|domain)|spill-)/.test(row.id))
+  const spills = [{ id: 'spill-local', disabled: true }, { id: 'spill-tool-env', disabled: false }]
+  assert.deepEqual(rows('u1'), [
+    { id: 'storage-db', disabled: false, config: { connectionString: 'postgres://db', userCode: 'u1' } },
+    { id: 'storage-domain', config: { backend: 'db', routes: { keep: 'json' } } },
+    ...spills,
+  ])
+  assert.deepEqual(rows('u2'), spills)
+  // Without a tool environment read/grep run on this host, so the local spill store stays.
+  assert.deepEqual(rows('u2', { toolEnvBackend: 'none' }), [])
+})
+
+test('listed users on a byclaw-be tool sandbox keep image attachments in their space; renewed tokens reach the store', () => {
+  const entries = [
+    { id: 'attachment-local', name: 'local', config: { maxImageBytes: 9 } },
+    { id: 'attachment-be', name: 'be', disabled: true },
+  ]
+  const config = host.readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_SESSION_DB_URL: 'postgres://db', BYCLAW_SESSION_DB_USERS: 'u1' })
+  const toolEnvBe = { baseUrl: 'http://be/byaiService', systemCode: 'sys' }
+  const rows = (user, spec) => composeUserOverlays(entries, user, `/home/${user}`, { sessionDb: host.sessionDbFor(config, user), env: { BEYOND_TOKEN: 'tok' }, ...spec })
+    .filter(row => row.id.startsWith('attachment-'))
+  assert.deepEqual(rows('u1', { toolEnvBe }), [
+    { id: 'attachment-local', config: { maxImageBytes: 9, dshHome: '/home/u1' } },
+    { id: 'attachment-local', disabled: true },
+    { id: 'attachment-be', disabled: false, config: { maxImageBytes: 9, dshHome: '/home/u1', be: { baseUrl: 'http://be/byaiService', systemCode: 'sys', token: 'tok' } } },
+  ])
+  const localOnly = [{ id: 'attachment-local', config: { maxImageBytes: 9, dshHome: '/home/u2' } }]
+  assert.deepEqual(rows('u2', { toolEnvBe }), localOnly)
+  assert.deepEqual(rows('u1', {}).length, 1)
+
+  const renewed = []
+  const ctx = { get: name => ({ attachments: { renewBeToken: token => renewed.push(['attachments', token]) }, ssh: { renewBeToken: token => renewed.push(['ssh', token]) } })[name] }
+  assert.equal(host.renewUserToken(ctx, { toolEnvBackend: 'byclaw-be' }, { BEYOND_TOKEN: ' new ' }), true)
+  assert.deepEqual(renewed, [['attachments', 'new'], ['ssh', 'new']])
+})
+
+test('glob/grep run rg from PATH in the tool environment, and the packaged one without it', () => {
+  const env = {}
+  host.applyHostProcessDefaults({ toolEnvBackend: 'byclaw-be' }, env)
+  assert.deepEqual(env, { BYCLAW_DSH_TOOL_ENV: 'opensandbox', BYCLAW_RIPGREP_PATH: 'rg' })
+  const chatOnly = { BYCLAW_DSH_TOOL_ENV: 'none' }
+  host.applyHostProcessDefaults({ toolEnvBackend: 'none' }, chatOnly)
+  assert.equal(chatOnly.BYCLAW_RIPGREP_PATH, undefined)
+  const explicit = { BYCLAW_RIPGREP_PATH: '/opt/rg/bin/rg' }
+  host.applyHostProcessDefaults({ toolEnvBackend: 'opensandbox' }, explicit)
+  assert.equal(explicit.BYCLAW_RIPGREP_PATH, '/opt/rg/bin/rg')
+})
+
+test('credential files are stored in the database only with both the secret file and the database', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'host-file-store-'))
+  try {
+    const secretFile = join(dir, 'service-secret')
+    await writeFile(secretFile, 'a-service-secret-of-enough-length\n')
+    const queries = []
+    const pg = { Pool: class { constructor(options) { this.options = options } on() {} async query(text, values) { queries.push([text, values]); return { rows: [], rowCount: 0 } } async end() {} } }
+    assert.equal(await host.openHostFileStore({ sessionDbUrl: undefined }, { BYCLAW_CREDENTIAL_SECRET_FILE: secretFile }, () => pg), undefined)
+    assert.equal(await host.openHostFileStore({ sessionDbUrl: 'postgres://db' }, {}, () => pg), undefined)
+    const opened = await host.openHostFileStore({ sessionDbUrl: 'postgres://db' }, { BYCLAW_CREDENTIAL_SECRET_FILE: secretFile }, () => pg)
+    assert.equal(opened.key.length, 32)
+    assert.deepEqual(await opened.store.list('u1'), [])
+    assert.match(queries.at(-1)[0], /SELECT name, value FROM byai\.dsh_host_file WHERE user_code = \$1/)
+    assert.deepEqual(queries.at(-1)[1], ['u1'])
+    // Where no file can be mounted, the same secret as a value derives the same key.
+    const fromValue = await host.openHostFileStore({ sessionDbUrl: 'postgres://db' }, { BYCLAW_CREDENTIAL_SECRET: ' a-service-secret-of-enough-length ' }, () => pg)
+    assert.deepEqual(fromValue.key, opened.key)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('the service secret as a value never reaches a launch environment', () => {
+  const values = host.launchEnvironmentValues({ BYCLAW_CREDENTIAL_SECRET: 'secret', BYCLAW_CREDENTIAL_SECRET_FILE: '/run/secrets/service-secret', PATH: '/bin' }, {}, 'u1')
+  assert.equal(values.BYCLAW_CREDENTIAL_SECRET, undefined)
+  // Nor where the host keeps it.
+  assert.equal(values.BYCLAW_CREDENTIAL_SECRET_FILE, undefined)
+  assert.equal(values.PATH, '/bin')
+})
+
+test('managed hosts list users by user code and keep each context apart in the database', () => {
+  const config = host.readHostConfig({ BYCLAW_MULTI_HOST_TOKEN: 't', BYCLAW_MULTI_HOST_MANAGED: '1', BYCLAW_MULTI_HOST_ID: '0f8c2a6e-1b2c-4d5e-8f90-123456789abc',
+    BYCLAW_MULTI_HOST_CAPACITY: '4', BYCLAW_SESSION_DB_URL: 'postgres://db', BYCLAW_SESSION_DB_USERS: 'u1' })
+  assert.equal(config.managed, true)
+  assert.equal(config.sessionDbUrl, 'postgres://db')
+  const entries = [
+    { id: 'session-persistence-jsonl', name: 'jsonl', config: { root: '/x' } },
+    { id: 'session-persistence-db', name: 'db', disabled: true },
+    { id: 'storage-domain', name: 'domain', config: {} },
+    { id: 'storage-db', name: 'storage', disabled: true },
+  ]
+  // The same person in two enterprises: two contexts, one user code on the list.
+  for (const context of ['ctx-7f3a', 'ctx-91bc']) {
+    const rows = composeUserOverlays(entries, context, `/data/contexts/${context}/dsh-home`, { managed: true, userCode: 'u1', sessionDb: host.sessionDbFor(config, 'u1') })
+    for (const id of ['session-persistence-db', 'storage-db']) {
+      assert.deepEqual(rows.find(row => row.id === id), { id, disabled: false, config: { connectionString: 'postgres://db', userCode: context } })
+    }
+  }
+  assert.equal(host.sessionDbFor(config, 'ctx-7f3a'), undefined)
+})
+
+test('the session database password never reaches a launch environment', () => {
+  const values = launchEnvironmentValues({ KEEP: '1', BYCLAW_SESSION_DB_URL: 'postgres://u:secret@db' }, {}, 'u1')
+  assert.equal(values.KEEP, '1')
+  assert.equal(values.BYCLAW_SESSION_DB_URL, undefined)
 })
 
 test('each context is offered the Beyond-Token of its latest PUT, for BE calls while its user is logged out', () => {
