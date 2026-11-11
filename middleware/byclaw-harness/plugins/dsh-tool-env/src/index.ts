@@ -23,6 +23,7 @@ import { ByClawBeBackend, parseEndpoint, type BeTokenSource, type ByClawBeBacken
 import { isDshBusy, probeResidualProcesses, type AgentsView, type JobsView } from './busy.ts'
 import { ToolEnvConnection } from './connection.ts'
 import { ToolEnvIdentity } from './identity.ts'
+import { deploymentConfigured, loadDeploymentCredentials } from './deployment-environment.ts'
 
 export { ToolSandboxManager } from './catalog.ts'
 export type { SandboxTemplate, SandboxRuntime, ExecutionLease } from './catalog.ts'
@@ -107,6 +108,16 @@ export class ToolEnv extends ToolEnvConnection {
   private readonly catalogRuntimes = new Set<ToolEnv>()
   private catalogLaunchEnv: Readonly<Record<string, string>> = {}
   private catalogToken = ''
+  private currentDeploymentCredentials: Readonly<Record<string, string>> | undefined
+
+  async refreshDeploymentCredentials(): Promise<boolean> {
+    const provider = this.ctx.get('credentials') as { resolve: (name: string) => Promise<{ value: string } | undefined> } | undefined
+    const values = provider === undefined ? this.catalogLaunchEnv : await loadDeploymentCredentials(name => provider.resolve(name))
+    this.currentDeploymentCredentials = values
+    this.setDeploymentCredentials(values)
+    for (const runtime of this.catalogRuntimes) runtime.setDeploymentCredentials(values)
+    return deploymentConfigured(values)
+  }
 
   static Config: schema<Config> = schema.object({
     backend: schema.union(['static', 'opensandbox', 'byclaw-be']).required(),
@@ -207,6 +218,7 @@ export class ToolEnv extends ToolEnvConnection {
         try { started.resolve({ ssh: new ToolEnv(inner, innerConfig, false), subprocess: new SshSubprocessRuntime(inner) }) } catch (error) { started.reject(error) }
       } })
       const runtime = await started.promise.catch(error => { fiber.dispose(); throw error })
+      if (this.currentDeploymentCredentials !== undefined) runtime.ssh.setDeploymentCredentials(this.currentDeploymentCredentials)
       try { await runtime.ssh.acquireSession(allocationSessionId) }
       catch (error) { await runtime.ssh.releaseOwned(false).catch(() => {}); await fiber.dispose(); throw error }
       this.catalogRuntimes.add(runtime.ssh)

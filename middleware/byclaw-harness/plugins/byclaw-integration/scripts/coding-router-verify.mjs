@@ -38,6 +38,7 @@ function fixture(options = {}) {
   const environment = options.environment ?? { BYCLAW_AGENT_EXECUTION_MAP: JSON.stringify({ '11444401': 'CODEX_CLI' }) }
   const router = new ByClawExecutionRouter({
     userCode: 'u1', environment: () => environment,
+    deploymentEnabled: options.deploymentEnabled,
     resolveTarget: (cmd, text) => {
       if (options.unauthorized) throw new Error('not authorized')
       return { kind: 'employee', resourceId: cmd.extraPayload.agent_id, text }
@@ -80,6 +81,16 @@ test('deployment opt-in uses the dedicated coding entry and never silently falls
   await assert.rejects(missing.run(), error => error.message === 'EXECUTION_FAILED'
     && error.cause?.message === 'EXECUTION_DEPLOYMENT_UNAVAILABLE')
   assert.equal(missing.dshCalls, 0)
+})
+test('live credential resolution enables deployment without startup-spec variables', async () => {
+  const f = fixture({ deploymentEnabled: async () => true })
+  let dedicated = 0
+  f.manager.executeWithDeployment = (...args) => { dedicated++; return f.manager.execute(...args) }
+  assert.equal((await f.run()).finalAnswer, '6')
+  assert.equal(dedicated, 1)
+  const paused = fixture({ environment: { BYCLAW_AGENT_EXECUTION_MAP: '{"11444401":"CODEX_CLI"}', BYCLAW_DEPLOY_ENABLED: '1' }, deploymentEnabled: async () => false })
+  paused.manager.executeWithDeployment = async () => { throw new Error('disabled live credentials must override stale startup env') }
+  assert.equal((await paused.run()).finalAnswer, '6')
 })
 test('a simple question invokes Codex in coding sandbox and returns its answer without DSH', async () => {
   const f = fixture()

@@ -1143,7 +1143,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       const employee = resources.employees.find(candidate => candidate.id === id)
       return { templateId: `byclaw-employee-${id}`, resourceId: id, kind: 'employee' as const, name: employee?.name ?? (id === coordination.coordinatorAgentId ? '群组工作助手' : '数字员工'), text }
     }
-    type ExecutionToolEnvironment = { sandboxCatalog?: ExecutionSandbox; environmentValue?: (name: string) => string | undefined }
+    type ExecutionToolEnvironment = { sandboxCatalog?: ExecutionSandbox; environmentValue?: (name: string) => string | undefined; refreshDeploymentCredentials?: () => Promise<boolean> }
     const executionEnvironment = () => {
       const ssh = ctx.get('ssh') as ExecutionToolEnvironment | undefined
       return {
@@ -1156,6 +1156,10 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
     execution = new ByClawExecutionRouter({
       userCode,
       environment: executionEnvironment,
+      deploymentEnabled: async () => {
+        const ssh = ctx.get('ssh') as ExecutionToolEnvironment | undefined
+        return await ssh?.refreshDeploymentCredentials?.() ?? executionEnvironment().BYCLAW_DEPLOY_ENABLED === '1'
+      },
       resolveTarget: resolveInboundTarget,
       sandbox: () => (ctx.get('ssh') as ExecutionToolEnvironment | undefined)?.sandboxCatalog,
       onActivityChange: () => sandboxBusy?.activityChanged(),

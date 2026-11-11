@@ -60,6 +60,7 @@ export interface ExecutionRouterEnvironment {
 export interface ExecutionRouterOptions {
   userCode: string
   environment: () => Readonly<ExecutionRouterEnvironment>
+  deploymentEnabled?: () => Promise<boolean>
   resolveTarget: (command: AskAgentCommand, text: string) => ExecutionTarget | undefined
   prepareContext: (command: AskAgentCommand, target: ExecutionTarget, lease: {
     sandbox: ExecutionSandbox; actor: string; leaseId: string; workspaceRoot: string; signal: AbortSignal; identity: string
@@ -249,7 +250,8 @@ export class ByClawExecutionRouter {
       const argv = ['python3', '-c', CODING_WORKSPACE_RUNNER, JSON.stringify(codingRunManifest(prepared, identity, String(command.header.messageId))), prompt, lease.workspaceRoot]
       executionStarted = performance.now()
       let firstStdout = false
-      const execute = this.options.environment().BYCLAW_DEPLOY_ENABLED === '1' ? sandbox.executeWithDeployment : sandbox.execute
+      const deployment = await this.options.deploymentEnabled?.() ?? this.options.environment().BYCLAW_DEPLOY_ENABLED === '1'
+      const execute = deployment ? sandbox.executeWithDeployment : sandbox.execute
       if (!execute) throw new Error('EXECUTION_DEPLOYMENT_UNAVAILABLE')
       const processResult = await execute.call(sandbox, actor, lease.leaseId, argv, lease.workspaceRoot, signal, chunk => {
         if (!firstStdout && chunk) { firstStdout = true; log('first_stdout', 'success', executionStarted) }
