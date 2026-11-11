@@ -222,6 +222,7 @@ export class ToolEnv extends ToolEnvConnection {
         releaseLease: (sessionId, destroy) => runtime.ssh.finishSession(sessionId, destroy),
         handshake: async () => { await runtime.ssh.ready; const result = await execute(['cat', '/etc/byclaw-tool-sandbox/capabilities.json']); if (result.exitCode !== 0) throw new Error('CAPABILITY_MANIFEST_UNAVAILABLE'); return JSON.parse(result.stdout) as unknown },
         execute,
+        executeWithDeployment: (...args) => runtime.ssh.runWithDeploymentCredentials(() => execute(...args)),
         release: async (destroy = true) => { await runtime.ssh.releaseOwned(destroy); this.catalogRuntimes.delete(runtime.ssh); await fiber.dispose() },
       }
     }, event => ctx.logger('byclaw-tool-env').info(`sandbox.lifecycle ${JSON.stringify(event)}`),

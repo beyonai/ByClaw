@@ -15,6 +15,7 @@ export interface SandboxRuntime {
   releaseLease?(sessionId: string, destroy: boolean): Promise<void>
   identity?(): { sandboxId?: string; workspaceRoot?: string; instanceContext?: SandboxInstanceContext }
   execute(argv: readonly string[], cwd?: string, signal?: AbortSignal, sessionId?: string, onStdout?: (chunk: string) => void): Promise<SandboxResult>
+  executeWithDeployment?: SandboxRuntime['execute']
   release(destroy?: boolean): Promise<void>
 }
 export interface ExecutionLease {
@@ -171,6 +172,13 @@ export class ToolSandboxManager {
     return instanceRefsFor(this.owned(actor, leaseId).public.instanceContext, capability)
   }
   async execute(actor: string, leaseId: string, argv: readonly string[], cwd?: string, signal?: AbortSignal, onStdout?: (chunk: string) => void): Promise<SandboxResult> {
+    return this.executeOwned(actor, leaseId, argv, cwd, signal, onStdout)
+  }
+  async executeWithDeployment(actor: string, leaseId: string, argv: readonly string[], cwd?: string, signal?: AbortSignal, onStdout?: (chunk: string) => void): Promise<SandboxResult> {
+    if (this.owned(actor, leaseId).public.templateKey !== 'coding') throw new Error('DEPLOYMENT_REQUIRES_CODING')
+    return this.executeOwned(actor, leaseId, argv, cwd, signal, onStdout, true)
+  }
+  private async executeOwned(actor: string, leaseId: string, argv: readonly string[], cwd?: string, signal?: AbortSignal, onStdout?: (chunk: string) => void, deployment = false): Promise<SandboxResult> {
     if (this.actorReleases.has(actor)) throw new Error('ACTOR_RELEASING')
     const lease = this.owned(actor, leaseId)
     const { handle } = lease
@@ -181,7 +189,12 @@ export class ToolSandboxManager {
     const command = sandboxId === undefined ? argv : ['/usr/bin/env', `E2B_SANDBOX_ID=${sandboxId}`, ...argv]
     handle.inflight++; lease.inflight++
     const running = (async () => {
-      try { return await (await handle.runtime).execute(command, cwd, signal, `${actor}:${leaseId}`, onStdout) }
+      try {
+        const runtime = await handle.runtime
+        const execute = deployment ? runtime.executeWithDeployment : runtime.execute
+        if (!execute) throw new Error('DEPLOYMENT_EXECUTION_UNAVAILABLE')
+        return await execute.call(runtime, command, cwd, signal, `${actor}:${leaseId}`, onStdout)
+      }
       finally { handle.inflight--; lease.inflight-- }
     })()
     const executions = this.executions.get(actor) ?? new Set<Promise<SandboxResult>>()
