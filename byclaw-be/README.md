@@ -1009,7 +1009,10 @@ The existing record schema provides recovery without a migration:
   replacement request. Any newer record for that user/service/resource supersedes it,
   including a later manually stopped or failed attempt. Manual stop and preferred-service
   removal cancel this intent. Immediately before reserving a new `STARTING` record, a
-  short transaction locks and rechecks the intent; no HTTP call runs in that transaction.
+  short transaction reads the intent, claims its observed `lock_version` with an ordinary
+  conditional `UPDATE`, and inserts the replacement. Cancellation or another claimant
+  changing that version prevents reservation. The claim rolls back if insertion fails;
+  no HTTP call runs in that transaction. No locking SELECT syntax is used.
 - Known success/failure responses receive their normal local lifecycle update. Missing
   responses, interrupted operations and network failures retain a recoverable attempt
   rather than being assumed to be explicit remote rejection.

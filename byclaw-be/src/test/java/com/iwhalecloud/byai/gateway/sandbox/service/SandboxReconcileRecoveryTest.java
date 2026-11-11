@@ -233,6 +233,7 @@ class SandboxReconcileRecoveryTest {
         when(mapper.selectPendingReconcileRestart(1L)).thenReturn(null);
         Boolean inserted = ReflectionTestUtils.invokeMethod(service, "insertLaunchRecord", record(99, null), 1L);
         assertThat(inserted).isFalse();
+        verify(mapper, never()).claimPendingReconcileRestart(any(), any());
         verify(mapper, never()).insert(any());
     }
 
@@ -240,12 +241,58 @@ class SandboxReconcileRecoveryTest {
     void replacementReservationChecksIntentBeforeInsertingPlaceholder() {
         SsSandboxRecord old = record(1, "missing");
         when(mapper.selectPendingReconcileRestart(1L)).thenReturn(old);
+        when(mapper.claimPendingReconcileRestart(1L, 0)).thenReturn(1);
         SsSandboxRecord replacement = record(99, null);
         Boolean inserted = ReflectionTestUtils.invokeMethod(service, "insertLaunchRecord", replacement, 1L);
         assertThat(inserted).isTrue();
         var ordered = inOrder(mapper);
         ordered.verify(mapper).selectPendingReconcileRestart(1L);
+        ordered.verify(mapper).claimPendingReconcileRestart(1L, 0);
         ordered.verify(mapper).insert(replacement);
+        verifyNoInteractions(facade);
+    }
+
+    @Test
+    void changedIntentVersionPreventsReplacementAfterRead() {
+        SsSandboxRecord pending = record(1, "missing");
+        pending.setLockVersion(7);
+        when(mapper.selectPendingReconcileRestart(1L)).thenReturn(pending);
+        // A manual cancellation or competing worker won after the ordinary read.
+        when(mapper.claimPendingReconcileRestart(1L, 7)).thenReturn(0);
+        Boolean inserted = ReflectionTestUtils.invokeMethod(service, "insertLaunchRecord", record(99, null), 1L);
+        assertThat(inserted).isFalse();
+        verify(mapper).claimPendingReconcileRestart(1L, 7);
+        verify(mapper, never()).insert(any());
+        verifyNoInteractions(facade);
+    }
+
+    @Test
+    void emptyInsertRollsBackSuccessfulClaim() {
+        var manager = (org.springframework.jdbc.datasource.DataSourceTransactionManager)
+            ReflectionTestUtils.getField(service, "sandboxTransactionManager");
+        var status = new org.springframework.transaction.support.SimpleTransactionStatus();
+        when(manager.getTransaction(any())).thenReturn(status);
+        when(mapper.selectPendingReconcileRestart(1L)).thenReturn(record(1, "missing"));
+        when(mapper.claimPendingReconcileRestart(1L, 0)).thenReturn(1);
+        doReturn(0).when(mapper).insert(any());
+        Boolean inserted = ReflectionTestUtils.invokeMethod(service, "insertLaunchRecord", record(99, null), 1L);
+        assertThat(inserted).isFalse();
+        assertThat(status.isRollbackOnly()).isTrue();
+        verifyNoInteractions(facade);
+    }
+
+    @Test
+    void failedInsertRollsBackSuccessfulClaim() {
+        var manager = (org.springframework.jdbc.datasource.DataSourceTransactionManager)
+            ReflectionTestUtils.getField(service, "sandboxTransactionManager");
+        var status = new org.springframework.transaction.support.SimpleTransactionStatus();
+        when(manager.getTransaction(any())).thenReturn(status);
+        when(mapper.selectPendingReconcileRestart(1L)).thenReturn(record(1, "missing"));
+        when(mapper.claimPendingReconcileRestart(1L, 0)).thenReturn(1);
+        doThrow(new IllegalStateException("insert failed")).when(mapper).insert(any());
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(service, "insertLaunchRecord", record(99, null), 1L))
+            .isInstanceOf(IllegalStateException.class).hasMessage("insert failed");
+        verify(manager).rollback(status);
         verifyNoInteractions(facade);
     }
 

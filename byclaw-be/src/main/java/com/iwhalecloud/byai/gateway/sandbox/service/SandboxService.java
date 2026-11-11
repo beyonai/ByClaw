@@ -782,16 +782,26 @@ public class SandboxService {
         if (pendingRestartId == null) {
             return sandboxRecordMapper.insert(record) > 0;
         }
-        // Serialize manual cancellation with reservation of the replacement. Never hold this transaction over HTTP.
+        // A version-checked UPDATE serializes cancellation with reservation; reads remain ordinary SELECTs.
+        // Never hold this transaction over HTTP.
         var transaction = new org.springframework.transaction.support.TransactionTemplate(sandboxTransactionManager);
         transaction.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         transaction.setTimeout(5);
         return Boolean.TRUE.equals(transaction.execute(status -> {
-            if (sandboxRecordMapper.selectPendingReconcileRestart(pendingRestartId) == null) {
+            SsSandboxRecord pending = sandboxRecordMapper.selectPendingReconcileRestart(pendingRestartId);
+            if (pending == null) {
                 return false;
             }
             checkReconcileCancellation();
-            return sandboxRecordMapper.insert(record) > 0;
+            if (sandboxRecordMapper.claimPendingReconcileRestart(pendingRestartId, pending.getLockVersion()) == 0) {
+                return false;
+            }
+            checkReconcileCancellation();
+            if (sandboxRecordMapper.insert(record) <= 0) {
+                status.setRollbackOnly();
+                return false;
+            }
+            return true;
         }));
     }
 

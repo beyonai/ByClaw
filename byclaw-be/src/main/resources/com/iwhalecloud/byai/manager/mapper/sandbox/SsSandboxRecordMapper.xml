@@ -488,8 +488,17 @@
         SELECT <include refid="Base_Column_List" /> FROM ss_sandbox_record
         WHERE owner_scope = 'USER' AND id = #{id,jdbcType=BIGINT}
           AND (<include refid="PendingReconcileRestart" />)
-        FOR UPDATE
     </select>
+
+    <update id="claimPendingReconcileRestart">
+        UPDATE ss_sandbox_record
+        SET version = version + 1, lock_version = lock_version + 1
+        WHERE id = #{id,jdbcType=BIGINT}
+          AND owner_scope = 'USER'
+          AND status = 'RELEASED'
+          AND release_reason = 'release.remote.missing'
+          AND lock_version = #{lockVersion,jdbcType=INTEGER}
+    </update>
 
     <update id="cancelPendingReconcileRestarts">
         UPDATE ss_sandbox_record
