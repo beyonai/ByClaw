@@ -16,6 +16,8 @@ const anchor = join(resolve(workspace), 'apps/cli/package.json')
 const hostRequire = createRequire(anchor)
 const profileRequire = createRequire(join(resolve(managedProfile), 'package.json'))
 const preloaded = await preloadHostRuntime({ installAnchor: anchor, managedProfile: resolve(managedProfile) })
+// Surface the original import error before reporting the failed module names.
+for (const name of preloaded.failed) await import(pathToFileURL(profileRequire.resolve(name)))
 assert.deepEqual(preloaded.failed, [], 'all image-owned shared modules must be importable')
 const { appBoot } = await loadHostRuntime(anchor)
 const { Context } = await import(pathToFileURL(hostRequire.resolve('@deepseek-ai/cordis')))
