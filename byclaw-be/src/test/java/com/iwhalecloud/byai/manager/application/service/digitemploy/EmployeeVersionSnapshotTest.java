@@ -40,6 +40,38 @@ class EmployeeVersionSnapshotTest {
         assertThrows(RuntimeException.class, () -> EmployeeVersionSnapshot.decode("{}"));
         assertThrows(RuntimeException.class, () -> EmployeeVersionSnapshot.decode("{\"snapshotSchemaVersion\":999,\"configuration\":{}}"));
     }
+    @Test void restorationDiscardsCurrentDerivedSkillsWhenSnapshotClearsSkills() {
+        var saved = employee();
+        saved.setRelIds(List.of());
+        saved.setRelSkills(List.of());
+        var current = employee();
+        current.setRelIds(List.of(99L));
+        String currentSkills = JSON.toJSONString(current.getRelSkills());
+        current.setSkills(currentSkills);
+
+        var restored = EmployeeVersionSnapshot.restore(EmployeeVersionSnapshot.encode(saved), current);
+
+        assertTrue(restored.getRelIds().isEmpty());
+        assertTrue(restored.getRelSkills().isEmpty());
+        assertNull(restored.getSkills());
+        assertEquals(currentSkills, current.getSkills());
+        assertEquals(List.of(99L), current.getRelIds());
+    }
+
+    @Test void restorationUsesSnapshotSkillSelectionInsteadOfCurrentDerivedSkills() {
+        var saved = employee();
+        saved.setRelIds(List.of(100L));
+        saved.setRelSkills(List.of(Map.of("resourceId", "100", "skillCode", "replacement")));
+        var current = employee();
+        current.setSkills(JSON.toJSONString(current.getRelSkills()));
+
+        var restored = EmployeeVersionSnapshot.restore(EmployeeVersionSnapshot.encode(saved), current);
+
+        assertEquals(List.of(100L), restored.getRelIds());
+        assertEquals("replacement", JSON.parseArray(JSON.toJSONString(restored.getRelSkills()))
+            .getJSONObject(0).getString("skillCode"));
+        assertNull(restored.getSkills());
+    }
     @Test void employeeGroupRetainsExistingRuntimeProtocol() {
         var dto = employee(); dto.setAgentType("017");
         var snapshot = JSON.parseObject(EmployeeVersionSnapshot.encode(dto));

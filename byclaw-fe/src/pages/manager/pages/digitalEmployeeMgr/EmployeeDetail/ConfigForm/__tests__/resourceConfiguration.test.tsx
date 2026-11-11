@@ -361,22 +361,25 @@ describe('employee editor resource configuration entries', () => {
     multiStepFormTimeout
   );
 
-  it('removes the last configured skill from both form fields before saving', async () => {
-    render(<Editor employee={{ ownerType: 'personal', resourceCode: 'alice_helper' }} />);
-    await waitFor(() => expect(screen.getByText('employeeDetail.basicSettings')).toBeVisible());
-    act(() => editorForm.setFieldsValue({ bundledSkills: skills, role: JSON.stringify({ bundledSkills: skills }) }));
-    const card = screen.getByText('Search skill').closest('.ant-card')!;
-    mockUpdateResource.mockImplementation(() => {
-      expect(editorForm.getFieldValue('bundledSkills')).toEqual([]);
-      expect(JSON.parse(editorForm.getFieldValue('role')).bundledSkills).toEqual([]);
-    });
+  it.each(['personal', 'enterprise'])(
+    'removes the last %s skill from both form fields before saving',
+    async (ownerType) => {
+      render(<Editor employee={{ ownerType, resourceCode: 'ordinary_helper' }} />);
+      await waitFor(() => expect(screen.getByText('employeeDetail.basicSettings')).toBeVisible());
+      act(() => editorForm.setFieldsValue({ bundledSkills: skills, role: JSON.stringify({ bundledSkills: skills }) }));
+      const card = screen.getByText('Search skill').closest('.ant-card')!;
+      mockUpdateResource.mockImplementation(() => {
+        expect(editorForm.getFieldValue('bundledSkills')).toEqual([]);
+        expect(JSON.parse(editorForm.getFieldValue('role')).bundledSkills).toEqual([]);
+      });
 
-    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'icon-a-Deleteshanchu' }));
+      fireEvent.click(within(card as HTMLElement).getByRole('button', { name: 'icon-a-Deleteshanchu' }));
 
-    await waitFor(() => expect(mockUpdateResource).toHaveBeenCalled());
-    expect(screen.queryByText('Search skill')).not.toBeInTheDocument();
-    mockUpdateResource.mockReset();
-  });
+      await waitFor(() => expect(mockUpdateResource).toHaveBeenCalled());
+      expect(screen.queryByText('Search skill')).not.toBeInTheDocument();
+      mockUpdateResource.mockReset();
+    }
+  );
 
   it('closes the resource dialog when switching from an ordinary employee to a super assistant', async () => {
     const { rerender } = render(<Editor employee={{ ownerType: 'personal', resourceCode: 'alice_helper' }} />);

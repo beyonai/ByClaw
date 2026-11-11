@@ -4,8 +4,13 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.dto.digitemploy.*;
 import com.iwhalecloud.byai.manager.entity.resource.*;
 import com.iwhalecloud.byai.manager.mapper.resource.*;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 import static org.junit.jupiter.api.Assertions.*;
@@ -51,6 +56,37 @@ class EmployeeVersionCommandsTest {
         assertThrows(IllegalStateException.class, () -> commands.save(request));
         verify(store, never()).append(any(), any(), any(), any(), any(), any(), any());
         verify(employees, never()).updateDigitalEmployee(any());
+    }
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void savingAndActivatingOrSwitchingToSavedVersionDoesNotRestoreDeletedSkills(boolean saveAndActivate) {
+        var cleared = new DigitalEmployeeDTO();
+        cleared.setResourceId(10L);
+        cleared.setResourceName("测试");
+        cleared.setAgentType("001");
+        cleared.setRelSkills(List.of());
+        cleared.setSkills("[]");
+        version.setExtInfo(EmployeeVersionSnapshot.encode(cleared));
+        config.setRelIds(List.of(99L));
+        config.setRelSkills(List.of(Map.of("resourceId", "99", "skillCode", "deleted")));
+        config.setSkills("[{\"resourceId\":99,\"skillCode\":\"deleted\"}]");
+        var request = request();
+        request.setEmployee(saveAndActivate ? cleared : null);
+        request.setActivate(saveAndActivate);
+        if (saveAndActivate) {
+            when(store.append(eq(resource), eq(cleared), any(), eq("EDIT_ACTIVATE"), any(), eq("request-1"), any()))
+                .thenReturn(version);
+        }
+
+        var result = saveAndActivate ? commands.save(request) : commands.activate(request);
+
+        assertEquals("ACTIVE", result.status());
+        var updated = ArgumentCaptor.forClass(DigitalEmployeeDTO.class);
+        verify(employees).updateDigitalEmployee(updated.capture());
+        assertTrue(updated.getValue().getRelIds().isEmpty());
+        assertTrue(updated.getValue().getRelSkills().isEmpty());
+        assertNull(updated.getValue().getSkills());
+        verify(sync).refresh(10L);
     }
     @Test void officialActivationCreatesReviewDraftAndCannotDirectlyUpdateEmployee() {
         resource.setOwnerType("enterprise"); resource.setPublicationSourceId(99L);

@@ -70,6 +70,8 @@ public final class EmployeeVersionSnapshot {
         JSONObject merged = (JSONObject) JSON.toJSON(current);
         JSONObject configuration = decode(json);
         for (String field : FIELDS) merged.put(field, configuration.get(field));
+        // skills 是当前关系派生的运行数据；清除后由快照 relSkills 重建，避免旧值覆盖版本中的删除或替换。
+        merged.remove("skills");
         // 用户私有记忆不随共享版本切换；运行镜像重新生成，版本指针只由服务端设置。
         merged.remove("memoryConfigList"); merged.remove("targetContent");
         merged.remove("resourceDVerid"); merged.remove("resourceRVerid");

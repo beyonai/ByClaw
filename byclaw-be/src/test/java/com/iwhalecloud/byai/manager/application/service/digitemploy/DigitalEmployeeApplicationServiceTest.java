@@ -2404,16 +2404,27 @@ class DigitalEmployeeApplicationServiceTest extends com.iwhalecloud.byai.common.
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {
-        "{\"manual\":true,\"sourceGroupIds\":[700]}",
-        "{\"manual\":false,\"sourceGroupIds\":[700]}",
-        "{\"version\":2,\"manual\":false,\"sourceGroupIds\":[700],"
+    @CsvSource(value = {
+        "false|{\"manual\":true,\"sourceGroupIds\":[700]}",
+        "true|{\"manual\":true,\"sourceGroupIds\":[700]}",
+        "false|{\"manual\":false,\"sourceGroupIds\":[700]}",
+        "true|{\"manual\":false,\"sourceGroupIds\":[700]}",
+        "false|{\"version\":2,\"manual\":false,\"sourceGroupIds\":[700],"
+            + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"700\":[2]}}",
+        "true|{\"version\":2,\"manual\":false,\"sourceGroupIds\":[700],"
             + "\"legacySourceGroupIds\":[],\"groupInstallers\":{\"700\":[2]}}"
-    })
-    void updateDigitalEmployeeOmittingGroupSkillDeletesRelationAndReloadsEmptySkills(String sourceInfo) {
+    }, delimiter = '|')
+    void updateDigitalEmployeeOmittingGroupSkillDeletesRelationAndReloadsEmptySkills(
+        boolean restoreVersion, String sourceInfo) {
         DigitalEmployeeDTO dto = updateDto();
         dto.setSkills("[]");
         dto.setRelSkills(List.of());
+        if (restoreVersion) {
+            DigitalEmployeeDTO current = updateDto(301L);
+            current.setSkills("[{\"resourceId\":301,\"skillCode\":\"deleted\"}]");
+            // 版本生效先与当前详情合并，再进入真实更新、关系重建和详情回显链路。
+            dto = EmployeeVersionSnapshot.restore(EmployeeVersionSnapshot.encode(dto), current);
+        }
         SsResource employee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
         SsResourceRelDetail relation = directSkillRelation(901L, 301L, sourceInfo);
         List<SsResourceRelDetail> persistedRelations = new ArrayList<>(List.of(relation));
