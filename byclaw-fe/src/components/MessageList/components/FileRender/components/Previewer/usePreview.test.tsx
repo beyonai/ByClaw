@@ -15,6 +15,39 @@ jest.mock('antd', () => ({ message: { warning: jest.fn() } }));
 
 beforeEach(() => jest.clearAllMocks());
 
+it('reopens an overwritten image at the same URL with the HTTP cache disabled', async () => {
+  const originalFetch = Object.getOwnPropertyDescriptor(global, 'fetch');
+  const firstImage = new Blob(['first'], { type: 'image/png' });
+  const updatedImage = new Blob(['updated'], { type: 'image/png' });
+  const fetchMock = jest
+    .fn()
+    .mockResolvedValueOnce({ ok: true, blob: async () => firstImage })
+    .mockResolvedValueOnce({ ok: true, blob: async () => updatedImage });
+  Object.defineProperty(global, 'fetch', { configurable: true, value: fetchMock });
+
+  try {
+    const { result } = renderHook(() => usePreview());
+    const fileItem = {
+      uid: '42',
+      status: 'done',
+      fileType: 'image' as const,
+      downloadUrl: '/byaiService/commonFile/download?fileId=42',
+    };
+    await act(async () => result.current.onPreview(fileItem));
+    expect(result.current.previewInfo.blob).toBe(firstImage);
+    act(() => result.current.onClosePreviewModal());
+    await act(async () => result.current.onPreview(fileItem));
+    expect(result.current.previewInfo.blob).toBe(updatedImage);
+    expect(fetchMock.mock.calls.map(([url, options]) => [url, options.cache])).toEqual([
+      [`${window.location.origin}${fileItem.downloadUrl}`, 'no-store'],
+      [`${window.location.origin}${fileItem.downloadUrl}`, 'no-store'],
+    ]);
+  } finally {
+    if (originalFetch) Object.defineProperty(global, 'fetch', originalFetch);
+    else delete (global as { fetch?: typeof fetch }).fetch;
+  }
+});
+
 it('does not let an older download overwrite a newly selected file', async () => {
   let finish: (result: { file: Blob }) => void = () => {};
   const first = new Promise<{ file: Blob }>((resolve) => {

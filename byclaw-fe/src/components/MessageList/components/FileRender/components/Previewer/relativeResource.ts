@@ -94,10 +94,7 @@ export const createRelativeResourceResolver = (fileUrl?: string): MarkdownImageR
 
     const resourceUrl = getRelativeResourceUrl(fileUrl, resourcePath);
     // 预览文件可能在会话过程中被覆盖，禁止复用旧的相对资源 Blob。
-    const requestUrl = new URL(resourceUrl, window.location.origin);
-    requestUrl.searchParams.set('_previewTime', `${Date.now()}`);
-
-    const request = fetch(requestUrl.toString(), { cache: 'no-store' }).then(async (response) => {
+    const request = fetch(resourceUrl, { cache: 'no-store' }).then(async (response) => {
       if (!response.ok) throw new Error(getIntl().formatMessage({ id: 'common.requestFailed' }));
       const blob = await response.blob();
       return normalizeResourceBlob(blob, resourcePath);

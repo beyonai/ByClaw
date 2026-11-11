@@ -49,9 +49,10 @@ const usePreview = () => {
         if (downloadRequest) {
           blob = (await downloadRequest()).file;
         } else if (url) {
-          const requestUrl = new URL(url, window.location.origin);
-          requestUrl.searchParams.set('_previewTime', String(Date.now()));
-          const response = await fetch(requestUrl.toString(), { cache: 'no-store', signal: abort.signal });
+          const response = await fetch(new URL(url, window.location.origin).toString(), {
+            cache: 'no-store',
+            signal: abort.signal,
+          });
           if (!response.ok) throw new Error(response.statusText);
           blob = await response.blob();
         } else if (fileItem.file instanceof Blob) {
