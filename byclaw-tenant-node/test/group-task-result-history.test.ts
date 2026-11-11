@@ -52,3 +52,16 @@ it("does not turn task acknowledgements or unrelated messages into results", asy
   ]);
   expect(result.map((message) => message.kind)).toEqual(["TASK_ACK", undefined]);
 });
+
+it('exposes explicit message completeness for notification access checks', async () => {
+  const repository = {
+    tasks: vi.fn(async () => []),
+    acknowledgements: vi.fn(async () => []),
+  } as unknown as HistoryRepository;
+  const messages = await displayMessages(repository, [
+    { sessionId: '30', messageId: '100', usage: 2, isComplete: true },
+    { sessionId: '30', messageId: '101', usage: 2, isComplete: false },
+    { sessionId: '30', messageId: '102', usage: 2 },
+  ]);
+  expect(messages.map(message => message.complete)).toEqual([true, false, false]);
+});

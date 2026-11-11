@@ -55,7 +55,7 @@ it('registers later instances without stealing selection or reopening', async ()
   expect(getDesktopOwner(owner).selected).toBe(first);
   expect(mockEmit).not.toHaveBeenCalled();
 });
-it('claims pending once; B neither cancels nor replaces A', async () => {
+it('claims one pending open for multiple frames of the same reply', async () => {
   let resolve!: (rows: any[]) => void;
   mockLookup.mockReturnValue(
     new Promise((done) => {
@@ -64,7 +64,7 @@ it('claims pending once; B neither cancels nor replaces A', async () => {
   );
   const { result } = renderHook(() => useVncOpener('chat'));
   act(() => result.current({ key: 'A', instanceRefs: [refA] }));
-  act(() => result.current({ key: 'B', instanceRefs: [refB] }));
+  act(() => result.current({ key: 'A', instanceRefs: [refB] }));
   await act(async () => {
     resolve([row('a'), row('b')]);
   });
@@ -72,13 +72,20 @@ it('claims pending once; B neither cancels nor replaces A', async () => {
   expect(getDesktopOwner(owner).selected).toContain('"a"');
   expect(mockEmit.mock.calls.filter(([event]) => event === 'beyond-drawer-view')).toHaveLength(1);
 });
-it('does not replace another work panel and consumes the first chance', async () => {
+it('keeps a busy work panel and lets the next reply open when it is free', async () => {
   const { result } = renderHook(() => useVncOpener('chat'));
   useDesktopWorkspace.setState({ panel: 'preview' });
   act(() => result.current({ key: 'A', instanceRefs: [refA] }));
-  expect(getDesktopOwner(owner).handled).toBe(true);
+  expect(getDesktopOwner(owner).autoOpenKeys).toEqual(['A']);
   expect(mockLookup).not.toHaveBeenCalled();
   expect(mockEmit).not.toHaveBeenCalled();
+
+  useDesktopWorkspace.setState({ panel: '' });
+  act(() => result.current({ key: 'A', instanceRefs: [refA] }));
+  expect(mockLookup).not.toHaveBeenCalled();
+  act(() => result.current({ key: 'B', instanceRefs: [refB] }));
+  await flush();
+  expect(mockEmit).toHaveBeenCalledWith('beyond-drawer-view', expect.objectContaining({ action: 'open' }));
 });
 it('cancels pending when user intent or owner changes', async () => {
   let resolve!: (rows: any[]) => void;
@@ -102,8 +109,12 @@ it('does not resurrect hidden entries on repeated tool events', async () => {
   await flush();
   const key = getDesktopOwner(owner).selected!;
   updateDesktopOwner(owner, { hidden: [key] });
-  act(() => result.current({ key: 'again', instanceRefs: [refA] }));
+  useDesktopWorkspace.setState({ visible: false });
+  mockEmit.mockClear();
+  act(() => result.current({ key: 'A', instanceRefs: [refA] }));
+  await flush();
   expect(getDesktopOwner(owner).hidden).toEqual([key]);
+  expect(mockEmit).not.toHaveBeenCalled();
 });
 it('does not consume the opportunity for explicit empty or known non-desktop references', async () => {
   mockLookup.mockResolvedValue([
@@ -111,10 +122,10 @@ it('does not consume the opportunity for explicit empty or known non-desktop ref
   ]);
   const { result } = renderHook(() => useVncOpener('chat'));
   act(() => result.current({ key: 'empty', instanceRefs: [] }));
-  expect(getDesktopOwner(owner).handled).not.toBe(true);
+  expect(getDesktopOwner(owner).autoOpenKeys || []).toEqual([]);
   act(() => result.current({ key: 'web', instanceRefs: [{ sandboxId: 'a', instance: 'web' }] }));
   await flush();
-  expect(getDesktopOwner(owner).handled).toBe(false);
+  expect(getDesktopOwner(owner).autoOpenKeys).toEqual([]);
   expect(getDesktopOwner(owner).refs).toEqual([]);
   expect(mockEmit).not.toHaveBeenCalled();
 });
@@ -125,7 +136,7 @@ it('opens the picker for ambiguous legacy targets without registering a guessed 
   expect(mockEmit).toHaveBeenCalledWith('beyond-drawer-view', expect.objectContaining({ action: 'open' }));
   expect(getDesktopOwner(owner).refs).toEqual([]);
 });
-it('opens a local draft owner manually and migrates its associations once a formal ID exists', async () => {
+it('migrates manual draft preferences and lets a new reply open under the saved ID', async () => {
   const { result, rerender } = renderHook(({ id }: { id?: string }) => useVncOpener(id), {
     initialProps: { id: undefined },
   });
@@ -140,12 +151,31 @@ it('opens a local draft owner manually and migrates its associations once a form
     refs: [refA],
     selected: JSON.stringify(['a', null, 'vnc']),
     hidden: ['hidden'],
-    handled: true,
   });
   expect(useDesktopWorkspace.getState().owners[draft]).toBeUndefined();
   mockEmit.mockClear();
   act(() => result.current({ key: 'first-real', instanceRefs: [refA] }));
-  expect(mockEmit).not.toHaveBeenCalled();
+  await flush();
+  expect(mockEmit).toHaveBeenCalledWith('beyond-drawer-view', expect.objectContaining({ action: 'open' }));
+});
+
+it('ignores old session-wide suppression and restores only reply keys after remount', async () => {
+  const key = `desktop-workspace:${JSON.stringify(['user', 'tenant', owner])}`;
+  sessionStorage.setItem(key, JSON.stringify({ handled: true }));
+  const first = renderHook(() => useVncOpener('chat'));
+  act(() => first.result.current({ key: 'A', instanceRefs: [refA] }));
+  await flush();
+  expect(mockEmit).toHaveBeenCalledTimes(1);
+  first.unmount();
+  useDesktopWorkspace.setState({ owners: {} });
+
+  const next = renderHook(() => useVncOpener('chat'));
+  act(() => next.result.current({ key: 'A', instanceRefs: [refA] }));
+  await flush();
+  expect(mockEmit).toHaveBeenCalledTimes(1);
+  act(() => next.result.current({ key: 'B', instanceRefs: [refB] }));
+  await flush();
+  expect(mockEmit).toHaveBeenCalledTimes(2);
 });
 it('restores the current owner after navigation effect cleanup so the next owner can open', () => {
   const { result, rerender } = renderHook(({ id }) => useVncOpener(id), { initialProps: { id: 'chat' } });

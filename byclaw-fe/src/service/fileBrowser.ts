@@ -3,6 +3,23 @@ import { GET, POST } from '@/service/common/request';
 import { hasAdmittedUpload, uploadResumableFile, type FileTransferProgress } from './resumableFileUpload';
 import { hasDesktopLocalFiles } from '@/service/common/desktopLocal';
 
+export interface PersonalStorageQuota {
+  enabled: boolean;
+  capacityLimitBytes?: number | null;
+  quotaBytes?: number;
+  quotaGiB?: number;
+  usedBytes?: number | null;
+  usageObservedAt?: string;
+}
+
+export function getPersonalStorageQuota() {
+  return GET<PersonalStorageQuota>(
+    '/byaiService/personal/model/storage/quota',
+    {},
+    { responseCfg: { hideErrorTips: true } }
+  );
+}
+
 const ownerUploadTails = new Map<string, Promise<void>>();
 
 export interface FileBrowserItem {

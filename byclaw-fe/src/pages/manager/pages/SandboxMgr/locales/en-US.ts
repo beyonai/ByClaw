@@ -44,11 +44,11 @@ export default {
   'sandboxMgr.market.capabilities': 'Capability labels',
   'sandboxMgr.market.capabilitiesPlaceholder': 'Enter labels and press Enter or comma',
   'sandboxMgr.market.cover': 'Template cover',
-  'sandboxMgr.market.coverUrl': 'Enter an http(s) image URL or site path or upload a cover',
-  'sandboxMgr.market.uploadCover': 'Upload cover',
+  'sandboxMgr.market.coverUrl': 'Enter an http(s) image URL or site path',
+  'sandboxMgr.market.uploadCover': 'Upload local image',
   'sandboxMgr.market.clearCover': 'Remove cover',
   'sandboxMgr.market.coverTip':
-    'PNG, JPEG or WebP, up to 512 KB. Uploaded covers are saved with the template configuration.',
+    'Local PNG, JPEG and WebP files up to 512 KB are saved as Base64. Image URLs are saved as links.',
   'sandboxMgr.market.coverInvalid': 'Use an http(s) image URL or site path or a PNG, JPEG or WebP image up to 512 KB.',
   'sandboxMgr.market.coverReadFailed': 'Could not read the cover. Please select the image again.',
   'sandboxMgr.market.enabledSaveSuccess': 'Template availability updated',
@@ -244,6 +244,9 @@ export default {
   'sandboxMgr.config.addTitle': 'Add Sandbox Config',
   'sandboxMgr.config.serviceKey': 'Service Key',
   'sandboxMgr.config.specJson': 'Spec JSON',
+  'sandboxMgr.config.rebuildSaved':
+    'Saved the service specification for {serviceKey}. Rebuild the template or view its rebuild history here.',
+  'sandboxMgr.config.saveBeforeRebuild': 'Save the service specification before rebuilding.',
   'sandboxMgr.config.templateJson': 'Template JSON',
   'sandboxMgr.config.autoStart': 'Start on Login',
   'sandboxMgr.config.autoStartTip':

@@ -42,6 +42,7 @@ import com.iwhaleai.byai.framework.common.RedisClient;
 import com.iwhaleai.byai.framework.core.WorkerRegistry;
 import com.iwhaleai.byai.framework.core.discovery.ServiceRegistry;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
+import com.iwhalecloud.byai.common.discovery.ServiceRegistryCleanup;
 import com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest;
 import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
@@ -70,7 +71,6 @@ import io.github.resilience4j.retry.RetryConfig;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
-import redis.clients.jedis.Jedis;
 
 /**
  * 沙箱服务 提供沙箱环境的启动、释放、查询和自动清理等功能
@@ -1519,6 +1519,16 @@ public class SandboxService {
      */
     public List<SandboxInfo> sandboxInfo(String userCode) {
         return sandboxInfo(userCode, null);
+    }
+
+    public Map<String, String> resolveSharedIngressHeaders(String userCode, SandboxInfo binding, String endpoint) {
+        if (binding.getMappingId() == null) {
+            return binding.getEndpointHeaders() == null ? Map.of() : binding.getEndpointHeaders();
+        }
+        if (sharedSandboxGateway == null) {
+            throw new IllegalStateException("Shared execution context is unavailable");
+        }
+        return sharedSandboxGateway.executionHeaders(userCode, binding, endpoint);
     }
 
     /** Resolve one known identity without preparing unrelated sandbox endpoints. */
@@ -3060,7 +3070,7 @@ public class SandboxService {
                 .resolve(openclawEndpoint);
             Map<String, Object> metadata = new SandboxEndpointRegistryMetadataFactory(gatewayToken)
                 .build();
-            cleanupSandboxRegistryKeys(serviceName);
+            ServiceRegistryCleanup.clear(redisClient, serviceName);
 
             ServiceRegistry registry = new ServiceRegistry(redisClient);
             registry.registerOnly(serviceName, target.protocol(), target.host(), target.port(), target.pathPrefix(), 1, metadata);
@@ -3079,7 +3089,7 @@ public class SandboxService {
             return;
         }
         try {
-            cleanupSandboxRegistryKeys(serviceName);
+            ServiceRegistryCleanup.clear(redisClient, serviceName);
             LOGGER.info("沙箱endpoint反注册完成，serviceName={}，userCode={}，sandboxType={}",
                 serviceName, userCode, sandboxType);
         }
@@ -3143,22 +3153,6 @@ public class SandboxService {
         }
         catch (Exception e) {
             LOGGER.error("Failed to unregister worker membership on sandbox release: workerId={}, sandbox={}", workerId, sandboxRef(record), e);
-        }
-    }
-
-    private void cleanupSandboxRegistryKeys(String serviceName) {
-        try (Jedis jedis = redisClient.getResource()) {
-            String instancesKey = Constants.RegistryKeys.sdInstanceDetails(serviceName);
-            String activeKey = Constants.RegistryKeys.sdActiveInstances(serviceName);
-            Map<String, String> instanceMap = jedis.hgetAll(instancesKey);
-            if (instanceMap != null && !instanceMap.isEmpty()) {
-                String[] instanceIds = instanceMap.keySet().toArray(new String[0]);
-                jedis.hdel(instancesKey, instanceIds);
-                jedis.zrem(activeKey, instanceIds);
-            }
-            jedis.del(instancesKey);
-            jedis.del(activeKey);
-            jedis.srem(Constants.RegistryKeys.sdServices(), serviceName);
         }
     }
 

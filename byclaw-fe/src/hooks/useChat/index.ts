@@ -66,7 +66,7 @@ import type { IState as IEmployeesState } from '@/models/useEmployees';
 import type { IState } from '@/models/useEmployees';
 import type { RichInputResourceList } from '@/components/QueryInput/RichInput';
 import type { IMessageInfo } from '@/models/useMessageStore';
-import { getSessionLastAnsMsgMetadata } from './util';
+import { getAnswerClientMsgId, getSessionLastAnsMsgMetadata } from './util';
 import { resolveDigitalEmployeePlaceholders } from '@/utils/session';
 
 type ISseRes = {
@@ -144,10 +144,6 @@ export type ISendConf = {
 
 function getClientRequestId(queryMsgId: string, answerMsgId: string) {
   return `${queryMsgId}_${answerMsgId}`;
-}
-
-function getAnswerClientMsgId(clientRequestId: string) {
-  return clientRequestId.split('_')[1];
 }
 
 function getQueryClientMsgId(clientRequestId: string) {
@@ -1142,14 +1138,15 @@ function useChat(props: IProps) {
     let hasFreshResumeTarget = false;
     const llmMessageId = get(restPayload, 'llmMessageId');
 
-    const persistedResumeAnswer = isResumeChat && llmMessageId
-      ? messageListRef.current.find(
-        (item) =>
-          item.fromBeyond &&
-            `${item.messageId ?? ''}` === `${llmMessageId ?? ''}` &&
-            (!inheritQryMsgId || !item.queryMsgId || `${item.queryMsgId}` === `${inheritQryMsgId}`)
-      )
-      : undefined;
+    const persistedResumeAnswer =
+      isResumeChat && llmMessageId
+        ? messageListRef.current.find(
+          (item) =>
+            item.fromBeyond &&
+              `${item.messageId ?? ''}` === `${llmMessageId ?? ''}` &&
+              (!inheritQryMsgId || !item.queryMsgId || `${item.queryMsgId}` === `${inheritQryMsgId}`)
+        )
+        : undefined;
 
     hasFreshResumeTarget = isMatchingResumeAnswer(sendProps.resumeAnswerMsg, {
       sessionId,
@@ -1214,14 +1211,9 @@ function useChat(props: IProps) {
         }
       }
       if (isContinuingRunningTrace && hasFreshResumeTarget && resumeTargetAnswer) {
-        const refreshed = refreshChatStreamAnswerMessage(
-          { sessionId, traceId: payload.traceId },
-          resumeTargetAnswer
-        );
-        const rebound = rebindChatStreamAnswerMessage(
-          { sessionId, traceId: payload.traceId },
-          resumeTargetAnswer
-        ) || refreshed;
+        const refreshed = refreshChatStreamAnswerMessage({ sessionId, traceId: payload.traceId }, resumeTargetAnswer);
+        const rebound =
+          rebindChatStreamAnswerMessage({ sessionId, traceId: payload.traceId }, resumeTargetAnswer) || refreshed;
         if (!rebound) {
           isContinuingRunningTrace = false;
           isColdResume = true;

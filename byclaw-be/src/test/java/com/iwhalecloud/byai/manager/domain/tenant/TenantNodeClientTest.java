@@ -20,6 +20,8 @@ import com.iwhaleai.byai.framework.common.RedisClient;
 import com.iwhalecloud.byai.manager.mapper.tenant.TenantAdminTenantMapper;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
+import com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardMaintenance.Category;
+import com.iwhalecloud.byai.state.domain.groupchat.forward.infrastructure.TenantForwardMaintenanceStore;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonGenerator;
@@ -324,7 +326,7 @@ class TenantNodeClientTest {
     }
 
     @Test
-    void forwardingClaimBatchSkipsOnlyExactNodeAdmissionAndAuthorizationRejections() throws Exception {
+    void forwardingSkipsOnlyExpectedScanAndClaimRejections() throws Exception {
         var json = TenantNodeClient.protocolMapper(new ObjectMapper().findAndRegisterModules());
         var actor = new com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardActor(8, 123);
         var backend = com.iwhalecloud.byai.state.domain.groupchat.forward.domain.ForwardModels.ForwardBackend.TENANT;
@@ -406,6 +408,22 @@ class TenantNodeClientTest {
             rejectionStatus.set(500);
             assertThatThrownBy(() -> tenant.claimTarget(locator, 201, "claim", java.time.Duration.ofMinutes(1)))
                 .isInstanceOf(ResponseStatusException.class).hasMessageContaining("502");
+            rejectionStatus.set(409);
+            var maintenance = new TenantForwardMaintenanceStore(client);
+            for (String pausedCode : List.of("POLICY_EXECUTION_DISABLED", "POLICY_NOT_EFFECTIVE")) {
+                rejectionCode.set(pausedCode);
+                var paused = maintenance.scan(123, Category.WORK, "201", 20);
+                assertThat(paused.candidates()).isEmpty();
+                assertThat(paused.nextCursor()).isEqualTo("201");
+            }
+            rejectionCode.set("FORWARD_IDEMPOTENCY_CONFLICT");
+            assertThatThrownBy(() -> maintenance.scan(123, Category.DELIVERY, null, 20))
+                .hasMessageContaining("step=requestNodeOperation")
+                .hasRootCauseMessage("502 BAD_GATEWAY \"tenant Node rejected request: FORWARD_IDEMPOTENCY_CONFLICT\"");
+            rejectionCode.set("POLICY_EXECUTION_DISABLED");
+            rejectionStatus.set(500);
+            assertThatThrownBy(() -> maintenance.scan(123, Category.DELIVERY, null, 20))
+                .hasMessageContaining("nodeStatus=500");
             rejectionStatus.set(409);
             assertThatThrownBy(() -> client.request(context, "POST", "/internal/v1/commands", null,
                 new TypeReference<Map<String, Object>>() {}))

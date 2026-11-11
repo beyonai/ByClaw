@@ -41,10 +41,12 @@ export default function TemplateRebuildActions({
   serviceKey,
   profileKey,
   supported,
+  rebuildDisabled = false,
 }: {
   serviceKey: string;
   profileKey?: string;
   supported: boolean;
+  rebuildDisabled?: boolean;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [recordsOpen, setRecordsOpen] = useState(false);
@@ -100,7 +102,7 @@ export default function TemplateRebuildActions({
   }, [supported, recordsOpen, records, load]);
 
   const submit = async () => {
-    if (submitting) return;
+    if (submitting || rebuildDisabled) return;
     requestId.current ||= nanoid();
     setSubmitting(true);
     setError('');
@@ -126,6 +128,7 @@ export default function TemplateRebuildActions({
         size="small"
         type="link"
         icon={<ReloadOutlined />}
+        disabled={rebuildDisabled}
         onClick={() => {
           setError('');
           setConfirmOpen(true);
@@ -148,6 +151,7 @@ export default function TemplateRebuildActions({
         onOk={submit}
         okText="确认重建"
         confirmLoading={submitting}
+        okButtonProps={{ disabled: rebuildDisabled }}
         onCancel={() => !submitting && setConfirmOpen(false)}
         destroyOnClose
       >

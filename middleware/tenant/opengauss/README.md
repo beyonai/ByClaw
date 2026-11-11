@@ -13,8 +13,11 @@ provide a compatible runtime. The engine's private library path is scoped to
 the database entrypoint and `omm` login shells, leaving MicroVM system tools
 on Debian's libraries.
 
-CI builds this variant as `byclaw-tenant-opengauss`, separately from
-`byclaw-opengauss`. Changes to this directory or the BE tenant entrypoint
+CI builds this variant as `byclaw-tenant-opengauss` for `linux/amd64`.
+The default OpenGauss 6.0.3 engine image contains x86-64 binaries. An ARM64
+build requires a compatible ARM64 engine image supplied via `BASE_IMAGE`
+and must pass the same runtime checks before it is published.
+Changes to this directory or the BE tenant entrypoint
 trigger the tenant image build. Select the tenant image explicitly in the
 tenant service configuration; this directory move does not switch existing
 deployments automatically.
@@ -41,6 +44,21 @@ matching the OpenSandbox volume owner. Prepare existing database files with
 that numeric ownership before using this image; the non-root entrypoint does
 not change ownership of mounted files. Keep the database directory at mode
 `0700`.
+
+On a fresh NFS-backed data volume, the tenant entrypoint initializes the
+database and its tenant role on local scratch storage. The temporary server
+uses a separate loopback port so the normal readiness probe only observes the
+persistent server. After the temporary server stops, the entrypoint copies and
+syncs the initialized data on the mounted volume and publishes it as the
+`byclaw-cluster` directory. Restart reuses the published cluster. Existing
+databases with `PG_VERSION` at the volume root keep their layout.
+
+`BYCLAW_OPENGAUSS_LOCAL_INIT=0` disables staging for fresh volumes.
+`BYCLAW_OPENGAUSS_LOCAL_INIT=1` forces it for an isolated test. An interrupted
+copy cannot become the active cluster. Keep an image that supports
+`byclaw-cluster` when restarting a tenant initialized with the staged layout.
+The entrypoint reports initialization and persistent publish timings
+separately without logging credentials.
 
 Mount only the database directory to retain the image's tenant startup script:
 

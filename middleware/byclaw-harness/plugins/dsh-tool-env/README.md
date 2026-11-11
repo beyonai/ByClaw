@@ -363,3 +363,23 @@ Only a browser configured with `workspaceOnToolEnvironment` uses the SSH
 provider's binding and advertises reference support before cold allocation.
 A local browser leaves references absent, preserving the existing frontend
 viewer lookup, even if an unrelated SSH provider is available in the same context.
+
+### Forwarding B's own environment
+
+Tool SSH sessions explicitly forward B's own environment by default, including
+credential-shaped business variables such as `REDIS_PASSWORD`. Configure
+`BYCLAW_TOOL_ENV_FORWARD_ENVIRONMENT` in **B's spec env** as `all` (default),
+`{"allow":["REDIS_PASSWORD","BUSINESS_API_TOKEN"]}`, or `{"allow":[]}`. Invalid
+policies stop startup without logging the supplied value.
+
+Request env overrides B's forwarded values, including empty strings and null
+unset markers (without refilling them from B during assembly). The allowlist selects the explicit B overlay, not the ordinary
+system environment inherited by DSH, and does not restrict explicit business
+request entries. Internal `BYCLAW_(DSH_)TOOL_ENV*`, browser secret/listen-FD
+variables, and MicroVM/command payloads are excluded even when allowlisted or
+supplied by a request. A's host-credential filtering remains unchanged.
+
+The pinned helper build patch covers the shared ordinary/terminal environment
+assembly and keeps workspace/profile copies aligned for digest verification.
+Run `node --test middleware/byclaw-harness/scripts/tool-helper-env.test.mjs`
+from the repository root. Image builds and live SSH still require validation.

@@ -40,7 +40,11 @@ export interface HistoryRepository {
   extensions(sessionId: string): Promise<Row[]>;
   messages(filter: MessageFilter): Promise<Row[]>;
   countMessages(filter: MessageFilter): Promise<number>;
-  groups(actor: string, page: number, size: number): Promise<{ list: Row[]; total: number }>;
+  groups(
+    actor: string,
+    page: number,
+    size: number,
+  ): Promise<{ list: Row[]; total: number; totalUnreadMessageCount?: number }>;
   tasks(sessionId: string): Promise<Row[]>;
   task(taskId: string): Promise<Row | null>;
   candidate?(sessionId: string): Promise<Row | null>;

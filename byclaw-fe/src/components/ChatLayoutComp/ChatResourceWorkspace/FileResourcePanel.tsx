@@ -63,6 +63,8 @@ import {
   listFiles,
   renameFile,
   uploadFiles,
+  getPersonalStorageQuota,
+  type PersonalStorageQuota,
   type FileBrowserItem,
 } from '@/service/fileBrowser';
 import {
@@ -164,6 +166,18 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const [loadedDirectoryKeys, setLoadedDirectoryKeys] = useState<Key[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   const [loading, setLoading] = useState(false);
+  const [storageQuota, setStorageQuota] = useState<PersonalStorageQuota>();
+  const storageCapacityBytes =
+    storageQuota?.capacityLimitBytes ??
+    storageQuota?.quotaBytes ??
+    (storageQuota?.quotaGiB === undefined ? undefined : storageQuota.quotaGiB * 1024 ** 3);
+  const storageUsedBytes = storageQuota?.usedBytes;
+  const showStorageQuota =
+    storageQuota?.enabled &&
+    Number.isFinite(storageUsedBytes) &&
+    storageUsedBytes! >= 0 &&
+    Number.isFinite(storageCapacityBytes) &&
+    storageCapacityBytes! > 0;
   const [loadError, setLoadError] = useState<string>();
   const [renameTarget, setRenameTarget] = useState<FileBrowserItem | null>(null);
   const [renameLoading, setRenameLoading] = useState(false);
@@ -178,6 +192,25 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   // 根节点异步到达时仍保持展开；Tree 需关闭 defaultExpandParent，避免过滤尚未加载的根键。
   // 每次打开移动弹窗重新初始化，后续由用户控制目录展开状态。
   const [moveExpandedKeys, setMoveExpandedKeys] = useState<Key[]>(['/']);
+
+  useEffect(() => {
+    if (scope !== 'shared') {
+      setStorageQuota(undefined);
+      return;
+    }
+    let active = true;
+    void getPersonalStorageQuota()
+      .then((response) => {
+        if (active) setStorageQuota(response?.enabled ? response : undefined);
+      })
+      .catch(() => {
+        // Local NFS/Longhorn and older Platform versions do not expose quota; hide the optional UI.
+        if (active) setStorageQuota(undefined);
+      });
+    return () => {
+      active = false;
+    };
+  }, [scope, refreshKey]);
   const [moveTreeLoading, setMoveTreeLoading] = useState(false);
   const [saveDestination, setSaveDestination] = useState<'project' | 'shared'>('project');
   const [saveTarget, setSaveTarget] = useState<FileBrowserItem | null>(null);
@@ -955,7 +988,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     },
     [intl, isCurrentContext]
   );
-  const fileTransfers = useFileTransferQueue(uploadOneFile, transferContext.key);
+  const fileTransfers = useFileTransferQueue(uploadOneFile, transferContext.key, 3000);
   const uploading = fileTransfers.rows.some((row) => row.status === 'pending' || row.status === 'uploading');
   const handleUpload = useCallback(
     async (fileList: File[], targetPath = currentDirectoryPath) => {
@@ -1402,6 +1435,25 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         }
         contentBefore={
           <>
+            {showStorageQuota && (
+              <div
+                style={{ padding: '0 12px 8px' }}
+                aria-label={intl.formatMessage({ id: 'chatResource.personalStorageUsage' })}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                  <span>{intl.formatMessage({ id: 'chatResource.storageUsage' })}</span>
+                  <span>
+                    {(storageUsedBytes! / 1024 ** 3 || 0).toFixed(2)} / {(storageCapacityBytes! / 1024 ** 3).toFixed(0)}{' '}
+                    GB
+                  </span>
+                </div>
+                <Progress
+                  percent={Math.min(100, (storageUsedBytes! / storageCapacityBytes!) * 100)}
+                  size="small"
+                  showInfo={false}
+                />
+              </div>
+            )}
             <UnfinishedUploads
               onCancelQueued={fileTransfers.cancelQueued}
               ownerKey={transferContext.ownerKey}

@@ -16,9 +16,9 @@ leave unrelated staged files untouched. Test/check subprocesses clear Git-local
 environment variables in a subshell so nested test repositories use their own
 index. The hook itself and lint-staged retain the committing repository's Git
 environment. No application tests or dependency downloads run in this regression.
-The frontend commit gate runs the full Jest suite serially with ordinary console
-output silenced; assertion failures and the test summary remain visible. This
-avoids concurrent jsdom form work competing for memory on developer machines.
+The frontend commit gate runs Jest tests related to staged frontend files with
+the normal worker pool; the full suite runs in CI. Backend hooks incrementally
+compile the module and run only staged test classes, while CI runs the full suite.
 
 ## One-click startup
 

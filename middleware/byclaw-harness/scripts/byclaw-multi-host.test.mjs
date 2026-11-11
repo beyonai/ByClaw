@@ -37,8 +37,10 @@ test('shared host imports the installed runtime once from its CLI anchor, indepe
 test('shared host entrypoint uses compiled Node runtime without the source alias loader', async () => {
   const source = await readFile(new URL('../docker-entrypoint.sh', import.meta.url), 'utf8')
   const shared = source.slice(source.indexOf('if [[ "${1:-}" == multi-host ]]'), source.indexOf('if [[ "${BYCLAW_DSH_PREPARED'))
-  assert.match(shared, /exec node "\$\{launcher\}"/)
+  assert.match(shared, /exec "\$\{pid1\[@\]\}" node "\$\{host_node_flags\[@\]\}" "\$\{launcher\}"/)
   assert.doesNotMatch(shared, /tsx/)
+  // Node as PID 1 does not reap orphans (each closed tool-environment connection leaves its ws-proxy).
+  assert.match(shared, /pid1=\(\/usr\/local\/bin\/byclaw-pid1\)/)
 })
 
 test('module preloading deduplicates active rows without activating plugins or hiding import failures', async () => {
@@ -1023,4 +1025,16 @@ test('purpose marketplace templates come from the trusted user launch environmen
   const [row] = composeUserOverlays(entries, 'u1', '/r/u1', configured)
   assert.deepEqual(row.config.templates, templates)
   assert.throws(() => composeUserOverlays(entries, 'u1', '/r/u1', { ...configured, env: { ...configured.env, BYCLAW_TOOL_ENV_CATALOG: JSON.stringify([templates[0], { ...templates[1], serviceKey: templates[0].serviceKey }]) } }), /CATALOG/)
+})
+
+test('each context is offered the Beyond-Token of its latest PUT, for BE calls while its user is logged out', () => {
+  const issued = host.contextTokenHolder({ BEYOND_TOKEN: ' first ' })
+  assert.equal(issued.current(), 'first')
+  issued.renew({ BEYOND_TOKEN: 'second' })
+  assert.equal(issued.current(), 'second')
+  // A PUT without a token keeps the last one.
+  issued.renew({})
+  issued.renew(undefined)
+  assert.equal(issued.current(), 'second')
+  assert.equal(host.contextTokenHolder(undefined).current(), undefined)
 })

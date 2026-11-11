@@ -22,4 +22,12 @@ public class HookPublisher {
             LOG.info("触发勾子失败，Hook未启用,type={},data={}", type, JsonUtil.toJSONString(data));
         }
     }
+
+    /** Publish a business fact whose owning database has already committed, including tenant Node writes. */
+    public void publishCommitted(String type, int version, Map<String, Object> data) {
+        HookDispatcher active = dispatcher.getIfAvailable();
+        if (active != null) {
+            active.publishCommitted(type, version, data);
+        }
+    }
 }

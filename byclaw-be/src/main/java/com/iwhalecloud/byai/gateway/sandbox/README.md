@@ -21,6 +21,13 @@ remote 模式从平台 `/internal/platform/sandbox/runtime/list` 读取实际运
 更新时先部署平台新接口，再更新 BE/FE。新 BE 对尚未升级的平台也会返回空列表。
 修复证据记录于仓库 `docs/implementation/sandbox-manager-2026-10-22.md`。
 
+## Redis 服务发现
+
+BE 本地沙箱和资源服务的 endpoint 注册、注销共用服务发现清理逻辑。清理按网关 SDK 的
+`REDIS_KEY_SCHEMA_VERSION` 生成实例详情、活跃实例和服务索引键，并逐键执行 Redis 命令。
+单机连接借用后归还连接池，Cluster 复用 SDK 管理的共享句柄。排查沙箱启动成功但网关无路由时，
+应同时检查 endpoint 注册日志和对应服务发现键。
+
 ## Worker Agent Type Configuration
 
 每种沙箱可以在 Spec JSON 的 `env` 中声明固定的基础 Worker AgentType：

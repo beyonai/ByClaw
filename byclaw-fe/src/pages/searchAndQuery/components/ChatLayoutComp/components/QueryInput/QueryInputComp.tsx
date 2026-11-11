@@ -215,7 +215,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
     return (
       <>
         <Space size="large" className={chatStyles.bottomRight}>
-          {this.STTRender()}
+          {/* this.STTRender() */}
         </Space>
       </>
     );

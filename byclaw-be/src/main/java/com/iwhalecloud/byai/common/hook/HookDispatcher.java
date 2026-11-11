@@ -63,6 +63,15 @@ public class HookDispatcher implements AutoCloseable {
     }
 
     public void publish(String type, int version, Map<String, Object> data) {
+        publish(type, version, data, false);
+    }
+
+    /** Only callers observing the owning database's successful commit may use this entry point. */
+    public void publishCommitted(String type, int version, Map<String, Object> data) {
+        publish(type, version, data, true);
+    }
+
+    private void publish(String type, int version, Map<String, Object> data, boolean committed) {
         HookEventSchema schema = schemas.stream().filter(item -> item.type().equals(type) && item.version() == version)
             .findFirst().orElse(null);
         if (schema == null) {
@@ -78,8 +87,10 @@ public class HookDispatcher implements AutoCloseable {
             if (!subscription.isEnabled() || !type.equals(subscription.getEvent()) || version != subscription.getEventVersion()) {
                 return;
             }
-            if (!TransactionSynchronizationManager.isActualTransactionActive()
-                || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            // Spring still reports an active transaction inside afterCommit; do not register a second callback.
+            boolean transactional = !committed && TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive();
+            if (!transactional && !committed) {
                 record(id, eventId, "no_transaction", 0, 0);
                 logger.info("触发勾子失败，无活动事务,type={},data={}", type, JsonUtil.toJSONString(data));
                 return;
@@ -98,6 +109,14 @@ public class HookDispatcher implements AutoCloseable {
                     return;
                 }
                 Request request = mapper.map(id, subscription, envelope);
+                if (!transactional) {
+                    try {
+                        executor.execute(() -> send(id, eventId, subscription, request, 1));
+                    } catch (RuntimeException rejected) {
+                        record(id, eventId, "rejected", 0, 0);
+                    }
+                    return;
+                }
                 logger.info("勾子等待事务提交,subscription={},event={},data={}", id, eventId, JsonUtil.toJSONString(data));
                 TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                     @Override

@@ -561,7 +561,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           <div className={classNames(styles.outsideTools, hasTools && styles.outsideToolsWithTools)}>{bottomRight}</div>
         </ConfigProvider>
         <Space className={styles.toolsRight}>
-          {this.STTRender()}
+          {/* this.STTRender() */}
           {!cannotSend && !this.state.voiceRecording && (
             <>
               {!this.checkIsSending() ? (

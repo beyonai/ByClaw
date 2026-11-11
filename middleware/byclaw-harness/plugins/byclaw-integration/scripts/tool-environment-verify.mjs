@@ -104,6 +104,32 @@ try {
     check((await readdir(b.toHost(join(byRoot, '.sessions', 'http1', 'asr')))).length === 1, 'ASR HTTP audio lands on B')
   } finally { await new Promise(resolve => server.close(resolve)) }
 
+  // Manual ASR archive failures are diagnosable without exposing storage details.
+  const denied = () => { throw Object.assign(new Error('private filesystem details'), { code: 'EACCES' }) }
+  for (const [archiveFiles, stage, code] of [
+    [lazyToolEnvironmentFiles({ connected: false, async whenConnected() {} }, files), 'resolve-user-root', 'ENOENT'],
+    [{ ...files, ensureDirectory: denied }, 'create-session-directory', 'EACCES'],
+    [{ ...files, writeBytes: denied }, 'persist-audio', 'EACCES'],
+  ]) {
+    const archiveFailures = []
+    const failingHandler = createVoiceHttpHandler({ byRoot, files: archiveFiles,
+      authHeaders: async () => ({ 'Beyond-Token': 'token' }),
+      resolveModel: async () => { throw new Error('archive failure must stop before model resolution') },
+      logArchiveFailure: (stage, code) => archiveFailures.push({ stage, code }),
+    })
+    const failingServer = createServer(failingHandler)
+    await new Promise(resolve => failingServer.listen(0, '127.0.0.1', resolve))
+    try {
+      const response = await fetch(`http://127.0.0.1:${failingServer.address().port}/`, { method: 'POST', headers: { 'Beyond-Token': 'token' },
+        body: JSON.stringify({ audioBase64: voice.audioBase64, mimeType: 'audio/mpeg', sessionId: 'archive-failure' }) })
+      check(response.status === 400, 'ASR archive failures retain their HTTP status')
+      const body = await response.json()
+      check(body.code === 'ASR_TRANSCRIPTION_FAILED' && !JSON.stringify(body).includes(byRoot)
+        && !JSON.stringify(body).includes('private filesystem details'), 'ASR responses hide filesystem details')
+      assert.deepEqual(archiveFailures, [{ stage, code }]); checks += 1
+    } finally { await new Promise(resolve => failingServer.close(resolve)) }
+  }
+
   // --- media artifacts and connector projections -----------------------------
   const workspace = join(byRoot, '.sessions', 'media')
   const image = await saveMediaArtifact(workspace, 'image', Buffer.from([137, 80, 78, 71, 0, 1, 2]), 'image/png', files)

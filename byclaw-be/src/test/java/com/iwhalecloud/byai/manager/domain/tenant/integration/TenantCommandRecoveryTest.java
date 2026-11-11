@@ -19,6 +19,8 @@ class TenantCommandRecoveryTest {
     TenantCommandRecovery recovery;
     TenantSandboxService sandboxes;
     TenantNodeSchemaService schemas;
+    com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService provisioning =
+        mock(com.iwhalecloud.byai.manager.domain.tenant.TenantDbProvisioningService.class);
     TenantAdminTenantMapper tenants;
     ObjectMapper json=new ObjectMapper();
     String request="11111111-1111-4111-8111-111111111111";
@@ -40,7 +42,7 @@ class TenantCommandRecoveryTest {
         when(tenants.selectConfig(2,"DB_PASSWORD")).thenReturn("persisted-envelope");
         when(sandboxes.inspectRecovery(2,"DB_CREATE","command-1:DB_CREATE"))
             .thenReturn(new TenantSandboxService.RecoveryResource("ABSENT",null,null));
-        recovery=new TenantCommandRecovery(store,jdbc,sandboxes,tenants,schemas,json,
+        recovery=new TenantCommandRecovery(store,jdbc,sandboxes,tenants,schemas,provisioning,json,
             new DataSourceTransactionManager(jdbc.getDataSource()));
     }
     private com.fasterxml.jackson.databind.JsonNode body(boolean confirm) throws Exception {
@@ -150,6 +152,41 @@ class TenantCommandRecoveryTest {
                 new TenantSandboxService.RecoveryResource("MATCHED",
                     new TenantSandboxService.TenantSandboxView(id,"sandbox-"+id,"http://resource-"+id),record));
         }
+    }
+
+    private void restartedPair() {
+        schemaReadyForFirstDispatch();
+        jdbc.update("UPDATE byai.tenant_task SET stage='DB_CREATE' WHERE id=1");
+        jdbc.update("UPDATE byai.tenant_task_step SET step_key='DB_CREATE',provider_request_key='command-1:DB_CREATE'");
+        for (String step : java.util.List.of("DB_CREATE","NODE_CREATE")) {
+            var matching = sandboxes.inspectRecovery(2,step,"command-1:"+step);
+            when(sandboxes.inspectRestartRecord(2,step,Long.toString(matching.adopted().recordId()))).thenReturn(matching);
+        }
+        when(sandboxes.inspectRecovery(2,"DB_CREATE","command-1:DB_CREATE"))
+            .thenReturn(new TenantSandboxService.RecoveryResource("RESOURCE_IDENTITY_MISMATCH",null,null));
+        when(tenants.selectConfig(2,"COMMERCIAL_MANAGED")).thenReturn("true");
+        when(tenants.selectConfig(2,"PROVISION_STATE")).thenReturn("{\"status\":\"READY\",\"generation\":\"1\"}");
+        when(schemas.verifiedRecoveryAudit(2,"internal-1",8)).thenReturn(true);
+    }
+
+    @Test void verifiedRestartAdoptsBothResourceStepsInOneReceipt() throws Exception {
+        restartedPair();
+        assertEquals("ADOPT_EXISTING", recovery.inspect(1).get("decision"));
+        assertEquals("ADOPT_EXISTING", recovery.recover(1,body(false)).get("decision"));
+        var rows=jdbc.queryForList("SELECT result FROM byai.tenant_task_step WHERE command_id=1 AND status='SUCCEEDED' ORDER BY step_key",String.class);
+        assertEquals(2,rows.size());
+        assertEquals(8,json.readTree(rows.get(0)).path("recordId").asLong());
+        assertEquals(9,json.readTree(rows.get(1)).path("recordId").asLong());
+        assertEquals("PENDING",store.find(1).status());
+    }
+
+    @Test void restartedPairRequiresBothHealthAndOriginalAudit() throws Exception {
+        restartedPair();
+        doThrow(new IllegalStateException()).when(provisioning).verifyRestartedPair(eq(2L),any(),any());
+        assertEquals("RESTARTED_RESOURCES_NOT_READY", recovery.inspect(1).get("reasonCode"));
+        when(schemas.verifiedRecoveryAudit(2,"internal-1",8)).thenReturn(false);
+        assertThrows(TenantCommandException.class, () -> recovery.recover(1,body(true)));
+        assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM byai.tenant_task_step",Integer.class));
     }
 
     private com.fasterxml.jackson.databind.JsonNode safeBody() {

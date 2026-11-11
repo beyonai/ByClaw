@@ -1,5 +1,6 @@
 import { IObjectType, SSEMessageType } from '@/constants/message';
 import type { IMessage, IMessageListItem } from '@/typescript/message';
+import { mergeInstanceRefs } from '@/utils/desktopInstances';
 import { isSameSessionId, type SessionIdInput } from '@/utils/sessionId';
 
 const legacyScripts = new Set([
@@ -213,15 +214,25 @@ const hasBrowserInput = (input: Record<string, unknown> | undefined) => {
 const isBrowserTool = (title: unknown) =>
   typeof title === 'string' && (title.includes('jarvis_run_flow') || title.includes('browser'));
 
+function requestsSandboxDesktop(input: unknown): boolean {
+  const showDesktop = parseObject(parseObject(input)?.opts)?.show_desktop;
+  return Boolean(showDesktop && typeof showDesktop === 'object' && !Array.isArray(showDesktop));
+}
+
+export function allowsDesktopEntry(tool: unknown): boolean {
+  const substance = parseObject(tool);
+  const title = substance?.title ?? tool;
+  if (title === 'sandbox_acquire') return false;
+  return title !== 'sandbox_exec' || requestsSandboxDesktop(substance?.input);
+}
+
 export function isDesktopOpeningToolMessage(message?: Partial<IMessageListItem> | null): boolean {
   if (String(message?.contentType) !== String(SSEMessageType.toolCall)) return false;
   const substance = parseObject(message?.content?.substance);
   if (substance?.title === 'sandbox_exec') {
-    const opts = parseObject(parseObject(substance.input)?.opts);
-    const showDesktop = opts?.show_desktop;
     return (
       substance.status === '_DONE_' &&
-      Boolean(showDesktop && typeof showDesktop === 'object' && !Array.isArray(showDesktop)) &&
+      requestsSandboxDesktop(substance.input) &&
       parseObject(substance.output)?.exitCode === 0
     );
   }
@@ -257,17 +268,28 @@ export function hasVncActivity(message?: Partial<IMessage> | null): boolean {
   );
 }
 
+const isDigitalEmployeeReply = (message: IMessage) =>
+  message.fromBeyond && (message.usage === undefined || String(message.usage) === '2');
+
+export function getDesktopMessageTargets(messages: IMessage[], sessionId: SessionIdInput) {
+  const replies = messages.filter(
+    (message) => isDigitalEmployeeReply(message) && isSameSessionId(message.sessionId, sessionId)
+  );
+  const refs = replies.flatMap((message) =>
+    [...(message.thinkList || []), ...(message.messageList || [])]
+      .filter((item) => allowsDesktopEntry(item.content?.substance))
+      .flatMap((item) => item.content?.instanceRefs || [])
+  );
+  return { refs: mergeInstanceRefs([], refs), legacy: replies.some(hasVncActivity) };
+}
+
 export function getLatestDigitalEmployeeMessage(
   messages: IMessage[],
   sessionId?: SessionIdInput
 ): IMessage | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (
-      message.fromBeyond &&
-      (sessionId === undefined || isSameSessionId(message.sessionId, sessionId)) &&
-      (message.usage === undefined || String(message.usage) === '2')
-    ) {
+    if (isDigitalEmployeeReply(message) && (sessionId === undefined || isSameSessionId(message.sessionId, sessionId))) {
       return message;
     }
   }

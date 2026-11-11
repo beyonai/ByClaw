@@ -8,6 +8,28 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class SharedUserStoragePreparationTest {
+    @Test void quotaControllerUsesWorkspaceQueryWithoutPreparationPolicy() {
+        var policy = mock(SharedSandboxPolicy.class);
+        var gateway = mock(SharedSandboxGateway.class);
+        var sandboxes = mock(SandboxService.class);
+        var service = new SharedUserStoragePreparation(policy, gateway, sandboxes, Runnable::run);
+        var controller = new com.iwhalecloud.byai.state.interfaces.controller.personalmodel.PersonalModelController();
+        org.springframework.test.util.ReflectionTestUtils.setField(controller, "sharedUserStoragePreparation", service);
+        var login = new LoginInfo();
+        login.setUserCode("0027003719");
+        login.setUserId(10000029L);
+        when(gateway.workspaceSpaceStatus("0027003719")).thenReturn(Map.of("enabled", true));
+        com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.setLoginInfo(login);
+        try {
+            controller.storageQuota();
+            verify(gateway).workspaceSpaceStatus("0027003719");
+            verify(gateway, never()).userStorageStatus(anyString());
+            verifyNoInteractions(policy, sandboxes);
+        } finally {
+            com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.setLoginInfo(null);
+        }
+    }
+
     @Test void loginCapturesTenantAndDoesNotWaitForNasOrRequireAutoStart() {
         var policy=mock(SharedSandboxPolicy.class);var gateway=mock(SharedSandboxGateway.class);
         var sandboxes=mock(SandboxService.class);List<Runnable> queue=new ArrayList<>();

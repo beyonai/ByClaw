@@ -74,6 +74,15 @@ check_version_pinning
 if [ "$HAS_FE" = true ]; then
   echo "🔍 [pre-commit] Running frontend checks..."
 
+  FE_FILES=""
+  for file in $STAGED_FILES; do
+    case "$file" in
+      byclaw-fe/*)
+        if [ -f "$REPO_ROOT/$file" ]; then FE_FILES="$FE_FILES ${file#byclaw-fe/}"; fi
+        ;;
+    esac
+  done
+
   # lint-staged: prettier + eslint + stylelint on staged files
   cd "$REPO_ROOT/byclaw-fe"
   npx lint-staged --concurrent false
@@ -82,9 +91,9 @@ if [ "$HAS_FE" = true ]; then
     EXIT_CODE=1
   fi
 
-  # 本地真实 Ant Design 交互串行执行，避免 worker 争抢导致超时。
-  # 静默普通 console 日志；Jest 仍报告失败断言与测试汇总。
-  run_without_git_env pnpm exec jest --passWithNoTests --runInBand --silent 2>&1
+  # 只运行本次暂存文件关联的测试；全量测试由 CI 执行。
+  # 不强制 runInBand，保留 Jest 的并行 worker。
+  run_without_git_env pnpm exec jest --passWithNoTests --findRelatedTests $FE_FILES --silent 2>&1
   if [ $? -ne 0 ]; then
     echo "❌ [pre-commit] Frontend tests failed"
     EXIT_CODE=1
@@ -101,11 +110,34 @@ fi
 if [ "$HAS_BE" = true ]; then
   echo "🔍 [pre-commit] Running backend checks..."
 
-  # 清理旧的 test-classes，避免增量编译运行当前源码中已删除的测试类。
-  run_without_git_env mvn -B -f "$REPO_ROOT/byclaw-be/pom.xml" clean test
-  if [ $? -ne 0 ]; then
-    echo "❌ [pre-commit] Backend tests failed"
+  BE_TESTS=""
+  for file in $STAGED_FILES; do
+    case "$file" in
+      byclaw-be/src/test/java/*)
+        if [ ! -f "$REPO_ROOT/$file" ]; then continue; fi
+        test_class="${file##*/}"
+        case "$test_class" in
+          *.java)
+            test_class="${test_class%.java}"
+            if [ -n "$BE_TESTS" ]; then BE_TESTS="$BE_TESTS,$test_class"; else BE_TESTS="$test_class"; fi
+            ;;
+        esac
+        ;;
+    esac
+  done
+
+  # 增量编译当前改动；具体测试类才运行对应测试，全量测试由 CI 执行。
+  run_without_git_env mvn -B -ntp -nsu -f "$REPO_ROOT/byclaw-be/pom.xml" -DskipTests compile
+  BE_STATUS=$?
+  if [ $BE_STATUS -eq 0 ] && [ -n "$BE_TESTS" ]; then
+    run_without_git_env mvn -B -ntp -nsu -f "$REPO_ROOT/byclaw-be/pom.xml" -Dtest="$BE_TESTS" test
+    BE_STATUS=$?
+  fi
+  if [ $BE_STATUS -ne 0 ]; then
     EXIT_CODE=1
+  fi
+  if [ $BE_STATUS -ne 0 ]; then
+    echo "❌ [pre-commit] Backend tests failed"
   else
     echo "✅ [pre-commit] Backend checks passed"
   fi

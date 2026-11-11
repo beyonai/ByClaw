@@ -192,6 +192,9 @@ export async function resolveByClawBaseUrl(
     || DEFAULT_BYCLAW_BE_BASE_URL
 }
 
+/** Service a shared host provides to each context: `current()` is the Beyond-Token of the context's latest PUT. */
+export const CONTEXT_TOKEN_SOURCE = 'byclawContextToken'
+
 export const name = 'byclaw-dsh'
 export const inject = ['todoExecution', 'agentPresets', 'agents', 'llm', 'sessionPersistence', 'storageDomain', 'subagents', 'tools', 'systemPrompt', 'skills', 'shellEnv', ...(modelRouterEnabled() ? ['agentLoop'] : [])]
 
@@ -560,6 +563,13 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
   }
   const userCode = config.userCode?.trim() || process.env['USER_CODE']?.trim()
   if (userCode === undefined || userCode === '') throw new Error('byclaw-dsh requires config.userCode or USER_CODE')
+  // The token BE issued for this context, for BE calls made while the user is logged out (a scheduled
+  // turn): a shared host offers each context the one from its latest PUT; a per-user sandbox has it in
+  // its environment. The shared host's own environment is never used for a user.
+  const contextToken = async (): Promise<string | undefined> => {
+    const issued = ctx.get(CONTEXT_TOKEN_SOURCE) as { current(): Promise<string | undefined> | string | undefined } | undefined
+    return issued !== undefined ? await issued.current() : process.env['BEYOND_TOKEN']
+  }
   let baseUrl = ''
   applyByClawWorkerHistory(config.workerHistory)
   const dshHome = config.dshHome?.trim() ? resolve(config.dshHome.trim()) : undefined
@@ -598,7 +608,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
   installMemberTodoExecution(ctx)
   const generationLease = new ByClawGenerationLease()
   const lazySkills = createLazyByClawSkillLoader({
-    loadResources: template => loadAuthorizedByClawResources({ redis, userCode, baseUrl,
+    loadResources: template => loadAuthorizedByClawResources({ redis, userCode, baseUrl, fallbackToken: contextToken,
       resourceIds: new Set([template.source.resourceId, ...resources.groups
         .filter(group => group.members.some(member => member.employeeId === template.source.resourceId))
         .map(group => group.id)]),
@@ -713,7 +723,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
   closeRuntime = close
   const resourceRuntime = new ByClawOnDemandResources({
     load: selection => loadAuthorizedByClawResources({
-      redis, userCode, baseUrl, ...selection,
+      redis, userCode, baseUrl, fallbackToken: contextToken, ...selection,
       snapshotConcurrency: config.snapshotConcurrency ?? 8,
       excludedResourceIds: deletedResourceIds,
       onResourceLoadError: (resourceId, error) => ctx.logger.error(
@@ -988,7 +998,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
         }
         const prepared = await templateRuntime.prepareRoot(templateId)
         const authorizeCurrent = async (): Promise<void> => {
-          const authorization = await resolveByClawAuthorization(redis, userCode)
+          const authorization = await resolveByClawAuthorization(redis, userCode, contextToken)
           if (!authorization.resourceIds.includes(templateId.replace(/^byclaw-employee-/u, ''))
             || deletedResourceIds.has(templateId.replace(/^byclaw-employee-/u, ''))) {
             throw new Error(`Digital employee ${templateId} is no longer authorized`)
@@ -1073,7 +1083,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
     const emitter = new GatewayDataEmitter(observeReplyRedis(redis))
     const sessionHost: ByClawSessionHost = {
       baseUrl, userCode, byRoot,
-      resolveAuthHeaders: async () => (await resolveByClawAuthorization(redis, userCode)).authHeaders,
+      resolveAuthHeaders: async () => (await resolveByClawAuthorization(redis, userCode, contextToken)).authHeaders,
       resolveSourcePath: source => resolveByClawInboundPath(source, byRoot),
       resolveSessionRoot: agentId => workspaceRegistry.get(agentId)?.sessionRoot,
       resolveMediaModel: (type, modelId) => resolvePluginMediaModel(redis, type, { modelId, decrypt: decryptByClawAuthToken, ...mediaModelOptions }),
@@ -1092,10 +1102,13 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       const web = (ctx.get('webServer') ?? ctx.get('httpServer')) as VoiceWebHost | undefined
       if (!web) return
       return ctx.effect(() => {
-        const authHeaders = async () => (await resolveByClawAuthorization(redis, userCode)).authHeaders
+        const authHeaders = async () => (await resolveByClawAuthorization(redis, userCode, contextToken)).authHeaders
         const disposeAsr = web.register({ kind: 'exact', path: '/api/byclaw/asr/transcribe', handler: createVoiceHttpHandler({
           byRoot, authHeaders,
           resolveModel: () => resolvePluginMediaModel(redis, 'ASR', { decrypt: decryptByClawAuthToken, ...mediaModelOptions }),
+          logArchiveFailure: (stage, code) => {
+            ctx.logger.warn(`[byclaw-asr] archive failed stage=${stage} code=${code} toolEnvironmentConnected=${lazyEnvironment?.connected ?? 'unknown'}`)
+          },
           ...(userFiles === undefined ? {} : { files: userFiles }),
         }) })
         const disposeTts = web.register({ kind: 'exact', path: '/api/byclaw/tts/debug', handler: createTtsDebugHttpHandler({

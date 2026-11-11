@@ -5,11 +5,45 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import java.util.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserInfoFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
 class SharedSandboxGatewayTest {
+    @Test
+    void workspaceQuotaUsesUserCodeWithoutNasPolicyAndPreservesUnknownUsage() {
+        var gateway = gateway();
+        var data = new HashMap<String, Object>(Map.of("backend", "agenticfs", "capacityQuotaSupported", true,
+            "capacityLimitBytes", 10737418240L, "usedBytes", 125165568L, "internalBinding", "private"));
+        when(client.getWorkspaceSpace(Map.of("type", "USER", "tenant", "global", "id", "0027003719")))
+            .thenReturn(Map.of("code", 0, "data", data));
+        assertThat(gateway.workspaceSpaceStatus("0027003719"))
+            .containsEntry("enabled", true).containsEntry("usedBytes", 125165568L)
+            .containsEntry("capacityLimitBytes", 10737418240L).doesNotContainKey("internalBinding");
+        data.put("usedBytes", null);
+        assertThat(gateway.workspaceSpaceStatus("0027003719")).containsEntry("usedBytes", null);
+        verifyNoInteractions(policy, users);
+        verify(client, never()).call(anyString(), anyMap());
+    }
+
+    @Test
+    void workspaceQuotaHidesMissingOrUnsupportedStorageAndRejectsFailedResponses() {
+        var gateway = gateway();
+        when(client.getWorkspaceSpace(anyMap())).thenReturn(Map.of("code", 0));
+        assertThat(gateway.workspaceSpaceStatus("alice")).containsExactlyEntriesOf(Map.of("enabled", false));
+        when(client.getWorkspaceSpace(anyMap())).thenReturn(Map.of("code", 0, "data",
+            Map.of("backend", "nfs", "capacityQuotaSupported", true)));
+        assertThat(gateway.workspaceSpaceStatus("alice")).containsExactlyEntriesOf(Map.of("enabled", false));
+        when(client.getWorkspaceSpace(anyMap())).thenReturn(Map.of("code", -1));
+        assertThatThrownBy(() -> gateway.workspaceSpaceStatus("alice")).isInstanceOf(IllegalStateException.class);
+        clearInvocations(client);
+        assertThat(gateway.workspaceSpaceStatus(" ")).containsEntry("enabled", false);
+        when(provider.getIfAvailable()).thenReturn(null);
+        assertThat(gateway.workspaceSpaceStatus("alice")).containsEntry("enabled", false);
+        verifyNoInteractions(client);
+    }
+
     @Test
     void serverExecutionAccessRetainsProviderHeadersWithoutMutatingPublicContext() {
         var gateway = gateway();
@@ -44,6 +78,28 @@ class SharedSandboxGatewayTest {
         assertThatThrownBy(() -> gateway.executionAccess("alice", "byclaw-dsh", context))
             .hasMessage("Shared execution context is unavailable");
         verifyNoInteractions(client);
+    }
+
+    @Test
+    void onlyFetchesProviderHeadersForTheCurrentBoundEndpoint() {
+        var gateway = gateway();
+        when(policy.eligible("alice")).thenReturn(true);
+        var binding = SandboxInfo.builder().mappingId("m1").sandboxId("pool1").build();
+        String endpoint = "https://example.test/u/context/";
+        Map<String, Object> current = Map.of("mappingId", "m1", "sandboxId", "pool1", "generation", 2L, "endpoint", endpoint);
+        when(client.call(eq("lookup"), anyMap())).thenReturn(Map.of("code", 0, "data", current));
+        var access = new HashMap<>(current);
+        access.put("endpointHeaders", Map.of("e2b-traffic-access-token", "fixture-ingress"));
+        when(client.call(eq("executionAccess"), anyMap())).thenReturn(Map.of("code", 0, "data", access));
+
+        assertThat(gateway.executionHeaders("alice", binding, endpoint))
+            .containsEntry("e2b-traffic-access-token", "fixture-ingress");
+        verify(client).call(eq("executionAccess"), argThat(p -> "m1".equals(p.get("mappingId"))
+            && Long.valueOf(2).equals(p.get("generation"))));
+        clearInvocations(client);
+        assertThatThrownBy(() -> gateway.executionHeaders("alice", binding, endpoint + "old"))
+            .hasMessage("Shared execution context changed");
+        verify(client, never()).call(eq("executionAccess"), anyMap());
     }
 
     @Test

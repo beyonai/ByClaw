@@ -4,6 +4,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhaleai.byai.framework.common.RedisClient;
 import com.iwhaleai.byai.framework.core.discovery.ServiceRegistry;
+import com.iwhalecloud.byai.common.discovery.ServiceRegistryCleanup;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceRegistrationTarget;
 import jakarta.annotation.PreDestroy;
 import org.apache.commons.lang3.StringUtils;
@@ -13,7 +14,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
-import redis.clients.jedis.Jedis;
 
 import java.net.URI;
 import java.util.LinkedHashMap;
@@ -41,12 +41,6 @@ public class ResourceDiscoveryRegistrationService {
     private static final int DEFAULT_WEIGHT = 1;
 
     private static final int DEFAULT_HEARTBEAT_SECONDS = 5;
-
-    private static final String SD_SERVICES_KEY = "byai_gateway:sd:services";
-
-    private static final String SD_INSTANCE_DETAILS_PREFIX = "byai_gateway:sd:instances:";
-
-    private static final String SD_ACTIVE_INSTANCES_PREFIX = "byai_gateway:sd:active:";
 
     @Autowired
     private RedisClient redisClient;
@@ -136,7 +130,7 @@ public class ResourceDiscoveryRegistrationService {
                         target.getServiceName(), e.getMessage());
                 }
             }
-            cleanupRegistryKeys(target.getServiceName());
+            ServiceRegistryCleanup.clear(redisClient, target.getServiceName());
 
             ServiceRegistry registry = new ServiceRegistry(redisClient);
 
@@ -172,32 +166,12 @@ public class ResourceDiscoveryRegistrationService {
                         serviceName, e.getMessage());
                 }
             }
-            cleanupRegistryKeys(serviceName);
+            ServiceRegistryCleanup.clear(redisClient, serviceName);
             LOGGER.info("资源服务反注册完成, serviceName={}, resourceBizType={}, resourceId={}, resourceCode={}",
                 serviceName, resourceBizType, resourceId, resourceCode);
         } catch (Exception e) {
             LOGGER.error("资源服务反注册失败，不影响原流程, serviceName={}, resourceBizType={}, resourceId={}, reason={}",
                 serviceName, resourceBizType, resourceId, e.getMessage(), e);
-        }
-    }
-
-    private void cleanupRegistryKeys(String serviceName) {
-        try (Jedis jedis = redisClient.getResource()) {
-            String instancesKey = SD_INSTANCE_DETAILS_PREFIX + serviceName;
-            String activeKey = SD_ACTIVE_INSTANCES_PREFIX + serviceName;
-            Map<String, String> instanceMap = jedis.hgetAll(instancesKey);
-            LOGGER.warn("资源服务清理 Redis 注册信息, serviceName={}, instancesKey={}, activeKey={}, instanceIds={}, activeCountBefore={}",
-                serviceName, instancesKey, activeKey,
-                instanceMap == null ? java.util.List.of() : instanceMap.keySet(), jedis.zcard(activeKey));
-            if (instanceMap != null && !instanceMap.isEmpty()) {
-                String[] instanceIds = instanceMap.keySet().toArray(new String[0]);
-                jedis.hdel(instancesKey, instanceIds);
-                jedis.zrem(activeKey, instanceIds);
-            }
-            jedis.del(instancesKey);
-            jedis.del(activeKey);
-            jedis.srem(SD_SERVICES_KEY, serviceName);
-            LOGGER.warn("资源服务清理 Redis 注册信息完成, serviceName={}, deletedInstancesKey={}, deletedActiveKey={}", serviceName, instancesKey, activeKey);
         }
     }
 

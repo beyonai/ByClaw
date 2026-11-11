@@ -21,7 +21,7 @@ import io.netty.channel.Channel;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import lombok.extern.slf4j.Slf4j;
 
-/** 向群内用户的所有在线设备广播事件。Agent 成员没有 WebSocket 身份，不参与设备推送。 */
+/** 向真人成员的在线 WebSocket 广播，同时发布已提交消息的通用事实。 */
 @Slf4j
 @Service
 public class GroupChatEventPublisher {
@@ -31,8 +31,8 @@ public class GroupChatEventPublisher {
     private final ChannelManager channelManager;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private TenantNodeClient tenantNodeClient;
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.iwhalecloud.byai.state.domain.mobilepush.MobilePushService mobilePush;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.hook.WorkgroupMessageEvents messageEvents;
 
     public GroupChatEventPublisher(SessionMemberService memberService, ChannelManager channelManager) {
         this.memberService = memberService;
@@ -52,8 +52,8 @@ public class GroupChatEventPublisher {
         }
         int sent = 0;
         List<ByaiSessionMember> members = memberService.findSessionMembers(sessionId, MemObjType.USER.name(), null);
-        // 系统推送按真实成员发放，与其是否有在线 Channel 无关。
-        publishMobile(groupEnterpriseId, event, members.stream().map(ByaiSessionMember::getMemObjId).toList());
+        // External facts cover all real members, including users without an online WebSocket.
+        publishCommitted(groupEnterpriseId, event, members.stream().map(ByaiSessionMember::getMemObjId).toList());
         for (ByaiSessionMember member : members) {
             // 群主交接提示只推送给新群主的在线设备。
             if ("OWNERSHIP_TRANSFERRED".equals(event.getString("event"))
@@ -86,21 +86,22 @@ public class GroupChatEventPublisher {
 
     /** 使用写入前已鉴权的成员快照，离群和解散提交后仍可通知原成员。 */
     public int publishTenantMembers(TenantRequestContext tenant, JSONObject event, List<?> members) {
-        event.put("enterpriseId", String.valueOf(tenant.enterpriseId()));
+        JSONObject deliveryEvent = mutableCopy(event);
+        deliveryEvent.put("enterpriseId", String.valueOf(tenant.enterpriseId()));
         int sent = 0;
-        List<Long> mobileRecipients = new java.util.ArrayList<>();
+        List<Long> recipientIds = new java.util.ArrayList<>();
         for (Object value : members) {
             if (!(value instanceof Map<?, ?> member) || !"USER".equals(member.get("memObjType"))) continue;
             Object rawId = member.get("memObjId");
             if ("OWNERSHIP_TRANSFERRED".equals(event.getString("event"))
                 && !String.valueOf(rawId).equals(event.getString("recipientUserId"))) continue;
             if (rawId == null || !rawId.toString().matches("[1-9][0-9]*")) continue;
-            mobileRecipients.add(Long.valueOf(rawId.toString()));
+            recipientIds.add(Long.valueOf(rawId.toString()));
             for (Channel channel : channelManager.getChannels(Long.valueOf(rawId.toString()))) {
                 if (!channel.isActive() || !Objects.equals(String.valueOf(tenant.enterpriseId()),
                     channel.attr(Constant.ATT_ENTERPRISE_ID).get())) continue;
                 try {
-                    channel.writeAndFlush(new TextWebSocketFrame(event.toJSONString()));
+                    channel.writeAndFlush(new TextWebSocketFrame(deliveryEvent.toJSONString()));
                     sent++;
                 }
                 catch (Exception error) {
@@ -108,19 +109,24 @@ public class GroupChatEventPublisher {
                 }
             }
         }
-        publishMobile(tenant.enterpriseId(), event, mobileRecipients);
+        publishCommitted(tenant.enterpriseId(), event, recipientIds);
         return sent;
     }
     /** Only the forwarding service supplies freshly bound USER recipients; completion means enqueue, never client receipt. */
     public void publishForwardMembers(long enterpriseId,List<Long> recipientIds,JSONObject event) {
         if(enterpriseId<=0||event==null)throw new IllegalArgumentException("FORWARD_INVALID_DELIVERY");
-        event.put("enterpriseId",Long.toString(enterpriseId));
+        // Callers may pass JSONObject instances backed by immutable maps (for example Map.of in tests).
+        // Keep the committed event immutable from the caller's perspective while adding delivery metadata.
+        JSONObject deliveryEvent = mutableCopy(event);
+        deliveryEvent.put("enterpriseId",Long.toString(enterpriseId));
+        // The message is already committed; socket delivery failures cannot suppress external facts.
+        publishCommitted(enterpriseId, event, recipientIds);
         List<io.netty.channel.ChannelFuture> sends=new java.util.ArrayList<>();
         try {
             for(Long id:new java.util.LinkedHashSet<>(recipientIds)) {
                 for(Channel channel:channelManager.getChannels(id)) {
                     if(!channel.isActive()||!Objects.equals(Long.toString(enterpriseId),channel.attr(Constant.ATT_ENTERPRISE_ID).get()))continue;
-                    sends.add(channel.writeAndFlush(new TextWebSocketFrame(event.toJSONString())));
+                    sends.add(channel.writeAndFlush(new TextWebSocketFrame(deliveryEvent.toJSONString())));
                 }
             }
             long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
@@ -128,7 +134,6 @@ public class GroupChatEventPublisher {
                 long left=deadline-System.nanoTime();
                 if(left<=0||!send.await(left,java.util.concurrent.TimeUnit.NANOSECONDS)||!send.isSuccess())throw new IllegalStateException("FORWARD_DELIVERY_UNAVAILABLE");
             }
-            publishMobile(enterpriseId, event, recipientIds);
         } catch(InterruptedException interrupted) {
             Thread.currentThread().interrupt();throw new IllegalStateException("FORWARD_DELIVERY_UNAVAILABLE");
         } catch(RuntimeException failure) {
@@ -136,15 +141,21 @@ public class GroupChatEventPublisher {
         }
     }
 
-    /** 手机通知是提交后的旁路，配置、异步执行或厂商异常不能改变已有消息 ACK/广播语义。 */
-    private void publishMobile(Long enterpriseId, JSONObject event, List<Long> recipientIds) {
-        if (mobilePush == null || enterpriseId == null) {
+    /** External consumers cannot change an already committed message or its existing ACK/broadcast semantics. */
+    private void publishCommitted(Long enterpriseId, JSONObject event, List<Long> recipientIds) {
+        if (messageEvents == null || enterpriseId == null) {
             return;
         }
         try {
-            mobilePush.notifyMembers(enterpriseId, event, recipientIds);
+            messageEvents.committed(enterpriseId, event, recipientIds);
         } catch (RuntimeException error) {
-            log.warn("Mobile notification submission failed, enterpriseId={}", enterpriseId);
+            log.warn("Workgroup event submission failed, enterpriseId={}", enterpriseId);
         }
+    }
+
+    private static JSONObject mutableCopy(JSONObject event) {
+        JSONObject copy = new JSONObject();
+        copy.putAll(event);
+        return copy;
     }
 }
