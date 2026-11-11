@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { before, prepare, prepareSource } from './prepare-tool-helper-env.mjs'
+import { isDeploymentParameter } from '../plugins/dsh-tool-env/src/deployment-environment.ts'
 
 // The pinned helper assembles this environment before choosing ordinary vs PTY spawn.
 const fixture = `function environment(request, process) { ${before} return env; }`
@@ -97,10 +98,11 @@ test('host filtering still removes Redis credentials before the request reaches 
   const body = source.slice(source.indexOf('export function scrubEnvironment('), source.indexOf('/** True once'))
     .replace('export function scrubEnvironment(params: unknown): unknown', 'function scrubEnvironment(params)')
     .replace('(params as { env?: unknown })', 'params')
-  const scrub = new Function(`const PRIVATE_ENVIRONMENT = ${privatePattern}; const HOST_CREDENTIAL_ENVIRONMENT = ${hostPattern}; ${body}; return scrubEnvironment`)()
+  const scrub = new Function('isDeploymentParameter', `const PRIVATE_ENVIRONMENT = ${privatePattern}; const HOST_CREDENTIAL_ENVIRONMENT = ${hostPattern}; ${body}; return scrubEnvironment`)(isDeploymentParameter)
   const request = scrub({ env: { REDIS_PASSWORD: 'host-fixture', REDIS_CLUSTER_PASSWORD: 'cluster-fixture',
     BYCLAW_TOOL_ENV_FORWARDING: '1', BYCLAW_TOOL_ENV_FORWARD_ENVIRONMENT: 'all',
-    PLATFORM_API_TOKEN: 'host-token', BEYOND_TOKEN: 'user-token' } })
+    PLATFORM_API_TOKEN: 'host-token', BYCLAW_DEPLOY_PRIVATE_KEY: 'deployment-fixture',
+    BYCLAW_DEPLOY_HOST: 'deployment.invalid', BEYOND_TOKEN: 'user-token' } })
   assert.deepEqual(request.env, { BEYOND_TOKEN: 'user-token' })
   assert.deepEqual(environment(request, { env: own }), { ...business, BEYOND_TOKEN: 'user-token' })
 })
