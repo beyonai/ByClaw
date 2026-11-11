@@ -12,6 +12,39 @@ import org.springframework.beans.factory.ObjectProvider;
 
 class SharedSandboxGatewayTest {
     @Test
+    void workspaceQuotaUsesUserCodeWithoutNasPolicyAndPreservesUnknownUsage() {
+        var gateway = gateway();
+        var data = new HashMap<String, Object>(Map.of("backend", "agenticfs", "capacityQuotaSupported", true,
+            "capacityLimitBytes", 10737418240L, "usedBytes", 125165568L, "internalBinding", "private"));
+        when(client.getWorkspaceSpace(Map.of("type", "USER", "tenant", "global", "id", "0027003719")))
+            .thenReturn(Map.of("code", 0, "data", data));
+        assertThat(gateway.workspaceSpaceStatus("0027003719"))
+            .containsEntry("enabled", true).containsEntry("usedBytes", 125165568L)
+            .containsEntry("capacityLimitBytes", 10737418240L).doesNotContainKey("internalBinding");
+        data.put("usedBytes", null);
+        assertThat(gateway.workspaceSpaceStatus("0027003719")).containsEntry("usedBytes", null);
+        verifyNoInteractions(policy, users);
+        verify(client, never()).call(anyString(), anyMap());
+    }
+
+    @Test
+    void workspaceQuotaHidesMissingOrUnsupportedStorageAndRejectsFailedResponses() {
+        var gateway = gateway();
+        when(client.getWorkspaceSpace(anyMap())).thenReturn(Map.of("code", 0));
+        assertThat(gateway.workspaceSpaceStatus("alice")).containsExactlyEntriesOf(Map.of("enabled", false));
+        when(client.getWorkspaceSpace(anyMap())).thenReturn(Map.of("code", 0, "data",
+            Map.of("backend", "nfs", "capacityQuotaSupported", true)));
+        assertThat(gateway.workspaceSpaceStatus("alice")).containsExactlyEntriesOf(Map.of("enabled", false));
+        when(client.getWorkspaceSpace(anyMap())).thenReturn(Map.of("code", -1));
+        assertThatThrownBy(() -> gateway.workspaceSpaceStatus("alice")).isInstanceOf(IllegalStateException.class);
+        clearInvocations(client);
+        assertThat(gateway.workspaceSpaceStatus(" ")).containsEntry("enabled", false);
+        when(provider.getIfAvailable()).thenReturn(null);
+        assertThat(gateway.workspaceSpaceStatus("alice")).containsEntry("enabled", false);
+        verifyNoInteractions(client);
+    }
+
+    @Test
     void serverExecutionAccessRetainsProviderHeadersWithoutMutatingPublicContext() {
         var gateway = gateway();
         when(policy.eligible("alice")).thenReturn(true);
