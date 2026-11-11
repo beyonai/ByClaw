@@ -4,7 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { ByClawSessionHost } from '@byclaw/dsh-integration/session-extensions'
 import { GroupTaskPublicationClient } from './client.ts'
-import { GroupTaskPublicationTools } from './tool.ts'
+import { GroupTaskPublicationTools, GROUP_TASK_PUBLICATION_DESCRIPTION } from './tool.ts'
 import { GroupTaskPublicationState } from './state.ts'
 
 export { GroupTaskPublicationClient, type GroupTaskPublicationBinding, type GroupTaskPublicationClientOptions, type Publication } from './client.ts'
@@ -41,6 +41,15 @@ export function apply(ctx: Context, config: Config): Promise<void> {
       composers.set(host, tools)
     }
     tools.mount(agentCtx, binding, ctx)
+  })
+  ctx.on('byclaw/coding-setup', async setup => {
+    const { command, host } = setup
+    if (host.userCode !== command.header.userCode) throw new Error('群任务发布上下文与宿主用户身份不一致。')
+    const binding = await (await ready).select(command)
+    if (binding === undefined) return
+    const client = new GroupTaskPublicationClient({ ...host, timeoutMs: config.timeoutMs })
+    setup.publication = { description: GROUP_TASK_PUBLICATION_DESCRIPTION,
+      prepare: (args, signal) => client.prepare(binding, args, signal) }
   })
   return ready.then(() => undefined)
 }

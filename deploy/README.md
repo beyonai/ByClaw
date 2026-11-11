@@ -179,6 +179,32 @@ STANDALONE_MODULES=fe,be
 
 `start-fe.sh` 和 `start-all.sh` 会自动调用生成脚本，从 `.env` 读取 `BE_SERVER_PORT`、`BE_WS_PORT` 和 `BYCLAW_SANDBOX_PORT` 替换模板中的占位符，并初始化开发环境 `localhost` HTTPS 证书。修改 nginx 配置只需编辑 `.tpl` 模板文件。
 
+应用预览入口默认关闭（`/sandbox-apps/` 返回 404）。需要通过平台入口访问 coding
+沙箱应用时，在部署环境配置：
+
+```ini
+NGINX_APP_PREVIEW_DOMAIN=cn-beijing.sandbox.aliyuncs.com
+NGINX_APP_PREVIEW_PORT=8082
+NGINX_APP_PREVIEW_DNS=
+```
+
+域名必须是受信任的云网关 DNS 后缀，不带协议、路径、凭证或变量。端口范围为
+1024—65535，必须与 coding Spec 的公开端口及 `BYCLAW_APP_PORT` 一致。
+DNS 可显式指定 FE 容器能访问的 IPv4 解析服务器；留空使用 Docker 的 127.0.0.11，
+或 macOS Podman 网络网关（查询失败时默认 10.89.0.1）。预览 location 自带 resolver，
+不依赖普通后端是否采用集群 upstream。非法参数会使生成失败，保留原配置。
+
+云域名和端口只是平台转发目标；coding Spec 另需配置
+`BYCLAW_APP_PUBLIC_BASE=https://<平台域名>/sandbox-apps`，用于命令返回浏览器地址。
+配置生成、Nginx 配置校验和重载/容器更新是不同步骤，修改 `.env` 不会自动生效。
+`nginx-app-preview.conf.tpl` 是可复用的规则片段；通用和环境专用主模板都通过
+`{{APP_PREVIEW_BLOCK}}` 引入它。ByClaw 只维护模板，不提交生成的 `.conf`。
+若通过 byclaw-middleware 部署，需使用该仓库维护的对应配置源，不能只更新本仓库。
+这是匿名应用预览，同源和 Cookie 限制见 coding 的 APP_PREVIEW.md；不改变租约回收。
+
+生成测试：`python3 -m unittest discover -s deploy/tests -p 'test_nginx_app_preview.py'`。
+测试使用临时目录，不操作线上 Nginx，也不能代替真实 Nginx/云网关验收。
+
 旧版本升级：需单独停止并删除旧 `qa-worker` 容器，或 K3s 中的旧 Worker Deployment 及专用 ConfigMap；更新部署清单不会自动删除旧实例。QA Manager 及数据卷保留。
 
 ## 部署环境检查

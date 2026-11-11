@@ -4,6 +4,9 @@ Push-Location $PSScriptRoot
 
 $envFile = "../../.env"
 $template = "../config/nginx-standalone.conf.tpl"
+if (Test-Path '../../nginx-standalone.conf.tpl') {
+    $template = '../../nginx-standalone.conf.tpl'
+}
 $output = "../config/nginx-standalone.conf"
 $sslDir = "../config/ssl"
 $sslKey = "$sslDir/localhost.key"
@@ -102,7 +105,29 @@ if ($isDarwin -and (Get-Command "podman" -ErrorAction SilentlyContinue)) {
     $proxySandboxes = '$sandbox_http'
 }
 
+$previewBlock = '    location /sandbox-apps/ { return 404; }'
+if ($env:NGINX_APP_PREVIEW_DOMAIN) {
+    $domain = $env:NGINX_APP_PREVIEW_DOMAIN
+    if ($domain.Length -gt 253 -or $domain -cmatch '[^a-z0-9.-]' -or $domain -cnotmatch '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$') {
+        throw 'Invalid NGINX_APP_PREVIEW_DOMAIN'
+    }
+    $port = if ($env:NGINX_APP_PREVIEW_PORT) { $env:NGINX_APP_PREVIEW_PORT } else { '8082' }
+    if ($port -match '[^0-9]' -or $port -notmatch '^[0-9]{1,5}$' -or [int]$port -lt 1024 -or [int]$port -gt 65535) {
+        throw 'Invalid NGINX_APP_PREVIEW_PORT'
+    }
+    $dns = if ($env:NGINX_APP_PREVIEW_DNS) { $env:NGINX_APP_PREVIEW_DNS } else { '127.0.0.11' }
+    if ($dns -match '[^0-9.]' -or $dns -notmatch '^[0-9]{1,3}(\.[0-9]{1,3}){3}$') { throw 'Invalid NGINX_APP_PREVIEW_DNS' }
+    foreach ($octet in $dns.Split('.')) {
+        if ([int]$octet -gt 255) { throw 'Invalid NGINX_APP_PREVIEW_DNS' }
+    }
+    $previewBlock = Get-Content '../config/nginx-app-preview.conf.tpl' -Raw
+    $previewBlock = $previewBlock.Replace('{{APP_PREVIEW_DOMAIN}}', $domain)
+    $previewBlock = $previewBlock.Replace('{{APP_PREVIEW_PORT}}', $port)
+    $previewBlock = $previewBlock.Replace('{{APP_PREVIEW_DNS}}', $dns)
+}
+
 $content = Get-Content $template -Raw
+$content = $content.Replace('{{APP_PREVIEW_BLOCK}}', $previewBlock)
 $content = $content.Replace('{{BE_SERVER_PORT}}', $bePort)
 $content = $content.Replace('{{BE_WS_PORT}}', $wsPort)
 $content = $content.Replace('{{CONTAINER_SUFFIX}}', $suffix)

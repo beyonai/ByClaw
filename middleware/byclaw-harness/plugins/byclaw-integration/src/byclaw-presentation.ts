@@ -17,6 +17,7 @@ export interface DshProjectionContext {
   depth: number
   sequence: number | string
   eventKind: DshSessionEventKind
+  eventSource?: 'dsh' | 'codex'
   status?: DshSessionStatus
   childName?: string
   childTask?: string
@@ -87,7 +88,7 @@ export async function emitByClawProjection(
 function metadata(context: DshProjectionContext): Record<string, unknown> {
   return {
     ...context.groupMetadata,
-    event_source: 'dsh',
+    event_source: context.eventSource ?? 'dsh',
     event_kind: context.eventKind,
     session_scope: context.scope,
     external_session_id: context.sessionId,

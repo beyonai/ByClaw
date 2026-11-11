@@ -199,6 +199,9 @@ else
     PROXY_SANDBOXES="\$sandbox_http"
 fi
 
+# Resolve preview configuration before writing any generated files.
+APP_PREVIEW_BLOCK=$(sh ../config/render-app-preview.sh)
+
 escape_sed_replacement() {
     printf '%s' "$1" | sed 's/[&|]/\\&/g'
 }
@@ -219,15 +222,20 @@ sed -e "s|{{BE_SERVER_PORT}}|$(escape_sed_replacement "$BE_PORT")|g" \
 # Multi-line replacement for UPSTREAM_BLOCK via awk
 UPSTREAM_FILE=$(mktemp)
 printf '%s' "$UPSTREAM_BLOCK" > "$UPSTREAM_FILE"
-awk -v rfile="$UPSTREAM_FILE" '{
+APP_PREVIEW_FILE=$(mktemp)
+printf '%s\n' "$APP_PREVIEW_BLOCK" > "$APP_PREVIEW_FILE"
+awk -v rfile="$UPSTREAM_FILE" -v pfile="$APP_PREVIEW_FILE" '{
     if (index($0, "{{UPSTREAM_BLOCK}}")) {
         while ((getline line < rfile) > 0) print line
         close(rfile)
+    } else if (index($0, "{{APP_PREVIEW_BLOCK}}")) {
+        while ((getline line < pfile) > 0) print line
+        close(pfile)
     } else {
         print
     }
 }' "${OUTPUT}.tmp" > "$OUTPUT"
-rm -f "${OUTPUT}.tmp" "$UPSTREAM_FILE"
+rm -f "${OUTPUT}.tmp" "$UPSTREAM_FILE" "$APP_PREVIEW_FILE"
 
 echo "Generated $OUTPUT (BE_PORT=${BE_PORT}, WS_PORT=${WS_PORT}, SUFFIX=${SUFFIX}, SANDBOX_URL=${SANDBOX_URL})"
 if [ -n "${BE_CLUSTER:-}" ]; then

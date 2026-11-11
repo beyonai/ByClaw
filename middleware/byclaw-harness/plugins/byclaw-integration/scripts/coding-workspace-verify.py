@@ -1,0 +1,286 @@
+"""Keyless tests of the actual lease-local runner; no online model or user files."""
+import contextlib
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import tomllib
+import unittest
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location('coding_workspace', Path(__file__).with_name('coding-workspace.py'))
+runner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runner)
+
+
+class WorkspaceTests(unittest.TestCase):
+    def test_deployment_context_is_local_private_stripped_and_cleaned_on_failure(self):
+        source = dict(CODEX_AUTH='model-auth', BYCLAW_DEPLOY_ENABLED='1',
+                      BYCLAW_DEPLOY_PRIVATE_KEY='synthetic-only', BYCLAW_DEPLOY_HOST='example.invalid')
+        contexts = []
+        with self.assertRaisesRegex(RuntimeError, 'cancelled'):
+            with runner.deployment_environment(source) as environment:
+                self.assertEqual(environment['CODEX_AUTH'], 'model-auth')
+                self.assertNotIn('BYCLAW_DEPLOY_PRIVATE_KEY', environment)
+                path = Path(environment['BYCLAW_DEPLOY_CONTEXT'])
+                contexts.append(path)
+                self.assertEqual(path.parent.parent, Path('/tmp'))
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+                self.assertEqual(json.loads(path.read_text())['private_key'], 'synthetic-only')
+                with runner.deployment_environment(source) as other:
+                    self.assertNotEqual(environment['BYCLAW_DEPLOY_CONTEXT'], other['BYCLAW_DEPLOY_CONTEXT'])
+                raise RuntimeError('cancelled')
+        self.assertFalse(contexts[0].parent.exists())
+        with runner.deployment_environment(dict(source, BYCLAW_DEPLOY_ENABLED='0')) as environment:
+            self.assertEqual(environment, {'CODEX_AUTH': 'model-auth'})
+
+    def test_native_runner_scopes_deployment_context_without_persisting_it(self):
+        observed = []
+        def verify(args, kwargs):
+            path = Path(kwargs['env']['BYCLAW_DEPLOY_CONTEXT'])
+            observed.append(path)
+            self.assertTrue(path.is_file())
+            self.assertNotIn('BYCLAW_DEPLOY_PRIVATE_KEY', kwargs['env'])
+            self.assertNotIn('BYCLAW_DEPLOY_PRIVATE_KEY', os.environ)
+            self.assertNotIn('synthetic-only', json.dumps(args))
+            self.assertTrue(kwargs['start_new_session'])
+        with patch.dict(os.environ, {'BYCLAW_DEPLOY_ENABLED': '1', 'BYCLAW_DEPLOY_PRIVATE_KEY': 'synthetic-only'}):
+            with patch.object(runner.os, 'killpg') as kill:
+                self.run_cli(verify)
+                kill.assert_called_once()
+        self.assertFalse(observed[0].parent.exists())
+        for file in self.by.rglob('*'):
+            if file.is_file():
+                self.assertNotIn(b'synthetic-only', file.read_bytes())
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='coding-workspace-test-')
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.by = self.root / 'by'
+        self.by.mkdir()
+        self.defaults = self.root / 'image'
+        self.defaults.mkdir()
+        self.default_config = 'model="image-model"\nmodel_provider="byclaw"\n[model_providers.byclaw]\nbase_url="https://example.invalid/v1"\nenv_key="CODEX_AUTH"\nwire_api="responses"\n'
+        (self.defaults / 'config.toml').write_text(self.default_config, encoding='utf-8')
+        session = self.by / '.sessions' / 's1'
+        cwd = self.by / '.shared' / 'project_8'
+        self.manifest = dict(version=1, identity='identity-a', employeeId='1001', messageId='m1', persona='RULE_CHECK', skills=[],
+            workspace=dict(sessionRoot=str(session), cwd=str(cwd), defaultOutputRoot=str(cwd), sharedRoot=str(self.by / '.shared')),
+            home=str(session / 'executors' / '1001' / 'codex-home'))
+        self.home = Path(self.manifest['home'])
+        self.cwd = cwd
+
+    def run_cli(self, callback=None, manifest=None):
+        calls = []
+        thread = '12345678-1234-1234-1234-123456789abc'
+        class Child:
+            def __init__(child, args, **kwargs):
+                child.pid = 99999999
+                calls.append((args, kwargs))
+                if callback:
+                    callback(args, kwargs)
+                native = Path(kwargs['env']['CODEX_HOME']) / 'sessions' / ('rollout-' + thread + '.jsonl')
+                native.parent.mkdir(exist_ok=True)
+                native.write_text('native state', encoding='utf-8')
+                child.stdin = io.StringIO()
+                child.stdout = io.StringIO('\n'.join(json.dumps(item) for item in [
+                    dict(type='thread.started', thread_id=thread), dict(type='turn.started'),
+                    dict(type='item.completed', item=dict(id='answer', type='agent_message', text='done')), dict(type='turn.completed')]) + '\n')
+            def wait(child):
+                return 0
+            def poll(child):
+                return 0
+        output = io.StringIO()
+        with patch.dict(os.environ, dict(CODEX_HOME=str(self.defaults), CODEX_AUTH='test-auth-not-a-prompt', CODEX_MODEL='override-model', CODEX_BASE_URL='https://override.invalid/v1')):
+            with patch.object(runner.subprocess, 'Popen', Child), contextlib.redirect_stdout(output):
+                code = runner.run(manifest or self.manifest, 'current task', self.by)
+        self.assertEqual(code, 0)
+        return calls, [json.loads(line) for line in output.getvalue().splitlines()]
+
+    def test_config_identity_resume_and_rule_update(self):
+        self.cwd.mkdir(parents=True)
+        original = self.cwd / 'AGENTS.md'
+        original.write_text('project policy', encoding='utf-8')
+        calls, _ = self.run_cli()
+        data = tomllib.loads((self.home / 'config.toml').read_text(encoding='utf-8'))
+        self.assertEqual(data['model'], 'image-model')
+        self.assertEqual(data['model_providers']['byclaw']['env_key'], 'CODEX_AUTH')
+        self.assertNotIn('test-auth', (self.home / 'config.toml').read_text())
+        self.assertEqual(data['developer_instructions'], 'RULE_CHECK')
+        self.assertEqual(calls[0][1]['env']['CODEX_HOME'], str(self.home))
+        self.assertEqual(calls[0][1]['env']['DSH_BYCLAW_AGENT_ID'], '1001')
+        self.assertIn('override-model', calls[0][0])
+        self.assertEqual(calls[0][0][-1], '-')
+        self.manifest['persona'] = 'UPDATED_RULE'
+        calls, events = self.run_cli()
+        self.assertIn('resume', calls[0][0])
+        self.assertIn('12345678-1234-1234-1234-123456789abc', calls[0][0])
+        self.assertTrue(any(event.get('status') == 'resumed' for event in events))
+        self.assertEqual((self.home / 'AGENTS.md').read_text().strip(), 'UPDATED_RULE')
+        self.assertEqual(original.read_text(), 'project policy')
+        self.assertEqual((self.defaults / 'config.toml').read_text(), self.default_config)
+
+    def test_missing_native_state_recreates_but_foreign_identity_rejects(self):
+        self.run_cli()
+        for file in (self.home / 'sessions').glob('*'):
+            file.unlink()
+        calls, events = self.run_cli()
+        self.assertNotIn('resume', calls[0][0])
+        self.assertTrue(any(event.get('status') == 'recreated' for event in events))
+        self.manifest['identity'] = 'other-user'
+        with self.assertRaisesRegex(ValueError, 'SCOPE_MISMATCH'):
+            self.run_cli()
+
+    def test_existing_file_binary_shell_output_and_session_artifact_use_original_protocol(self):
+        self.cwd.mkdir(parents=True)
+        (self.cwd / 'old.txt').write_text('old\n', encoding='utf-8', newline='\n')
+        def write_files(args, kwargs):
+            (self.cwd / 'old.txt').write_text('new\n', encoding='utf-8', newline='\n')
+            nested = self.cwd / 'reports' / 'deep'
+            nested.mkdir(parents=True)
+            (nested / 'result.md').write_text('RULE_CHECK\nreport\n', encoding='utf-8')
+            (nested / 'archive.zip').write_bytes(b'PK\0binary')
+            (Path(self.manifest['workspace']['sessionRoot']) / 'session.txt').write_text('session\n', encoding='utf-8')
+        _, events = self.run_cli(write_files)
+        summaries = [event for event in events if event['type'] == 'byclaw.file_changes']
+        self.assertEqual(len(summaries), 2)
+        details = []
+        for summary in summaries:
+            self.assertEqual(summary['payload']['version'], 2)
+            for file in summary['payload']['files']:
+                path = self.by / '.file_changes' / 's1' / 'files' / (file['uuid'] + '.json')
+                details.append(json.loads(path.read_text(encoding='utf-8')))
+        modified = next(item for item in details if item['filePath'] == 'old.txt')
+        self.assertEqual(modified['originalContent'], 'old\n')
+        self.assertEqual(modified['modifiedContent'], 'new\n')
+        archive = next(item for item in details if item['filePath'].endswith('.zip'))
+        self.assertTrue(archive['binary'])
+        self.assertTrue(archive['modifiedExists'])
+        self.assertEqual(archive['modifiedSize'], len(b'PK\0binary'))
+        self.assertFalse(any('executors/' in item['filePath'] for item in details))
+        self.assertFalse(list(self.by.rglob('HANDOFF.md')))
+        self.assertFalse(list(self.by.rglob('delivery.json')))
+
+    def test_missing_skill_mount_fails_before_model(self):
+        self.manifest['skills'] = [dict(name='missing', path=str(self.root / 'missing' / 'SKILL.md'), enabled=True)]
+        with self.assertRaisesRegex(ValueError, 'SKILL_MOUNT_MISSING'):
+            self.run_cli()
+
+    def test_tool_preparation_runs_before_cli_and_failure_stops_execution(self):
+        self.manifest['prepareAgentSkills'] = True
+        observed = []
+        def preparation(manifest, root):
+            observed.append((manifest['employeeId'], root))
+            manifest['skills'] = []
+        with patch.object(runner, 'prepare_agent_skills', preparation):
+            self.run_cli(lambda *_: self.assertEqual(len(observed), 1))
+        self.assertEqual(observed, [('1001', self.by)])
+        with patch.object(runner, 'prepare_agent_skills', side_effect=ValueError('EXECUTION_SKILL_AUTH_FAILED')):
+            with patch.object(runner.subprocess, 'Popen') as cli:
+                with self.assertRaisesRegex(ValueError, 'SKILL_AUTH_FAILED'):
+                    runner.run(self.manifest, 'task', self.by)
+                cli.assert_not_called()
+
+    def test_actual_preparer_child_receives_identity_and_existing_environment(self):
+        program = self.root / 'prepare-fixture.mjs'
+        program.write_text('''
+import assert from 'node:assert/strict';
+assert.equal(process.argv[2], '1001');
+assert.equal(process.env.BEYOND_TOKEN, 'synthetic-auth');
+assert.ok(process.argv[3]);
+process.stdout.write(JSON.stringify({skills:[]}));
+''', encoding='utf-8')
+        with patch.dict(os.environ, dict(BYCLAW_AGENT_SKILLS_PREPARER=str(program), BEYOND_TOKEN='synthetic-auth')):
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                runner.prepare_agent_skills(self.manifest, self.by)
+        self.assertEqual(self.manifest['skills'], [])
+        self.assertIn('skills-ready', output.getvalue())
+        self.assertNotIn('synthetic-auth', output.getvalue())
+        program.write_text('process.stderr.write("private credential diagnostic\\nEXECUTION_SKILL_AUTH_FAILED\\n");process.exit(1)', encoding='utf-8')
+        with patch.dict(os.environ, dict(BYCLAW_AGENT_SKILLS_PREPARER=str(program))):
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(ValueError, '^EXECUTION_SKILL_AUTH_FAILED$'):
+                    runner.prepare_agent_skills(self.manifest, self.by)
+
+    def test_missing_preparer_fails_instead_of_using_empty_skills(self):
+        with patch.dict(os.environ, dict(BYCLAW_AGENT_SKILLS_PREPARER='')):
+            with self.assertRaisesRegex(ValueError, 'SKILL_PREPARER_MISSING'):
+                runner.prepare_agent_skills(self.manifest, self.by)
+
+    def test_cancel_preparation_terminates_child_and_releases_cache_lock(self):
+        class Child:
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            stopped = False
+            def communicate(child):
+                raise KeyboardInterrupt()
+            def poll(child):
+                return 130 if child.stopped else None
+            def terminate(child):
+                child.stopped = True
+            def wait(child, timeout=None):
+                return 130
+        child = Child()
+        program = self.root / 'cancel-fixture.mjs'
+        program.touch()
+        with patch.dict(os.environ, dict(BYCLAW_AGENT_SKILLS_PREPARER=str(program))):
+            with patch.object(runner.subprocess, 'Popen', return_value=child), contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(KeyboardInterrupt):
+                    runner.prepare_agent_skills(self.manifest, self.by)
+        self.assertTrue(child.stopped)
+        with runner.identity_lock(self.by / '.byclaw' / '.agent-skills.lock'):
+            pass
+
+    def test_effective_skill_view_removes_revoked_links_between_tasks(self):
+        source = self.root / 'source'
+        source.mkdir()
+        (source / 'SKILL.md').write_text('---\nname: associated-demo\ndescription: fixture\n---\n', encoding='utf-8')
+        self.manifest['skills'] = [dict(name='associated-demo', path=str(source / 'SKILL.md'), enabled=True)]
+        try:
+            self.run_cli()
+        except OSError as error:
+            if os.name == 'nt' and getattr(error, 'winerror', None) == 1314:
+                self.skipTest('Windows account lacks symlink privilege; verify native links in the Linux image')
+            raise
+        link = self.home / 'skills' / 'associated-demo'
+        self.assertTrue(link.is_symlink())
+        self.manifest['skills'] = []
+        self.run_cli()
+        self.assertFalse(link.is_symlink())
+
+    def test_oversized_scan_never_invents_deletions(self):
+        before = ({'unseen.txt': dict(size=1, text='a')}, True)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            runner.file_changes(self.cwd, 's1', before, ({}, False), self.by)
+        self.assertNotIn('file_changes', output.getvalue())
+        self.assertIn('partial', output.getvalue())
+
+    def test_real_cross_process_lock_serializes_same_identity(self):
+        lock = self.root / 'shared.lock'
+        program = ('import importlib.util,time,sys\n'
+            's=importlib.util.spec_from_file_location("runner",sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m)\n'
+            'from pathlib import Path\n'
+            'with m.identity_lock(Path(sys.argv[2])):\n'
+            ' print("ENTER",time.monotonic(),flush=True);time.sleep(.3);print("EXIT",time.monotonic(),flush=True)\n')
+        args = [sys.executable, '-c', program, str(Path(runner.__file__)), str(lock)]
+        first = subprocess.Popen(args, stdout=subprocess.PIPE, text=True)
+        self.assertTrue(first.stdout.readline().startswith('ENTER'))
+        second = subprocess.Popen(args, stdout=subprocess.PIPE, text=True)
+        first_output = first.communicate(timeout=10)[0]
+        second_output = second.communicate(timeout=10)[0]
+        left = float(next(line.split()[1] for line in first_output.splitlines() if line.startswith('EXIT')))
+        right = float(next(line.split()[1] for line in second_output.splitlines() if line.startswith('ENTER')))
+        self.assertGreaterEqual(right, left)
+        self.assertEqual(first.returncode, 0)
+        self.assertEqual(second.returncode, 0)
+
+
+if __name__ == '__main__':
+    unittest.main()

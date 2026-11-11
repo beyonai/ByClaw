@@ -72,6 +72,8 @@ server {
         }
     }
 
+    {{APP_PREVIEW_BLOCK}}
+
     location /v1/sandboxes {
         proxy_pass {{PROXY_SANDBOXES}};
 

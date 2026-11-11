@@ -23,6 +23,7 @@ import { ByClawBeBackend, parseEndpoint, type BeTokenSource, type ByClawBeBacken
 import { isDshBusy, probeResidualProcesses, type AgentsView, type JobsView } from './busy.ts'
 import { ToolEnvConnection } from './connection.ts'
 import { ToolEnvIdentity } from './identity.ts'
+import { deploymentConfigured, loadDeploymentCredentials } from './deployment-environment.ts'
 
 export { ToolSandboxManager } from './catalog.ts'
 export type { SandboxTemplate, SandboxRuntime, ExecutionLease } from './catalog.ts'
@@ -99,11 +100,24 @@ const volume = schema.object({
 export const BE_TOKEN_SOURCE = 'byclawBeTokenSource'
 
 export class ToolEnv extends ToolEnvConnection {
+  /** Per-user catalog API for deterministic executors; same leases and authorization as tools. */
+  sandboxCatalog: ToolSandboxManager | undefined
+  environmentValue(name: string): string | undefined { return this.catalogLaunchEnv[name] }
   /** The byclaw-be backend, when that is the configured one; for {@link renewBeToken}. */
   private readonly beBackend: ByClawBeBackend | undefined
   private readonly catalogRuntimes = new Set<ToolEnv>()
   private catalogLaunchEnv: Readonly<Record<string, string>> = {}
   private catalogToken = ''
+  private currentDeploymentCredentials: Readonly<Record<string, string>> | undefined
+
+  async refreshDeploymentCredentials(): Promise<boolean> {
+    const provider = this.ctx.get('credentials') as { resolve: (name: string) => Promise<{ value: string } | undefined> } | undefined
+    const values = provider === undefined ? this.catalogLaunchEnv : await loadDeploymentCredentials(name => provider.resolve(name))
+    this.currentDeploymentCredentials = values
+    this.setDeploymentCredentials(values)
+    for (const runtime of this.catalogRuntimes) runtime.setDeploymentCredentials(values)
+    return deploymentConfigured(values)
+  }
 
   static Config: schema<Config> = schema.object({
     backend: schema.union(['static', 'opensandbox', 'byclaw-be']).required(),
@@ -204,14 +218,15 @@ export class ToolEnv extends ToolEnvConnection {
         try { started.resolve({ ssh: new ToolEnv(inner, innerConfig, false), subprocess: new SshSubprocessRuntime(inner) }) } catch (error) { started.reject(error) }
       } })
       const runtime = await started.promise.catch(error => { fiber.dispose(); throw error })
+      if (this.currentDeploymentCredentials !== undefined) runtime.ssh.setDeploymentCredentials(this.currentDeploymentCredentials)
       try { await runtime.ssh.acquireSession(allocationSessionId) }
       catch (error) { await runtime.ssh.releaseOwned(false).catch(() => {}); await fiber.dispose(); throw error }
       this.catalogRuntimes.add(runtime.ssh)
-      const execute = async (argv: readonly string[], cwd = workspace, signal?: AbortSignal, sessionId = allocationSessionId): Promise<SandboxResult> => runtime.ssh.runInSession(sessionId, async () => {
+      const execute = async (argv: readonly string[], cwd = workspace, signal?: AbortSignal, sessionId = allocationSessionId, onStdout?: (chunk: string) => void): Promise<SandboxResult> => runtime.ssh.runInSession(sessionId, async () => {
         const root = posix.resolve(workspace), target = posix.resolve(cwd)
         if (target !== root && !target.startsWith(`${root}/`)) throw new Error('WORKSPACE_FORBIDDEN')
         const process = runtime.subprocess.spawn({ argv, cwd: target, stdio: { stdin: 'ignore', stdout: { maxBytes: 1024 * 1024 }, stderr: { maxBytes: 1024 * 1024 } }, graceMs: 5000, signal })
-        return executeSandboxProcess(process, signal)
+        return executeSandboxProcess(process, signal, onStdout)
       })
       return {
         identity: () => ({ ...(runtime.ssh.instanceContext === undefined ? {} : { instanceContext: runtime.ssh.instanceContext }), workspaceRoot: workspace, ...(runtime.ssh.sandboxId === undefined ? {} : { sandboxId: runtime.ssh.sandboxId }) }),
@@ -219,10 +234,12 @@ export class ToolEnv extends ToolEnvConnection {
         releaseLease: (sessionId, destroy) => runtime.ssh.finishSession(sessionId, destroy),
         handshake: async () => { await runtime.ssh.ready; const result = await execute(['cat', '/etc/byclaw-tool-sandbox/capabilities.json']); if (result.exitCode !== 0) throw new Error('CAPABILITY_MANIFEST_UNAVAILABLE'); return JSON.parse(result.stdout) as unknown },
         execute,
+        executeWithDeployment: (...args) => runtime.ssh.runWithDeploymentCredentials(() => execute(...args)),
         release: async (destroy = true) => { await runtime.ssh.releaseOwned(destroy); this.catalogRuntimes.delete(runtime.ssh); await fiber.dispose() },
       }
     }, event => ctx.logger('byclaw-tool-env').info(`sandbox.lifecycle ${JSON.stringify(event)}`),
     () => this.beBackend!.catalogTemplates())
+    this.sandboxCatalog = manager
     registerCatalogLifecycle(ctx, manager)
     ctx.effect(() => () => manager.dispose())
     ctx.inject(['tools'], inner => { registerCatalogTools(inner, manager) })

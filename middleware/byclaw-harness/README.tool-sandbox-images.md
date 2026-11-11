@@ -6,6 +6,7 @@ Build from the repository root on host53 for `linux/amd64`. Dockerfile parents u
 | --- | --- | --- |
 | `Dockerfile.tools.base-slim` | `D0.6.0_base_slim` | Clean Debian13, Python/Node/Git, exact Harness SSH/helper/PTC transport |
 | `Dockerfile.tools.browser` | `D0.6.0_browser` | Slim base; Chromium/Playwright/byCLI, native browser automation and noVNC |
+| `Dockerfile.tools.coding` | `D0.6.0_coding` | Browser layer; verified Codex install, Nginx previews and explicitly initialized application templates. `--target coding-core` omits bundled application environments. |
 | `Dockerfile.tools.media` | `D0.6.0_media` | Browser business layer; HyperFrames/GSAP, FFmpeg/FFprobe |
 | `Dockerfile.tools.unity` | `D0.6.0_unity` | Browser business layer; Unity Editor/Hub, WebGL/Linux toolchains and game desktop |
 | `Dockerfile.tools.godot` | `D0.6.0_godot` | Browser business layer; Godot editor, built-in GDScript, Web/Linux exports and game desktop |

@@ -1,18 +1,63 @@
 import { describe, expect, it, vi } from 'vitest'
+import { execFileSync } from 'node:child_process'
 import { ToolSandboxManager, type SandboxRuntime } from '../src/catalog.ts'
 const templates = [
   { templateKey: 'browser', serviceKey: 'byclaw-tools-browser', capabilities: ['process.exec', 'browser.automation'], enabled: true },
   { templateKey: 'media', serviceKey: 'byclaw-tools-media', capabilities: ['process.exec', 'media.render'], enabled: true },
 ]
-function fixture() {
+function fixture(identity?: (template: typeof templates[number]) => string | undefined) {
   const runtimes: SandboxRuntime[] = []
   const factory = vi.fn(async (template: typeof templates[number]) => {
     const r = { handshake: vi.fn(async () => ({ contract: 'byclaw.tool-sandbox/v1', purpose: template.templateKey, operations: { protocol: 'ssh', exposure: 'private' }, capabilities: template.capabilities })), execute: vi.fn(async () => ({ exitCode: 0, stdout: template.templateKey, stderr: '' })), release: vi.fn(async () => {}) }
-    runtimes.push(r); return r
+    runtimes.push(r); return identity === undefined ? r : { ...r, identity: () => { const sandboxId = identity(template); return sandboxId === undefined ? {} : { sandboxId } } }
   })
   return { factory, runtimes, manager: new ToolSandboxManager(templates, factory) }
 }
 describe('tool sandbox catalog and independent leases', () => {
+  it('gives child commands the current lease identity instead of an inherited host ID', async () => {
+    const f = fixture(t => `microvm--cn-beijing--sbx-${t.templateKey}-12345678`)
+    const browser = await f.manager.acquire('actor', 'browser', 'browser')
+    const media = await f.manager.acquire('actor', 'media', 'media')
+    const command = [process.execPath, '-e', 'process.stdout.write(process.env.E2B_SANDBOX_ID + "|" + process.argv[1])', 'literal $() ; argument']
+    for (const [index, lease, expected] of [[0, browser, 'sbx-browser-12345678'], [1, media, 'sbx-media-12345678']] as const) {
+      vi.mocked(f.runtimes[index]!.execute).mockImplementationOnce(async argv => ({
+        exitCode: 0, stderr: '', stdout: execFileSync(argv[0]!, argv.slice(1), {
+          encoding: 'utf8', env: { ...process.env, E2B_SANDBOX_ID: 'shared-host-stale-id' },
+        }),
+      }))
+      const result = await f.manager.execute('actor', lease.leaseId, command)
+      expect(result.stdout).toBe(`${expected}|literal $() ; argument`)
+    }
+    expect(command[0]).toBe(process.execPath)
+    await f.manager.dispose()
+  })
+
+  it('refreshes the injected identity after allocation replacement and preserves execution controls', async () => {
+    let id = 'sbx-first-12345678'
+    const f = fixture(() => id)
+    const first = await f.manager.acquire('actor', 'browser', 'first')
+    await f.manager.execute('actor', first.leaseId, ['probe'])
+    await f.manager.release('actor', first.leaseId)
+    id = 'sbx-second-12345678'
+    const second = await f.manager.acquire('actor', 'browser', 'second')
+    const signal = new AbortController().signal
+    const stream = vi.fn()
+    await f.manager.execute('actor', second.leaseId, ['probe'], '/by/project', signal, stream)
+    expect(f.runtimes[0]!.execute).toHaveBeenCalledWith(['/usr/bin/env', 'E2B_SANDBOX_ID=sbx-first-12345678', 'probe'], undefined, undefined, `actor:${first.leaseId}`, undefined)
+    expect(f.runtimes[1]!.execute).toHaveBeenCalledWith(['/usr/bin/env', 'E2B_SANDBOX_ID=sbx-second-12345678', 'probe'], '/by/project', signal, `actor:${second.leaseId}`, stream)
+    await f.manager.dispose()
+  })
+
+  it.each([undefined, 'opensandbox--other-provider', 'microvm--cn-beijing--sbx-invalid;command'])('keeps commands unchanged without a compatible identity: %s', async id => {
+    const f = fixture(() => id)
+    const lease = await f.manager.acquire('actor', 'browser', 'probe')
+    await expect(f.manager.execute('other-actor', lease.leaseId, ['probe'])).rejects.toThrow()
+    expect(f.runtimes[0]!.execute).not.toHaveBeenCalled()
+    await f.manager.execute('actor', lease.leaseId, ['probe'])
+    expect(f.runtimes[0]!.execute).toHaveBeenCalledWith(['probe'], undefined, undefined, `actor:${lease.leaseId}`, undefined)
+    await f.manager.dispose()
+  })
+
   it('returns leases to idle by default and destroys only on an explicit request', async () => {
     const f = fixture()
     await f.manager.acquire('actor', 'browser', 'turn1')

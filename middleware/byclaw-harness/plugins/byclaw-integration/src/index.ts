@@ -30,6 +30,7 @@ import z from '@deepseek-ai/schemastery'
 import {
   GatewayDataEmitter,
   createRedis,
+  EventType,
 } from '@byclaw/by-framework'
 import { createLazyByClawSkillLoader } from './lazy-skills.ts'
 import { ByClawOnDemandResources } from './on-demand-resources.ts'
@@ -43,7 +44,7 @@ import { ByClawExternalWorkerAdapter } from './group-worker.ts'
 import { GroupStateBoundary } from './group-state-boundary.ts'
 import { groupCoordinationFromExtra, scopeIdentity, ByClawGroupCoordinationRuntime } from './group-coordination.ts'
 import { defaultAgentTemplateDir, readAgentTemplate } from './agent-template.ts'
-import { agentSkillRootFor, AGENT_SKILLS_ROOT } from './skill-runtime.ts'
+import { agentSkillRootFor, AGENT_SKILLS_ROOT, SKILL_CREATOR_POLICY } from './skill-runtime.ts'
 import { lazyToolEnvironment, lazyToolEnvironmentFiles, mediaArtifactIo, toolEnvironmentFiles } from './tool-environment-files.ts'
 import { ToolEnvironmentSkills } from './tool-environment-skills.ts'
 import { memberSkillProjectionRoot } from './group-skill-resources.ts'
@@ -79,6 +80,12 @@ import type { ByClawSessionHost } from './session-extensions.ts'
 import { registerByClawAgentWorkspacePolicy, ByClawSessionWorkspaceRegistry } from './session-workspace.ts'
 import { resolveByClawByRoot, resolveByClawLocalE2eStorageRoot, resolveByClawInboundPath } from './inbound-context.ts'
 import { ByClawDshWorkerRuntime } from './worker-runtime.ts'
+import { ByClawExecutionRouter, type ExecutionSandbox } from './coding-router.ts'
+import { codingEventPresentation } from './coding-presentation.ts'
+import { codingLeaseFileChecks, codingPreviousCwd, prepareCodingContext } from './coding-context.ts'
+import type { ByClawCodingSetup } from './session-extensions.ts'
+import { emitByClawProjection, reasoningProjection, toolCallProjection } from './byclaw-presentation.ts'
+import type { AskAgentCommand } from '@byclaw/by-framework'
 import { ByClawDshSandboxBusyPublisher } from './sandbox-busy.ts'
 import {
   decryptByClawAuthToken,
@@ -121,7 +128,7 @@ export * from './session-workspace.ts'
 export * from './inbound-context.ts'
 export * from './session-metadata.ts'
 export { byClawTurnModelOverride } from './session-runtime.ts'
-export type { ByClawSessionHost, ByClawSessionSetup } from './session-extensions.ts'
+export type { ByClawSessionHost, ByClawSessionSetup, ByClawCodingSetup } from './session-extensions.ts'
 export * from './repair-legacy-session.ts'
 export * from './inbound-routing.ts'
 export * from './byclaw-presentation.ts'
@@ -212,6 +219,8 @@ export interface Config {
   provider?: string
   model?: string
   workerId?: string
+  agentExecutionMap?: string
+  codexExecTimeoutMs?: number
   agentTypes?: string[]
   refreshChannel?: string
   authorizationPollMs?: number
@@ -277,6 +286,8 @@ export const Config: z<Config> = z.object({
   provider: z.string(),
   model: z.string(),
   workerId: z.string(),
+  agentExecutionMap: z.string().default('{}'),
+  codexExecTimeoutMs: z.union([z.const(0), z.natural().min(1000).max(2_147_483_647)]).default(0),
   workspaceOnToolEnvironment: z.boolean().default(false),
   byRoot: z.string(),
   dshHome: z.string(),
@@ -690,6 +701,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
   let sessions: ByClawDshSessionRuntime | undefined
   let disposition: ReturnType<typeof installGroupChatDisposition> | undefined
   let worker: ByClawDshWorkerRuntime | undefined
+  let execution: ByClawExecutionRouter | undefined
   let sandboxBusy: ByClawDshSandboxBusyPublisher | undefined
   let resourceWatch: ByClawResourceWatch | undefined
   let acceptingRefresh = true
@@ -711,6 +723,8 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
     await settle(() => resourceRuntime.close())
     await settle(() => generationLease.close())
     await settle(() => refresh)
+    worker?.stopAdmission()
+    await settle(execution === undefined ? undefined : () => execution?.close() ?? Promise.resolve())
     await settle(worker === undefined ? undefined : () => worker?.close() ?? Promise.resolve())
     await settle(disposition === undefined ? undefined : () => disposition?.close() ?? Promise.resolve())
     await settle(sessions === undefined ? undefined : () => sessions?.close() ?? Promise.resolve())
@@ -1133,6 +1147,67 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       // This adapter is used only by eligible group turns, never ordinary input or context boot.
       ...(userFiles === undefined ? {} : { files: toolEnvironmentFiles(ctx), historyFiles: toolEnvironmentFiles(ctx) }),
     })
+    const resolveInboundTarget = (command: AskAgentCommand, text: string) => {
+      const coordination = groupCoordinationFromExtra(command.extraPayload)
+      if (coordination === undefined) return resolveByClawInboundTarget(resources, command.extraPayload, text)
+      const id = String(command.extraPayload['agent_id'] ?? command.extraPayload['agentId'] ?? coordination.coordinatorAgentId)
+      if (id !== coordination.coordinatorAgentId && !coordination.allowedAgentIds.includes(id)) throw new Error('Inbound group employee is outside the server-bound task scope')
+      const employee = resources.employees.find(candidate => candidate.id === id)
+      return { templateId: `byclaw-employee-${id}`, resourceId: id, kind: 'employee' as const, name: employee?.name ?? (id === coordination.coordinatorAgentId ? '群组工作助手' : '数字员工'), text }
+    }
+    type ExecutionToolEnvironment = { sandboxCatalog?: ExecutionSandbox; environmentValue?: (name: string) => string | undefined; refreshDeploymentCredentials?: () => Promise<boolean> }
+    const executionEnvironment = () => {
+      const ssh = ctx.get('ssh') as ExecutionToolEnvironment | undefined
+      return {
+        BYCLAW_AGENT_EXECUTION_MAP: ssh?.environmentValue?.('BYCLAW_AGENT_EXECUTION_MAP') ?? config.agentExecutionMap ?? '{}',
+        CODEX_EXEC_TIMEOUT_MS: ssh?.environmentValue?.('CODEX_EXEC_TIMEOUT_MS') ?? String(config.codexExecTimeoutMs ?? 0),
+        BYCLAW_DEPLOY_ENABLED: ssh?.environmentValue?.('BYCLAW_DEPLOY_ENABLED')
+          ?? (ssh?.environmentValue?.('BYCLAW_DEPLOY_HOST')?.trim() && ssh?.environmentValue?.('BYCLAW_DEPLOY_PRIVATE_KEY')?.trim() ? '1' : '0'),
+      }
+    }
+    execution = new ByClawExecutionRouter({
+      userCode,
+      environment: executionEnvironment,
+      deploymentEnabled: async () => {
+        const ssh = ctx.get('ssh') as ExecutionToolEnvironment | undefined
+        return await ssh?.refreshDeploymentCredentials?.() ?? executionEnvironment().BYCLAW_DEPLOY_ENABLED === '1'
+      },
+      resolveTarget: resolveInboundTarget,
+      sandbox: () => (ctx.get('ssh') as ExecutionToolEnvironment | undefined)?.sandboxCatalog,
+      onActivityChange: () => sandboxBusy?.activityChanged(),
+      log: entry => ctx.logger('byclaw-execution').info(`execution.lifecycle ${JSON.stringify(entry)}`),
+      prepareContext: async (command, target, lease) => {
+        const template = await templateRuntime.prepareEmployee(`byclaw-employee-${target.resourceId}`, groupCoordinationFromExtra(command.extraPayload))
+        lease.signal.throwIfAborted()
+        const setup: ByClawCodingSetup = { command, host: { ...sessionHost,
+          userFiles: codingLeaseFileChecks(lease.sandbox, lease.actor, lease.leaseId, lease.workspaceRoot, lease.signal) } }
+        await ctx.serial('byclaw/coding-setup', setup)
+        lease.signal.throwIfAborted()
+        const savedCwd = sessionMetadata.get(String(command.header.sessionId))?.identity.cwd
+        const previousCwd = await codingPreviousCwd(lease, String(command.header.sessionId), target.resourceId)
+          ?? (savedCwd !== undefined && /^\/by\/\.shared\/project_-?\d+$/u.test(savedCwd) ? savedCwd : undefined)
+        // The current coding lease resolves builtins and current agent associations itself.
+        return prepareCodingContext(command, target, { ...template, persona: `${template.persona}\n\n${SKILL_CREATOR_POLICY}` }, [], setup.publication, previousCwd)
+      },
+      emitFileChanges: async (command, context, payload, workspace) => {
+        const rootSessionId = String(command.header.sessionId)
+        // The native snapshots are on the same /by volume used by the original UserFS API.
+        await emitter.emitChunk(String(context.sessionId), context.traceId, {
+          content: JSON.stringify(payload), metadata: { event_source: 'dsh', event_kind: 'file_changes', session_scope: 'parent',
+            external_session_id: rootSessionId, external_root_session_id: rootSessionId, host_session_id: String(context.sessionId), workspace },
+        }, { eventType: EventType.ANSWER_DELTA, contentType: '3016' as never, sourceAgentType,
+          messageId: `${command.header.messageId}:file-changes:${workspace === `/by/.sessions/${rootSessionId}` ? 'session' : 'project'}:${payload.files[0]?.uuid}`,
+          parentMessageId: String(command.header.messageId) })
+      },
+      emit: async (command, context, event) => {
+        const presentation = codingEventPresentation(event, { sessionId: String(command.header.sessionId),
+          hostSessionId: String(context.sessionId), messageId: String(command.header.messageId) })
+        const projection = event.kind === 'progress'
+          ? reasoningProjection(presentation.text, presentation.context)
+          : toolCallProjection(presentation.tool, presentation.context)
+        await emitByClawProjection(emitter, String(context.sessionId), context.traceId, projection, sourceAgentType)
+      },
+    })
     sessions = new ByClawDshSessionRuntime(ctx, {
       workspace,
       voiceRuntime,
@@ -1161,14 +1236,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       sessionSetup: (agentCtx, command, agent) => setupTodoExecution(ctx, agentCtx, agent, command, sessionHost,
         sessionMetadata.get(String(agent.id))?.groupCoordination, isSuperAssistant(agent)),
       workspaceRegistry,
-      resolveInboundTarget: (command, text) => {
-        const coordination = groupCoordinationFromExtra(command.extraPayload)
-        if (coordination === undefined) return resolveByClawInboundTarget(resources, command.extraPayload, text)
-        const id = String(command.extraPayload['agent_id'] ?? command.extraPayload['agentId'] ?? coordination.coordinatorAgentId)
-        if (id !== coordination.coordinatorAgentId && !coordination.allowedAgentIds.includes(id)) throw new Error('Inbound group employee is outside the server-bound task scope')
-        const employee = resources.employees.find(candidate => candidate.id === id)
-        return { templateId: `byclaw-employee-${id}`, resourceId: id, kind: 'employee', name: employee?.name ?? (id === coordination.coordinatorAgentId ? '群组工作助手' : '数字员工'), text }
-      },
+      resolveInboundTarget,
       templateRuntime,
       onActivityChange: () => sandboxBusy?.activityChanged(),
     })
@@ -1181,10 +1249,10 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       agentType: agentTypes.find(candidate => (
         candidate === BYCLAW_DSH_AGENT_TYPE || candidate.startsWith(`${BYCLAW_DSH_AGENT_TYPE}_`)
       )) ?? BYCLAW_DSH_AGENT_TYPE,
-      activity: () => sessions?.sandboxBusySnapshot() ?? {
-        busy: false,
-        activeAgentCount: 0,
-        activeChildCount: 0,
+      activity: () => {
+        const snapshot = sessions?.sandboxBusySnapshot() ?? { busy: false, activeAgentCount: 0, activeChildCount: 0 }
+        const executionCount = execution?.activeCount ?? 0
+        return { ...snapshot, busy: snapshot.busy || executionCount > 0, activeAgentCount: snapshot.activeAgentCount + executionCount }
       },
       logger: ctx.logger,
     })
@@ -1197,6 +1265,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       admission: ctx.get('byclawManagedAdmission'),
       agentTypes,
       sessions,
+      execution,
     })
     startupPhase('worker-start')
     await startup.measure('worker-registration', () => worker!.start(id))
@@ -1210,11 +1279,13 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
         activity: () => {
           const snapshot = runtimeSessions.sandboxBusySnapshot()
           const activeRequests = runtimeWorker.admission?.activeRequests ?? 0
-          return { busy: snapshot.busy || activeRequests > 0, activeRequests: Math.max(activeRequests, snapshot.activeAgentCount + snapshot.activeChildCount) }
+          const executionCount = execution?.activeCount ?? 0
+          return { busy: snapshot.busy || activeRequests > 0 || executionCount > 0, activeRequests: Math.max(activeRequests, snapshot.activeAgentCount + snapshot.activeChildCount + executionCount) }
         },
         stopAdmission: () => runtimeWorker.stopAdmission(),
         stopExecution: async () => {
           runtimeWorker.stopAdmission()
+          await execution?.close()
           // Cancel this user's sessions before joining the worker during context disposal.
           await runtimeSessions.close({ requireStopped: true })
         },

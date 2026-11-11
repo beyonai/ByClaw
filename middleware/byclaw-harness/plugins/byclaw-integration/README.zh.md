@@ -353,6 +353,12 @@ INFO 日志 `[byclaw-super-assistant] bound` 显示会话和工具白名单；�
 
 ### 启动与 Skill 懒加载
 
+Codex 路由的 Skill 准备在当前 coding 租约中完成：`Dockerfile.tools.coding` 将共享内置 Skill 打入 `BYCLAW_SKILLS_DIR`；每次执行前，`coding-workspace.py` 调用镜像提供的 `BYCLAW_AGENT_SKILLS_PREPARER`，按现有 manifest 的 `employeeId` 查询后端关联资源。认证与后端地址复用原进程环境（`USER_CODE`、`BEYOND_TOKEN`、`BYAI_SERVICE_BASE_URL`，以及已有的可选认证头），凭证不写入 manifest 或提示词。
+
+关联 Skill 复用 `skill-sync.ts` 的版本检查、ZIP 校验和原子缓存，缓存位于当前用户 `/by/.byclaw/skills/<resourceId>/<skillCode>`，同版本不重复下载；内置关联直接使用镜像。每轮仅加载内置及当前员工关联 Skill，同名关联覆盖内置，关联名称冲突、认证或下载失败则停止本轮，不启动 Codex。共享缓存使用进程锁，Codex 配置及原生 Skill 链接仍按会话和员工隔离；取消任务会停止准备子进程。原 DSH 的下述流程不变。
+
+此变更需同时升级 Harness 主镜像与 coding 工具镜像，复用现有实例时须释放旧实例。无需给浏览器、媒体等其他工具沙箱新增下载逻辑。验证：`pnpm verify:agent-skills`、`python3 scripts/coding-workspace-verify.py`，以及原 `verify:coding-context`、`verify:coding-router`。还须在实际 Linux coding 镜像中验证原生 Skill 发现与关联 Skill 下载。
+
 镜像构建阶段编译 DSH 和全部插件，运行时直接执行编译后的 CLI。浏览器、桌面和 byCLI 桥接默认在首次私有 browser 请求或受管 byCLI 浏览器命令时激活；首次请求等待激活完成，后续复用。
 
 Integration 在 Worker 上线前只发现授权资源目录；员工模板、员工模型和专家团运行时延迟到实际选择目标时准备。业务 Skill 的版本请求、下载及解析延迟到当前员工查询 registry list/snapshot/get 时，包括 Skill 工具和提示词目录查询。每次查询检查版本与授权，缓存缺失、不完整或版本变化时下载并原子替换；同版本复用缓存，并发请求合并。下载后复核授权和关联关系，失效的旧代际结果不能重新发布。

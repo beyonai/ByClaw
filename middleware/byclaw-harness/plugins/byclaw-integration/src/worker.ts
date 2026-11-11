@@ -17,6 +17,7 @@ import { byClawVoicePayload } from './voice-runtime.ts'
 import { extractByClawUserText } from './protocol.ts'
 import { runChatChain, chatChain } from './chat-chain-log.ts'
 import { instrumentContextReply, observeReplyRedis } from './reply-log.ts'
+import { dispatchExecutionAsk, type ByClawExecutionRouter, type ExecutionResult } from './coding-router.ts'
 
 /** Result of one ByClaw request after its DSH work and output have settled. */
 export interface ByClawDshAskResult {
@@ -40,7 +41,7 @@ export interface ByClawCommandContext {
 
 /** Testable command dispatch separated from GatewayWorker's Redis lifecycle. */
 export class ByClawDshCommandHandler {
-  constructor(readonly sessions: ByClawDshSessionPort) {}
+  constructor(readonly sessions: ByClawDshSessionPort, readonly execution?: ByClawExecutionRouter) {}
 
   async process(command: GatewayCommand, context: AgentContext): Promise<AgentTaskResult> {
     if (command instanceof ResumeCommand) {
@@ -65,9 +66,9 @@ export class ByClawDshCommandHandler {
     }
     if (!(command instanceof AskAgentCommand)) throw new Error(`Unsupported BYCLAW_DSH command: ${command.actionType}`)
     if (extractByClawUserText(command.content) === '' && byClawVoicePayload(command) === undefined) throw new Error('BYCLAW_DSH AskAgent content is empty')
-    let result: ByClawDshAskResult
+    let result: ByClawDshAskResult | ExecutionResult
     try {
-      result = await this.sessions.ask(command, context)
+      result = await dispatchExecutionAsk(this.execution, command, context, extractByClawUserText(command.content), () => this.sessions.ask(command, context))
       if (context.isCancelRequested?.()) throw new TaskCancelledError('ByClaw task cancelled')
     } catch (error) {
       if (context.isCancelRequested?.()) throw new TaskCancelledError('ByClaw task cancelled')
@@ -81,7 +82,9 @@ export class ByClawDshCommandHandler {
       // GatewayWorker owns finalAnswer emission; legacy output remains process data.
       content: result.finalAnswer ?? '',
       replyData: null,
-      metadata: { dshSessionId: result.dshSessionId },
+      metadata: 'executor' in result
+        ? { executor: result.executor, ...(result.codexThreadId === undefined ? {} : { codexThreadId: result.codexThreadId }) }
+        : { dshSessionId: result.dshSessionId },
     })
   }
 }
@@ -100,13 +103,14 @@ export class ByClawDshGatewayWorker extends GatewayWorker {
     registry?: WorkerRegistry
     admission?: ManagedAdmission
     startupId?: string
+    execution?: ByClawExecutionRouter
   }) {
     super(options.workerId, options.registry ?? new WorkerRegistry(options.redis), options.redis ? observeReplyRedis(options.redis) : undefined)
     this.chainWorkerId = options.workerId
     this.startupId = options.startupId ?? ''
     this.admission = options.admission
     this.agentTypes = [...new Set(options.agentTypes)]
-    this.handler = new ByClawDshCommandHandler(options.sessions)
+    this.handler = new ByClawDshCommandHandler(options.sessions, options.execution)
   }
 
   private readonly admission: ManagedAdmission | undefined
@@ -133,6 +137,7 @@ export class ByClawDshGatewayWorker extends GatewayWorker {
 
   async onCancelTask(command: unknown): Promise<void> {
     if (command instanceof CancelTaskCommand) {
+      this.handler.execution?.cancel(command.targetMessageId)
       await this.sessions.cancel(command.targetMessageId, command.reason || 'ByClaw task cancelled')
     }
   }

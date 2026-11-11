@@ -1,0 +1,18 @@
+{
+  "version": "0.167.0",
+  "platform": "linux-x64",
+  "packages": [
+    {
+      "directory": "codex",
+      "version": "0.167.0",
+      "url": "https://registry.npmmirror.com/@openai/codex/-/codex-0.167.0.tgz",
+      "integrity": "sha512-1FSQgbTIKAdTub5Ln6z36NT4eXDmBRkinfigzycbgn9yLZdJ3UdkQZqr0N7jnl8/D1xxT/Pz3Fl2l7S2dmRaFA=="
+    },
+    {
+      "directory": "codex-linux-x64",
+      "version": "0.167.0-linux-x64",
+      "url": "https://registry.npmmirror.com/@openai/codex/-/codex-0.167.0-linux-x64.tgz",
+      "integrity": "sha512-FNc7danfUng9Sp6w+Fh7kofNHHZpA6VMyNKWsWrS3OwHly69gywTWeiuwrUPXpJSho8Df4xqRsHfHRPzj7zYQg=="
+    }
+  ]
+}

@@ -47,8 +47,22 @@ export interface ByClawSessionOpening {
   readonly signal: AbortSignal
 }
 
+/** Optional extensions for a routed CLI turn; no DSH Agent or model is created. */
+export interface ByClawCodingSetup {
+  readonly command: AskAgentCommand
+  readonly host: Omit<ByClawSessionHost, 'userFiles'> & {
+    readonly userFiles: Pick<import('./tool-environment-files.ts').ToolEnvironmentFiles, 'realpath' | 'lstat'>
+  }
+  publication?: {
+    description: string
+    prepare(args: { text: string; sourcePaths: string[] }, signal: AbortSignal): Promise<unknown>
+  }
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Events {
+    /** Compose optional CLI capabilities with the same trusted command and user-file checks. @mode serial */
+    'byclaw/coding-setup'(payload: ByClawCodingSetup): void | Promise<void>
     /**
      * Notify independently owned observers of root opening or routed requests.
      * Eligibility queries and listeners run without delaying input; failures are logged.

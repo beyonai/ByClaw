@@ -128,6 +128,21 @@ try {
   fibers.push(plugin)
   assert.equal(ctx.tools.schemas().length, 0)
 
+  // CLI eligibility uses the same durable activation without constructing an Agent
+  // or requesting credentials until there is an explicit publication request.
+  const cli = { command: command(hacu, { sessionId: 'cli-only-task' }), host }
+  await ctx.serial('byclaw/coding-setup', cli)
+  assert.equal(typeof cli.publication?.prepare, 'function')
+  assert.match(cli.publication.description, /整体替换/u)
+  assert.match(cli.publication.description, /不发送群消息/u)
+  const followup = { command: command({}, { sessionId: 'cli-only-task' }), host }
+  await ctx.serial('byclaw/coding-setup', followup)
+  assert.equal(typeof followup.publication?.prepare, 'function')
+  const ordinary = { command: command({}, { sessionId: 'normal-cli' }), host }
+  await ctx.serial('byclaw/coding-setup', ordinary)
+  assert.equal(ordinary.publication, undefined)
+  await assert.rejects(ctx.serial('byclaw/coding-setup', { ...cli, command: command(hacu, { userCode: 'other-user' }) }), /身份不一致/u)
+
   // Hold the durable write to prove that the generic awaited hook fences factory publication.
   const put = table.put
   let releaseWrite

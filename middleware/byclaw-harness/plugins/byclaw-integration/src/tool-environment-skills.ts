@@ -53,6 +53,11 @@ export class ToolEnvironmentSkills {
     return this.map(path, 'visible', 'host') ?? path
   }
 
+  /** Shared-mount lookup only; external executors must not create another Skill copy. */
+  visiblePath(path: string): string {
+    return this.map(path, 'host', 'visible') ?? path
+  }
+
   private map(path: string, from: keyof SkillDirectoryRoot, to: keyof SkillDirectoryRoot): string | undefined {
     for (const root of this.options.roots) {
       const rest = relative(root[from], path)

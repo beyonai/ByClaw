@@ -4,6 +4,7 @@ import { ManagedAdmission, type ManagedAdmissionLease } from './managed-admissio
 import { WorkerRegistry, WorkerRunner, createRedis } from '@byclaw/by-framework'
 import { ByClawDshGatewayWorker } from './worker.ts'
 import type { ByClawDshSessionRuntime } from './session-runtime.ts'
+import type { ByClawExecutionRouter } from './coding-router.ts'
 
 interface RestartableRunner {
   start(options: { handleSignals: boolean }): Promise<void>
@@ -51,6 +52,7 @@ export class ByClawDshWorkerRuntime {
   private runner: WorkerRunner | undefined
   private run: Promise<void> | undefined
   private lifecycle: AbortController | undefined
+  private readonly execution: ByClawExecutionRouter | undefined
 
   constructor(options: {
     redis: ReturnType<typeof createRedis>
@@ -59,7 +61,9 @@ export class ByClawDshWorkerRuntime {
     sessions: ByClawDshSessionRuntime
     admission?: ManagedAdmissionLease
     startupId?: string
+    execution?: ByClawExecutionRouter
   }) {
+    this.execution = options.execution
     this.admission = options.admission === undefined ? undefined : new ManagedAdmission(options.admission, () => this.stopAdmission())
     this.registry = new WorkerRegistry(options.redis)
     this.redis = options.redis
@@ -71,6 +75,7 @@ export class ByClawDshWorkerRuntime {
       registry: this.registry,
       admission: this.admission,
       startupId: options.startupId,
+      execution: options.execution,
     })
   }
 
@@ -113,6 +118,7 @@ export class ByClawDshWorkerRuntime {
 
   async close(): Promise<void> {
     this.stopAdmission()
+    await this.execution?.close()
     await this.run?.catch(() => undefined)
     if (this.admissionTimer) clearInterval(this.admissionTimer)
   }
