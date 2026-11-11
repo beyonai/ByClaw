@@ -4,6 +4,10 @@ import type { IMessage, IMessageListItem } from '@/typescript/message';
 import { isTextContentType } from '@/utils/messgae';
 import { ResourceTypeMap } from '@/constants/resource';
 
+export function getAnswerClientMsgId(clientRequestId: string) {
+  return clientRequestId.split('_')[1];
+}
+
 function isTextObject(item: IText): item is ITextObj {
   return typeof item === 'object' && item !== null;
 }

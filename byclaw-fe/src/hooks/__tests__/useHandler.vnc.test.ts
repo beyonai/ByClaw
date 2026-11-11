@@ -43,7 +43,7 @@ describe('useHandler VNC stream integration', () => {
         'cd /work && RUN=$(cat RUNPATH.txt) && env AGENT_ID="agent-a" bycli browser main open "https://example.test/"',
     });
     expect(result.current.browserHandler(props as any)).toBe(props);
-    expect(mockOpenVnc).toHaveBeenCalledWith({ key: 'answer-a:tool-a' });
+    expect(mockOpenVnc).toHaveBeenCalledWith({ key: 'answer-a' });
   });
 
   it('does not open for a different session or for an ordinary shell mention', () => {
@@ -68,7 +68,7 @@ describe('useHandler VNC stream integration', () => {
       streamProps('bash', { command: 'bycli list -f json 2>&1 | head -100' }, answerSessionId) as any
     );
 
-    expect(mockOpenVnc).toHaveBeenCalledWith({ key: 'answer-a:tool-a' });
+    expect(mockOpenVnc).toHaveBeenCalledWith({ key: 'answer-a' });
   });
 
   it('does not open another numeric session', () => {
@@ -126,6 +126,6 @@ describe('useHandler VNC stream integration', () => {
       },
     ];
     result.current.browserHandler(props);
-    expect(mockOpenVnc).toHaveBeenCalledWith({ key: 'answer-a:tool-a' });
+    expect(mockOpenVnc).toHaveBeenCalledWith({ key: 'answer-a' });
   });
 });

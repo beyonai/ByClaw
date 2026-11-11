@@ -22,6 +22,7 @@ export default function UnfinishedUploads({
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<StoredUpload[]>([]);
   const [error, setError] = useState('');
+  const [availableContext, setAvailableContext] = useState('');
   const contextKey = `${ownerKey}:${resourceId || ''}`;
   const mounted = useRef(true);
   useEffect(() => {
@@ -43,6 +44,28 @@ export default function UnfinishedUploads({
         throw new Error('Upload context changed');
     };
   };
+  useEffect(() => {
+    let active = true;
+    setAvailableContext('');
+    if (ownerKey && !disabled) {
+      const check = guard(contextKey);
+      void listStoredUploads(ownerKey, resourceId, check)
+        .then((next) => {
+          if (
+            active &&
+            scope.current === contextKey &&
+            next.some((row) => ['UPLOADING', 'COMMITTING'].includes(row.state))
+          ) {
+            setAvailableContext(contextKey);
+          }
+        })
+        .catch(() => {});
+    }
+    return () => {
+      active = false;
+    };
+  }, [ownerKey, resourceId, contextKey, disabled]);
+
   const load = async () => {
     const owner = ownerKey;
     const context = contextKey;
@@ -50,7 +73,11 @@ export default function UnfinishedUploads({
     setError('');
     try {
       const next = await listStoredUploads(owner, resourceId, guard(context));
-      if (mounted.current && scope.current === context) setRows(next);
+      if (mounted.current && scope.current === context) {
+        const unfinished = next.filter((row) => ['UPLOADING', 'COMMITTING'].includes(row.state));
+        setRows(unfinished);
+        setAvailableContext(unfinished.length ? context : '');
+      }
     } catch (failure: any) {
       if (mounted.current && scope.current === context) setError(failure?.message || String(failure));
     } finally {
@@ -63,8 +90,11 @@ export default function UnfinishedUploads({
     setError('');
     try {
       await abortStoredUpload(ownerKey, row, guard(contextKey));
-      if (mounted.current && scope.current === contextKey)
-        setRows((current) => current.filter((item) => item.storageKey !== row.storageKey));
+      if (mounted.current && scope.current === contextKey) {
+        const remaining = rows.filter((item) => item.storageKey !== row.storageKey);
+        setRows(remaining);
+        setAvailableContext(remaining.length ? contextKey : '');
+      }
     } catch (failure: any) {
       if (mounted.current && scope.current === contextKey) setError(failure?.message || String(failure));
     } finally {
@@ -78,18 +108,20 @@ export default function UnfinishedUploads({
           {t('cancelQueued')}
         </Button>
       )}
-      <Button
-        size="small"
-        disabled={disabled || !ownerKey}
-        onClick={() => {
-          setRows([]);
-          setOpenedOwner(contextKey);
-          setOpen(true);
-          void load();
-        }}
-      >
-        {t('manageUnfinished')}
-      </Button>
+      {availableContext === contextKey && (
+        <Button
+          size="small"
+          disabled={disabled || !ownerKey}
+          onClick={() => {
+            setRows([]);
+            setOpenedOwner(contextKey);
+            setOpen(true);
+            void load();
+          }}
+        >
+          {t('manageUnfinished')}
+        </Button>
+      )}
       <Modal
         title={t('manageUnfinished')}
         open={open && openedOwner === contextKey}

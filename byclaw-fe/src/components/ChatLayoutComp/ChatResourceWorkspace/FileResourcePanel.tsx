@@ -64,6 +64,7 @@ import {
   renameFile,
   uploadFiles,
   getPersonalStorageQuota,
+  type PersonalStorageQuota,
   type FileBrowserItem,
 } from '@/service/fileBrowser';
 import {
@@ -165,12 +166,18 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
   const [loadedDirectoryKeys, setLoadedDirectoryKeys] = useState<Key[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   const [loading, setLoading] = useState(false);
-  const [storageQuota, setStorageQuota] = useState<{
-    enabled: boolean;
-    quotaBytes?: number;
-    quotaGiB?: number;
-    usedBytes?: number;
-  }>();
+  const [storageQuota, setStorageQuota] = useState<PersonalStorageQuota>();
+  const storageCapacityBytes =
+    storageQuota?.capacityLimitBytes ??
+    storageQuota?.quotaBytes ??
+    (storageQuota?.quotaGiB === undefined ? undefined : storageQuota.quotaGiB * 1024 ** 3);
+  const storageUsedBytes = storageQuota?.usedBytes;
+  const showStorageQuota =
+    storageQuota?.enabled &&
+    Number.isFinite(storageUsedBytes) &&
+    storageUsedBytes! >= 0 &&
+    Number.isFinite(storageCapacityBytes) &&
+    storageCapacityBytes! > 0;
   const [loadError, setLoadError] = useState<string>();
   const [renameTarget, setRenameTarget] = useState<FileBrowserItem | null>(null);
   const [renameLoading, setRenameLoading] = useState(false);
@@ -194,7 +201,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     let active = true;
     void getPersonalStorageQuota()
       .then((response) => {
-        if (active && response?.enabled) setStorageQuota(response);
+        if (active) setStorageQuota(response?.enabled ? response : undefined);
       })
       .catch(() => {
         // Local NFS/Longhorn and older Platform versions do not expose quota; hide the optional UI.
@@ -981,7 +988,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
     },
     [intl, isCurrentContext]
   );
-  const fileTransfers = useFileTransferQueue(uploadOneFile, transferContext.key);
+  const fileTransfers = useFileTransferQueue(uploadOneFile, transferContext.key, 3000);
   const uploading = fileTransfers.rows.some((row) => row.status === 'pending' || row.status === 'uploading');
   const handleUpload = useCallback(
     async (fileList: File[], targetPath = currentDirectoryPath) => {
@@ -1428,9 +1435,7 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
         }
         contentBefore={
           <>
-            {storageQuota?.enabled &&
-              Number.isFinite(storageQuota.usedBytes) &&
-              (Number.isFinite(storageQuota.quotaBytes) || Number.isFinite(storageQuota.quotaGiB)) && (
+            {showStorageQuota && (
               <div
                 style={{ padding: '0 12px 8px' }}
                 aria-label={intl.formatMessage({ id: 'chatResource.personalStorageUsage' })}
@@ -1438,18 +1443,12 @@ const FileResourcePanel: React.FC<FileResourcePanelProps> = ({
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
                   <span>{intl.formatMessage({ id: 'chatResource.storageUsage' })}</span>
                   <span>
-                    {(storageQuota.usedBytes! / 1024 ** 3 || 0).toFixed(2)} /{' '}
-                    {(storageQuota.quotaBytes ? storageQuota.quotaBytes / 1024 ** 3 : storageQuota.quotaGiB!).toFixed(
-                      0
-                    )}{' '}
+                    {(storageUsedBytes! / 1024 ** 3 || 0).toFixed(2)} / {(storageCapacityBytes! / 1024 ** 3).toFixed(0)}{' '}
                     GB
                   </span>
                 </div>
                 <Progress
-                  percent={Math.min(
-                    100,
-                    (storageQuota.usedBytes! / (storageQuota.quotaBytes || storageQuota.quotaGiB! * 1024 ** 3)) * 100
-                  )}
+                  percent={Math.min(100, (storageUsedBytes! / storageCapacityBytes!) * 100)}
                   size="small"
                   showInfo={false}
                 />

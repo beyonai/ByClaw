@@ -6,7 +6,7 @@ type OwnerState = {
   refs: SandboxInstanceRef[];
   hidden: string[];
   selected?: string;
-  handled?: boolean;
+  autoOpenKeys?: string[];
   unseen?: string[];
 };
 const empty = (): OwnerState => ({ refs: [], hidden: [] });
@@ -46,7 +46,9 @@ const restore = (owner: string): OwnerState => {
       refs: mergeInstanceRefs([], data.refs),
       hidden: Array.isArray(data.hidden) ? data.hidden.filter((key: unknown) => typeof key === 'string') : [],
       selected: typeof data.selected === 'string' ? data.selected : undefined,
-      handled: data.handled === true,
+      autoOpenKeys: Array.isArray(data.autoOpenKeys)
+        ? data.autoOpenKeys.filter((key: unknown) => typeof key === 'string')
+        : [],
       unseen: Array.isArray(data.unseen) ? data.unseen.filter((key: unknown) => typeof key === 'string') : [],
     };
   } catch {
@@ -101,6 +103,12 @@ export function updateDesktopOwner(owner: string, update: Partial<OwnerState>) {
     return;
   }
 }
+export function claimDesktopAutoOpen(owner: string, key: string) {
+  const keys = getDesktopOwner(owner).autoOpenKeys || [];
+  if (keys.includes(key)) return false;
+  updateDesktopOwner(owner, { autoOpenKeys: [...keys, key] });
+  return true;
+}
 export function registerDesktops(owner: string, refs: unknown, live = false) {
   const current = getDesktopOwner(owner);
   const merged = mergeInstanceRefs(current.refs, refs);
@@ -122,7 +130,6 @@ export function selectDesktop(owner: string, ref: SandboxInstanceRef) {
   updateDesktopOwner(owner, {
     selected: desktopKey(ref),
     hidden: getDesktopOwner(owner).hidden.filter((key) => key !== desktopKey(ref)),
-    handled: true,
     unseen: getDesktopOwner(owner).unseen?.filter((key) => key !== desktopKey(ref)),
   });
 }
@@ -135,7 +142,7 @@ export function migrateDesktopOwner(previous: string, next: string) {
     refs: mergeInstanceRefs(target.refs, source.refs),
     hidden: Array.from(new Set([...target.hidden, ...source.hidden])),
     selected: source.selected || target.selected,
-    handled: source.handled || target.handled,
+    autoOpenKeys: Array.from(new Set([...(target.autoOpenKeys || []), ...(source.autoOpenKeys || [])])),
   });
   const owners = { ...useDesktopWorkspace.getState().owners };
   delete owners[previous];

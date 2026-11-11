@@ -110,6 +110,29 @@ public class SharedSandboxGateway {
         return access.getEndpointHeaders() == null ? Map.of() : access.getEndpointHeaders();
     }
 
+    /** Query the authenticated user's AgenticFS quota independently of shared NAS admission. */
+    public Map<String, Object> workspaceSpaceStatus(String user) {
+        var client = clients.getIfAvailable();
+        if (client == null || StringUtils.isBlank(user)) return Map.of("enabled", false);
+        var response = client.getWorkspaceSpace(Map.of("type", "USER", "tenant", "global", "id", user));
+        if (response == null || !(response.get("code") instanceof Number code) || code.intValue() != 0) {
+            throw new IllegalStateException("Workspace storage query failed");
+        }
+        if (response.get("data") == null) return Map.of("enabled", false);
+        if (!(response.get("data") instanceof Map<?, ?> details)) {
+            throw new IllegalStateException("Invalid workspace storage response");
+        }
+        if (!"agenticfs".equalsIgnoreCase(Objects.toString(details.get("backend"), ""))
+            || !Boolean.TRUE.equals(details.get("capacityQuotaSupported"))) return Map.of("enabled", false);
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (String key : List.of("backend", "provisioningState", "quotaState", "dataReady",
+            "capacityLimitBytes", "usedBytes", "usedFiles", "capacityQuotaSupported")) {
+            if (details.containsKey(key)) result.put(key, details.get(key));
+        }
+        result.put("enabled", true);
+        return result;
+    }
+
     /** Return only user-facing preparation state; never expose NAS bindings or other users. */
     public Map<String, Object> userStorageStatus(String user) {
         if (!policy.userNasEnabled(user, DSH_SERVICE)) return Map.of("enabled", false, "ready", true, "state", "LOGICAL");

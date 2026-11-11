@@ -1,3 +1,7 @@
+jest.mock('@/service/resumableFileUpload', () => ({
+  listStoredUploads: jest.fn().mockResolvedValue([]),
+  abortStoredUpload: jest.fn(),
+}));
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ensureFolder, getPersonalStorageQuota, listFiles, uploadFiles } from '@/service/fileBrowser';
 import { uploadFiles as uploadKnowledgeFiles } from '@/service/knowledgeCenter';
@@ -123,6 +127,32 @@ it('shows the personal storage quota with English labels', async () => {
   const usage = await screen.findByLabelText('Personal storage usage');
   expect(within(usage).getByText('Storage usage')).toBeInTheDocument();
   expect(within(usage).getByText('2.00 / 10 GB')).toBeInTheDocument();
+});
+
+it('renders AgenticFS capacity and usage from the platform response', async () => {
+  mockIntl = getLocaleIntl('en-US');
+  jest.mocked(getPersonalStorageQuota).mockResolvedValueOnce({
+    enabled: true,
+    capacityLimitBytes: 10737418240,
+    usedBytes: 125165568,
+  });
+  render(panel());
+  const usage = await screen.findByLabelText('Personal storage usage');
+  expect(within(usage).getByText('0.12 / 10 GB')).toBeInTheDocument();
+  expect(within(usage).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1');
+});
+
+it.each([
+  { enabled: false, capacityLimitBytes: 10737418240, usedBytes: 125165568 },
+  { enabled: true, capacityLimitBytes: 10737418240, usedBytes: null },
+  { enabled: true, capacityLimitBytes: 0, usedBytes: 125165568 },
+])('hides unavailable or invalid storage quota: %p', async (response) => {
+  mockIntl = getLocaleIntl('en-US');
+  jest.mocked(getPersonalStorageQuota).mockResolvedValueOnce(response);
+  await act(async () => {
+    render(panel());
+  });
+  expect(screen.queryByLabelText('Personal storage usage')).not.toBeInTheDocument();
 });
 
 it('renders the real shared project tree toolbar and isolates each file progress, failure and retry', async () => {

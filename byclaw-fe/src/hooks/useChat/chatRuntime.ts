@@ -526,7 +526,11 @@ export const applyProjectedRootState = (
   set(context.answerMsg, 'thinkDone', !runtime.rootActive || runtime.status === 'failed');
 };
 
-const applyParsedStreamToContext = (parsed: ParsedChatStreamMessage, context: ChatStreamRuntimeContext) => {
+const applyParsedStreamToContext = (
+  parsed: ParsedChatStreamMessage,
+  context: ChatStreamRuntimeContext,
+  isRestoredReplay: boolean
+) => {
   const { eventName, formattedPayload, rawMessage, sseMsg, streamId } = parsed;
   if (streamId) {
     set(context.answerMsg, 'streamId', streamId);
@@ -555,6 +559,7 @@ const applyParsedStreamToContext = (parsed: ParsedChatStreamMessage, context: Ch
     sseRes: formattedPayload,
     sseMsg: {
       ...sseMsg,
+      isRestoredReplay,
       id: context.clientRequestId,
       clientRequestId: context.clientRequestId,
       sessionExts: rawMessage.sessionExts,
@@ -616,7 +621,7 @@ const applyParsedStreamToContext = (parsed: ParsedChatStreamMessage, context: Ch
     });
 };
 
-export const handleParsedChatStream = (parsed: ParsedChatStreamMessage) => {
+export const handleParsedChatStream = (parsed: ParsedChatStreamMessage, isRestoredReplay = false) => {
   if (!shouldApplyParsedStream(parsed)) {
     if (isChatCheckpoint(parsed.rawMessage)) recordChatChain('fe.reply_deferred', parsed.rawMessage, 'ignored');
     return;
@@ -664,7 +669,7 @@ export const handleParsedChatStream = (parsed: ParsedChatStreamMessage) => {
     return;
   }
 
-  applyParsedStreamToContext(parsed, context);
+  applyParsedStreamToContext(parsed, context, isRestoredReplay);
 };
 
 export const handleTaskPlanSnapshot = (message: any) => {
@@ -718,7 +723,7 @@ export const flushRestoredChatStreamBuffer = (restoreKey: string) => {
   buffered
     .filter(shouldApplyParsedStream)
     .sort((a, b) => compareStreamId(a.streamId, b.streamId))
-    .forEach(handleParsedChatStream);
+    .forEach((parsed) => handleParsedChatStream(parsed, true));
 };
 
 export const handleChatStreamError = (message: any) => {

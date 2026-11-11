@@ -19,6 +19,9 @@ public interface SharedSandboxPlatformClient {
     @PostMapping("/internal/platform/sandbox/shared/{operation}")
     Map<String, Object> call(@PathVariable("operation") String operation, @RequestBody Map<String, Object> payload);
 
+    @PostMapping("/internal/platform/storage/spaces/get")
+    Map<String, Object> getWorkspaceSpace(@RequestBody Map<String, Object> owner);
+
     class Configuration extends PlatformControlClient.Configuration {
         @Bean
         @ConditionalOnMissingBean(PlatformBridgeTokens.class)

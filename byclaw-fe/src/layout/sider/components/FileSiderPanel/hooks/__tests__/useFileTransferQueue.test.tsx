@@ -165,3 +165,43 @@ it('cancels queued jobs before their storage lane starts without cancelling the 
   });
   expect(result.current.rows.map((row) => row.status)).toEqual(['success', 'failed']);
 });
+
+it('dismisses successful rows after three seconds while retaining failures and retries', async () => {
+  jest.useFakeTimers();
+  try {
+    const upload = jest.fn(async (task) => {
+      if (task.id === 'failed') throw new Error('offline');
+    });
+    const { result, unmount } = renderHook(() => useFileTransferQueue(upload, 'scope', 3000));
+    await act(async () => {
+      await result.current.start(
+        ['ok', 'failed'].map((id) => ({
+          id,
+          file: new File(['data'], `${id}.txt`),
+          path: '/',
+          overwrite: false,
+        }))
+      );
+    });
+    act(() => {
+      jest.advanceTimersByTime(2999);
+    });
+    expect(result.current.rows.map((row) => row.status)).toEqual(['success', 'failed']);
+    act(() => {
+      jest.advanceTimersByTime(1);
+    });
+    expect(result.current.rows.map((row) => row.id)).toEqual(['failed']);
+    upload.mockResolvedValue(undefined);
+    await act(async () => {
+      await result.current.retry('failed');
+    });
+    expect(result.current.rows[0].status).toBe('success');
+    act(() => {
+      jest.advanceTimersByTime(3000);
+    });
+    expect(result.current.rows).toEqual([]);
+    unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
