@@ -6,6 +6,8 @@
 !middleware/builtin/skills/**
 !middleware/builtin/python-clis/
 !middleware/builtin/python-clis/**
+!middleware/builtin/runtime-tools/
+!middleware/builtin/runtime-tools/server-ssh.py
 !middleware/byclaw-harness/
 !middleware/byclaw-harness/tool-sandbox/
 !middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh

@@ -14,7 +14,7 @@ COPY middleware/byclaw-harness/scripts/install-codex.py /tmp/install-codex.py
 RUN set -eu; \
     bash /tmp/configure-cn-sources.sh; \
     apt-get -o APT::Update::Error-Mode=any update; \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nginx; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nginx openssh-client; \
     rm -rf /var/lib/apt/lists/*; \
     python3 /tmp/install-codex.py --release /tmp/codex.release.json --prefix /opt/byclaw/codex; \
     ln -s /opt/byclaw/codex/bin/codex /usr/local/bin/codex; \
@@ -26,6 +26,7 @@ RUN install -d -m 0700 -o byclaw -g byclaw "${CODEX_HOME}"
 COPY --chown=byclaw:byclaw --chmod=0600 middleware/byclaw-harness/tool-sandbox/codex.config.toml /home/byclaw/.codex/config.toml
 COPY --chown=byclaw:byclaw middleware/builtin/skills/ /opt/byclaw/builtin/skills/
 COPY --chown=byclaw:byclaw middleware/builtin/python-clis/ /opt/byclaw/builtin/python-clis/
+COPY --chmod=0755 middleware/builtin/runtime-tools/server-ssh.py /usr/local/bin/server-ssh
 RUN python3 -m pip install --no-cache-dir --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
       "by-framework==0.2.2.dev10" \
       /opt/byclaw/builtin/python-clis/kbcli \
@@ -53,7 +54,8 @@ RUN set -eu; \
     su -s /bin/sh byclaw -c 'codex --version'; \
     env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env; \
     chmod 0644 /etc/byclaw-tool-env.session-env
-RUN python3 -m py_compile /usr/local/bin/sandbox-app /usr/local/bin/sandbox-template /usr/local/bin/byclaw-coding-entrypoint \
+RUN python3 -m py_compile /usr/local/bin/sandbox-app /usr/local/bin/sandbox-template /usr/local/bin/byclaw-coding-entrypoint /usr/local/bin/server-ssh \
+    && ssh -V && command -v scp && server-ssh --help >/dev/null \
     && nginx -V \
     && ln -sfn /usr/local/bin/byclaw-coding-entrypoint /usr/local/bin/byclaw-dsh-entrypoint
 
