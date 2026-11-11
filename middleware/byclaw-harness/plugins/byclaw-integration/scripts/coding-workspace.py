@@ -335,7 +335,35 @@ def publication_schema():
         required=['text', 'sourcePaths'], properties=dict(text=dict(type='string'), sourcePaths=dict(type='array', items=dict(type='string'))))])))
 
 
+@contextlib.contextmanager
+def deployment_environment(environment, workspace_root=None):
+    """Lease-local credentials, outside UserFS and native Codex history/config."""
+    clean = {k: v for k, v in environment.items() if not k.startswith('BYCLAW_DEPLOY_')}
+    if environment.get('BYCLAW_DEPLOY_ENABLED') != '1':
+        yield clean
+        return
+    fields = ('HOST', 'PORT', 'USER', 'PRIVATE_KEY', 'HOST_KEY', 'ROOT')
+    data = {k.lower(): environment.get('BYCLAW_DEPLOY_' + k, '') for k in fields}
+    if workspace_root is not None and not data['host_key'].strip():
+        # Public server identities persist across disposable coding instances; no private key here.
+        trust = Path(workspace_root) / '.server-deploy'
+        safe_directory(trust, Path(workspace_root))
+        data['known_hosts'] = str(trust / 'known_hosts')
+    payload = json.dumps(data)
+    if len(payload.encode()) > 65536:
+        raise ValueError('EXECUTION_DEPLOYMENT_CONFIG_TOO_LARGE')
+    # Explicit /tmp ignores caller TMPDIR, which may point into persistent /by.
+    with tempfile.TemporaryDirectory(prefix='byclaw-deploy-', dir='/tmp') as directory:
+        path = Path(directory) / 'context.json'
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as output:
+            output.write(payload)
+        yield dict(clean, BYCLAW_DEPLOY_CONTEXT=str(path))
+
+
 def run(manifest, prompt, root):
+    # Remove before Skill preparation or any other subprocess can inherit raw material.
+    deployment_values = {k: os.environ.pop(k) for k in list(os.environ) if k.startswith('BYCLAW_DEPLOY_')}
     default_home = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex')))
     default_config = default_home / 'config.toml'
     home, cwd = prepare(manifest, root)
@@ -362,11 +390,16 @@ def run(manifest, prompt, root):
         environment = dict(os.environ, CODEX_HOME=str(home), BYCLAW_AGENT_ID=manifest['employeeId'], DSH_BYCLAW_AGENT_ID=manifest['employeeId'])
         roots = list(dict.fromkeys([cwd, Path(manifest['workspace']['sessionRoot'])]))
         before = {path: scan(path) for path in roots}
+        environment.update(deployment_values)
+        deployment = deployment_environment(environment, root)
+        environment = deployment.__enter__()
+        deploying = 'BYCLAW_DEPLOY_CONTEXT' in environment
         child = None
         try:
             # stdin avoids argv limits and "Reading additional input" ambiguity in Codex.
             child = subprocess.Popen(args + ['-'], cwd=cwd, env=environment, stdin=subprocess.PIPE,
-                                     stdout=subprocess.PIPE, stderr=None, text=True, encoding='utf-8')
+                                     stdout=subprocess.PIPE, stderr=None, text=True, encoding='utf-8',
+                                     start_new_session=deploying)
             child.stdin.write(prompt)
             child.stdin.close()
             for line in child.stdout:
@@ -381,15 +414,23 @@ def run(manifest, prompt, root):
                 sys.stdout.flush()
             code = child.wait()
         finally:
-            if child is not None:
-                if child.poll() is None:
-                    child.terminate()
-                    try:
-                        child.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        child.kill()
-                        child.wait()
-                child.stdout.close()
+            try:
+                if child is not None:
+                    if deploying:
+                        try:
+                            os.killpg(child.pid, signal.SIGTERM)
+                        except ProcessLookupError:
+                            pass
+                    if child.poll() is None:
+                        child.terminate()
+                        try:
+                            child.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            child.kill()
+                            child.wait()
+                    child.stdout.close()
+            finally:
+                deployment.__exit__(None, None, None)
             for path in roots:
                 file_changes(path, Path(manifest['workspace']['sessionRoot']).name, before[path], scan(path), root)
         return code

@@ -18,6 +18,46 @@ spec.loader.exec_module(runner)
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_deployment_context_is_local_private_stripped_and_cleaned_on_failure(self):
+        source = dict(CODEX_AUTH='model-auth', BYCLAW_DEPLOY_ENABLED='1',
+                      BYCLAW_DEPLOY_PRIVATE_KEY='synthetic-only', BYCLAW_DEPLOY_HOST='example.invalid')
+        contexts = []
+        with self.assertRaisesRegex(RuntimeError, 'cancelled'):
+            with runner.deployment_environment(source) as environment:
+                self.assertEqual(environment['CODEX_AUTH'], 'model-auth')
+                self.assertNotIn('BYCLAW_DEPLOY_PRIVATE_KEY', environment)
+                path = Path(environment['BYCLAW_DEPLOY_CONTEXT'])
+                contexts.append(path)
+                self.assertEqual(path.parent.parent, Path('/tmp'))
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+                self.assertEqual(json.loads(path.read_text())['private_key'], 'synthetic-only')
+                with runner.deployment_environment(source) as other:
+                    self.assertNotEqual(environment['BYCLAW_DEPLOY_CONTEXT'], other['BYCLAW_DEPLOY_CONTEXT'])
+                raise RuntimeError('cancelled')
+        self.assertFalse(contexts[0].parent.exists())
+        with runner.deployment_environment(dict(source, BYCLAW_DEPLOY_ENABLED='0')) as environment:
+            self.assertEqual(environment, {'CODEX_AUTH': 'model-auth'})
+
+    def test_native_runner_scopes_deployment_context_without_persisting_it(self):
+        observed = []
+        def verify(args, kwargs):
+            path = Path(kwargs['env']['BYCLAW_DEPLOY_CONTEXT'])
+            observed.append(path)
+            self.assertTrue(path.is_file())
+            self.assertNotIn('BYCLAW_DEPLOY_PRIVATE_KEY', kwargs['env'])
+            self.assertNotIn('BYCLAW_DEPLOY_PRIVATE_KEY', os.environ)
+            self.assertNotIn('synthetic-only', json.dumps(args))
+            self.assertTrue(kwargs['start_new_session'])
+        with patch.dict(os.environ, {'BYCLAW_DEPLOY_ENABLED': '1', 'BYCLAW_DEPLOY_PRIVATE_KEY': 'synthetic-only'}):
+            with patch.object(runner.os, 'killpg') as kill:
+                self.run_cli(verify)
+                kill.assert_called_once()
+        self.assertFalse(observed[0].parent.exists())
+        for file in self.by.rglob('*'):
+            if file.is_file():
+                self.assertNotIn(b'synthetic-only', file.read_bytes())
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='coding-workspace-test-')
         self.addCleanup(self.temporary.cleanup)
@@ -41,6 +81,7 @@ class WorkspaceTests(unittest.TestCase):
         thread = '12345678-1234-1234-1234-123456789abc'
         class Child:
             def __init__(child, args, **kwargs):
+                child.pid = 99999999
                 calls.append((args, kwargs))
                 if callback:
                     callback(args, kwargs)
