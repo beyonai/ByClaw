@@ -10,6 +10,8 @@
  * SshConnection, and only the next operation reconnects.
  */
 import type { Socket } from 'node:net'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { deploymentEnvironment, isDeploymentParameter } from './deployment-environment.ts'
 import { Context, Service } from '@deepseek-ai/cordis'
 import { SshConnection, type Config as SshConfig } from '@deepseek-ai/dsh-ssh'
 import type { SshStreamEndpoint } from '@deepseek-ai/dsh-ssh/schemas'
@@ -74,6 +76,7 @@ export class ToolEnvConnection extends Service {
   private residualSince: number | undefined
   /** The user's launch environment; see {@link launchEnvironment}. */
   private launchEnv: Readonly<Record<string, string>>
+  private readonly deploymentScope = new AsyncLocalStorage<boolean>()
   private readonly deferred = new DeferredToolEnvironmentWork(message => { this.ctx.logger('byclaw-tool-env').warn(message) })
 
   constructor(
@@ -187,8 +190,18 @@ export class ToolEnvConnection extends Service {
       if (answer !== undefined) return result.parse(answer)
     }
     this.noteStartReason(method, params)
-    const scrubbed = scrubEnvironment(launchEnvironment(method, params, this.launchEnv))
+    let scrubbed = scrubEnvironment(launchEnvironment(method, params, this.launchEnv))
+    if (method === 'process.prepare' && this.deploymentScope.getStore()) {
+      const input = scrubbed as { env?: Readonly<Record<string, string | null>> }
+      scrubbed = { ...input, env: { ...input.env, ...deploymentEnvironment(this.launchEnv) } }
+    }
     return await this.use(lease => lease.connection.request(method, scrubbed, result, signal, wait), signal)
+  }
+
+  /** Internal executor scope, never exposed as a model tool or a caller-controlled env flag. */
+  runWithDeploymentCredentials<T>(run: () => Promise<T>): Promise<T> {
+    deploymentEnvironment(this.launchEnv)
+    return this.deploymentScope.run(true, run)
   }
 
   async connectStream(endpoint: SshStreamEndpoint, signal?: AbortSignal): Promise<Socket> {
@@ -428,7 +441,7 @@ export function scrubEnvironment(params: unknown): unknown {
   if (typeof params !== 'object' || params === null || !('env' in params)) return params
   const env = (params as { env?: unknown }).env
   if (typeof env !== 'object' || env === null) return params
-  const kept = Object.fromEntries(Object.entries(env).filter(([key]) => !PRIVATE_ENVIRONMENT.test(key) && !HOST_CREDENTIAL_ENVIRONMENT.test(key)))
+  const kept = Object.fromEntries(Object.entries(env).filter(([key]) => !PRIVATE_ENVIRONMENT.test(key) && !HOST_CREDENTIAL_ENVIRONMENT.test(key) && !isDeploymentParameter(key)))
   return { ...params, env: kept }
 }
 

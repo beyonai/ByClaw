@@ -67,6 +67,40 @@ describe('physical ownership versus SSH lease teardown', () => {
 })
 
 describe('scrubEnvironment', () => {
+  it('isolates an explicitly scoped coding request from concurrent ordinary requests', async () => {
+    const ctx = new Context()
+    const secret = 'synthetic-alice-only'
+    const backend = { ensure: vi.fn(async () => { throw new Error('no network') }), pause: vi.fn(async () => {}) }
+    const connection = new ToolEnvConnection(ctx, { ssh: {} as never,
+      ptcLaunch: { kind: 'node-script', executable: 'node', bootstrapPath: '/unused' }, idleMs: 0,
+      launchEnv: { BYCLAW_DEPLOY_ENABLED: '1', BYCLAW_DEPLOY_PRIVATE_KEY: secret, USER_CODE: 'alice' },
+    }, backend, new ToolEnvIdentity('/unused'))
+    const seen: Array<{ argv: string[]; env: Record<string, string> }> = []
+    const transport = { connection: { request: async (_method: string, input: typeof seen[number]) => {
+      seen.push(input); return null
+    } } }
+    const use = vi.spyOn(connection as unknown as { use: (callback: (value: typeof transport) => unknown) => Promise<unknown> }, 'use')
+      .mockImplementation(async callback => callback(transport))
+    try {
+      await Promise.all([
+        connection.runWithDeploymentCredentials(async () => {
+          await Promise.resolve()
+          return connection.request('process.prepare', { argv: ['coding'], env: {} }, {} as never)
+        }),
+        connection.request('process.prepare', { argv: ['ordinary'], env: { BYCLAW_DEPLOY_PRIVATE_KEY: 'forged' } }, {} as never),
+      ])
+      expect(seen.find(x => x.argv[0] === 'coding')?.env.BYCLAW_DEPLOY_PRIVATE_KEY).toBe(secret)
+      expect(seen.find(x => x.argv[0] === 'ordinary')?.env).toEqual({ USER_CODE: 'alice' })
+      await connection.request('process.prepare', { argv: ['later'] }, {} as never)
+      expect(seen.at(-1)?.env).toEqual({ USER_CODE: 'alice' })
+    } finally { use.mockRestore(); await ctx.fiber.dispose() }
+  })
+  it('drops deployment values from generic processes, including forged context paths', () => {
+    const env = { BYCLAW_DEPLOY_ENABLED: '1', BYCLAW_DEPLOY_PRIVATE_KEY: 'synthetic-private',
+      BYCLAW_DEPLOY_CONTEXT: '/tmp/forged', USER_CODE: 'alice' }
+    expect(scrubEnvironment(launchEnvironment('process.prepare', { argv: ['sh'], env }, env)))
+      .toEqual({ argv: ['sh'], env: { USER_CODE: 'alice' } })
+  })
   it('keeps host coordination and platform credentials out of user tool processes', () => {
     const protectedNames = ['REDIS_PASSWORD', 'REDIS_CLUSTER_PASSWORD', 'REDIS_URL', 'REDIS_CLUSTER_NODES',
       'TENCENTCLOUD_SECRET_ID', 'TENCENTCLOUD_SECRET_KEY', 'LANGFUSE_SECRET_KEY', 'TYPESAFE_API_KEY',
