@@ -76,7 +76,8 @@ export class ToolEnvConnection extends Service {
   private residualSince: number | undefined
   /** The user's launch environment; see {@link launchEnvironment}. */
   private launchEnv: Readonly<Record<string, string>>
-  private readonly deploymentScope = new AsyncLocalStorage<boolean>()
+  private readonly deploymentScope = new AsyncLocalStorage<Readonly<Record<string, string>>>()
+  private deploymentValues: Readonly<Record<string, string>> | undefined
   private readonly deferred = new DeferredToolEnvironmentWork(message => { this.ctx.logger('byclaw-tool-env').warn(message) })
 
   constructor(
@@ -191,17 +192,22 @@ export class ToolEnvConnection extends Service {
     }
     this.noteStartReason(method, params)
     let scrubbed = scrubEnvironment(launchEnvironment(method, params, this.launchEnv))
-    if (method === 'process.prepare' && this.deploymentScope.getStore()) {
+    const deployment = this.deploymentScope.getStore()
+    if (method === 'process.prepare' && deployment !== undefined) {
       const input = scrubbed as { env?: Readonly<Record<string, string | null>> }
-      scrubbed = { ...input, env: { ...input.env, ...deploymentEnvironment(this.launchEnv) } }
+      scrubbed = { ...input, env: { ...input.env, ...deployment } }
     }
     return await this.use(lease => lease.connection.request(method, scrubbed, result, signal, wait), signal)
   }
 
   /** Internal executor scope, never exposed as a model tool or a caller-controlled env flag. */
   runWithDeploymentCredentials<T>(run: () => Promise<T>): Promise<T> {
-    deploymentEnvironment(this.launchEnv)
-    return this.deploymentScope.run(true, run)
+    const values = deploymentEnvironment(this.deploymentValues ?? this.launchEnv)
+    return this.deploymentScope.run(values, run)
+  }
+
+  setDeploymentCredentials(values: Readonly<Record<string, string>>): void {
+    this.deploymentValues = { ...values }
   }
 
   async connectStream(endpoint: SshStreamEndpoint, signal?: AbortSignal): Promise<Socket> {

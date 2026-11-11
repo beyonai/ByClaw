@@ -93,6 +93,11 @@ describe('scrubEnvironment', () => {
       expect(seen.find(x => x.argv[0] === 'ordinary')?.env).toEqual({ USER_CODE: 'alice' })
       await connection.request('process.prepare', { argv: ['later'] }, {} as never)
       expect(seen.at(-1)?.env).toEqual({ USER_CODE: 'alice' })
+      connection.setDeploymentCredentials({ BYCLAW_DEPLOY_HOST: 'example.invalid', BYCLAW_DEPLOY_PRIVATE_KEY: 'rotated-user-key' })
+      await connection.runWithDeploymentCredentials(() => connection.request('process.prepare', { argv: ['refreshed'] }, {} as never))
+      expect(seen.at(-1)?.env.BYCLAW_DEPLOY_PRIVATE_KEY).toBe('rotated-user-key')
+      connection.setDeploymentCredentials({ BYCLAW_DEPLOY_ENABLED: '0' })
+      expect(() => connection.runWithDeploymentCredentials(async () => {})).toThrow('DEPLOYMENT_NOT_ENABLED')
     } finally { use.mockRestore(); await ctx.fiber.dispose() }
   })
   it('drops deployment values from generic processes, including forged context paths', () => {
