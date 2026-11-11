@@ -1,7 +1,7 @@
 {
-  "image": "byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness:D0.6.0_coding-r2",
+  "image": "byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness:D0.6.0_coding",
   "startup": {
-    "entrypoint": ["/usr/local/bin/byclaw-tool-slim-entrypoint", "tools"]
+    "entrypoint": ["/usr/local/bin/byclaw-coding-entrypoint", "tools"]
   },
   "env": {
     "TZ": "Asia/Shanghai",
@@ -11,12 +11,14 @@
     "BYCLAW_TOOL_ENV_HOST_KEY": "${envVars.BYCLAW_TOOL_ENV_HOST_KEY}",
     "BYCLAW_TOOL_ENV_AUTHORIZED_KEY": "${envVars.BYCLAW_TOOL_ENV_AUTHORIZED_KEY}",
     "BYCLAW_BROWSER_STARTUP": "eager",
-    "CODEX_AUTH": "${envVars.CODEX_AUTH}"
+    "CODEX_AUTH": "${envVars.CODEX_AUTH}",
+    "BYCLAW_APP_PORT": "8082"
   },
   "servicePort": 8080,
   "ports": [
     { "port": 8080, "instance": "ssh", "protocol": "http", "exposure": "private" },
-    { "port": 8081, "instance": "vnc", "protocol": "http", "exposure": "public" }
+    { "port": 8081, "instance": "vnc", "protocol": "http", "exposure": "public" },
+    { "port": 8082, "instance": "web", "protocol": "http", "exposure": "public" }
   ],
   "resourceRequests": { "cpu": "2", "memory": "4Gi" },
   "resourceLimits": { "cpu": "4", "memory": "8Gi" },
@@ -39,6 +41,7 @@
       "contract": "byclaw.tool-sandbox/v1",
       "purpose": "coding",
       "enabled": "true",
+      "description": "Codex 开发环境，支持内置应用模板和 Nginx 预览。先读 /etc/byclaw-tool-sandbox/APP_PREVIEW.md；用 sandbox-template 显式初始化项目，用 sandbox-app 返回预览链接。",
       "capabilities": "[\"process.exec\",\"filesystem\",\"browser.automation\"]"
     }
   }

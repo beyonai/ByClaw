@@ -137,7 +137,7 @@ class CodingPackagingTest(unittest.TestCase):
         for key in ('contract', 'purpose'):
             self.assertEqual(manifest[key], tool[key])
         self.assertEqual(manifest['capabilities'], json.loads(tool['capabilities']))
-        self.assertEqual(spec['startup']['entrypoint'], ['/usr/local/bin/byclaw-tool-slim-entrypoint', 'tools'])
+        self.assertEqual(spec['startup']['entrypoint'], ['/usr/local/bin/byclaw-coding-entrypoint', 'tools'])
         self.assertTrue(spec['image'].endswith(':' + manifest['runtimeVersion']))
         self.assertEqual(spec['ports'][0]['instance'], 'ssh')
         self.assertEqual(spec['ports'][0]['exposure'], 'private')
@@ -157,8 +157,10 @@ class CodingPackagingTest(unittest.TestCase):
                       + ' /home/byclaw/.codex/config.toml', dockerfile)
         self.assertIn('install -d -m 0700 -o byclaw -g byclaw "${CODEX_HOME}"', dockerfile)
         self.assertIn('!' + source, ignore.splitlines())
-        self.assertIn('ENTRYPOINT ["/usr/local/bin/byclaw-tool-slim-entrypoint"]', dockerfile)
-        self.assertNotIn('coding-entrypoint', dockerfile + ignore)
+        self.assertIn('ENTRYPOINT ["/usr/local/bin/byclaw-coding-entrypoint"]', dockerfile)
+        entrypoint = (HARNESS / 'scripts/coding-entrypoint.py').read_text()
+        self.assertIn("TOOL_ENTRYPOINT = '/usr/local/bin/byclaw-tool-slim-entrypoint'", entrypoint)
+        self.assertIn('os.execv(TOOL_ENTRYPOINT', entrypoint)
 
 
 if __name__ == '__main__':

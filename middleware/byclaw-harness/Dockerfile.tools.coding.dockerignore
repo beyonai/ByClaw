@@ -9,3 +9,17 @@
 !middleware/byclaw-harness/tool-sandbox/coding.capabilities.json
 !middleware/byclaw-harness/scripts/
 !middleware/byclaw-harness/scripts/install-codex.py
+!middleware/byclaw-harness/scripts/sandbox-app.py
+!middleware/byclaw-harness/scripts/sandbox-template.py
+!middleware/byclaw-harness/scripts/coding-entrypoint.py
+!middleware/byclaw-harness/tool-sandbox/APP_PREVIEW.md
+!middleware/byclaw-harness/templates/
+!middleware/byclaw-harness/templates/easel/
+!middleware/byclaw-harness/templates/easel/template.json
+!middleware/byclaw-harness/templates/easel/README.md
+!middleware/byclaw-harness/templates/easel/source.json
+!middleware/byclaw-harness/templates/easel/install.sh
+!middleware/byclaw-harness/templates/easel/workspace.py
+!middleware/byclaw-harness/templates/easel/preview.conf
+!middleware/byclaw-harness/templates/easel/easel-source-5c12e42.tar.gz
+!middleware/byclaw-harness/templates/easel/easel-source-5c12e42.tar.gz.sha256

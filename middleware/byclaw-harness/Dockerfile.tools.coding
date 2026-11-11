@@ -1,6 +1,6 @@
 # Build from the ByClaw repository root. Codex only; keep browser/SSH transport.
 ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
-FROM ${BROWSER_IMAGE} AS tools-coding
+FROM ${BROWSER_IMAGE} AS coding-core
 USER root
 ARG TARGETARCH
 RUN test "${TARGETARCH}" = amd64
@@ -11,6 +11,9 @@ COPY middleware/byclaw-harness/tool-sandbox/codex.release.json /tmp/codex.releas
 COPY middleware/byclaw-harness/scripts/install-codex.py /tmp/install-codex.py
 RUN set -eu; \
     bash /tmp/configure-cn-sources.sh; \
+    apt-get -o APT::Update::Error-Mode=any update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nginx; \
+    rm -rf /var/lib/apt/lists/*; \
     python3 /tmp/install-codex.py --release /tmp/codex.release.json --prefix /opt/byclaw/codex; \
     ln -s /opt/byclaw/codex/bin/codex /usr/local/bin/codex; \
     install -d /usr/local/share/byclaw-tool-sandbox; \
@@ -20,13 +23,27 @@ RUN set -eu; \
 RUN install -d -m 0700 -o byclaw -g byclaw "${CODEX_HOME}"
 COPY --chown=byclaw:byclaw --chmod=0600 middleware/byclaw-harness/tool-sandbox/codex.config.toml /home/byclaw/.codex/config.toml
 COPY middleware/byclaw-harness/tool-sandbox/coding.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
+COPY --chmod=0755 middleware/byclaw-harness/scripts/sandbox-app.py /usr/local/bin/sandbox-app
+COPY --chmod=0755 middleware/byclaw-harness/scripts/sandbox-template.py /usr/local/bin/sandbox-template
+COPY --chmod=0755 middleware/byclaw-harness/scripts/coding-entrypoint.py /usr/local/bin/byclaw-coding-entrypoint
+COPY middleware/byclaw-harness/tool-sandbox/APP_PREVIEW.md /etc/byclaw-tool-sandbox/APP_PREVIEW.md
 RUN set -eu; \
     su -s /bin/sh byclaw -c 'codex --version'; \
     env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env; \
     chmod 0644 /etc/byclaw-tool-env.session-env
+RUN python3 -m py_compile /usr/local/bin/sandbox-app /usr/local/bin/sandbox-template /usr/local/bin/byclaw-coding-entrypoint \
+    && nginx -V \
+    && ln -sfn /usr/local/bin/byclaw-coding-entrypoint /usr/local/bin/byclaw-dsh-entrypoint
 
 LABEL io.byclaw.tool-sandbox.contract="byclaw.tool-sandbox/v1" \
       io.byclaw.tool-sandbox.purpose="coding"
-# Use the existing SSH/browser entrypoint with the baked-in Codex defaults.
-ENTRYPOINT ["/usr/local/bin/byclaw-tool-slim-entrypoint"]
+# Prepare Nginx, then delegate to the original SSH/browser entrypoint.
+EXPOSE 8082
+ENTRYPOINT ["/usr/local/bin/byclaw-coding-entrypoint"]
 CMD ["tools"]
+
+# Bundled applications are initialized explicitly, never during sandbox startup.
+# --target coding-core omits the transitional preinstalled media environment.
+FROM coding-core AS tools-coding
+COPY middleware/byclaw-harness/templates/easel/ /opt/byclaw/templates/easel/
+RUN bash /opt/byclaw/templates/easel/install.sh
