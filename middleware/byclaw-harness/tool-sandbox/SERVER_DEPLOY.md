@@ -45,7 +45,11 @@ per-user Harness context retain access to the configured material.
 
 `BYCLAW_DEPLOY_*` is reserved: normal tool subprocesses drop it even if a caller
 tries to supply it. Only the internal coding executor can use the dedicated catalog
-method; ownership and coding-template checks still apply. Configuring both enabled
+method; ownership and coding-template checks still apply. At task execution the trusted
+host resolves the fields through the existing user-scoped credential provider (which
+reads enabled personal parameters from Redis); it does not require fields in the cloud
+startup specification. A fresh resolution replaces prior deployment values, including
+explicit pauses and removals. Configuring both enabled
 required parameters activates delivery unless explicitly paused. While active,
 all routed Codex tasks for this user receive this capability. Natural-language intent
 is not an authorization control; disable it after the authorized deployment period.
