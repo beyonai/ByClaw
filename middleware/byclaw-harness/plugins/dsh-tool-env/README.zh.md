@@ -40,3 +40,34 @@ DSH 运行时（A）保留 Web 界面、Agent、模型、会话和配置；工�
 A 和 B 必须用**同一次构建**的镜像，否则 helper 摘要校验会拒绝连接。B 镜像由 `middleware/byclaw-harness/Dockerfile.tools` 从 A 镜像构建（`--build-arg HARNESS_IMAGE=<A 镜像>`）：保留 A 的全部工具链（系统包、Python/Node CLI、内置 skills），只去掉 A 运行时专用的部分（DSH 自身安装、Playwright 浏览器、构建缓存），压成一层；A 的镜像环境变量记录在 `/etc/byclaw-tool-env.session-env`，B 的 sshd 把它交给每个会话。A 镜像本身也能当 B 用（`tools` 模式）。
 
 配置项、限制说明见 [README.md](README.md)。
+
+### 工具沙箱 B 的环境转发
+
+工具进程默认显式转发 B 的 SSH helper 自身全部环境变量，以保留规格 `env` 中的
+`REDIS_PASSWORD`、业务 API Token 等变量，避免 DSH 对隐式继承的敏感变量清理。
+这不是转发 Harness A 的环境：A 侧 `REDIS_*` 和其他宿主凭据过滤保持不变。
+
+通过 **B 的规格 `env`** 配置 `BYCLAW_TOOL_ENV_FORWARD_ENVIRONMENT`：
+
+- 不配置或设置为 `all`：默认转发全部 B 环境。
+- 设置为 JSON 字符串 `{"allow":["REDIS_PASSWORD","BUSINESS_API_TOKEN"]}`：
+  仅显式转发名单中的 B 环境变量；`{"allow":[]}` 关闭 B 环境的显式补入。
+- 非法 JSON、非法变量名、额外字段或错误类型会中止启动；错误不输出配置值。
+
+顺序为 **B 环境 → 请求 env 覆盖 → 内部启动变量排除**。请求可以提供名单以外的
+业务变量；空字符串保留，`null` 沿用上游 unset 标记，在本层组装时不回填 B 的同名值。经过 A 的请求仍先
+接受原有宿主凭据过滤，因此从 A 发送的 `REDIS_PASSWORD` 不会覆盖 B 的密码。
+白名单约束的是新增的显式转发层，与 `dsh-bash-provider` 相同；它不清空 DSH/系统
+原本继承的普通环境，不是进程环境隔离或权限控制。
+
+无论 all、白名单或请求覆盖，均不显式传递 `BYCLAW_TOOL_ENV*`、
+`BYCLAW_DSH_TOOL_ENV*`、`BYCLAW_BROWSER_SECRET*`、`BYCLAW_BROWSER_LISTEN_FD`、
+`BYCLAW_MICROVM_PAYLOAD`、`BYCLAW_COMMAND_PAYLOAD`。这些排除覆盖 SSH bootstrap
+密钥、broker secret/文件描述符和内部启动载荷；白名单不能放开这些变量。
+转发策略和启用标记由 B 的 sshd 启动配置生成，单次工具请求不能修改策略。
+
+`prepare-tool-helper-env.mjs` 在普通进程与终端共用的 helper 环境组装位置应用补丁；
+Full、extensions 和 slim Harness 镜像在 profile 安装后同步处理两份 helper。工具镜像
+须从匹配的新 Harness 镜像派生，继续使用原 helper 摘要校验。旧镜像不会自动获得修复。
+本地回归：`node --test middleware/byclaw-harness/scripts/tool-helper-env.test.mjs`。
+测试覆盖环境组装、真实 Node 子进程和 sshd 配置生成；不代替真实镜像/SSH 验证。
