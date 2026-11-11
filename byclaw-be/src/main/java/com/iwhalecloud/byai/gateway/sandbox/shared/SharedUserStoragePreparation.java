@@ -32,6 +32,10 @@ public class SharedUserStoragePreparation {
         return gateway.userStorageStatus(user);
     }
 
+    public Map<String, Object> workspaceSpaceStatus(String user) {
+        return gateway.workspaceSpaceStatus(user);
+    }
+
     public void trigger(LoginInfo login) {
         if (login == null || login.getUserId() == null || login.getEnterpriseId() == null || login.getUserCode() == null) return;
         String user = login.getUserCode();

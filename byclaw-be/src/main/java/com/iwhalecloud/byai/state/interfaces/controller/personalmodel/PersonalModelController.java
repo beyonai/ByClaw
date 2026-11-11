@@ -57,13 +57,13 @@ public class PersonalModelController {
     @Autowired
     private SharedUserStoragePreparation sharedUserStoragePreparation;
 
-    /** Returns personal NAS usage when the remote Aliyun storage admission is enabled. */
+    /** Returns the current user's AgenticFS capacity and measured usage. */
     @ApiOperation("个人存储用量")
     @GetMapping("/storage/quota")
     public ResponseUtil<Map<String, Object>> storageQuota() {
         Map<String, Object> result = new java.util.LinkedHashMap<>();
         String userCode = CurrentUserHolder.getCurrentUserCode();
-        Map<String, Object> details = sharedUserStoragePreparation.status(userCode);
+        Map<String, Object> details = sharedUserStoragePreparation.workspaceSpaceStatus(userCode);
         if (details != null) {
             result.putAll(details);
         }
