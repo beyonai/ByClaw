@@ -421,6 +421,7 @@ export default {
   'chatBI.dragFileHere': 'Drop files here. Common spreadsheet and document formats are supported, up to 100 MB.',
   'common.noPermissionOperation': 'Your current role does not have permission to perform this operation',
   'resource.import.finish': 'Finish',
+  'resource.import.summary': 'Added {createdCount} and updated {updatedCount} items in this import.',
   'common.back': 'Back',
   'resource.import.failedSummary': '{failedCount} items failed. Resolve the failed items and try again.',
   'resource.import.createdRange': 'Created items',
