@@ -61,6 +61,26 @@ test('execution map parsing accepts registered types and rejects invalid maps', 
   assert.throws(() => parseAgentExecutionMap('1001;1002'), /BYCLAW_AGENT_EXECUTION_MAP/)
   assert.throws(() => parseAgentExecutionMap('{"1001":"UNKNOWN"}'), /unknown executionType/)
 })
+test('deployment opt-in uses the dedicated coding entry and never silently falls back', async () => {
+  const environment = { BYCLAW_AGENT_EXECUTION_MAP: '{"11444401":"CODEX_CLI"}', BYCLAW_DEPLOY_ENABLED: '1' }
+  const enabled = fixture({ environment })
+  const dedicated = []
+  enabled.manager.executeWithDeployment = (...args) => {
+    dedicated.push(args)
+    return enabled.manager.execute(...args)
+  }
+  assert.equal((await enabled.run()).finalAnswer, '6')
+  assert.equal(dedicated.length, 1)
+  assert.equal(JSON.stringify(JSON.parse(dedicated[0][2][3])).includes('PRIVATE_KEY'), false, 'manifest never includes credential material')
+  const disabled = fixture()
+  disabled.manager.executeWithDeployment = async () => { throw new Error('must not use deployment') }
+  assert.equal((await disabled.run()).finalAnswer, '6')
+  const missing = fixture({ environment })
+  missing.manager.executeWithDeployment = undefined
+  await assert.rejects(missing.run(), error => error.message === 'EXECUTION_FAILED'
+    && error.cause?.message === 'EXECUTION_DEPLOYMENT_UNAVAILABLE')
+  assert.equal(missing.dshCalls, 0)
+})
 test('a simple question invokes Codex in coding sandbox and returns its answer without DSH', async () => {
   const f = fixture()
   const result = await f.run()

@@ -25,6 +25,7 @@ export const EXECUTION_DEFINITIONS: Readonly<Record<ExecutionType, ExecutionDefi
 export interface ExecutionSandbox {
   acquire(actor: string, templateKey: string, requestId: string): Promise<{ leaseId: string; workspaceRoot: string }>
   execute(actor: string, leaseId: string, argv: readonly string[], cwd?: string, signal?: AbortSignal, onStdout?: (chunk: string) => void): Promise<{ exitCode: number | null; stdout: string; stderr: string }>
+  executeWithDeployment?: ExecutionSandbox['execute']
   releaseActor(actor: string): Promise<{ retainedLeases: string[]; retainedAllocations: string[] }>
 }
 
@@ -54,6 +55,7 @@ export interface ExecutionDiagnostic {
 export interface ExecutionRouterEnvironment {
   BYCLAW_AGENT_EXECUTION_MAP?: string
   CODEX_EXEC_TIMEOUT_MS?: string
+  BYCLAW_DEPLOY_ENABLED?: string | undefined
 }
 export interface ExecutionRouterOptions {
   userCode: string
@@ -247,7 +249,9 @@ export class ByClawExecutionRouter {
       const argv = ['python3', '-c', CODING_WORKSPACE_RUNNER, JSON.stringify(codingRunManifest(prepared, identity, String(command.header.messageId))), prompt, lease.workspaceRoot]
       executionStarted = performance.now()
       let firstStdout = false
-      const processResult = await sandbox.execute(actor, lease.leaseId, argv, lease.workspaceRoot, signal, chunk => {
+      const execute = this.options.environment().BYCLAW_DEPLOY_ENABLED === '1' ? sandbox.executeWithDeployment : sandbox.execute
+      if (!execute) throw new Error('EXECUTION_DEPLOYMENT_UNAVAILABLE')
+      const processResult = await execute.call(sandbox, actor, lease.leaseId, argv, lease.workspaceRoot, signal, chunk => {
         if (!firstStdout && chunk) { firstStdout = true; log('first_stdout', 'success', executionStarted) }
         parser.write(chunk)
       })

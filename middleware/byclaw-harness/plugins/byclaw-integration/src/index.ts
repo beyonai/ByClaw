@@ -1149,6 +1149,8 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       return {
         BYCLAW_AGENT_EXECUTION_MAP: ssh?.environmentValue?.('BYCLAW_AGENT_EXECUTION_MAP') ?? config.agentExecutionMap ?? '{}',
         CODEX_EXEC_TIMEOUT_MS: ssh?.environmentValue?.('CODEX_EXEC_TIMEOUT_MS') ?? String(config.codexExecTimeoutMs ?? 0),
+        BYCLAW_DEPLOY_ENABLED: ssh?.environmentValue?.('BYCLAW_DEPLOY_ENABLED')
+          ?? (ssh?.environmentValue?.('BYCLAW_DEPLOY_HOST')?.trim() && ssh?.environmentValue?.('BYCLAW_DEPLOY_PRIVATE_KEY')?.trim() ? '1' : '0'),
       }
     }
     execution = new ByClawExecutionRouter({
