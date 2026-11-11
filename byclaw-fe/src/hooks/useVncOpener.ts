@@ -9,11 +9,13 @@ import {
   type SandboxInstanceRef,
 } from '@/utils/desktopInstances';
 import {
+  claimDesktopAutoOpen,
   desktopAuthEpoch,
   migrateDesktopOwner,
   mountDesktopOwner,
   getDesktopOwner,
   registerDesktops,
+  selectDesktop,
   updateDesktopOwner,
   useDesktopWorkspace,
 } from '@/utils/desktopWorkspace';
@@ -53,19 +55,18 @@ export default function useVncOpener(sessionId?: SessionIdInput, ownerType = 'se
   }, [owner]);
   const openVnc = useCallback(
     (options: VncOpenOptions = {}) => {
-      if ((!id && options.key) || (options.instanceRefs !== undefined && !options.instanceRefs.length)) return;
+      const { key } = options;
+      if ((!id && key) || (options.instanceRefs !== undefined && !options.instanceRefs.length)) return;
       const epoch = desktopAuthEpoch();
-      registerDesktops(owner, options.instanceRefs, Boolean(options.key));
-      const automatic = Boolean(options.key);
-      if (!automatic) useDesktopWorkspace.setState((state) => ({ revision: state.revision + 1, pendingOwner: '' }));
-      const state = getDesktopOwner(owner);
-      if (automatic && (state.handled || process.env.UMI_APP_MULTI_DESKTOP_ENABLED === 'false')) return;
-      updateDesktopOwner(owner, { handled: true });
-      if (automatic && useDesktopWorkspace.getState().panel && useDesktopWorkspace.getState().panel !== 'desktop')
-        return;
-      if (automatic) useDesktopWorkspace.setState((state) => ({ revision: state.revision + 1 }));
+      registerDesktops(owner, options.instanceRefs, Boolean(key));
+      if (key) {
+        if (process.env.UMI_APP_MULTI_DESKTOP_ENABLED === 'false' || !claimDesktopAutoOpen(owner, key)) return;
+        const { activeOwner, visible, panel } = useDesktopWorkspace.getState();
+        if (activeOwner !== owner || visible || (panel && panel !== 'desktop')) return;
+      }
+      useDesktopWorkspace.setState((state) => ({ revision: state.revision + 1, pendingOwner: '' }));
       const intent = useDesktopWorkspace.getState().revision;
-      const open = () => {
+      const open = (selected?: SandboxInstanceRef) => {
         if (
           current.current !== owner ||
           desktopAuthEpoch() !== epoch ||
@@ -73,6 +74,7 @@ export default function useVncOpener(sessionId?: SessionIdInput, ownerType = 'se
           intent !== useDesktopWorkspace.getState().revision
         )
           return;
+        if (selected) selectDesktop(owner, selected);
         useDesktopWorkspace.setState({ activeOwner: owner, visible: true, pendingOwner: '' });
         openDrawerView(
           EventEmitter,
@@ -88,14 +90,13 @@ export default function useVncOpener(sessionId?: SessionIdInput, ownerType = 'se
           { owner }
         );
       };
-      if (!automatic) {
+      if (!key) {
         open();
         return;
       }
       pendingIntent.current = intent;
       useDesktopWorkspace.setState({ pendingOwner: owner });
 
-      // Claim the opportunity before asynchronous directory access. Other tool frames only register.
       const started = Date.now();
       let attempts = 0;
       const attempt = async (): Promise<void> => {
@@ -108,8 +109,7 @@ export default function useVncOpener(sessionId?: SessionIdInput, ownerType = 'se
         )
           return;
         const front = useDesktopWorkspace.getState();
-        if (front.activeOwner !== owner || (front.visible && getDesktopOwner(owner).selected !== state.selected))
-          return;
+        if (front.activeOwner !== owner || front.visible) return;
         let rows: any[] = [];
         try {
           rows = await withDesktopTimeout(
@@ -130,7 +130,7 @@ export default function useVncOpener(sessionId?: SessionIdInput, ownerType = 'se
           const previous = getDesktopOwner(owner);
           useDesktopWorkspace.setState({ pendingOwner: '' });
           updateDesktopOwner(owner, {
-            handled: false,
+            autoOpenKeys: previous.autoOpenKeys?.filter((messageKey) => messageKey !== key),
             refs: previous.refs.filter((ref) => !isExplicitNonDesktop(rows, ref)),
           });
           return;
@@ -151,14 +151,9 @@ export default function useVncOpener(sessionId?: SessionIdInput, ownerType = 'se
           }
           refs = [choices[0].ref];
         }
-        if (refs.some((ref) => resolveDesktop(rows, ref))) {
-          if (options.instanceRefs === undefined) registerDesktops(owner, refs);
-          const selected = refs.find((ref) => resolveDesktop(rows, ref));
-          if (selected)
-            updateDesktopOwner(owner, {
-              selected: JSON.stringify([selected.sandboxId, selected.mappingId ?? null, selected.instance]),
-            });
-          open();
+        const selected = refs.find((ref) => resolveDesktop(rows, ref));
+        if (selected) {
+          open(selected);
           return;
         }
         if (attempts < 30 && Date.now() - started < 60000) setTimeout(() => void attempt(), 2000);

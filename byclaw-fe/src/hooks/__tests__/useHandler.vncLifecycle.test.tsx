@@ -1,8 +1,16 @@
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import VNC from '@/components/ChatLayoutComp/components/VNC';
 import MainDrawer from '@/components/MainDrawer';
 import { formatStreamPayload } from '@/hooks/useSseSender/chatStream';
 import useHandler from '@/hooks/useChat/useHandler';
-import { clearChatRuntime, handleParsedChatStream, registerPendingChatContext } from '@/hooks/useChat/chatRuntime';
+import {
+  clearChatRuntime,
+  flushRestoredChatStreamBuffer,
+  getRestoredStreamKey,
+  handleParsedChatStream,
+  registerPendingChatContext,
+  startRestoringChatStream,
+} from '@/hooks/useChat/chatRuntime';
 import type { IMessage } from '@/typescript/message';
 import { EventEmitter$Cls } from '@/utils/eventEmitter';
 import { useDesktopWorkspace } from '@/utils/desktopWorkspace';
@@ -16,6 +24,7 @@ const mockAppState = {
 
 jest.mock('@umijs/max', () => ({
   useDispatch: () => jest.fn(),
+  useSelector: (selector: (state: object) => unknown) => selector({}),
   useIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
   getIntl: () => ({ formatMessage: ({ id }: { id: string }) => id }),
 }));
@@ -25,7 +34,7 @@ jest.mock('@/hooks/useGlobal', () => ({
 }));
 jest.mock('@/models/common/useAppStore', () => ({
   __esModule: true,
-  default: { getState: () => mockAppState },
+  default: Object.assign(() => undefined, { getState: () => mockAppState }),
 }));
 // Keep the registered stream context, handler, opener, event bus, workspace and drawer real.
 jest.mock('@/components/MessagesComp/Iframe/IframeRender', () => ({
@@ -35,17 +44,17 @@ jest.mock('@/components/MessagesComp/Iframe/IframeRender', () => ({
 jest.mock('@/components/Preview/Twins', () => ({ PreViewFile: () => null }));
 jest.mock('@/pages/mobile/AuthPage', () => ({ __esModule: true, default: () => null }));
 
-const registerStream = (flowHandler: (props: any) => any) => {
+const registerStream = (flowHandler: (props: any) => any, id = 'a', requestId = `request-${id}`) => {
   const answer = {
-    msgId: 'answer-a',
-    messageId: 'answer-a',
+    msgId: `answer-${id}`,
+    messageId: `answer-${id}`,
     fromBeyond: true,
     messageList: [],
     thinkList: [],
   } as unknown as IMessage;
   registerPendingChatContext({
-    clientRequestId: 'request-a',
-    queryMsg: { msgId: 'query-a' } as IMessage,
+    clientRequestId: requestId,
+    queryMsg: { msgId: `query-${id}` } as IMessage,
     answerMsg: answer,
     flowHandler,
     getMessageList: () => [answer],
@@ -63,11 +72,13 @@ const receiveTool = (
     orderId: 'browser-a',
     title: 'browser',
     input: { operation: 'open' },
-  }
+  },
+  { requestId = 'request-a', traceId }: { requestId?: string; traceId?: string } = {}
 ) => {
   const { orderId, ...substance } = tool;
   const payload = {
     sessionId,
+    traceId,
     contentType: '3015',
     objectType: 'tool_call',
     orderId,
@@ -79,8 +90,8 @@ const receiveTool = (
     formattedPayload: formatStreamPayload('reasoningLogDelta', payload),
     res: { sessionId },
     sseMsg: { event: 'reasoningLogDelta', data: JSON.stringify(payload) },
-    rawMessage: { type: 'CHAT_STREAM', clientRequestId: 'request-a', sessionId, data: payload },
-    clientRequestId: 'request-a',
+    rawMessage: { type: 'CHAT_STREAM', clientRequestId: requestId, sessionId, data: payload },
+    clientRequestId: requestId,
     isError: false,
     isDone: false,
   } as any);
@@ -159,14 +170,15 @@ it.each([
 });
 
 it.each([
-  { requested: true, exitCode: 0, opens: true },
+  { requested: true, exitCode: 0, opens: true, resultRefs: desktopRefs },
+  { requested: true, exitCode: 0, opens: true, resultRefs: [] },
   { requested: true, exitCode: 1, opens: false },
   { requested: false, exitCode: 0, opens: false },
 ])(
-  'opens a scripted desktop only after an opted-in success ($requested, $exitCode)',
-  async ({ requested, exitCode, opens }) => {
+  'opens a scripted desktop only after an opted-in success ($requested, $exitCode, $resultRefs)',
+  async ({ requested, exitCode, opens, resultRefs = desktopRefs }) => {
     mockSessionId = 'chat-a';
-    const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+    const { result, rerender } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
     render(<MainDrawer />);
     const { browserHandler, messageHandler } = result.current;
     const answer = registerStream((props) => browserHandler(messageHandler(props)));
@@ -184,15 +196,111 @@ it.each([
     expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
 
     await act(async () =>
-      receiveTool('chat-a', desktopRefs, {
+      receiveTool('chat-a', resultRefs, {
         ...tool,
         output: JSON.stringify({ exitCode, stdout: '', stderr: '' }),
         status: '_DONE_',
       })
     );
     await waitFor(() => expect(Boolean(screen.queryByTitle('remote desktop'))).toBe(opens));
+    if (resultRefs.length) return;
+
+    mockSessionId = 'chat-b';
+    rerender();
+    await waitFor(() => expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument());
+
+    mockSessionId = 'chat-a';
+    rerender();
+    render(
+      <VNC sessionId="chat-a" messages={[answer, { ...answer, msgId: 'newer-text', thinkList: [], messageList: [] }]} />
+    );
+    expect(await screen.findByTitle('远程桌面')).toBeInTheDocument();
+    expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
   }
 );
+
+it('opens a new reply after manual close and ignores further frames for the same reply', async () => {
+  mockSessionId = 'chat-a';
+  const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+  render(<MainDrawer />);
+  const { browserHandler, messageHandler } = result.current;
+  const receiveReply = (props: any) => browserHandler(messageHandler(props));
+  const first = registerStream(receiveReply);
+  first.sessionId = 'chat-a';
+  first.metadata = JSON.stringify({ messageRenderVersion: 'v2' });
+  first.messageId = undefined;
+
+  await act(async () => receiveTool('chat-a', desktopRefs));
+  expect(await screen.findByTitle('remote desktop')).toBeInTheDocument();
+  fireEvent.click(screen.getAllByRole('img', { name: 'close' })[0]);
+  expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
+
+  first.messageId = 'server-assigned-a';
+  await act(async () =>
+    receiveTool('chat-a', desktopRefs, { orderId: 'another-tool-in-a', title: 'browser', input: { operation: 'open' } })
+  );
+  expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
+
+  const second = registerStream(receiveReply, 'b');
+  second.sessionId = 'chat-a';
+  second.metadata = first.metadata;
+  await act(async () => receiveTool('chat-a', desktopRefs, undefined, { requestId: 'request-b' }));
+  expect(await screen.findByTitle('remote desktop')).toBeInTheDocument();
+
+  fireEvent.click(screen.getAllByRole('img', { name: 'close' })[0]);
+  await act(async () => receiveTool('chat-a', desktopRefs));
+  expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
+});
+
+it('keeps the same auto-open key when a live reply is restored with its server message ID', async () => {
+  mockSessionId = 'chat-a';
+  const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+  render(<MainDrawer />);
+  const { browserHandler, messageHandler } = result.current;
+  const receiveReply = (props: any) => browserHandler(messageHandler(props));
+  const requestId = 'query-a_answer-a';
+  const first = registerStream(receiveReply, 'a', requestId);
+  first.sessionId = 'chat-a';
+  first.messageId = 'server-assigned-a';
+
+  await act(async () => receiveTool('chat-a', desktopRefs, undefined, { requestId }));
+  expect(await screen.findByTitle('remote desktop')).toBeInTheDocument();
+  fireEvent.click(screen.getAllByRole('img', { name: 'close' })[0]);
+
+  const reloaded = registerStream(receiveReply, 'a', requestId);
+  reloaded.sessionId = first.sessionId;
+  reloaded.msgId = first.messageId;
+  reloaded.messageId = first.messageId;
+  await act(async () => receiveTool('chat-a', desktopRefs, undefined, { requestId }));
+  expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
+});
+
+it('registers desktop references during history restore and opens only a later live reply', async () => {
+  mockSessionId = 'chat-a';
+  const { result } = renderHook(() => useHandler({ addSession: jest.fn(), setSessionId: jest.fn() }));
+  render(<MainDrawer />);
+  const { browserHandler, messageHandler } = result.current;
+  const receiveReply = (props: any) => browserHandler(messageHandler(props));
+  const answer = registerStream(receiveReply);
+  answer.sessionId = 'chat-a';
+  const traceId = 'restored-trace';
+  const restoreKey = getRestoredStreamKey('chat-a', traceId);
+
+  startRestoringChatStream(restoreKey);
+  await act(async () => receiveTool('chat-a', desktopRefs, undefined, { traceId }));
+  expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
+
+  await act(async () => flushRestoredChatStreamBuffer(restoreKey));
+  expect(useDesktopWorkspace.getState().owners['["session","chat-a"]']?.refs).toEqual(desktopRefs);
+  expect(screen.queryByTitle('remote desktop')).not.toBeInTheDocument();
+  render(<VNC sessionId="chat-a" messages={[answer]} />);
+  expect(await screen.findByTitle('远程桌面')).toBeInTheDocument();
+
+  const next = registerStream(receiveReply, 'b');
+  next.sessionId = 'chat-a';
+  await act(async () => receiveTool('chat-a', desktopRefs, undefined, { requestId: 'request-b' }));
+  expect(await screen.findByTitle('remote desktop')).toBeInTheDocument();
+});
 
 it('does not open a late previous-chat tool through the retained stream callback after navigation', async () => {
   mockSessionId = 'chat-a';

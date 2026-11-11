@@ -1,3 +1,4 @@
+import { mergeInstanceRefs } from '@/utils/desktopInstances';
 import { registerDesktops } from '@/utils/desktopWorkspace';
 import { showNasQuotaError } from '@/utils/nasQuota';
 import { useCallback, useEffect, useRef } from 'react';
@@ -13,7 +14,7 @@ import { isDesktopOpeningToolMessage, isVncToolMessage } from '@/utils/chatVnc';
 import { isSameSessionId } from '@/utils/sessionId';
 import { isTextContentType } from '@/utils/messgae';
 
-import { substanceHandler } from '@/hooks/useChat/util';
+import { getAnswerClientMsgId, substanceHandler } from '@/hooks/useChat/util';
 import { isSameUpdatableMessage, updateExistingMessage } from '@/utils/messageItemUpdate';
 import { hydrateV2RuntimeState } from '@/utils/messageV2Runtime';
 import { getFinalContent } from '@/utils/finalAnswer';
@@ -561,7 +562,7 @@ function useHandler(props: IProps) {
 
   // A registered stream retains this callback across the temporary-to-saved session transition.
   const browserHandler = usePersistFn((onionsProps: IOnionsProps) => {
-    const { sseRes, newAnswerMsg } = onionsProps;
+    const { sseRes, sseMsg, newAnswerMsg } = onionsProps;
     const incomingMessage = sseRes?.message;
     if (newAnswerMsg?.sessionId && incomingMessage?.content?.instanceRefs)
       registerDesktops(
@@ -569,7 +570,8 @@ function useHandler(props: IProps) {
         incomingMessage.content.instanceRefs,
         true
       );
-    if (!isSameSessionId(newAnswerMsg?.sessionId, curSessioneRef.current)) return onionsProps;
+    if (sseMsg?.isRestoredReplay || !isSameSessionId(newAnswerMsg?.sessionId, curSessioneRef.current))
+      return onionsProps;
     let mergedMessage: IMessageListItem | undefined;
     if (`${incomingMessage?.contentType}` === `${SSEMessageType.toolCall}`) {
       mergedMessage = [...(newAnswerMsg.thinkList || []), ...(newAnswerMsg.messageList || [])].find((item) =>
@@ -579,17 +581,24 @@ function useHandler(props: IProps) {
     // Tool results omit input; the preceding message handler preserves it by orderId.
     const toolMessage = mergedMessage || incomingMessage;
     // The legacy renderer can preserve input without merging the latest instance refs.
-    const instanceRefs = incomingMessage?.content?.instanceRefs ?? toolMessage?.content?.instanceRefs;
+    // The terminal frame may carry an empty list before instance metadata is attached.
+    // Use references from this call only, including the ones already merged into its card.
+    const incomingRefs = incomingMessage?.content?.instanceRefs;
+    const savedRefs = toolMessage?.content?.instanceRefs;
+    const instanceRefs =
+      incomingRefs === undefined && savedRefs === undefined ? undefined : mergeInstanceRefs(savedRefs, incomingRefs);
     if (instanceRefs !== undefined) {
       if (!instanceRefs.length || !isDesktopOpeningToolMessage(toolMessage)) return onionsProps;
     } else if (!isVncToolMessage(toolMessage)) {
       return onionsProps;
     }
 
-    const answerId = newAnswerMsg.messageId || newAnswerMsg.msgId;
-    const toolId = get(sseRes, 'message.content.orderId') || get(sseRes, 'message.uuid') || 'browser';
+    // History can use the server ID as msgId. The request retains the original reply ID.
+    const answerId =
+      getAnswerClientMsgId(sseMsg?.clientRequestId || '') || newAnswerMsg.msgId || newAnswerMsg.messageId;
+    if (!answerId) return onionsProps;
     openVnc({
-      key: `${answerId}:${toolId}`,
+      key: answerId,
       ...(instanceRefs !== undefined ? { instanceRefs } : {}),
     });
 

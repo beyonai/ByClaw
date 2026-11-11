@@ -14,11 +14,29 @@ export function sameToken(actual: unknown, expected: string): boolean {
   const a = Buffer.from(actual), b = Buffer.from(expected)
   return a.length === b.length && timingSafeEqual(a, b)
 }
+type ArchiveStage = 'create-session-directory' | 'resolve-session-root' | 'resolve-user-root'
+  | 'validate-session-path' | 'persist-audio'
+
+const safeArchiveErrorCodes = new Set([
+  'EACCES', 'EEXIST', 'EIO', 'EISDIR', 'ELOOP', 'ENOENT', 'ENOSPC', 'ENOTDIR', 'EPERM', 'EROFS',
+])
+
+function archiveErrorCode(error: unknown): string {
+  if (error instanceof Error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code && safeArchiveErrorCodes.has(code)) return code
+    if (error.message === 'ASR_SESSION_PATH_REJECTED') return 'ASR_SESSION_PATH_REJECTED'
+    if (error.message.startsWith('MEDIA_ARTIFACT_DIRECTORY')) return 'MEDIA_ARTIFACT_DIRECTORY'
+  }
+  return 'ASR_ARCHIVE_FAILED'
+}
+
 export function createVoiceHttpHandler(options: {
   byRoot: string
   authHeaders(): Promise<Record<string, string>>
   resolveModel(): Promise<MediaModel>
   transcribe?: typeof transcribeAudio
+  logArchiveFailure?: (stage: ArchiveStage, code: string) => void
   /** Persist audio in the separate tool environment that holds the user tree. */
   files?: ToolEnvironmentFiles
 }) {
@@ -29,6 +47,7 @@ export function createVoiceHttpHandler(options: {
     const abort = () => control.abort()
     request.once('aborted', abort)
     response.once('close', abort)
+    let archiveStage: ArchiveStage | undefined
     try {
       const auth = await options.authHeaders()
       if (!sameToken(request.headers['beyond-token'], auth['Beyond-Token'] ?? '')) { send(401, { code: 'ASR_UNAUTHORIZED' }); return }
@@ -46,15 +65,19 @@ export function createVoiceHttpHandler(options: {
       if (body['sessionId'] !== undefined) {
         const root = voiceSessionRoot(options.byRoot, String(body['sessionId']))
         const files = options.files
-        if (files === undefined) {
-          await mkdir(root, { recursive: true, mode: 0o700 })
-          if (await realpath(root) !== join(await realpath(options.byRoot), '.sessions', String(body['sessionId']))) throw new Error('ASR_SESSION_PATH_REJECTED')
-          await persistAssets(root, 'asr', [{ bytes, mimeType: 'audio/mpeg' }])
-        } else {
-          await files.ensureDirectory(root)
-          if (await files.realpath(root) !== join(await files.realpath(options.byRoot), '.sessions', String(body['sessionId']))) throw new Error('ASR_SESSION_PATH_REJECTED')
-          await persistAssets(root, 'asr', [{ bytes, mimeType: 'audio/mpeg' }], mediaArtifactIo(files))
-        }
+        const canonical = files === undefined ? realpath : (path: string) => files.realpath(path)
+        archiveStage = 'create-session-directory'
+        if (files === undefined) await mkdir(root, { recursive: true, mode: 0o700 })
+        else await files.ensureDirectory(root)
+        archiveStage = 'resolve-session-root'
+        const canonicalSession = await canonical(root)
+        archiveStage = 'resolve-user-root'
+        const canonicalUser = await canonical(options.byRoot)
+        archiveStage = 'validate-session-path'
+        if (canonicalSession !== join(canonicalUser, '.sessions', String(body['sessionId']))) throw new Error('ASR_SESSION_PATH_REJECTED')
+        archiveStage = 'persist-audio'
+        await persistAssets(root, 'asr', [{ bytes, mimeType: 'audio/mpeg' }], files && mediaArtifactIo(files))
+        archiveStage = undefined
       }
       let model: MediaModel
       if (body['model'] !== undefined) {
@@ -69,6 +92,7 @@ export function createVoiceHttpHandler(options: {
       send(200, result)
     } catch (error) {
       if (control.signal.aborted) return
+      if (archiveStage !== undefined) options.logArchiveFailure?.(archiveStage, archiveErrorCode(error))
       const code = error instanceof Error && /^ASR_[A-Z_]+$/u.test(error.message) ? error.message : 'ASR_TRANSCRIPTION_FAILED'
       send(code === 'ASR_SPEECH_NOT_DETECTED' ? 422 : 400, { code, message: code === 'ASR_SPEECH_NOT_DETECTED' ? ASR_NO_SPEECH_MESSAGE : '语音识别失败，请检查 ASR 模型配置后重试。' })
     } finally {

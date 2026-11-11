@@ -66,7 +66,7 @@ import type { IState as IEmployeesState } from '@/models/useEmployees';
 import type { IState } from '@/models/useEmployees';
 import type { RichInputResourceList } from '@/components/QueryInput/RichInput';
 import type { IMessageInfo } from '@/models/useMessageStore';
-import { getSessionLastAnsMsgMetadata } from './util';
+import { getAnswerClientMsgId, getSessionLastAnsMsgMetadata } from './util';
 import { resolveDigitalEmployeePlaceholders } from '@/utils/session';
 
 type ISseRes = {
@@ -145,10 +145,6 @@ export type ISendConf = {
 
 function getClientRequestId(queryMsgId: string, answerMsgId: string) {
   return `${queryMsgId}_${answerMsgId}`;
-}
-
-function getAnswerClientMsgId(clientRequestId: string) {
-  return clientRequestId.split('_')[1];
 }
 
 function getQueryClientMsgId(clientRequestId: string) {

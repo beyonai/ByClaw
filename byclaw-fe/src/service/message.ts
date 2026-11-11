@@ -1,4 +1,4 @@
-import { GET, POST } from '@/service/common/request';
+import { GET, POST, type ConfigType } from '@/service/common/request';
 
 const withCustomHandle = {
   responseCfg: {
@@ -6,10 +6,13 @@ const withCustomHandle = {
   },
 };
 
-export const getMessages = (payload: { sessionId: string; pageNum?: number; pageSize?: number; messageId?: string }) =>
-  POST<any>('/byaiService/assiman/getMessages', {
-    ...payload,
-  });
+export const getMessages = (
+  payload: { sessionId: string; pageNum?: number; pageSize?: number; messageId?: string },
+  config?: ConfigType
+) =>
+  config
+    ? POST<any>('/byaiService/assiman/getMessages', { ...payload }, config)
+    : POST<any>('/byaiService/assiman/getMessages', { ...payload });
 
 export type ConversationOutlineItem = {
   messageId: string;

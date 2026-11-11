@@ -1106,6 +1106,9 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
         const disposeAsr = web.register({ kind: 'exact', path: '/api/byclaw/asr/transcribe', handler: createVoiceHttpHandler({
           byRoot, authHeaders,
           resolveModel: () => resolvePluginMediaModel(redis, 'ASR', { decrypt: decryptByClawAuthToken, ...mediaModelOptions }),
+          logArchiveFailure: (stage, code) => {
+            ctx.logger.warn(`[byclaw-asr] archive failed stage=${stage} code=${code} toolEnvironmentConnected=${lazyEnvironment?.connected ?? 'unknown'}`)
+          },
           ...(userFiles === undefined ? {} : { files: userFiles }),
         }) })
         const disposeTts = web.register({ kind: 'exact', path: '/api/byclaw/tts/debug', handler: createTtsDebugHttpHandler({

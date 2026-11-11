@@ -22,12 +22,13 @@ export interface FileTransferRow extends FileTransferTask {
   status: 'pending' | 'uploading' | 'success' | 'failed';
   progress: FileTransferProgress;
   error?: string;
+  completedAt?: number;
 }
 
 type Upload = (task: FileTransferTask, report: (progress: FileTransferProgress) => void) => Promise<unknown>;
 
 /** Task callbacks retain their destination; old context generations cannot publish or retry. */
-export default function useFileTransferQueue(upload: Upload, contextKey = '') {
+export default function useFileTransferQueue(upload: Upload, contextKey = '', successVisibleMs = 0) {
   const [state, setState] = useState<{ key: string; rows: FileTransferRow[] }>({ key: contextKey, rows: [] });
   const rowsRef = useRef<FileTransferRow[]>([]);
   const scope = useRef(contextKey);
@@ -52,6 +53,26 @@ export default function useFileTransferQueue(upload: Upload, contextKey = '') {
       generation.current += 1;
     };
   }, []);
+
+  useEffect(() => {
+    if (!successVisibleMs || state.key !== contextKey) return;
+    const completed = state.rows.filter((row) => row.status === 'success' && row.completedAt !== undefined);
+    if (!completed.length) return;
+    const epoch = generation.current;
+    const timer = window.setTimeout(() => {
+      if (!mounted.current || generation.current !== epoch) return;
+      setState((current) => {
+        if (generation.current !== epoch || current.key !== contextKey) return current;
+        const rows = current.rows.filter(
+          (row) =>
+            row.status !== 'success' || row.completedAt === undefined || Date.now() - row.completedAt < successVisibleMs
+        );
+        rowsRef.current = rows;
+        return { ...current, rows };
+      });
+    }, Math.max(0, Math.min(...completed.map((row) => row.completedAt! + successVisibleMs)) - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [state, contextKey, successVisibleMs]);
 
   const update = useCallback((id: string, change: Partial<FileTransferRow>, epoch: number) => {
     if (!mounted.current || epoch !== generation.current) return;
@@ -89,7 +110,11 @@ export default function useFileTransferQueue(upload: Upload, contextKey = '') {
         if (!current()) return false;
         update(
           row.id,
-          { status: 'success', progress: { ...row.progress, loaded: row.file.size, phase: 'uploading' } },
+          {
+            status: 'success',
+            completedAt: Date.now(),
+            progress: { ...row.progress, loaded: row.file.size, phase: 'uploading' },
+          },
           epoch
         );
         return current();

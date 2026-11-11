@@ -13,6 +13,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /** Read-only chat facts for explicitly authorized services; browser identities cannot impersonate a recipient. */
@@ -38,9 +39,16 @@ public class WorkgroupIntegrationController {
     @GetMapping("/workgroups/{groupId}/messages/{messageId}/access/{accountId}")
     public ResponseUtil<?> messageAccess(HttpServletRequest request, @PathVariable @Min(1) long enterpriseId,
         @PathVariable @Min(1) long groupId, @PathVariable @Min(1) long messageId,
-        @PathVariable @Min(1) long accountId) {
+        @PathVariable @Min(1) long accountId,
+        @RequestParam(name = "includePreview", defaultValue = "false") boolean includePreview) {
         authorize(request, enterpriseId);
         WorkgroupMessageQuery query = new WorkgroupMessageQuery(enterpriseId, groupId, messageId, accountId);
+        // 摘要是显式请求的附加读取，沿用相同服务 scope、企业和接收人权限。
+        if (includePreview) {
+            var preview = access.preview(query);
+            return ResponseUtil.success(preview == null ? Map.of("allowed", false, "mentioned", false)
+                : Map.of("allowed", true, "mentioned", access.mentioned(query), "preview", preview));
+        }
         boolean allowed = access.allowed(query);
         return ResponseUtil.success(Map.of("allowed", allowed, "mentioned", allowed && access.mentioned(query)));
     }

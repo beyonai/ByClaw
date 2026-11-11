@@ -1,10 +1,13 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SSEMessageType } from '@/constants/message';
 import type { IMessage } from '@/typescript/message';
 import type { SandboxInstanceRef } from '@/utils/desktopInstances';
+import type { IMessageInfo } from '@/models/useMessageStore';
 import VNC from '../index';
 
 const mockOpen = jest.fn();
+const mockGetMessages = jest.fn();
+let mockMessagePages: Map<string, Partial<IMessageInfo>>;
 const mockRegister = jest.fn();
 const mockSelect = jest.fn();
 const mockGetSandboxes = jest.fn();
@@ -17,10 +20,19 @@ const runningSandbox = (sandboxId: string, instance = 'vnc') => ({
 const owner = JSON.stringify(['session', 'session']);
 let mockWorkspace: { owners: Record<string, any>; pendingOwner: string };
 jest.mock('@/hooks/useVncOpener', () => () => mockOpen);
+jest.mock('@umijs/max', () => ({
+  ...jest.requireActual('@umijs/max'),
+  getDvaApp: () => ({ _store: { getState: () => ({}) } }),
+  useSelector: (select: any) => select({ messageStore: { sessionListMap: mockMessagePages } }),
+}));
+jest.mock('@/service/message', () => ({
+  getMessages: (...args: any[]) => mockGetMessages(...args),
+}));
 jest.mock('@/models/common/useAppStore', () =>
   Object.assign((select: any) => select(mockApp), { getState: () => mockApp })
 );
 jest.mock('@/utils/desktopWorkspace', () => ({
+  desktopAuthEpoch: () => 1,
   registerDesktops: (...args: any[]) => mockRegister(...args),
   selectDesktop: (...args: any[]) => mockSelect(...args),
   useDesktopWorkspace: (select: any) => select(mockWorkspace),
@@ -28,6 +40,8 @@ jest.mock('@/utils/desktopWorkspace', () => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockMessagePages = new Map();
+  mockGetMessages.mockReset();
   mockGetSandboxes.mockResolvedValue([runningSandbox('a')]);
   mockWorkspace = { owners: {}, pendingOwner: '' };
 });
@@ -55,15 +69,17 @@ test('shows a legacy browser answer with an unambiguous running VNC and without 
   expect(screen.queryByText('0')).not.toBeInTheDocument();
 });
 
-test('shows the button when the latest tool message references a running desktop', async () => {
+test('shows the button for an older reply with a running desktop', async () => {
   const ref = { sandboxId: 'a', instance: 'vnc' };
   const olderAnswer = referencedAnswer([ref]);
   const latestAnswer = referencedAnswer([]);
   const view = render(
     <VNC sessionId="session" latestDigitalEmployeeMessage={latestAnswer} messages={[olderAnswer, latestAnswer]} />
   );
-  expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
+  expect(await screen.findByTitle('远程桌面')).toBeInTheDocument();
   expect(mockRegister).toHaveBeenCalledWith(owner, [ref]);
+  expect(mockOpen).not.toHaveBeenCalled();
+  expect(mockGetMessages).not.toHaveBeenCalled();
 
   const updatedAnswer = referencedAnswer([{ sandboxId: 'b', instance: 'desktop' }]);
   mockGetSandboxes.mockResolvedValue([runningSandbox('b', 'desktop')]);
@@ -71,6 +87,88 @@ test('shows the button when the latest tool message references a running desktop
     <VNC sessionId="session" latestDigitalEmployeeMessage={updatedAnswer} messages={[olderAnswer, updatedAnswer]} />
   );
   expect(await screen.findByTitle('远程桌面')).toBeInTheDocument();
+});
+
+test('checks unloaded history pages when an authorized desktop has no match in loaded messages', async () => {
+  mockMessagePages.set('session', { pageNum: 1, pageSize: 20, total: 41, pageRange: [1, 1] });
+  const desktopResult = {
+    contentType: '3015',
+    orderId: 'desktop-tool',
+    instanceRefs: [{ sandboxId: 'a', instance: 'vnc' }],
+    choices: [
+      {
+        delta: {
+          content: JSON.stringify({
+            title: 'sandbox_exec',
+            input: { opts: { show_desktop: {} } },
+            status: '_DONE_',
+          }),
+        },
+      },
+    ],
+  };
+  mockGetMessages.mockResolvedValueOnce({
+    list: [{ sessionId: 'session', messageId: 'plain', usage: 1 }],
+    pageNum: 2,
+    pageSize: 20,
+    total: 41,
+  });
+  mockGetMessages.mockResolvedValueOnce({
+    list: [{ sessionId: 'session', messageId: 'older', usage: 2, inferLog: JSON.stringify([desktopResult]) }],
+    pageNum: 3,
+    pageSize: 20,
+    total: 41,
+  });
+
+  render(<VNC sessionId="session" messages={[{ ...browserAnswer, messageList: [] }]} />);
+  expect(await screen.findByTitle('远程桌面')).toBeInTheDocument();
+  expect(mockGetMessages).toHaveBeenNthCalledWith(
+    1,
+    { sessionId: 'session', pageNum: 2, pageSize: 20 },
+    expect.objectContaining({ responseCfg: { hideErrorTips: true } })
+  );
+  expect(mockGetMessages).toHaveBeenNthCalledWith(
+    2,
+    { sessionId: 'session', pageNum: 3, pageSize: 20 },
+    expect.objectContaining({ responseCfg: { hideErrorTips: true } })
+  );
+  expect(mockOpen).not.toHaveBeenCalled();
+});
+
+test('aborts an unloaded history lookup when switching conversations', async () => {
+  mockMessagePages.set('session', { pageNum: 1, pageSize: 20, total: 21, pageRange: [1, 1] });
+  let resolvePage!: (page: unknown) => void;
+  mockGetMessages.mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolvePage = resolve;
+    })
+  );
+  const view = render(<VNC sessionId="session" messages={[]} />);
+  await waitFor(() => expect(mockGetMessages).toHaveBeenCalledTimes(1));
+  const request = mockGetMessages.mock.calls[0][1].cancelToken as AbortController;
+
+  view.rerender(<VNC sessionId="other" messages={[]} />);
+  expect(request.signal.aborted).toBe(true);
+  await act(async () => resolvePage({ list: [] }));
+  expect(mockGetMessages).toHaveBeenCalledTimes(1);
+  expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
+  expect(mockOpen).not.toHaveBeenCalled();
+});
+
+test('does not read older pages when the authorized directory has no usable desktop', async () => {
+  mockMessagePages.set('session', { pageNum: 1, pageSize: 20, total: 21, pageRange: [1, 1] });
+  mockGetSandboxes.mockResolvedValue([{ ...runningSandbox('a'), status: 'STOPPED' }]);
+  await act(async () => render(<VNC sessionId="session" messages={[]} />));
+  expect(mockGetSandboxes).toHaveBeenCalled();
+  expect(mockGetMessages).not.toHaveBeenCalled();
+  expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
+});
+
+test('does not borrow a desktop from another session when restoring history', async () => {
+  const otherAnswer = { ...referencedAnswer([{ sandboxId: 'a', instance: 'vnc' }]), sessionId: 'other' };
+  await act(async () => render(<VNC sessionId="session" messages={[otherAnswer]} />));
+  expect(screen.queryByTitle('远程桌面')).not.toBeInTheDocument();
+  expect(mockGetSandboxes).not.toHaveBeenCalled();
 });
 
 test('offers a manual desktop only for a sandbox execution that requests it', async () => {

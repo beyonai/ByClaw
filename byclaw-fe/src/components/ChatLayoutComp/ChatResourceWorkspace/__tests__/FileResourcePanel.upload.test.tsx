@@ -1,3 +1,7 @@
+jest.mock('@/service/resumableFileUpload', () => ({
+  listStoredUploads: jest.fn().mockResolvedValue([]),
+  abortStoredUpload: jest.fn(),
+}));
 import { isValidElement, type ComponentProps, type ReactNode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { message, type MenuProps } from 'antd';
