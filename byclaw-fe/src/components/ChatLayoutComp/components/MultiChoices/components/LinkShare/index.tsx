@@ -64,6 +64,9 @@ function LinkShare(props: IProps) {
     }
 
     const finalDuration = duration === 'custom' ? customDurationDays : duration;
+    // 「永久有效」选项 value 为 -1，但后端校验会拒绝 -1；后端契约是「不传 expireDays = 永久」，
+    // request.ts 会剔除 undefined 字段，因此选永久时不发送该字段
+    const expireDays = finalDuration === -1 ? undefined : finalDuration;
     const finalMaxAccessDays = limitedAccess ? maxAccessDays : undefined;
 
     if (cancelToken.current) {
@@ -76,7 +79,7 @@ function LinkShare(props: IProps) {
     POST(
       '/byaiService/chat/message/share-link',
       {
-        expireDays: finalDuration,
+        expireDays,
         maxAccessCount: finalMaxAccessDays,
         accessPermission: 'PUBLIC', // 访问权限：PUBLIC（免登录）/ AUTHENTICATED（需登录），默认 AUTHENTICATED
         ...getExtraInfo(),
