@@ -66,6 +66,18 @@ EXPOSE 8082
 ENTRYPOINT ["/usr/local/bin/byclaw-coding-entrypoint"]
 CMD ["tools"]
 
+# Match the Harness SSH helper even when the browser parent predates forwarding.
+COPY middleware/byclaw-harness/scripts/prepare-tool-helper-env.mjs /tmp/prepare-tool-helper-env.mjs
+RUN set -eu; \
+    node /tmp/prepare-tool-helper-env.mjs /workspace /opt/byclaw/dsh-managed/profiles/web; \
+    if [ -f /etc/byclaw-tool-sandbox/helper.sha256 ]; then \
+        awk '$2 != "/workspace/packages/ssh/ssh/lib/helper.js"' /etc/byclaw-tool-sandbox/helper.sha256 >/tmp/helper.sha256; \
+        sha256sum /workspace/packages/ssh/ssh/lib/helper.js >>/tmp/helper.sha256; \
+        sha256sum -c /tmp/helper.sha256; \
+        mv /tmp/helper.sha256 /etc/byclaw-tool-sandbox/helper.sha256; \
+    fi; \
+    rm /tmp/prepare-tool-helper-env.mjs
+
 # Bundled applications are initialized explicitly, never during sandbox startup.
 # --target coding-core omits the transitional preinstalled media environment.
 FROM coding-core AS tools-coding
