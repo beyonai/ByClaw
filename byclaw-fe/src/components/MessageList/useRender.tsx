@@ -198,7 +198,8 @@ export default function useRender({
                       </Button>
                     </div>
                   )}
-                  {/* <div className={classnames(styles.actionsBarItem)} role="presentation">
+                  {/* 已结束的回答可进入消息多选，再选择链接分享及其有效期。 */}
+                  <div className={classnames(styles.actionsBarItem)} role="presentation">
                     <Button
                       type="text"
                       size="small"
@@ -210,7 +211,7 @@ export default function useRender({
                     >
                       <span className={styles.actionsBarText}>{intl.formatMessage({ id: 'common.share' })}</span>
                     </Button>
-                  </div> */}
+                  </div>
                   <div className={classnames(styles.actionsBarItem)} role="presentation">
                     <Tooltip title={intl.formatMessage({ id: 'messageList.saveMessage' })}>
                       <Button
