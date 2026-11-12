@@ -37,10 +37,10 @@ class ToolSandboxDomesticSourcesTest(unittest.TestCase):
     def test_business_images_default_to_the_internal_slim_family(self):
         for name, tag in (('Dockerfile.tools.browser', 'D0.6.0_base_slim'),
                           ('Dockerfile.tools.media', 'D0.6.0_browser')):
-            self.assertIn(f'ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:{tag}',
+            self.assertIn(f'ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:{tag}',
                           (HARNESS / name).read_text(), name)
         for name in ('Dockerfile.tools.unity', 'Dockerfile.tools.godot'):
-            self.assertIn('ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser',
+            self.assertIn('ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_browser',
                           (HARNESS / name).read_text(), name)
         self.assertRegex((HARNESS / 'Dockerfile.tool-market-host').read_text(), r'(?m)^ARG HARNESS_IMAGE\s*$')
 
@@ -131,7 +131,7 @@ class ToolSandboxDomesticSourcesTest(unittest.TestCase):
 
     def test_general_sandbox_layers_on_browser_without_java_or_ffmpeg(self):
         source = (HARNESS / 'Dockerfile.tools.general').read_text()
-        self.assertIn('ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser', source)
+        self.assertIn('ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_browser', source)
         self.assertIn('FROM ${BROWSER_IMAGE} AS general', source)
         self.assertNotIn('RTK_DOWNLOAD_BASE', source)
         self.assertIn('BYCLAW_BROWSER_STARTUP=on-demand', source)

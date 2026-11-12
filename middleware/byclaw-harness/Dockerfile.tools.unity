@@ -1,5 +1,5 @@
 # Repository-root context. Browser is itself built from Dockerfile.tools.base-slim.
-ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
+ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_browser
 # Required: immutable, controlled Unity installation donor (not a runtime snapshot).
 ARG UNITY_DONOR_IMAGE
 FROM ${UNITY_DONOR_IMAGE} AS unity-assets

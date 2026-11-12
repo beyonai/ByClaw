@@ -5,8 +5,8 @@
 # noVNC and the X server come from domestic mirrors. Build after base-slim of the same A:
 #   docker build -f middleware/byclaw-harness/Dockerfile.tools.browser \
 #     --build-arg TOOLS_IMAGE=<base_slim of A>@sha256:<digest> \
-#     --build-arg HARNESS_IMAGE=<A>@sha256:<digest> -t byclaw-harness-tools:<tag>_browser .
-ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_base_slim
+#     --build-arg HARNESS_IMAGE=<A>@sha256:<digest> -t byclaw-harness:<tag>_browser .
+ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_base_slim
 ARG HARNESS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_slim
 
 FROM ${HARNESS_IMAGE} AS browser-runtime

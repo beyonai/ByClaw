@@ -1,5 +1,5 @@
 # Repository-root context; the browser parent is built from the minimal common base.
-ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
+ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_browser
 # BuildKit overrides this empty stage with --build-context godot-assets=DIR.
 # Without that explicit context the COPY fails closed; no image/download fallback.
 FROM scratch AS godot-assets
