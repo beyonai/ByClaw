@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createHash } from 'node:crypto'
-import { prepareCodingContext, codingPreviousCwd, codingRunManifest, codingFinalOutput, codingLeaseFileChecks } from '../src/coding-context.ts'
+import { prepareCodingContext, codingPreviousCwd, codingRunManifest, codingFinalOutput, codingLeaseFileChecks, codingRepoDirectory, validCodingCwd, resolveCodingWorkspace } from '../src/coding-context.ts'
 import { ByClawExecutionRouter } from '../src/coding-router.ts'
 
 const command = (messageId = 'm1', sessionId = 's1') => ({
@@ -89,7 +89,7 @@ test('publication file checks run on the coding lease rather than the default to
   assert.ok(calls.every(args => args[0] === 'current-actor' && args[1] === 'coding-lease'))
 })
 
-function fixture({ publication, answer = 'done', extra = [], prepareFailure, emitFailure } = {}) {
+function fixture({ publication, answer = 'done', extra = [], prepareFailure, emitFailure, repository = false, dirty = false } = {}) {
   const calls = [], summaries = [], events = [], releases = []
   let preparedCount = 0
   const router = new ByClawExecutionRouter({
@@ -99,11 +99,14 @@ function fixture({ publication, answer = 'done', extra = [], prepareFailure, emi
       preparedCount++
       assert.equal(lease.leaseId, 'coding-lease')
       if (prepareFailure) throw new Error('EXECUTION_PREPARE_FAILED')
-      return prepareCodingContext(cmd, employee, template, skills, publication)
+      const workspace = repository ? { sessionRoot: '/by/.sessions/s1', sharedRoot: '/by/.shared', cwd: '/by/.shared/project_8/repo',
+        defaultOutputRoot: '/by/.shared/project_8/repo', repository: '/by/.shared/project_8/repo' } : undefined
+      return prepareCodingContext(cmd, employee, template, skills, publication, undefined, workspace)
     },
     sandbox: () => ({
       acquire: async () => ({ leaseId: 'coding-lease', workspaceRoot: '/by' }),
       execute: async (...args) => {
+        if (args[2][3] === '--revision') return { exitCode: 0, stdout: JSON.stringify({ revision: 'a'.repeat(40), dirty }), stderr: '' }
         calls.push(args)
         const stdout = jsonl(...extra, ...completed(answer))
         args[5](stdout)
@@ -175,4 +178,57 @@ test('preparation failure releases the lease and never starts the CLI', async ()
   await assert.rejects(f.router.ask(command(), context, target.text), /EXECUTION_FAILED/)
   assert.equal(f.calls.length, 0)
   assert.equal(f.releases.length, 1)
+})
+
+test('repo directory config is deployment-owned and resumed paths permit one safe child only', () => {
+  assert.equal(codingRepoDirectory(undefined), 'repo')
+  assert.equal(codingRepoDirectory('app'), 'app')
+  for (const value of ['', '.', '..', '/tmp', 'a/b', 'a\\b', 'C:repo', ' repo', 'a\0b']) {
+    assert.throws(() => codingRepoDirectory(value), /INVALID_REPO_DIR/)
+  }
+  for (const value of ['/by/.shared/project_-1/repo', '/by/.shared/project_8/old-app', '/by/.sessions/s1/repo']) {
+    assert.equal(validCodingCwd(value, '/by/.sessions/s1'), true)
+  }
+  for (const value of ['/by/.sessions/s2/repo', '/by/.shared/project_8/repo/repo', '/by/.shared/project_8/../x', '/bak/repo']) {
+    assert.equal(validCodingCwd(value, '/by/.sessions/s1'), false)
+  }
+})
+
+test('actual lease resolves repository before prompt and manifest use its final cwd', async () => {
+  const base = prepareCodingContext(command(), target, template, skills).workspace
+  let observed
+  const selected = { ...base, cwd: base.cwd + '/repo', defaultOutputRoot: base.cwd + '/repo', repository: base.cwd + '/repo' }
+  const lease = { actor: 'actor', leaseId: 'coding-lease', workspaceRoot: '/by', identity: 'identity', signal: new AbortController().signal,
+    sandbox: { execute: async (...args) => { observed = args; return { exitCode: 0, stdout: JSON.stringify(selected), stderr: '' } } } }
+  const workspace = await resolveCodingWorkspace(lease, base, 'repo')
+  assert.equal(observed[0], 'actor')
+  assert.equal(observed[1], 'coding-lease')
+  assert.equal(observed[2][3], '--resolve')
+  assert.deepEqual(JSON.parse(observed[2][4]), { workspace: base, repoDir: 'repo' })
+  const prepared = prepareCodingContext(command(), target, template, skills, undefined, undefined, workspace)
+  assert.equal(codingRunManifest(prepared, 'identity', 'm1').workspace.cwd, selected.cwd)
+  assert.ok(prepared.prompt.includes('根目录 AGENTS.md'))
+  assert.ok(prepared.prompt.includes('sourcePaths 必须为空'))
+  lease.sandbox.execute = async () => ({ exitCode: 0, stdout: JSON.stringify({ ...selected, cwd: '/by/.shared/project_9/repo',
+    defaultOutputRoot: '/by/.shared/project_9/repo', repository: '/by/.shared/project_9/repo' }), stderr: '' })
+  await assert.rejects(resolveCodingWorkspace(lease, base, 'repo'), /UNSAFE_WORKSPACE/)
+  lease.sandbox.execute = async () => ({ exitCode: 1, stdout: '', stderr: 'EXECUTION_REPOSITORY_INVALID\n' })
+  await assert.rejects(resolveCodingWorkspace(lease, base, 'repo'), /REPOSITORY_INVALID/)
+})
+
+test('repo publication is text-only, includes real git revision, and retains confirmation', async () => {
+  const prepared = []
+  const publication = { description: 'wait', prepare: async args => prepared.push(args) }
+  const f = fixture({ repository: true, publication, answer: JSON.stringify({ answer: 'Ready', publication: {
+    text: '修改：完成。验证：构建通过。', sourcePaths: ['/by/.shared/project_8/repo/app.ts'] } }) })
+  const result = await f.router.ask(command(), context, target.text)
+  assert.deepEqual(prepared[0].sourcePaths, [])
+  assert.ok(prepared[0].text.includes('a'.repeat(40)))
+  assert.ok(result.finalAnswer.includes('等待你确认'))
+  assert.ok(result.finalAnswer.includes('工作区干净'))
+})
+
+test('dirty repo reports an incomplete delivery version rather than claiming everything committed', async () => {
+  const result = await fixture({ repository: true, dirty: true }).router.ask(command(), context, target.text)
+  assert.ok(result.finalAnswer.includes('存在未提交改动'))
 })

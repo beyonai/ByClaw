@@ -26,6 +26,7 @@
         userCode: !!js process.env.USER_CODE
         agentExecutionMap: !!js "process.env.BYCLAW_AGENT_EXECUTION_MAP || '{}'"
         codexExecTimeoutMs: !!js "Number(process.env.CODEX_EXEC_TIMEOUT_MS || 0)"
+        codeRepoDir: !!js process.env.BYCLAW_CODE_REPO_DIR
         stateDir: '.agent-teams'
         provider: 'deepseek-official'
         model: 'deepseek-v4-flash'

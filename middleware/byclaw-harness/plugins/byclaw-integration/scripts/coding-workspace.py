@@ -98,7 +98,7 @@ def toml_document(data):
 
 
 def safe_directory(path, root):
-    if not path.is_relative_to(root):
+    if '..' in path.parts or not path.is_absolute() or not path.is_relative_to(root):
         raise ValueError('EXECUTION_UNSAFE_WORKSPACE')
     current = root
     for component in path.relative_to(root).parts:
@@ -108,6 +108,124 @@ def safe_directory(path, root):
         current.mkdir(mode=0o700, exist_ok=True)
     if not path.resolve().is_relative_to(root.resolve()):
         raise ValueError('EXECUTION_UNSAFE_WORKSPACE')
+
+
+def repo_name(value):
+    if (not isinstance(value, str) or not value or value != value.strip() or value in ('.', '..')
+            or re.search(r'[\\/\x00-\x1f:]', value)):
+        raise ValueError('EXECUTION_INVALID_REPO_DIR')
+    return value
+
+
+def plain_path(path, root):
+    if not path.is_absolute() or '..' in path.parts or not path.is_relative_to(root):
+        raise ValueError('EXECUTION_UNSAFE_WORKSPACE')
+    if any(part.is_symlink() for part in (path, *path.parents)):
+        raise ValueError('EXECUTION_UNSAFE_STATE_PATH')
+
+
+def git_read(cwd, *args):
+    environment = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+    environment.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull, GIT_TERMINAL_PROMPT='0')
+    try:
+        result = subprocess.run(['git', '-C', str(cwd), *args], env=environment,
+                                capture_output=True, text=True, encoding='utf-8', timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        raise ValueError('EXECUTION_REPOSITORY_INVALID') from None
+    if result.returncode:
+        raise ValueError('EXECUTION_REPOSITORY_INVALID')
+    return result.stdout.strip()
+
+
+def check_repository(path, root):
+    plain_path(path, root)
+    for entry in (path / '.git', path / '.git' / 'HEAD', path / '.git' / 'objects', path / 'AGENTS.md'):
+        plain_path(entry, root)
+    if (not (path / '.git').is_dir() or not (path / '.git' / 'HEAD').is_file()
+            or not (path / '.git' / 'objects').is_dir() or not (path / 'AGENTS.md').is_file()
+            or (path / '.git' / 'objects' / 'info' / 'alternates').exists()):
+        raise ValueError('EXECUTION_REPOSITORY_INVALID')
+    try:
+        with (path / 'AGENTS.md').open('r', encoding='utf-8') as handle:
+            handle.read(1)
+        if Path(git_read(path, 'rev-parse', '--show-toplevel')).resolve() != path.resolve():
+            raise ValueError('EXECUTION_REPOSITORY_INVALID')
+        git_read(path, 'rev-parse', '--verify', 'HEAD^{commit}')
+        git_read(path, 'cat-file', '-e', 'HEAD^{tree}')
+    except (OSError, UnicodeError):
+        raise ValueError('EXECUTION_REPOSITORY_INVALID') from None
+
+
+def repository_state(path, root):
+    check_repository(path, root)
+    revision = git_read(path, 'rev-parse', '--verify', 'HEAD')
+    dirty = bool(git_read(path, 'status', '--porcelain', '--untracked-files=all'))
+    return dict(revision=revision, dirty=dirty)
+
+
+def resolve_workspace(request, root):
+    """Pin the first valid repository per space; no copying, extraction, or git init."""
+    workspace = dict(request['workspace'])
+    session = Path(workspace['sessionRoot'])
+    base = Path(workspace['cwd'])
+    previous = request.get('previousCwd')
+    name = repo_name(request['repoDir'])
+    if (session.parent != root / '.sessions' or not re.fullmatch(r'[a-zA-Z0-9_-]+', session.name)
+            or Path(workspace['sharedRoot']) != root / '.shared'):
+        raise ValueError('EXECUTION_UNSAFE_WORKSPACE')
+    # A recovered cwd may already be a repository. Never append repo/repo.
+    def is_base(path):
+        return path == session or (path.parent == root / '.shared' and re.fullmatch(r'project_-?\d+', path.name))
+    if not is_base(base):
+        repo_name(base.name)
+        base = base.parent
+    if not is_base(base):
+        raise ValueError('EXECUTION_UNSAFE_WORKSPACE')
+    safe_directory(session, root)
+    safe_directory(base, root)
+    registry = base / '.byclaw' / 'coding-repository.json'
+    plain_path(registry, root)
+    selected = base / name
+    bound = registry.exists()
+    if bound:
+        if registry.stat().st_size > 4096:
+            raise ValueError('EXECUTION_REPOSITORY_BINDING_INVALID')
+        binding = json.loads(registry.read_text(encoding='utf-8'))
+        if binding.get('version') != 1 or binding.get('space') != str(base):
+            raise ValueError('EXECUTION_REPOSITORY_BINDING_INVALID')
+        selected = base / repo_name(binding.get('directory'))
+    elif previous and Path(previous) != base:
+        old = Path(previous)
+        if old.parent != base:
+            raise ValueError('EXECUTION_PROJECT_BINDING_CHANGED')
+        selected = base / repo_name(old.name)
+    plain_path(selected, root)
+    if selected.exists() or bound or (previous and Path(previous) != base):
+        try:
+            check_repository(selected, root)
+        except ValueError as error:
+            if bound or (previous and Path(previous) != base) or str(error) != 'EXECUTION_REPOSITORY_INVALID':
+                raise
+            # An uninitialized folder must not disable ordinary chat or create another code copy.
+            cwd = base
+            workspace.pop('repository', None)
+            workspace['repositoryIssue'] = 'EXECUTION_REPOSITORY_INVALID'
+        else:
+            cwd = selected
+            workspace['repository'] = str(cwd)
+            workspace.pop('repositoryIssue', None)
+    else:
+        cwd = base
+        workspace.pop('repository', None)
+        workspace.pop('repositoryIssue', None)
+    if previous is not None and Path(previous) != cwd:
+        # Retain the native session and old files for an explicit operator migration.
+        raise ValueError('EXECUTION_WORKSPACE_CHANGED')
+    if cwd != base and not bound:
+        safe_directory(registry.parent, root)
+        atomic_text(registry, json.dumps(dict(version=1, space=str(base), directory=cwd.name)))
+    workspace.update(cwd=str(cwd), defaultOutputRoot=str(cwd))
+    return workspace
 
 
 def connect_skills(home, skills, cwd):
@@ -164,6 +282,10 @@ def prepare(manifest, root):
         raise ValueError('EXECUTION_UNSAFE_WORKSPACE')
     for directory in [session, cwd, home]:
         safe_directory(directory, root)
+    if workspace.get('repository') is not None:
+        if workspace['repository'] != str(cwd):
+            raise ValueError('EXECUTION_UNSAFE_WORKSPACE')
+        check_repository(cwd, root)
     os.chmod(home, 0o700)
     return home, cwd
 
@@ -216,7 +338,7 @@ def prepare_agent_skills(manifest, root):
     emit('byclaw.workspace', status='skills-ready', count=len(manifest['skills']))
 
 
-EXCLUDED = {'.git', 'node_modules', '.venv', '__pycache__', 'executors', '.file_changes'}
+EXCLUDED = {'.git', '.byclaw', 'node_modules', '.venv', '__pycache__', 'executors', '.file_changes'}
 MAX_FILES = 10000
 MAX_TEXT = 256 * 1024
 MAX_TOTAL_TEXT = 16 * 1024 * 1024
@@ -320,12 +442,14 @@ def resume_id(home, identity, cwd):
     state = json.loads(state_path.read_text(encoding='utf-8'))
     if state.get('identity') != identity:
         raise ValueError('EXECUTION_SESSION_SCOPE_MISMATCH')
+    if state.get('cwd') != str(cwd):
+        raise ValueError('EXECUTION_WORKSPACE_CHANGED')
     thread = state.get('threadId', '')
     if not re.fullmatch(r'[a-fA-F0-9-]{36}', thread):
         raise ValueError('EXECUTION_INVALID_THREAD_ID')
     if state.get('cwd') == str(cwd) and any((home / 'sessions').rglob('*' + thread + '*.jsonl')):
         return thread
-    emit('byclaw.workspace', status='recreated', reason='native_state_missing_or_workspace_changed')
+    emit('byclaw.workspace', status='recreated', reason='native_state_missing')
     return None
 
 
@@ -442,6 +566,12 @@ def main():
         raise KeyboardInterrupt()
     signal.signal(signal.SIGTERM, stop_execution)
     try:
+        if sys.argv[1] == '--resolve':
+            print(json.dumps(resolve_workspace(json.loads(sys.argv[2]), Path(sys.argv[3]))))
+            return 0
+        if sys.argv[1] == '--revision':
+            print(json.dumps(repository_state(Path(sys.argv[2]), Path(sys.argv[3]))))
+            return 0
         manifest = json.loads(sys.argv[1])
         return run(manifest, sys.argv[2], Path(sys.argv[3]))
     except KeyboardInterrupt:

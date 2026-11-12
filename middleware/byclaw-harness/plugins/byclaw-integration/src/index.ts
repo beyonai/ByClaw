@@ -82,7 +82,7 @@ import { resolveByClawByRoot, resolveByClawLocalE2eStorageRoot, resolveByClawInb
 import { ByClawDshWorkerRuntime } from './worker-runtime.ts'
 import { ByClawExecutionRouter, type ExecutionSandbox } from './coding-router.ts'
 import { codingEventPresentation } from './coding-presentation.ts'
-import { codingLeaseFileChecks, codingPreviousCwd, prepareCodingContext } from './coding-context.ts'
+import { codingLeaseFileChecks, codingPreviousCwd, prepareCodingContext, codingRepoDirectory, resolveCodingWorkspace } from './coding-context.ts'
 import type { ByClawCodingSetup } from './session-extensions.ts'
 import { emitByClawProjection, reasoningProjection, toolCallProjection } from './byclaw-presentation.ts'
 import type { AskAgentCommand } from '@byclaw/by-framework'
@@ -218,6 +218,7 @@ export interface Config {
   workerId?: string
   agentExecutionMap?: string
   codexExecTimeoutMs?: number
+  codeRepoDir?: string
   agentTypes?: string[]
   refreshChannel?: string
   authorizationPollMs?: number
@@ -285,6 +286,7 @@ export const Config: z<Config> = z.object({
   workerId: z.string(),
   agentExecutionMap: z.string().default('{}'),
   codexExecTimeoutMs: z.union([z.const(0), z.natural().min(1000).max(2_147_483_647)]).default(0),
+  codeRepoDir: z.string(),
   workspaceOnToolEnvironment: z.boolean().default(false),
   byRoot: z.string(),
   dshHome: z.string(),
@@ -545,6 +547,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
 /** Activate resource synchronization and the by-framework Worker. */
 async function activate(ctx: Context, config: Config, startup: ByClawStartupLog): Promise<void> {
+  const codeRepoDir = codingRepoDirectory(process.env['BYCLAW_CODE_REPO_DIR'] ?? config.codeRepoDir)
   const startupStarted = performance.now()
   const startupPhase = (phase: string): void => {
     startup.point(phase)
@@ -1172,10 +1175,13 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
         await ctx.serial('byclaw/coding-setup', setup)
         lease.signal.throwIfAborted()
         const savedCwd = sessionMetadata.get(String(command.header.sessionId))?.identity.cwd
-        const previousCwd = await codingPreviousCwd(lease, String(command.header.sessionId), target.resourceId)
+        const nativeCwd = await codingPreviousCwd(lease, String(command.header.sessionId), target.resourceId)
+        const previousCwd = nativeCwd
           ?? (savedCwd !== undefined && /^\/by\/\.shared\/project_-?\d+$/u.test(savedCwd) ? savedCwd : undefined)
+        const initial = prepareCodingContext(command, target, template, [], setup.publication, previousCwd)
+        const selected = await resolveCodingWorkspace(lease, initial.workspace, codeRepoDir, nativeCwd)
         // The current coding lease resolves builtins and current agent associations itself.
-        return prepareCodingContext(command, target, { ...template, persona: `${template.persona}\n\n${SKILL_CREATOR_POLICY}` }, [], setup.publication, previousCwd)
+        return prepareCodingContext(command, target, { ...template, persona: `${template.persona}\n\n${SKILL_CREATOR_POLICY}` }, [], setup.publication, previousCwd, selected)
       },
       emitFileChanges: async (command, context, payload, workspace) => {
         const rootSessionId = String(command.header.sessionId)
