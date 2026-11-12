@@ -59,7 +59,7 @@ export class CodexEventAdapter {
       ...(this.lastEventAt === undefined ? {} : { lastEventAgeMs: Math.max(0, Math.round(performance.now() - this.lastEventAt)) }),
       toolsStarted: this.toolsStarted, toolsCompleted: this.toolsCompleted, activeTools: this.activeTools.size,
       turnCompleted: this.completed, turnFailed: this.failed,
-      finalAnswerSeen: Boolean((this.explicitAnswer ?? this.answer).trim()) }
+      finalAnswerSeen: Boolean(this.explicitAnswer?.trim() || (this.completed && this.answer.trim())) }
   }
 
   write(chunk: string): void {

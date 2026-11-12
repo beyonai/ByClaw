@@ -479,3 +479,18 @@ test('failed native lifecycle logs retain the last event without inventing a fin
   assert.equal(terminal.native.finalAnswerSeen, false)
   assert.ok(!JSON.stringify(f.logs).includes('private-provider-body'))
 })
+
+
+test('unphased legacy messages remain candidates until a completed turn confirms the answer', () => {
+  const parser = new CodexEventAdapter()
+  parser.write(jsonl({ type: 'turn.started' }, { type: 'item.completed', item: { id: 'candidate', type: 'agent_message', text: 'legacy commentary' } }))
+  assert.equal(parser.snapshot().finalAnswerSeen, false)
+  parser.write(jsonl({ type: 'item.started', item: { id: 'tool', type: 'command_execution', command: 'true' } }))
+  assert.equal(parser.snapshot().finalAnswerSeen, false)
+  parser.write(jsonl({ type: 'item.completed', item: { id: 'tool', type: 'command_execution', status: 'completed' } },
+    { type: 'item.completed', item: { id: 'answer', type: 'agent_message', text: 'legacy final' } }))
+  assert.equal(parser.snapshot().finalAnswerSeen, false)
+  parser.write(jsonl({ type: 'turn.completed' }))
+  assert.equal(parser.snapshot().finalAnswerSeen, true)
+  assert.equal(parser.finish(0), 'legacy final')
+})
