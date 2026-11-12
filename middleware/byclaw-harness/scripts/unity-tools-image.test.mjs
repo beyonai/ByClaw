@@ -17,7 +17,7 @@ test('Unity layer requires controlled installation assets and keeps user state o
   const dockerfile = await readFile(new URL('Dockerfile.tools.unity', base), 'utf8')
   assert.match(dockerfile, /^ARG UNITY_DONOR_IMAGE\s*$/m)
   assert.match(dockerfile, /^FROM \$\{UNITY_DONOR_IMAGE\} AS unity-assets$/m)
-  assert.match(dockerfile, /ARG BROWSER_IMAGE=192\.168\.0\.81:8080\/byclaw\/byclaw-harness-tools:D0\.6\.0_browser/)
+  assert.match(dockerfile, /ARG BROWSER_IMAGE=192\.168\.0\.81:8080\/byclaw\/byclaw-harness:D0\.6\.0_browser/)
   const donorCopies = dockerfile.split('\n').filter((line) => line.startsWith('COPY --from=unity-assets '))
   assert.ok(donorCopies.length > 0)
   for (const line of donorCopies) {

@@ -9,7 +9,7 @@ Browser/Chromium/Playwright, X11/noVNC, media tools, Java/Office, business conne
 Business Dockerfiles use the canonical LAN Harbor base tag:
 
 ```dockerfile
-FROM 192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_base_slim
+FROM 192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_base_slim
 USER root
 # Install this business layer's runtime dependencies and resources here.
 # Retain the tool SSH entrypoint, /workspace helper closure and /by workspace.
@@ -26,9 +26,9 @@ docker build --platform linux/amd64 \
   -f middleware/byclaw-harness/Dockerfile.tools.base-slim \
   --build-arg TOOLS_IMAGE='<the A image, e.g. byclaw-harness:D0.7.0_slim>@sha256:<digest>' \
   --build-arg RUNTIME_IMAGE='<Debian 13 Python runtime>@sha256:<digest>' \
-  -t 'byclaw-harness-tools:<unique-candidate-tag>' .
+  -t 'byclaw-harness:<unique-candidate-tag>' .
 bash middleware/byclaw-harness/scripts/tool-base-slim-smoke.sh \
-  'byclaw-harness-tools:<unique-candidate-tag>'
+  'byclaw-harness:<unique-candidate-tag>'
 ```
 
 `TOOLS_IMAGE` is the transport donor: preferably the A image this base will serve (for example `D0.7.0_slim`). The build collects the SSH helper/PTC closure from it with `collect-closure.sh`, so B carries the very files A verifies by digest, together with A's Node executable. A transport-only tool image built earlier still works as a donor. Rebuild this base whenever A changes. Digest checks and imports alone do not establish native PTY, subprocess or PTC execution: exercise those operations against the intended A version. Record runtime donor digests, build logs and dependency versions; package mirrors can change independently of image digests.
