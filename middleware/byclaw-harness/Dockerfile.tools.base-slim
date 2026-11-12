@@ -1,12 +1,23 @@
 # Repository-root context. Supply immutable, controlled image references.
 # The transport donor must match the Harness (A) that will use this base (B).
+# Use that A image itself (for example D0.7.0_slim): the closure below is collected
+# from it here, so B carries the very helper A verifies by digest. An older
+# transport-only tool image still works; collecting from a closure is idempotent.
 ARG TOOLS_IMAGE
 ARG RUNTIME_IMAGE
 FROM ${TOOLS_IMAGE} AS transport
 USER root
+COPY middleware/byclaw-harness/plugins/dsh-tool-env/docker/ /tmp/tool-env-docker/
 RUN set -eux; \
     test "$(uname -m)" = x86_64; \
     mkdir -p /transport/node/bin /transport/node/lib/node_modules /transport/etc; \
+    bash /tmp/tool-env-docker/collect-closure.sh /tmp/tool-env-closure.tar; \
+    tar -xf /tmp/tool-env-closure.tar -C /transport; \
+    test -s /transport/workspace/packages/ssh/ssh/lib/helper.js; \
+    # A launches the helper through its managed profile; that copy must be the same file.
+    profile_helper=/opt/byclaw/dsh-managed/profiles/web/node_modules/@deepseek-ai/dsh-ssh/lib/helper.js; \
+    if [ -e "${profile_helper}" ]; then cmp "${profile_helper}" /transport/workspace/packages/ssh/ssh/lib/helper.js; fi; \
+    rm -rf /tmp/tool-env-closure.tar /tmp/tool-env-docker; \
     cp -L /opt/nvm/current/bin/node /transport/node/bin/node; \
     cp -a /opt/nvm/current/lib/node_modules/npm /transport/node/lib/node_modules/npm; \
     node -p process.execPath >/transport/etc/node-exec-path; \
@@ -19,6 +30,8 @@ RUN set -eux; \
 
 FROM ${RUNTIME_IMAGE} AS tools-base-slim
 USER root
+# Optional Debian mirror for this build host; see configure-cn-sources.sh.
+ARG BYCLAW_APT_MIRROR
 ARG TARGETARCH
 RUN test "${TARGETARCH}" = amd64 \
     && . /etc/os-release && test "$ID" = debian && test "$VERSION_ID" = 13
@@ -61,13 +74,18 @@ RUN set -eux; \
     install -d -o byclaw -g byclaw /by /home/byclaw/.dsh; \
     rm -rf /var/lib/apt/lists/* /root/.npm /root/.cache /etc/ssh/ssh_host_*; \
     rm /tmp/configure-cn-sources.sh
-# The existing tool image already contains the resolved transport-only closure.
-# Copying it preserves Node symlinks, native PTY/FFI payloads and helper digests.
-COPY --from=transport /workspace/ /workspace/
+# The closure collected from the donor, at A's paths. Copying it preserves Node
+# symlinks, native PTY/FFI payloads and helper digests.
+COPY --from=transport /transport/workspace/ /workspace/
 COPY --from=transport /transport/etc/helper.sha256 /etc/byclaw-tool-sandbox/helper.sha256
 COPY --from=transport /transport/etc/node-exec-path /etc/byclaw-tool-sandbox/node-exec-path
 COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh /usr/local/bin/byclaw-tool-env-sshd
 COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ws-bridge.py /usr/local/bin/byclaw-tool-env-ws-bridge
+# The entrypoint keeps sshd and the bridge running on their own and runs the services
+# business layers declare in services.d; A starts every command through the workload
+# wrapper, which puts it in the work cgroup with a raised OOM score.
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-base-entrypoint.py /usr/local/bin/byclaw-tool-base-entrypoint
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-workload.sh /usr/local/bin/byclaw-tool-workload
 COPY middleware/byclaw-harness/plugins/dsh-tool-env/docker/trace-*.mjs /tmp/transport-check/
 RUN set -eux; \
     donor_node="$(cat /etc/byclaw-tool-sandbox/node-exec-path)"; \
@@ -78,8 +96,10 @@ RUN set -eux; \
     ln -s /opt/nvm/current/bin/npx /usr/local/bin/npx; \
     mkdir -p /opt/byclaw/dsh-managed/profiles/web/node_modules/@deepseek-ai; \
     ln -s /workspace/packages/ssh/ssh /opt/byclaw/dsh-managed/profiles/web/node_modules/@deepseek-ai/dsh-ssh; \
-    ln -s /usr/local/bin/byclaw-tool-env-sshd /usr/local/bin/byclaw-tool-base-entrypoint; \
-    ln -s /usr/local/bin/byclaw-tool-env-sshd /usr/local/bin/byclaw-dsh-entrypoint; \
+    ln -s /usr/local/bin/byclaw-tool-base-entrypoint /usr/local/bin/byclaw-dsh-entrypoint; \
+    install -d -m 0755 /etc/byclaw-tool-sandbox/services.d; \
+    python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' /usr/local/bin/byclaw-tool-base-entrypoint; \
+    test "$(/usr/local/bin/byclaw-tool-workload sh -c 'echo ok')" = ok; \
     sha256sum -c /etc/byclaw-tool-sandbox/helper.sha256; \
     su -s /bin/sh byclaw -c 'TRACE_OUT=/tmp/helper-imports.txt TRACE_HOOK=/tmp/transport-check/trace-hook.mjs node /tmp/transport-check/trace-main.mjs'; \
     test -s /tmp/helper-imports.txt; \

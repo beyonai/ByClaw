@@ -17,6 +17,8 @@
 #   BYCLAW_TOOL_ENV_WS_PORT         also serve a WebSocket bridge to sshd on this port
 #                                   (scripts/ws-bridge.py), for runtimes behind an HTTP
 #                                   ingress; unset = sshd only
+#   BYCLAW_TOOL_ENV_PREPARE_ONLY    `1`: write keys and sshd_config, then exit; the
+#                                   tool sandbox entrypoint supervises sshd and the bridge
 #   BYCLAW_TOOL_ENV_USER            login user (default byclaw)
 #   BYCLAW_TOOL_ENV_RUN_DIR         config/key directory (default /run/byclaw-tool-env)
 #   BYCLAW_TOOL_ENV_SESSION_ENV     NAME=VALUE lines the image recorded at build time
@@ -142,6 +144,11 @@ EOF
 # The host key and authorized key never need to stay in the environment of
 # anything sshd starts.
 unset BYCLAW_TOOL_ENV_HOST_KEY BYCLAW_TOOL_ENV_AUTHORIZED_KEY
+# The tool sandbox entrypoint (byclaw-tool-base-entrypoint) runs and restarts sshd
+# and the bridge itself; it only needs the keys and configuration written above.
+if [ "${BYCLAW_TOOL_ENV_PREPARE_ONLY:-}" = 1 ]; then
+    exit 0
+fi
 if [ -z "${ws_port}" ]; then
     exec "${sshd}" -D -e -f "${run_dir}/sshd_config"
 fi
