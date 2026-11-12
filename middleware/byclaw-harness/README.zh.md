@@ -321,4 +321,8 @@ Web 插件组成图现在复用未变化的 JS/source map 产物，插件新增�
 
 `execution.lifecycle` 直接输出到共享宿主控制台（systemd 部署可用 journal 读取），不依赖用户 profile 的命名 logger 导出器。其执行与请求阶段附带 `native`：事件数、最后事件类型及距今时间、工具开始/完成/活跃数、是否收到 turn 完成及最终回答、累计 stdout 字节数。这些字段仅描述已观察的原生事件；静默不代表模型停止或任务失败，也不能据此确认正在等待哪个上游。CLI 退出及任务成功仍使用原有完整性检查，不增加超时或自动回收规则。
 
+收到原生 `error` 或 `turn.failed` 时，立即记录 `stage=native_error`，包含 `nativeErrorType`、当时的事件计数和 `nativeDiagnostic`（分类、可识别的 HTTP 状态、重试词计数）；消息缺失时分类为 `unknown`。这里的 `status=error` 仅表示观察到错误事件，不表示整个请求已失败；可恢复错误之后仍可正常完成。原始错误正文、请求、地址和凭据不写入诊断，也不作为模型推理展示。日志回调异常不影响执行。
+
+后续执行等待及请求结束日志保留最近的 `nativeDiagnostic`；进程结束后另存 `stderrDiagnostic`，两者不会相互覆盖。终态 `diagnostic` 优先选择已识别的原生分类，其次是已识别的 stderr 分类，再回退到原生或 stderr 的 `unknown`。例如原生错误为 network、stderr 只是未知警告时，终态仍保留 network。重试词计数是文本特征，不是实际网络重试次数；没有可识别的状态码时不推断具体上游故障。
+
 这些诊断属于共享 Harness 镜像，不需要重建 coding 工具镜像。Platform 挂载探测属于独立服务，未包含在此日志中；若其丢失底层原因，仍需单独调查。
