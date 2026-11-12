@@ -1,4 +1,4 @@
 # Preserve the locked image's upstream modules and license text byte-for-byte.
-v1/core/** -whitespace
-v1/vendor/** -whitespace
-v1/licenses/** -whitespace
+v1/core/** -text -whitespace
+v1/vendor/** -text -whitespace
+v1/licenses/** -text -whitespace

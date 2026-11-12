@@ -33,6 +33,19 @@ export const WORKGROUP_TEMPLATE_MENU = {
   nameEn: 'Workgroup templates',
   icon: TeamOutlined,
 };
+export const LOG_CENTER_MENU = {
+  path: '/manager/logs',
+  routePath: '/manager/logs',
+  name: '日志管理',
+  nameEn: 'Log management',
+  icon: DatabaseOutlined,
+  adminVipOnly: true,
+};
+
+export const withLogCenterMenu = (menus: any[]): any[] => [
+  ...menus.filter((item) => item.path !== LOG_CENTER_MENU.path),
+  LOG_CENTER_MENU,
+];
 export const TENANT_ADMIN_MENU = {
   path: '/manager/tenants',
   routePath: '/manager/tenants',

@@ -23,6 +23,7 @@ import {
   getManagerMenuLabel,
   normalizeMenuUrl,
   withWorkgroupTemplateMenu,
+  withLogCenterMenu,
 } from './menuConfig';
 import { buildSiderMenuItems, flattenSiderMenuItems, getInitialOpenKeys } from './menuHelpers';
 
@@ -125,7 +126,7 @@ const Sider: React.FC = () => {
   const filteredMenus = useMemo(() => {
     // 根据userInfo判断isAdminVip过滤menuConfig中的adminVipOnly
     const platformAdmin = (userInfo?.usersOrganizations || []).some((org: any) => org.userType === 'PLAT_MAN');
-    const tenantMenus = withTenantAdminMenu(menuConfig, multiTenancyEnabled && platformAdmin);
+    const tenantMenus = withLogCenterMenu(withTenantAdminMenu(menuConfig, multiTenancyEnabled && platformAdmin));
     const filterMenus = filterMenusByMenuDisplay(filterMenusByAdminVip(tenantMenus, isAdminVip(userInfo)), userInfo);
 
     // blockedPaths 为 null 表示接口还未返回，先展示全部菜单；为空数组表示无需屏蔽

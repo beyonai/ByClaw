@@ -107,6 +107,11 @@ export default [
             component: './manager/pages/FileMgr',
           },
           {
+            path: '/manager/logs',
+            name: 'managerLogs',
+            component: './manager/pages/LogCenter',
+          },
+          {
             path: '/manager/workgroup-templates',
             name: 'managerWorkgroupTemplates',
             component: './manager/pages/WorkgroupTemplateMgr',
