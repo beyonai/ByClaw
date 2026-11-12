@@ -13,7 +13,7 @@ let hook, calls = 0, output, generateError, hold, finish = 'stop'
 const requests = [], warnings = []
 const ctx = {
   logger: { warn: message => warnings.push(message) },
-  on(event, listener) { assert.equal(event, 'byclaw/session-setup'); hook = listener; return () => { hook = undefined } },
+  on(event, listener) { if (event === 'byclaw/session-setup') hook = listener; return () => { if (event === 'byclaw/session-setup') hook = undefined } },
   llm: { async *stream(request) {
     calls++; requests.push(request)
     if (hold) await hold(request.signal)

@@ -51,7 +51,7 @@ export interface ByClawSessionOpening {
 export interface ByClawCodingSetup {
   readonly command: AskAgentCommand
   readonly host: Omit<ByClawSessionHost, 'userFiles'> & {
-    readonly userFiles: Pick<import('./tool-environment-files.ts').ToolEnvironmentFiles, 'realpath' | 'lstat'>
+    readonly userFiles: Pick<import('./tool-environment-files.ts').ToolEnvironmentFiles, 'realpath' | 'lstat' | 'readText' | 'writeText' | 'readTail'>
   }
   publication?: {
     description: string

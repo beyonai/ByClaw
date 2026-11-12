@@ -116,16 +116,82 @@ export function codingRunManifest(prepared: CodingContext, identity: string, mes
   return manifest
 }
 
-/** File checks stay on this lease, never on the default browser/tool sandbox or Harness host. */
-export function codingLeaseFileChecks(sandbox: ExecutionSandbox, actor: string, leaseId: string, workspaceRoot: string, signal: AbortSignal) {
-  const query = async (operation: string, path: string): Promise<unknown> => {
-    const source = 'import json,os,stat,sys\np=sys.argv[2]\nif sys.argv[1]=="realpath":\n print(json.dumps(os.path.realpath(p,strict=True)))\nelse:\n try:\n  s=os.lstat(p);print(json.dumps({"type":"file" if stat.S_ISREG(s.st_mode) else "directory" if stat.S_ISDIR(s.st_mode) else "other"}))\n except FileNotFoundError: print("null")'
-    const result = await sandbox.execute(actor, leaseId, ['python3', '-c', source, operation, path], workspaceRoot, signal)
+/** Classification and publication checks use this owned coding lease, never the default tool environment. */
+export function codingLeaseFiles(sandbox: ExecutionSandbox, actor: string, leaseId: string, workspaceRoot: string, signal: AbortSignal) {
+  const script = String.raw`import base64,json,os,stat,sys,uuid
+from pathlib import Path
+root=Path(sys.argv[1]).resolve(strict=True)
+op=sys.argv[2];path=Path(sys.argv[3]);args=json.loads(sys.argv[4]);fd=None;parent=None;temporary=None
+try:
+ if not path.is_absolute(): raise PermissionError()
+ if op=='realpath':
+  target=path.resolve(strict=True)
+  if target!=root and root not in target.parents: raise PermissionError()
+  value=str(target)
+ else:
+  base=Path(sys.argv[1])
+  parts=path.relative_to(base if path.is_relative_to(base) else root).parts
+  if any(p in ('.','..') for p in parts): raise PermissionError()
+  parent=os.open(root,os.O_RDONLY|os.O_DIRECTORY)
+  for part in parts[:-1]:
+   if op=='writeText':
+    try: os.mkdir(part,0o700,dir_fd=parent)
+    except FileExistsError: pass
+   child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent)
+   os.close(parent);parent=child
+  name=parts[-1] if parts else '.'
+  if op=='lstat':
+   try:
+    info=os.stat(name,dir_fd=parent,follow_symlinks=False)
+    value={'type':'file' if stat.S_ISREG(info.st_mode) else 'directory' if stat.S_ISDIR(info.st_mode) else 'symlink' if stat.S_ISLNK(info.st_mode) else 'other','size':info.st_size}
+   except FileNotFoundError: value=None
+  elif op=='writeText':
+   if not parts: raise PermissionError()
+   temporary='.'+name+'.'+uuid.uuid4().hex+'.tmp'
+   fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=parent)
+   with os.fdopen(fd,'w',encoding='utf-8') as output:
+    fd=None;output.write(args['content'])
+   if args.get('exclusive'):
+    os.link(temporary,name,src_dir_fd=parent,dst_dir_fd=parent,follow_symlinks=False)
+    os.unlink(temporary,dir_fd=parent)
+   else: os.replace(temporary,name,src_dir_fd=parent,dst_dir_fd=parent)
+   temporary=None;value=None
+  elif op in ('readText','readTail'):
+   fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
+   with os.fdopen(fd,'rb') as source:
+    fd=None;info=os.fstat(source.fileno())
+    if not stat.S_ISREG(info.st_mode): raise PermissionError()
+    if op=='readText': value=source.read(16385).decode('utf-8',errors='replace')
+    else:
+     limit=args['maxBytes']
+     if not isinstance(limit,int) or not 0<limit<=1048576: raise ValueError()
+     source.seek(max(0,info.st_size-limit));value={'base64':base64.b64encode(source.read(limit)).decode(),'truncated':info.st_size>limit}
+  else: raise ValueError()
+ print(json.dumps({'value':value}))
+except OSError as error:
+ print(json.dumps({'value':None} if op=='lstat' and isinstance(error,FileNotFoundError) else {'code':'ENOENT' if isinstance(error,FileNotFoundError) else 'EEXIST' if isinstance(error,FileExistsError) else 'EACCES'}))
+finally:
+ if fd is not None: os.close(fd)
+ if temporary is not None: os.unlink(temporary,dir_fd=parent)
+ if parent is not None: os.close(parent)
+`
+  const query = async (operation: string, path: string, args: Record<string, unknown> = {}): Promise<unknown> => {
+    const result = await sandbox.execute(actor, leaseId, ['python3', '-c', script, workspaceRoot, operation, path, JSON.stringify(args)], workspaceRoot, signal)
     if (result.exitCode !== 0) throw new Error('EXECUTION_FILE_CHECK_FAILED')
-    return JSON.parse(result.stdout) as unknown
+    const response = JSON.parse(result.stdout) as { value?: unknown; code?: string }
+    if (response.code) throw Object.assign(new Error('EXECUTION_FILE_ACCESS_FAILED'), { code: response.code })
+    return response.value
   }
-  return { realpath: async (path: string) => await query('realpath', path) as string,
-    lstat: async (path: string) => (await query('lstat', path) ?? undefined) as { type: 'file' | 'directory' | 'other' } | undefined }
+  return {
+    realpath: async (path: string) => await query('realpath', path) as string,
+    lstat: async (path: string) => (await query('lstat', path) ?? undefined) as { type: 'file' | 'directory' | 'symlink' | 'other'; size?: number } | undefined,
+    readText: async (path: string) => await query('readText', path) as string,
+    writeText: async (path: string, content: string, options: { exclusive?: boolean } = {}) => { await query('writeText', path, { content, ...options }) },
+    readTail: async (path: string, maxBytes: number) => {
+      const value = await query('readTail', path, { maxBytes }) as { base64: string; truncated: boolean }
+      return { bytes: Buffer.from(value.base64, 'base64'), truncated: value.truncated }
+    },
+  }
 }
 
 /** Native structured final output is used only when the existing publication plugin is active. */

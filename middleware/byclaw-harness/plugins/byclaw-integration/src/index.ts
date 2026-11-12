@@ -82,7 +82,7 @@ import { resolveByClawByRoot, resolveByClawLocalE2eStorageRoot, resolveByClawInb
 import { ByClawDshWorkerRuntime } from './worker-runtime.ts'
 import { ByClawExecutionRouter, type ExecutionSandbox } from './coding-router.ts'
 import { codingEventPresentation } from './coding-presentation.ts'
-import { codingLeaseFileChecks, codingPreviousCwd, prepareCodingContext } from './coding-context.ts'
+import { codingLeaseFiles, codingPreviousCwd, prepareCodingContext } from './coding-context.ts'
 import type { ByClawCodingSetup } from './session-extensions.ts'
 import { emitByClawProjection, reasoningProjection, toolCallProjection } from './byclaw-presentation.ts'
 import type { AskAgentCommand } from '@byclaw/by-framework'
@@ -1174,6 +1174,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       },
       resolveTarget: resolveInboundTarget,
       sandbox: () => (ctx.get('ssh') as ExecutionToolEnvironment | undefined)?.sandboxCatalog,
+      waitForGroupChatDisposition: command => disposition?.waitFor(command),
       onActivityChange: () => sandboxBusy?.activityChanged(),
       // The managed profile may have no console exporter for its isolated logger.
       // The router only supplies allowlisted metadata; write it to the host journal.
@@ -1182,7 +1183,9 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
         const template = await templateRuntime.prepareEmployee(`byclaw-employee-${target.resourceId}`, groupCoordinationFromExtra(command.extraPayload))
         lease.signal.throwIfAborted()
         const setup: ByClawCodingSetup = { command, host: { ...sessionHost,
-          userFiles: codingLeaseFileChecks(lease.sandbox, lease.actor, lease.leaseId, lease.workspaceRoot, lease.signal) } }
+          byRoot: lease.workspaceRoot,
+          resolveSourcePath: source => resolveByClawInboundPath(source, lease.workspaceRoot),
+          userFiles: codingLeaseFiles(lease.sandbox, lease.actor, lease.leaseId, lease.workspaceRoot, lease.signal) } }
         await ctx.serial('byclaw/coding-setup', setup)
         lease.signal.throwIfAborted()
         const savedCwd = sessionMetadata.get(String(command.header.sessionId))?.identity.cwd

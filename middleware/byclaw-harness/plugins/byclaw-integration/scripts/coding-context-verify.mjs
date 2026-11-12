@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { prepareCodingContext, codingPreviousCwd, codingRunManifest, codingFinalOutput, codingLeaseFileChecks } from '../src/coding-context.ts'
+import { prepareCodingContext, codingPreviousCwd, codingRunManifest, codingFinalOutput, codingLeaseFiles } from '../src/coding-context.ts'
 import { ByClawExecutionRouter } from '../src/coding-router.ts'
 
 test('the published plugin includes the workspace runner read during module import', () => {
@@ -88,9 +88,9 @@ test('follow-up queries the actual coding lease and preserves the original proje
 
 test('publication file checks run on the coding lease rather than the default tool environment', async () => {
   const calls = []
-  const files = codingLeaseFileChecks({ execute: async (...args) => {
+  const files = codingLeaseFiles({ execute: async (...args) => {
     calls.push(args)
-    return { exitCode: 0, stdout: args[2][3] === 'realpath' ? '"/by/report.md"' : '{"type":"file"}', stderr: '' }
+    return { exitCode: 0, stdout: JSON.stringify({ value: args[2][4] === 'realpath' ? '/by/report.md' : { type: 'file' } }), stderr: '' }
   } }, 'current-actor', 'coding-lease', '/by', new AbortController().signal)
   assert.equal(await files.realpath('/by/report.md'), '/by/report.md')
   assert.deepEqual(await files.lstat('/by/report.md'), { type: 'file' })

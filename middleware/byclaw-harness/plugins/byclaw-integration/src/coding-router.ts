@@ -69,6 +69,7 @@ export interface ExecutionRouterOptions {
   prepareContext: (command: AskAgentCommand, target: ExecutionTarget, lease: {
     sandbox: ExecutionSandbox; actor: string; leaseId: string; workspaceRoot: string; signal: AbortSignal; identity: string
   }) => CodingContext | Promise<CodingContext>
+  waitForGroupChatDisposition?: (command: AskAgentCommand) => Promise<void> | undefined
   emitFileChanges?: (command: AskAgentCommand, context: AgentContext, payload: FileChangesSummaryPayload, workspace: string) => Promise<void>
   sandbox: () => ExecutionSandbox | undefined
   emit: (command: AskAgentCommand, context: AgentContext, event: ExecutionRouteEvent) => Promise<void>
@@ -239,6 +240,10 @@ export class ByClawExecutionRouter {
     let result: ExecutionResult | undefined
     let failure: Error | undefined
     let processOutcome: Pick<ExecutionDiagnostic, 'exitCode' | 'diagnostic' | 'stderrDiagnostic'> = {}
+    let dispositionWait: Promise<void> | undefined
+    const settleDisposition = () => dispositionWait ??= Promise.resolve()
+      .then(() => this.options.waitForGroupChatDisposition?.(command))
+      .catch(() => { /* Classification owns its logging and deadline; never replace the execution outcome. */ })
     const failureCode = () => forwardingError ? 'EXECUTION_EVENT_FORWARDING_FAILED'
       : signal.aborted ? (control.signal.aborted ? 'EXECUTION_CANCELLED' : 'EXECUTION_TIMEOUT') : 'EXECUTION_FAILED'
     log('queue', 'success', queuedAt)
@@ -279,6 +284,8 @@ export class ByClawExecutionRouter {
         const reason = /(?:^|\n)((?:EXECUTION|CODEX)_[A-Z_]{1,80})(?:\r?\n|$)/u.exec(processResult.stderr)?.[1]
         if (reason) throw new Error(reason)
       }
+      // The backend must see the task decision before this request completes or prepares a publication.
+      await settleDisposition()
       const output = codingFinalOutput(parser.finish(processResult.exitCode), prepared?.publication !== undefined)
       let answer = output.answer
       endStage('success', undefined, processOutcome)
@@ -307,6 +314,7 @@ export class ByClawExecutionRouter {
       endStage('error', knownReason ?? code, processOutcome)
     } finally {
       if (heartbeat) clearInterval(heartbeat)
+      await settleDisposition()
       if (sandbox) {
         startStage('cleanup', '归还 coding 工具沙箱租约')
         try {
