@@ -253,6 +253,23 @@ class GroupChatGatewayExecutorTest extends I18nTestSupport {
         assertThat(executor.decorate(context, "继续讨论", params)).isEqualTo("继续讨论");
         assertThat(params.get("groupPrivatePublication")).isEqualTo(Map.of("taskSessionId", "60", "groupSessionId", "10"));
         assertThat(params.get("groupChat")).isSameAs(reference);
+        // 原群凭据来自已鉴权的私聊记录，消息引用仍保持私聊会话。
+        assertThat(context.groupSessionId).isEqualTo(10L);
+        var credentialMembers = mock(com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper.class);
+        var credentialNode = mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class);
+        var credentialRedis = mock(org.springframework.data.redis.core.StringRedisTemplate.class);
+        var login = new com.iwhalecloud.byai.common.login.bean.LoginInfo();
+        login.setUserId(30L);
+        com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.setLoginInfo(login);
+        try {
+            when(credentialMembers.findActiveUserApiKey(10L, 30L)).thenReturn("private-group-key");
+            new com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatGatewayCredentialService(
+                credentialMembers, credentialNode, credentialRedis, new com.fasterxml.jackson.databind.ObjectMapper())
+                .apply(context, params);
+            assertThat(params).containsEntry("api_key", "private-group-key");
+        } finally {
+            com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.clearLoginInfo();
+        }
         verifyNoInteractions(historyFiles);
 
         context.assistantChatDto.setMessageIntent("prepare_group_task_publication");

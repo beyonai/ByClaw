@@ -183,6 +183,8 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         // 复用本次授权检查返回的名单，不把可由客户端伪造的成员数据保存在 extParams 中。
         List<?> groupMembers = validateRequest(context.tenantContext, context.assistantChatDto);
         if (context.assistantChatDto.getExtParams().get("groupPrivatePublication") instanceof Map<?, ?> direct) {
+            // 使用 Node 已鉴权的原群读取当前用户凭据，不添加群任务执行或广播上下文。
+            context.setGroupSessionId(Long.valueOf(direct.get("groupSessionId").toString()));
             gatewayParams.put("groupPrivatePublication", direct);
             return "prepare_group_task_publication".equals(context.assistantChatDto.getMessageIntent())
                 ? decorateText(content, text -> prompts.appendPublicationPreparation(text, context.sessionId)) : content;

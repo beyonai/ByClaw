@@ -512,6 +512,26 @@ class TenantGroupCoordinationServiceTest extends I18nTestSupport {
         assertThat(gateway.get("groupPrivatePublication")).isEqualTo(Map.of("groupSessionId", "30",
             "taskSessionId", "50", "enterpriseId", String.valueOf(tenant.enterpriseId())));
         assertThat(ctx.assistantChatDto.getExtParams()).doesNotContainKeys("groupDispatch", "tenantGroupTask");
+        // 原群凭据来自已鉴权的私聊记录，消息引用仍保持私聊会话。
+        assertThat(ctx.groupSessionId).isEqualTo(30L);
+        var credentialMembers = mock(com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMemberMapper.class);
+        var credentialNode = node;
+        var credentialRedis = mock(org.springframework.data.redis.core.StringRedisTemplate.class);
+        var login = new com.iwhalecloud.byai.common.login.bean.LoginInfo();
+        login.setUserId(20L);
+        com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.setLoginInfo(login);
+        try {
+            when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/group-chats/30/member-api-key?identityOnly=true"), eq(null), any()))
+                .thenReturn(Map.of());
+            when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/group-chats/30/member-api-key"), eq(null), any()))
+                .thenReturn(Map.of("api_key", "private-group-key"));
+            new com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatGatewayCredentialService(
+                credentialMembers, credentialNode, credentialRedis, new com.fasterxml.jackson.databind.ObjectMapper())
+                .apply(ctx, gateway);
+            assertThat(gateway).containsEntry("api_key", "private-group-key");
+        } finally {
+            com.iwhalecloud.byai.common.login.auth.CurrentUserHolder.clearLoginInfo();
+        }
         ctx.assistantChatDto.setMessageIntent("prepare_group_task_publication");
         assertThat(service.decorate(ctx, "发布成果", gateway).toString()).contains("prepare_group_task_publication");
         assertThatThrownBy(() -> service.validateRequest(request(43L))).isInstanceOf(ResponseStatusException.class);

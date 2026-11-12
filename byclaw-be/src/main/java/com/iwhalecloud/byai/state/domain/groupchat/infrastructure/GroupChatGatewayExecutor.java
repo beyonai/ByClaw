@@ -342,7 +342,8 @@ public class GroupChatGatewayExecutor implements ChatGatewayRequestDecorator {
                         throw new IllegalArgumentException(I18nUtil.get("groupchat.turn.identityMismatch"));
                     }
                     taskAuthorizationService.requirePrivateAgent(direct, context.assistantChatDto.getAgentId());
-                    // 无群派发轮次的单聊只能获得草稿工具，普通对话的上下文和凭据路由保持原样。
+                    // 鉴权后仅绑定原群凭据范围；消息引用仍属于私聊，不进入群派发或广播。
+                    context.setGroupSessionId(direct.getGroupSessionId());
                     gatewayParams.put("groupPrivatePublication", Map.of("taskSessionId", context.sessionId.toString(),
                         "groupSessionId", direct.getGroupSessionId().toString()));
                     if ("prepare_group_task_publication".equals(context.assistantChatDto.getMessageIntent())) {
