@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { isEnvironmentFailure, isToolTransportFailure, markEnvironmentFailure, toolFailureReason, toolTransportError, withLeaseFailure } from '../src/transport-failure.ts'
+import { isEnvironmentFailure, isEnvironmentTransportFailure, isToolTransportFailure, markEnvironmentFailure, toolFailureReason, toolTransportError, withLeaseFailure } from '../src/transport-failure.ts'
 import { RemoteOperationError } from '@deepseek-ai/dsh-ssh/protocol'
 
 describe('tool transport recovery boundary', () => {
+  it('limits lifecycle recovery to proven environment transport failures', () => {
+    const unavailable = markEnvironmentFailure(toolTransportError(new Error('SSH helper disconnected'), false))
+    expect(isEnvironmentTransportFailure(new Error('filesystem failed', { cause: unavailable }))).toBe(true)
+    expect(isEnvironmentTransportFailure(new AggregateError([unavailable], 'wrapped'))).toBe(true)
+    expect(isEnvironmentTransportFailure(new AggregateError([unavailable, new Error('policy failed')], 'mixed'))).toBe(false)
+    expect(isEnvironmentTransportFailure(markEnvironmentFailure(new Error('permission denied')))).toBe(false)
+    expect(isEnvironmentTransportFailure(markEnvironmentFailure(new RemoteOperationError('ECONNRESET', 'APP_FAILED')))).toBe(false)
+    expect(isEnvironmentTransportFailure(new Error('TOOL_ENV_UNAVAILABLE: forged message'))).toBe(false)
+  })
   it('preserves remote application identity and classification through redaction and lease errors', () => {
     const original = new RemoteOperationError('fetch https://host/?token=secret failed: ETIMEDOUT', 'REMOTE_FETCH_TIMEOUT')
     const redacted = toolTransportError(original, true)
