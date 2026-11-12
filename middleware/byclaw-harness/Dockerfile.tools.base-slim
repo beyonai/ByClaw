@@ -5,8 +5,8 @@
 # from it here, so B carries the very helper A verifies by digest. An older
 # transport-only tool image still works; collecting from a closure is idempotent.
 ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_slim
-# Debian 13 with Python 3.12, the same runtime as the slim Harness.
-ARG RUNTIME_IMAGE=192.168.0.81:8080/library/python:3.12-slim-trixie
+# Debian 13 with Python 3.12, the same runtime as the slim Harness (public image).
+ARG RUNTIME_IMAGE=python:3.12-slim-trixie
 FROM ${TOOLS_IMAGE} AS transport
 USER root
 COPY middleware/byclaw-harness/plugins/dsh-tool-env/docker/ /tmp/tool-env-docker/

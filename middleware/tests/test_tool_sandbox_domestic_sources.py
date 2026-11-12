@@ -153,9 +153,11 @@ class ToolSandboxDomesticSourcesTest(unittest.TestCase):
             for variable in re.findall(r'(?m)^FROM \$\{(\w+)\}', source):
                 defaults = re.findall(rf'(?m)^ARG {variable}=(\S+)$', source)
                 self.assertEqual(len(defaults), 1, f'{name}: {variable} needs a default')
-                self.assertTrue(defaults[0].startswith('192.168.0.81:8080/'), f'{name}: {variable}')
+                if variable != 'RUNTIME_IMAGE':
+                    self.assertTrue(defaults[0].startswith('192.168.0.81:8080/'), f'{name}: {variable}')
+        # The OS runtime is the public Debian 13 Python image; ByClaw images come from Harbor.
         runtime = re.findall(r'(?m)^ARG RUNTIME_IMAGE=(\S+)$', (HARNESS / 'Dockerfile.tools.base-slim').read_text())
-        self.assertEqual(runtime, ['192.168.0.81:8080/library/python:3.12-slim-trixie'])
+        self.assertEqual(runtime, ['python:3.12-slim-trixie'])
 
 
 if __name__ == '__main__':

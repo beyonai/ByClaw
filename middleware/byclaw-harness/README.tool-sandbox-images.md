@@ -24,7 +24,7 @@ docker build -f middleware/byclaw-harness/Dockerfile.tools.browser --build-arg H
   --build-arg TOOLS_IMAGE=byclaw-harness-tools:<tag>_base_slim -t byclaw-harness-tools:<tag>_browser .
 ```
 
-Every parent image has an internal Harbor default (`192.168.0.81:8080`: A is `byclaw/byclaw-harness:D0.6.0_slim`, the runtime is `library/python:3.12-slim-trixie`, and each layer's parent is the previous `byclaw-harness-tools:D0.6.0_<layer>` tag), so on the internal network the family builds in order with no build arguments:
+Every parent image has an internal Harbor default (`192.168.0.81:8080`: A is `byclaw/byclaw-harness:D0.6.0_slim`, the runtime is the public `python:3.12-slim-trixie`, and each layer's parent is the previous `byclaw-harness-tools:D0.6.0_<layer>` tag), so on the internal network the family builds in order with no build arguments:
 
 ```bash
 for layer in base-slim:base_slim browser:browser general:general; do
