@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import type { AskAgentCommand, AgentContext } from '@byclaw/by-framework'
 import { CodexEventAdapter, type CodingEvent, type CodexEventSnapshot } from './cli-event-adapter.ts'
 import { summarizeCodingDiagnostic, type CodingDiagnosticSummary } from './coding-diagnostics.ts'
-import { CODING_WORKSPACE_RUNNER, codingFinalOutput, codingRunManifest, type CodingContext } from './coding-context.ts'
+import { CODING_WORKSPACE_RUNNER, codingFinalOutput, codingRunManifest, codingRepositoryState, type CodingContext } from './coding-context.ts'
 import type { FileChangesSummaryPayload } from './file-changes.ts'
 
 export type ExecutionType = 'CODEX_CLI' | 'CLAUDE_CLI' | 'UNITY'
@@ -287,6 +287,16 @@ export class ByClawExecutionRouter {
       // The backend must see the task decision before this request completes or prepares a publication.
       await settleDisposition()
       const output = codingFinalOutput(parser.finish(processResult.exitCode), prepared?.publication !== undefined)
+      if (prepared.workspace.repository !== undefined) {
+        const state = await codingRepositoryState(sandbox, actor, lease.leaseId, prepared.workspace.repository, lease.workspaceRoot, signal)
+        const version = `仓库当前提交：${state.revision}；${state.dirty ? '存在未提交改动，尚未形成完整交付版本' : '工作区干净'}。`
+        output.answer += `\n\n${version}`
+        if (output.publication !== undefined) {
+          if (!output.publication.text.trim()) throw new Error('EXECUTION_PUBLICATION_TEXT_REQUIRED')
+          // Repository code is already shared. Never publish model-selected source attachments.
+          output.publication = { text: `${output.publication.text}\n\n${version}`, sourcePaths: [] }
+        }
+      }
       let answer = output.answer
       endStage('success', undefined, processOutcome)
       await forwarding

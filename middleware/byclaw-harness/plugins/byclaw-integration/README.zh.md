@@ -381,6 +381,20 @@ Worker 消息分发不再设置任务并发上限，原 `maxConcurrency` 插件�
 ## 后端到沙箱的发起链路排查
 
 后端与 Harness 使用统一的 `chat_chain` 单行 JSON 日志，按服务端 `invocationId` 关联一次接收、按 `dispatchId` 区分派发重试，记录阶段耗时及租户与实例。初始化使用 `startupId`，回复使用 `replyEventId` 串联 Redis、后端、WebSocket 与前端实际应用对象。字段语义、三个场景的手工排查示例见 [链路日志规范](CHAT-CHAIN.zh.md)。本地验证：`pnpm verify:chat-chain`。
+### Codex 群项目 Git 仓库
+
+Harness 环境变量 `BYCLAW_CODE_REPO_DIR` 指定单级仓库目录名，未配置时为 `repo`。目录名不能是空值、绝对路径、含路径分隔符的路径或 `.`、`..`。本阶段将含完整 `.git/`、初始提交、根 `AGENTS.md` 和源码的 ZIP 人工解压到 `/by/.shared/project_<projectId>/<仓库目录名>/`；不实现模板管理、自动解压或项目锁，同群测试人工串行。
+
+项目归属沿用后端传入的 `project_info.project_id`；现有后端创建群内私聊时保存来源群和项目关系，私聊保留自己的会话 ID。运行前需核对群聊及关联私聊传入同一个群项目 ID。Harness 在当前 coding 租约上运行 `coding-workspace.py --resolve`，检查 Git 顶层、初始提交和根说明，选定目录后设置真实进程 cwd 和默认产物目录。项目说明留在仓库根，不复制进会话目录或 CODEX_HOME。无项目的普通私聊仍可使用 `/by/.sessions/<sessionId>/`，也可识别该空间下同名仓库。
+
+首次有效识别写入所属空间的 `.byclaw/coding-repository.json`，只记录相对目录名；后续群聊、关联私聊及配置变更均沿用已绑定位置。该文件是启动定位状态，不是模板元数据，也不交给 Codex。原生续聊状态仍在各会话 `executors/<agentId>/codex-home/byclaw-session.json`。缺少原生状态文件时可根据项目绑定重新开始；已存在原生状态的 cwd 发生变化会报 `EXECUTION_WORKSPACE_CHANGED`，管理员需先保留旧状态和文件、确认目标目录，再建立新的执行会话，不静默迁移。
+
+未绑定空间没有仓库时保留默认目录。发现未初始化完整的约定目录时，不进入它，给模型声明初始化异常；普通聊天可继续，模板开发须先修复。已绑定仓库被移除、损坏或成为符号链接时停止执行，不退回外层生成另一套代码。
+
+群仓库任务回群仅准备正文，程序清空源码附件清单，并从实际 Git 查询当前提交与未提交状态补入正文；“完成并发布”确认流程保持不变。员工按项目说明测试、提交，部署沿用 `server-deploy` 的 SSH 密钥配置，从已确认的干净提交导出发布包。没有新增密码认证入口或自动提交程序。
+
+验证：`verify:coding-context`、`verify:coding-router`。CLI 测试中的模型进程为夹具，Git 检查使用真实临时仓库；它们不能代替上线后的群私聊和实际服务器部署验收。此适配可在现有后端正确传递项目 ID 的前提下单独部署；每轮持久化绑定核验和缺失继承修复属于另外的后端增强。
+
 ### DSH 项目共享工作目录
 
 网关 `header.metadata.project_info.project_id` 绑定项目时，DSH 根会话和子会话的执行 cwd、相对路径文件操作及默认交付目录统一使用 `/by/.shared/project_{projectId}`，默认项目为 `project_-1`。运行端在工具环境中幂等创建目录；未绑定项目时保留原会话 cwd。`.sessions/<sessionId>` 仍作为内部会话路径存在，不再作为项目会话的默认交付目录。

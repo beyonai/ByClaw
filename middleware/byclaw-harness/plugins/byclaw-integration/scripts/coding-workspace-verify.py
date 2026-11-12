@@ -18,6 +18,119 @@ spec.loader.exec_module(runner)
 
 
 class WorkspaceTests(unittest.TestCase):
+    def repository(self, name='repo', base=None):
+        repo = (base or self.cwd) / name
+        repo.mkdir(parents=True)
+        subprocess.run(['git', 'init', str(repo)], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(repo), 'config', 'core.autocrlf', 'false'], check=True, capture_output=True)
+        (repo / 'AGENTS.md').write_text('PROJECT_RULE_CHECK\n', encoding='utf-8', newline='\n')
+        (repo / 'app.txt').write_text('initial\n', encoding='utf-8', newline='\n')
+        subprocess.run(['git', '-C', str(repo), 'add', '.'], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(repo), '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                        'commit', '-m', 'Initial fixture'], check=True, capture_output=True)
+        return repo
+
+    def resolve(self, name='repo', previous=None, workspace=None):
+        return runner.resolve_workspace(dict(workspace=workspace or self.manifest['workspace'], repoDir=name,
+                                             previousCwd=previous), self.by)
+
+    def test_repository_cwd_is_pinned_across_config_changes_and_private_sessions(self):
+        repo = self.repository()
+        first = self.resolve()
+        self.assertEqual(first['cwd'], str(repo))
+        self.assertEqual(first['defaultOutputRoot'], str(repo))
+        self.assertEqual(first['repository'], str(repo))
+        other = dict(self.manifest['workspace'], sessionRoot=str(self.by / '.sessions' / 'private2'))
+        self.assertEqual(self.resolve('app', workspace=other)['cwd'], str(repo))
+        self.assertFalse((self.cwd / 'app').exists())
+        self.manifest['workspace'] = first
+        calls, _ = self.run_cli()
+        self.assertEqual(calls[0][1]['cwd'], repo)
+        self.assertEqual((repo / 'AGENTS.md').read_text(), 'PROJECT_RULE_CHECK\n')
+        self.assertEqual(self.resolve('app', previous=str(repo))['cwd'], str(repo))
+        calls, _ = self.run_cli()
+        self.assertIn('resume', calls[0][0])
+
+    def test_custom_name_default_minus_one_and_independent_session_repository(self):
+        repo = self.repository('app')
+        self.assertEqual(self.resolve('app')['cwd'], str(repo))
+        for base in [self.by / '.shared' / 'project_-1', Path(self.manifest['workspace']['sessionRoot'])]:
+            repo = self.repository(base=base)
+            workspace = dict(self.manifest['workspace'], cwd=str(base), defaultOutputRoot=str(base))
+            self.assertEqual(self.resolve(workspace=workspace)['cwd'], str(repo))
+
+    def test_greeting_keeps_default_directory_and_does_not_create_repository(self):
+        selected = self.resolve()
+        self.assertEqual(selected['cwd'], str(self.cwd))
+        self.assertNotIn('repository', selected)
+        self.assertFalse((self.cwd / 'repo').exists())
+        self.assertFalse((self.cwd / '.byclaw').exists())
+
+    def test_incomplete_repository_missing_agents_and_external_git_are_rejected(self):
+        repo = self.cwd / 'repo'
+        repo.mkdir(parents=True)
+        # A parent repository must never make an empty child appear valid.
+        subprocess.run(['git', 'init', str(self.cwd)], check=True, capture_output=True)
+        self.assertEqual(self.resolve()['cwd'], str(self.cwd))
+        self.assertEqual(self.resolve()['repositoryIssue'], 'EXECUTION_REPOSITORY_INVALID')
+        (repo / '.git').write_text('gitdir: ../.git', encoding='utf-8')
+        self.assertEqual(self.resolve()['repositoryIssue'], 'EXECUTION_REPOSITORY_INVALID')
+        (repo / '.git').unlink()
+        subprocess.run(['git', 'init', str(repo)], check=True, capture_output=True)
+        self.assertEqual(self.resolve()['repositoryIssue'], 'EXECUTION_REPOSITORY_INVALID')
+
+    def test_missing_bound_repository_and_cwd_switch_fail_instead_of_falling_back(self):
+        repo = self.repository()
+        with self.assertRaisesRegex(ValueError, 'WORKSPACE_CHANGED'):
+            self.resolve(previous=str(self.cwd))
+        self.resolve()
+        (repo / 'AGENTS.md').unlink()
+        with self.assertRaisesRegex(ValueError, 'REPOSITORY_INVALID'):
+            self.resolve()
+
+    def test_recovered_repository_never_uses_repo_repo_and_cross_project_is_rejected(self):
+        repo = self.repository('old-app')
+        selected = self.resolve(previous=str(repo))
+        self.assertEqual(selected['cwd'], str(repo))
+        workspace = dict(selected, cwd=str(self.by / '.shared' / 'project_9'))
+        with self.assertRaisesRegex(ValueError, 'PROJECT_BINDING_CHANGED'):
+            self.resolve(previous=str(repo), workspace=workspace)
+
+    def test_directory_config_and_parent_traversal_are_rejected(self):
+        for value in ['', '.', '..', '/repo', 'a/b', 'a\\b', ' a', 'C:repo', 'a\0b']:
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'INVALID_REPO_DIR'):
+                self.resolve(value)
+        with self.assertRaisesRegex(ValueError, 'UNSAFE_WORKSPACE'):
+            runner.safe_directory(self.by / '..' / 'outside', self.by)
+
+    def test_repository_state_uses_real_head_and_tracks_uncommitted_files(self):
+        repo = self.repository()
+        state = runner.repository_state(repo, self.by)
+        self.assertRegex(state['revision'], r'^[a-f0-9]{40}$')
+        self.assertFalse(state['dirty'])
+        (repo / 'app.txt').write_text('modified\n', encoding='utf-8', newline='\n')
+        self.assertTrue(runner.repository_state(repo, self.by)['dirty'])
+        (repo / 'app.txt').write_text('initial\n', encoding='utf-8', newline='\n')
+        (repo / 'untracked.txt').touch()
+        self.assertTrue(runner.repository_state(repo, self.by)['dirty'])
+
+    def test_repository_is_rechecked_before_cli_and_project_rules_are_not_replaced(self):
+        repo = self.repository()
+        self.manifest['workspace'] = self.resolve()
+        (repo / 'AGENTS.md').unlink()
+        with patch.object(runner.subprocess, 'Popen') as cli:
+            with self.assertRaisesRegex(ValueError, 'REPOSITORY_INVALID'):
+                runner.run(self.manifest, 'task', self.by)
+            cli.assert_not_called()
+
+    @unittest.skipIf(os.name == 'nt', 'Native symlinks require Windows developer privileges')
+    def test_symlink_repository_never_escapes_the_mounted_space(self):
+        repo = self.repository('actual')
+        (self.cwd / 'repo').symlink_to(repo, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'UNSAFE_STATE_PATH'):
+            self.resolve()
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX deployment credential permissions and /tmp')
     def test_deployment_context_is_local_private_stripped_and_cleaned_on_failure(self):
         source = dict(CODEX_AUTH='model-auth', BYCLAW_DEPLOY_ENABLED='1',
                       BYCLAW_DEPLOY_PRIVATE_KEY='synthetic-only', BYCLAW_DEPLOY_HOST='example.invalid')
@@ -39,6 +152,7 @@ class WorkspaceTests(unittest.TestCase):
         with runner.deployment_environment(dict(source, BYCLAW_DEPLOY_ENABLED='0')) as environment:
             self.assertEqual(environment, {'CODEX_AUTH': 'model-auth'})
 
+    @unittest.skipIf(os.name == 'nt', 'Linux process groups are used by the coding image')
     def test_native_runner_scopes_deployment_context_without_persisting_it(self):
         observed = []
         def verify(args, kwargs):
@@ -106,8 +220,11 @@ class WorkspaceTests(unittest.TestCase):
             def poll(child):
                 return 0
         output = io.StringIO()
+        actual_popen = subprocess.Popen
+        def launch(args, **kwargs):
+            return Child(args, **kwargs) if args[0] == 'codex' else actual_popen(args, **kwargs)
         with patch.dict(os.environ, dict(CODEX_HOME=str(self.defaults), CODEX_AUTH='test-auth-not-a-prompt', CODEX_MODEL='override-model', CODEX_BASE_URL='https://override.invalid/v1')):
-            with patch.object(runner.subprocess, 'Popen', Child), contextlib.redirect_stdout(output):
+            with patch.object(runner.subprocess, 'Popen', launch), contextlib.redirect_stdout(output):
                 code = runner.run(manifest or self.manifest, 'current task', self.by)
         self.assertEqual(code, 0)
         return calls, [json.loads(line) for line in output.getvalue().splitlines()]

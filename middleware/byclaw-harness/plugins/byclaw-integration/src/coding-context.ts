@@ -13,7 +13,7 @@ export interface CodingContext {
   employeeId: string
   persona: string
   skills: Array<{ name: string; path: string; enabled: boolean }>
-  workspace: { sessionRoot: string; sharedRoot: string; cwd: string; defaultOutputRoot: string }
+  workspace: { sessionRoot: string; sharedRoot: string; cwd: string; defaultOutputRoot: string; repository?: string; repositoryIssue?: 'EXECUTION_REPOSITORY_INVALID' }
   publication?: NonNullable<ByClawCodingSetup['publication']>
 }
 
@@ -24,6 +24,24 @@ export function codingWorkspace(sessionId: string, projectId: unknown, byRoot = 
   const sharedRoot = posix.join(byRoot, '.shared')
   const cwd = /^-?\d+$/u.test(id) ? posix.join(sharedRoot, `project_${id}`) : sessionRoot
   return { sessionRoot, sharedRoot, cwd, defaultOutputRoot: cwd }
+}
+
+/** Deployment-owned single directory name; never resolve this from chat or package metadata. */
+export function codingRepoDirectory(value: string | undefined): string {
+  const name = value === undefined ? 'repo' : value
+  if (!name || name !== name.trim() || name === '.' || name === '..' || /[\\/\u0000-\u001f:]/u.test(name)) {
+    throw new Error('EXECUTION_INVALID_REPO_DIR')
+  }
+  return name
+}
+
+export function validCodingCwd(cwd: string, sessionRoot: string, byRoot = '/by'): boolean {
+  const parent = posix.dirname(cwd)
+  const isBase = (path: string) => path === sessionRoot
+    || (posix.dirname(path) === posix.join(byRoot, '.shared') && /^project_-?\d+$/u.test(posix.basename(path)))
+  if (isBase(cwd)) return true
+  try { return isBase(parent) && codingRepoDirectory(posix.basename(cwd)) === posix.basename(cwd) && posix.normalize(cwd) === cwd }
+  catch { return false }
 }
 
 function object(value: unknown): Record<string, unknown> | undefined {
@@ -37,14 +55,16 @@ function bounded(value: string, bytes: number): string {
 
 /** Never serialize extraPayload wholesale: it contains login and model credentials. */
 export function prepareCodingContext(command: AskAgentCommand, target: ExecutionTarget, template: DshAgentTemplate,
-  skills: CodingContext['skills'], publication?: CodingContext['publication'], previousCwd?: string): CodingContext {
+  skills: CodingContext['skills'], publication?: CodingContext['publication'], previousCwd?: string, resolvedWorkspace?: CodingContext['workspace']): CodingContext {
   if (template.kind !== 'agent' || template.source.resourceId !== target.resourceId) throw new Error('EXECUTION_EMPLOYEE_MISMATCH')
   const inbound = buildByClawInboundTurnContext(command, '/by')
-  const workspace = codingWorkspace(String(command.header.sessionId), inbound.project?.['project_id'])
+  const workspace = resolvedWorkspace ?? codingWorkspace(String(command.header.sessionId), inbound.project?.['project_id'])
   if (inbound.project?.['project_id'] === undefined && previousCwd !== undefined) {
-    if (previousCwd !== workspace.sessionRoot && !/^\/by\/\.shared\/project_-?\d+$/u.test(previousCwd)) throw new Error('EXECUTION_INVALID_PREVIOUS_WORKSPACE')
-    workspace.cwd = previousCwd
-    workspace.defaultOutputRoot = previousCwd
+    if (!validCodingCwd(previousCwd, workspace.sessionRoot)) throw new Error('EXECUTION_INVALID_PREVIOUS_WORKSPACE')
+    if (resolvedWorkspace === undefined) {
+      workspace.cwd = previousCwd
+      workspace.defaultOutputRoot = previousCwd
+    }
   }
   const groupChat = object(command.extraPayload['groupChat'])
   const group: Record<string, string> = {}
@@ -70,6 +90,12 @@ export function prepareCodingContext(command: AskAgentCommand, target: Execution
     ...(Array.isArray(history) && history.length > 20 ? [`聊天历史已截断：仅保留最近 20 项，省略 ${history.length - 20} 项；完整背景按原历史文件读取。`] : []),
     '附件和会话中间文件沿用 sessionRoot；正式产物、项目源码写入 defaultOutputRoot。保留原目录和项目规则，最终答复引用实际存在的文件路径。',
     '如提供 groupHistoryPath，先读取该文件以理解来源群消息、附件和任务背景；路径可用不代表内容已经读入。云盘/知识库按已有 Skill 按需读取，不预下载。',
+    ...(workspace.repositoryIssue === undefined ? [] : ['约定目录中的仓库不完整或缺少可读的根 AGENTS.md，本轮保留原默认目录供普通聊天。若用户要开发该模板，先说明初始化异常并请求修复；不要在外层另写一套模板源码。']),
+    ...(workspace.repository === undefined ? [] : [
+      `当前项目仓库及 Codex 启动目录是 ${workspace.repository}，根目录 AGENTS.md 是项目开发说明。群聊和关联私聊直接使用此仓库，不复制源码。`,
+      '完成开发后检查差异、执行适当测试并提交本任务改动，不提交凭据或不属于本任务的修改。汇报修改、实际验证结果和真实 commit ID；未提交或测试失败须如实说明。准备回群成果时只填正文，sourcePaths 必须为空，仍等待用户确认发布。',
+      '仅在用户要求部署时部署：先确认目标提交和服务器，检查 git status --porcelain（含未跟踪文件）为空，再从当前已提交版本构建发布；脏工作区先处理本任务修改并测试提交，不部署未提交源码。部署使用已有 server-deploy Skill，不创建另一份开发源码。',
+    ]),
     JSON.stringify({ identity, workspace, groupChat: group, groupTask: inbound.groupCoordination }),
     byClawInboundTurnContextDeclaration(inbound),
     JSON.stringify({ recentHistory: recent }),
@@ -101,8 +127,40 @@ export async function codingPreviousCwd(lease: { sandbox: ExecutionSandbox; acto
   if (result.exitCode !== 0) throw new Error('EXECUTION_SESSION_SCOPE_MISMATCH')
   const cwd: unknown = JSON.parse(result.stdout)
   if (cwd === null) return undefined
-  if (typeof cwd !== 'string' || (cwd !== session && !/^\/by\/\.shared\/project_-?\d+$/u.test(cwd))) throw new Error('EXECUTION_INVALID_PREVIOUS_WORKSPACE')
+  if (typeof cwd !== 'string' || !validCodingCwd(cwd, session, lease.workspaceRoot)) throw new Error('EXECUTION_INVALID_PREVIOUS_WORKSPACE')
   return cwd
+}
+
+/** Resolve and pin a repository only on the actual coding lease's mounted filesystem. */
+export async function resolveCodingWorkspace(lease: Parameters<typeof codingPreviousCwd>[0], workspace: CodingContext['workspace'],
+  repoDir: string, previousCwd?: string): Promise<CodingContext['workspace']> {
+  codingRepoDirectory(repoDir)
+  const request = { workspace, repoDir, previousCwd }
+  const result = await lease.sandbox.execute(lease.actor, lease.leaseId,
+    ['python3', '-c', CODING_WORKSPACE_RUNNER, '--resolve', JSON.stringify(request), lease.workspaceRoot], lease.workspaceRoot, lease.signal)
+  if (result.exitCode !== 0) {
+    const label = /(?:^|\n)(EXECUTION_[A-Z_]+)(?:\r?\n|$)/u.exec(result.stderr)?.[1]
+    throw new Error(label ?? 'EXECUTION_WORKSPACE_RESOLUTION_FAILED')
+  }
+  const selected = JSON.parse(result.stdout) as CodingContext['workspace']
+  const space = workspace.cwd === workspace.sessionRoot || posix.dirname(workspace.cwd) === workspace.sharedRoot
+    ? workspace.cwd : posix.dirname(workspace.cwd)
+  if (selected.sessionRoot !== workspace.sessionRoot || selected.sharedRoot !== workspace.sharedRoot
+    || (selected.cwd !== space && posix.dirname(selected.cwd) !== space)
+    || !validCodingCwd(selected.cwd, workspace.sessionRoot, lease.workspaceRoot) || selected.defaultOutputRoot !== selected.cwd
+    || (selected.repositoryIssue !== undefined && (selected.repositoryIssue !== 'EXECUTION_REPOSITORY_INVALID' || selected.repository !== undefined))
+    || (selected.repository !== undefined && selected.repository !== selected.cwd)) throw new Error('EXECUTION_UNSAFE_WORKSPACE')
+  return selected
+}
+
+export async function codingRepositoryState(sandbox: ExecutionSandbox, actor: string, leaseId: string, path: string,
+  workspaceRoot: string, signal: AbortSignal): Promise<{ revision: string; dirty: boolean }> {
+  const result = await sandbox.execute(actor, leaseId, ['python3', '-c', CODING_WORKSPACE_RUNNER, '--revision', path, workspaceRoot], workspaceRoot, signal)
+  if (result.exitCode !== 0) throw new Error('EXECUTION_REPOSITORY_INVALID')
+  const state = object(JSON.parse(result.stdout))
+  if (!state || typeof state.revision !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(state.revision)
+    || typeof state.dirty !== 'boolean') throw new Error('EXECUTION_REPOSITORY_INVALID')
+  return { revision: state.revision, dirty: state.dirty }
 }
 
 export function codingRunManifest(prepared: CodingContext, identity: string, messageId: string): Record<string, unknown> {
