@@ -14,8 +14,10 @@ COPY middleware/byclaw-harness/scripts/install-codex.py /tmp/install-codex.py
 RUN set -eu; \
     bash /tmp/configure-cn-sources.sh; \
     apt-get -o APT::Update::Error-Mode=any update; \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nginx openssh-client; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nginx openssh-client openjdk-21-jdk-headless maven; \
     rm -rf /var/lib/apt/lists/*; \
+    # Java builds live here, not in the general sandbox; Maven uses the domestic mirror configured above.
+    java -version; mvn --version >/dev/null; test -f /etc/byclaw-tool-sandbox/maven-settings.xml; \
     python3 /tmp/install-codex.py --release /tmp/codex.release.json --prefix /opt/byclaw/codex; \
     ln -s /opt/byclaw/codex/bin/codex /usr/local/bin/codex; \
     install -d /usr/local/share/byclaw-tool-sandbox; \
