@@ -1,0 +1,16 @@
+﻿#CheckStyle工具检查路径例外配置
+#格式说明：支持ant通配符，多个路径用逗号区分，请使用英文字符的逗号“,”
+#ant通配符说明：**匹配0或者更多的目录，*匹配0或者任意数量的字符，? 匹配任何单字符 
+ 
+#EXCLUDE节点配置例外规则,INCLUDE节点配置需检查的文件列表
+#EXCLUDE节点和INCLUDE节点不能同时存在于配置文件中，请根据实际需要选取一种方式配置
+#若同时配置了EXCLUDE和INCLUDE节点，只取EXCLUDE节点内容生效
+ 
+#路径说明：请基于流程节点属性配置表中的code.path属性值来配置代码检查路径，请根据实际配置调整
+
+#[INCLUDE]
+#[EXCLUDE]
+#code/**/src/main/**/*.*
+
+[INCLUDE]
+[EXCLUDE]
