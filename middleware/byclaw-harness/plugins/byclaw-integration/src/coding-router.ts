@@ -44,13 +44,16 @@ export interface ExecutionDiagnostic {
   employeeId: string
   executionType: ExecutionType
   templateKey: string
-  stage: 'queue' | 'sandbox' | 'exec' | 'first_stdout' | 'first_activity' | 'cleanup' | 'request' | 'stderr'
+  stage: 'queue' | 'sandbox' | 'exec' | 'first_stdout' | 'first_activity' | 'cleanup' | 'request' | 'stderr' | 'native_error'
   status: 'start' | 'waiting' | 'success' | 'error'
   elapsedMs: number
   totalElapsedMs: number
   exitCode?: number | null
   reason?: string
   diagnostic?: CodingDiagnosticSummary
+  nativeDiagnostic?: CodingDiagnosticSummary
+  stderrDiagnostic?: CodingDiagnosticSummary
+  nativeErrorType?: 'error' | 'turn.failed'
   native?: CodexEventSnapshot & { stdoutBytes: number }
 }
 export interface ExecutionRouterEnvironment {
@@ -175,13 +178,15 @@ export class ByClawExecutionRouter {
         if (!forwardingError) await this.options.emit(command, context, routed)
       }).catch(error => { forwardingError = error; control.abort(new Error('EXECUTION_EVENT_FORWARDING_FAILED')) })
     }
-    const log = (stage: ExecutionDiagnostic['stage'], status: ExecutionDiagnostic['status'], startedAt: number, extra: Pick<ExecutionDiagnostic, 'exitCode' | 'reason' | 'diagnostic'> = {}) => {
+    const log = (stage: ExecutionDiagnostic['stage'], status: ExecutionDiagnostic['status'], startedAt: number, extra: Pick<ExecutionDiagnostic, 'exitCode' | 'reason' | 'diagnostic' | 'stderrDiagnostic' | 'nativeErrorType'> = {}) => {
       const now = performance.now()
       // Only allowlisted fields reach the logger. No prompt, argv, stdout, stderr or Error object.
       try { this.options.log?.({ sessionId: String(command.header.sessionId), messageId: String(command.header.messageId),
         traceId: context.traceId, employeeId: target.resourceId, executionType, templateKey: definition.templateKey,
         stage, status, elapsedMs: Math.round(now - startedAt), totalElapsedMs: Math.round(now - queuedAt),
-        ...(['exec', 'request', 'stderr'].includes(stage) ? { native: { ...parser.snapshot(), stdoutBytes } } : {}), ...extra }) } catch { /* Logging cannot break a task. */ }
+        ...(['exec', 'request', 'stderr', 'native_error'].includes(stage)
+          ? { native: { ...parser.snapshot(), stdoutBytes }, ...(parser.diagnostic === undefined ? {} : { nativeDiagnostic: parser.diagnostic }) } : {}),
+        ...extra }) } catch { /* Logging cannot break a task. */ }
     }
     let stage: { id: 'sandbox' | 'exec' | 'cleanup'; title: string; startedAt: number } | undefined
     let heartbeat: ReturnType<typeof setInterval> | undefined
@@ -202,7 +207,7 @@ export class ByClawExecutionRouter {
       }, this.options.progressIntervalMs ?? 10_000)
       heartbeat.unref()
     }
-    const endStage = (phase: 'success' | 'error', reason?: string, extra: Pick<ExecutionDiagnostic, 'exitCode' | 'diagnostic'> = {}) => {
+    const endStage = (phase: 'success' | 'error', reason?: string, extra: Pick<ExecutionDiagnostic, 'exitCode' | 'diagnostic' | 'stderrDiagnostic'> = {}) => {
       if (heartbeat) clearInterval(heartbeat)
       if (!stage) return
       updateStage(phase, reason); log(stage.id, phase, stage.startedAt, { ...extra, ...(reason === undefined ? {} : { reason }) })
@@ -229,11 +234,11 @@ export class ByClawExecutionRouter {
           if (!forwardingError) await this.options.emitFileChanges?.(command, context, payload, workspace)
         }).catch(error => { forwardingError = error; control.abort(new Error('EXECUTION_EVENT_FORWARDING_FAILED')) })
       }
-    })
+    }, nativeErrorType => log('native_error', 'error', executionStarted, { nativeErrorType }))
     let sandbox: ExecutionSandbox | undefined
     let result: ExecutionResult | undefined
     let failure: Error | undefined
-    let processOutcome: Pick<ExecutionDiagnostic, 'exitCode' | 'diagnostic'> = {}
+    let processOutcome: Pick<ExecutionDiagnostic, 'exitCode' | 'diagnostic' | 'stderrDiagnostic'> = {}
     const failureCode = () => forwardingError ? 'EXECUTION_EVENT_FORWARDING_FAILED'
       : signal.aborted ? (control.signal.aborted ? 'EXECUTION_CANCELLED' : 'EXECUTION_TIMEOUT') : 'EXECUTION_FAILED'
     log('queue', 'success', queuedAt)
@@ -261,9 +266,14 @@ export class ByClawExecutionRouter {
         if (!firstStdout && chunk) { firstStdout = true; log('first_stdout', 'success', executionStarted) }
         parser.write(chunk)
       })
-      const diagnostic = summarizeCodingDiagnostic(processResult.stderr) ?? parser.diagnostic
-      processOutcome = { exitCode: processResult.exitCode, ...(diagnostic === undefined ? {} : { diagnostic }) }
-      if (diagnostic) log('stderr', 'success', executionStarted, { diagnostic, exitCode: processResult.exitCode })
+      const stderrDiagnostic = summarizeCodingDiagnostic(processResult.stderr)
+      // Keep both sources. Prefer a classified native error over unrelated stderr warnings.
+      const diagnostic = parser.diagnostic && parser.diagnostic.category !== 'unknown' ? parser.diagnostic
+        : stderrDiagnostic && stderrDiagnostic.category !== 'unknown' ? stderrDiagnostic
+        : parser.diagnostic ?? stderrDiagnostic
+      processOutcome = { exitCode: processResult.exitCode, ...(diagnostic === undefined ? {} : { diagnostic }),
+        ...(stderrDiagnostic === undefined ? {} : { stderrDiagnostic }) }
+      if (stderrDiagnostic) log('stderr', 'success', executionStarted, { diagnostic: stderrDiagnostic, stderrDiagnostic, exitCode: processResult.exitCode })
       signal.throwIfAborted()
       if (processResult.exitCode !== 0) {
         const reason = /(?:^|\n)((?:EXECUTION|CODEX)_[A-Z_]{1,80})(?:\r?\n|$)/u.exec(processResult.stderr)?.[1]
@@ -320,7 +330,7 @@ export class ByClawExecutionRouter {
         ...(diagnostic === undefined ? {} : { diagnostic }) })
       throw failure
     }
-    log('request', 'success', queuedAt)
+    log('request', 'success', queuedAt, processOutcome)
     return result!
   }
 
