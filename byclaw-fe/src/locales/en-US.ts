@@ -4171,6 +4171,8 @@ export default {
   'linkShare.createLink': 'Create Link',
   'linkShare.createLinkSuccess': 'Link created successfully, link copied to clipboard',
   'linkShare.createLinkFailed': 'Failed to create link',
+  'linkShare.pleaseEnterCustomDays': 'Please enter custom days',
+  'linkShare.customDaysRange': 'Custom days range is 1-365 days',
 
   'memory.enhanceMemory': 'Enhance Task',
   'memory.enhanceMemoryTask': 'Memory Tasks',

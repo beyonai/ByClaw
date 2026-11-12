@@ -4022,6 +4022,8 @@ export default {
   'linkShare.createLink': '创建链接',
   'linkShare.createLinkSuccess': '创建链接成功,链接已复制到剪贴板',
   'linkShare.createLinkFailed': '创建链接失败',
+  'linkShare.pleaseEnterCustomDays': '请输入自定义天数',
+  'linkShare.customDaysRange': '自定义天数范围为 1-365 天',
 
   'memory.enhanceMemory': '固化任务',
   'memory.enhanceMemoryTask': '固化记忆的任务',
