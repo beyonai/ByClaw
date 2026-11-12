@@ -80,6 +80,11 @@ export default defineConfig({
       changeOrigin: false,
       ws: true,
     },
+    '/byaiService/voice/stream': {
+      target,
+      changeOrigin: false,
+      ws: true,
+    },
     [`${routerBase}byaiService/ws`]: {
       target: wsTarget,
       changeOrigin: true,

@@ -1,3 +1,4 @@
+import { webcrypto } from 'node:crypto';
 import { message } from 'antd';
 import { act, renderHook } from '@testing-library/react';
 import useDictation from './useDictation';
@@ -8,9 +9,10 @@ const mockStopTrack = jest.fn();
 const mockCloseRecorder = jest.fn();
 let mockSendChunk: (bytes: Uint8Array) => void;
 
-jest.mock('@/pages/manager/service/session', () => ({
-  getDcSystemConfig: (...args: unknown[]) => mockGetConfig(...args),
+jest.mock('@/service/common/request', () => ({
+  POST: (...args: unknown[]) => mockGetConfig(...args),
 }));
+jest.mock('@/utils/auth', () => ({ getToken: () => 'browser-token' }));
 jest.mock('@/utils/encrypt/sm', () => ({ decryptBySM: (value: string) => value.replace('encoded-', '') }));
 jest.mock('@umijs/max', () => ({ useIntl: () => require('@/testUtils/localeIntl').getLocaleIntl('zh-CN') }));
 jest.mock('recorder-core', () => ({
@@ -41,38 +43,45 @@ class TestSocket {
     this.onmessage?.({ data: JSON.stringify(message) });
   }
 
-  result(text: string, id: number, type = '0') {
+  result(text: string, sn: number, status = 1, replacement?: [number, number]) {
     this.emit({
-      action: 'result',
-      code: '0',
-      data: JSON.stringify({
-        seg_id: id,
-        cn: { st: { type, rt: [{ ws: [{ cw: [{ w: text }] }] }] } },
-      }),
+      header: { code: 0, status },
+      payload: {
+        result: {
+          text: btoa(
+            JSON.stringify({
+              sn,
+              ws: [{ cw: [{ w: text }] }],
+              ...(replacement ? { pgs: 'rpl', rg: replacement } : {}),
+            })
+          ),
+        },
+      },
     });
+  }
+
+  receive(data: ArrayBuffer) {
+    (this.onmessage as ((event: { data: ArrayBuffer }) => void) | undefined)?.({ data });
   }
 }
 
 const realWebSocket = window.WebSocket;
+const originalSubtle = Object.getOwnPropertyDescriptor(window.crypto, 'subtle');
 
 beforeEach(() => {
   jest.clearAllMocks();
+  Object.defineProperty(window.crypto, 'subtle', { configurable: true, value: webcrypto.subtle });
   jest.useFakeTimers();
   window.WebSocket = TestSocket as unknown as typeof WebSocket;
   TestSocket.last = undefined;
   mockGetConfig.mockResolvedValue({
     paramValue: JSON.stringify({
-      services: {
-        realtimeTranscription: {
-          protocol: 'rtasr-standard-v1',
-          appIdEncrypted: 'encoded-app',
-          credentials: { apiKeyEncrypted: 'encoded-key' },
-          endpoints: { stream: 'wss://rtasr.xfyun.cn/v1/ws' },
-        },
-      },
+      type: 'xunfei-spark-asr-v2',
+      appIdEncrypted: 'encoded-app',
+      credentials: { apiKeyEncrypted: 'encoded-key', apiSecretEncrypted: 'encoded-secret' },
     }),
   });
-  mockGetUserMedia.mockResolvedValue({
+  mockGetUserMedia.mockReset().mockResolvedValue({
     getTracks: () => [{ stop: mockStopTrack, addEventListener: jest.fn() }],
   });
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: mockGetUserMedia } });
@@ -81,91 +90,82 @@ beforeEach(() => {
 afterEach(() => {
   jest.useRealTimers();
   window.WebSocket = realWebSocket;
+  if (originalSubtle) Object.defineProperty(window.crypto, 'subtle', originalSubtle);
+  else Reflect.deleteProperty(window.crypto, 'subtle');
 });
 
-it('uses the IAT handshake and inserts the final segment when speech dictation is configured', async () => {
+it('streams Spark V2 frames and applies dynamic replacement before inserting the final result', async () => {
+  const insert = jest.fn();
+  const { result } = renderHook(() => useDictation(() => insert));
+  await act(async () => result.current.start());
+  expect(mockGetConfig).toHaveBeenCalledWith(
+    '/byaiService/system/staticdata/getDcSystemConfig',
+    { paramCode: 'VOICE_STREAM_SERVICE_CONFIG' },
+    { responseCfg: { hideErrorTips: true } }
+  );
+  const socket = TestSocket.last!;
+  const url = new URL(socket.url);
+  expect(url.origin + url.pathname).toBe('wss://iat.cn-huabei-1.xf-yun.com/v1');
+  expect(atob(url.searchParams.get('authorization')!)).toContain('api_key="key"');
+  act(() => {
+    socket.onopen?.();
+    mockSendChunk(new Uint8Array(1282));
+    socket.result('draft', 1);
+    socket.result('corrected', 2, 1, [1, 1]);
+    result.current.stop();
+    jest.advanceTimersByTime(90);
+    socket.result(' result', 3, 2);
+  });
+  const frames = socket.send.mock.calls.map(([frame]) => JSON.parse(frame));
+  expect(frames[0]).toMatchObject({
+    header: { app_id: 'app', status: 0 },
+    parameter: { iat: { domain: 'spark_asr_v2', dwa: 'wpgs' } },
+  });
+  expect(frames.map((frame) => frame.payload.audio.seq)).toEqual([1, 2, 3]);
+  expect(frames.map((frame) => atob(frame.payload.audio.audio).length)).toEqual([1280, 2, 0]);
+  expect(insert.mock.calls).toEqual([
+    ['draft', true],
+    ['corrected', true],
+    ['corrected result', true],
+    ['corrected result'],
+  ]);
+});
+
+it('uses the authenticated same-origin relay for Volcengine binary frames and final snapshots', async () => {
   mockGetConfig.mockResolvedValueOnce({
     paramValue: JSON.stringify({
-      services: {
-        speechDictation: {
-          protocol: 'iat-v2',
-          appIdEncrypted: 'encoded-app',
-          credentials: { apiKeyEncrypted: 'encoded-key', apiSecretEncrypted: 'encoded-secret' },
-          endpoints: { stream: 'wss://iat-api.xfyun.cn/v2/iat' },
-        },
-      },
+      type: 'volcengine-streaming-asr-v2',
+      resourceId: 'volc.seedasr.sauc.duration',
+      credentials: { apiKeyEncrypted: 'never-send-this' },
     }),
   });
   const insert = jest.fn();
   const { result } = renderHook(() => useDictation(() => insert));
   await act(async () => result.current.start());
   const socket = TestSocket.last!;
-  const url = new URL(socket.url);
-  expect(url.origin + url.pathname).toBe('wss://iat-api.xfyun.cn/v2/iat');
-  expect(atob(url.searchParams.get('authorization')!)).toContain('api_key="key"');
-  act(() => {
-    socket.onopen?.();
-    mockSendChunk(new Uint8Array(1280));
-    socket.emit({ code: 0, data: { status: 1, result: { sn: 1, pgs: 'apd', ws: [{ cw: [{ w: '上嗨' }] }] } } });
-  });
-  expect(insert).toHaveBeenLastCalledWith('上嗨', true);
-  act(() => {
-    socket.emit({
-      code: 0,
-      data: { status: 1, result: { sn: 2, pgs: 'rpl', rg: [1, 1], ws: [{ cw: [{ w: '上海' }] }] } },
-    });
-  });
-  expect(insert).toHaveBeenLastCalledWith('上海', true);
-  act(() => {
-    socket.emit({ code: 0, data: { status: 2, result: { sn: 3, pgs: 'apd', ws: [{ cw: [{ w: '天气' }] }] } } });
-  });
-  expect(JSON.parse(socket.send.mock.calls[0][0])).toMatchObject({
-    common: { app_id: 'app' },
-    business: { dwa: 'wpgs' },
-  });
-  expect(insert).toHaveBeenLastCalledWith('上海天气');
-});
-
-it('loads the managed config and inserts final RTASR results only after the server closes', async () => {
-  const insert = jest.fn();
-  jest.setSystemTime(1512041814000);
-  const { result } = renderHook(() => useDictation(() => insert));
-  expect(mockGetConfig).not.toHaveBeenCalled();
-  await act(async () => result.current.start());
-  expect(mockGetConfig).toHaveBeenCalledWith(
-    { paramCode: 'XUNFEI_SERVICE_CONFIG' },
-    { responseCfg: { hideErrorTips: true } }
-  );
-  const socket = TestSocket.last!;
-  const url = new URL(socket.url);
-  expect(url.origin + url.pathname).toBe('wss://rtasr.xfyun.cn/v1/ws');
-  expect(Object.fromEntries(url.searchParams)).toEqual({
-    appid: 'app',
-    ts: '1512041814',
-    signa: '8lxwt22MNkgxbnjJ9CqC7oPoD1E=',
-  });
+  expect(new URL(socket.url).pathname).toBe('/byaiService/voice/stream');
+  expect(new URL(socket.url).search).toBe('');
   act(() => socket.onopen?.());
+  expect(JSON.parse(socket.send.mock.calls[0][0])).toEqual({ token: 'browser-token' });
   expect(result.current.status).toBe('voice.dictationConnecting');
+  function receive(flags: number, text: string) {
+    const body = new TextEncoder().encode(JSON.stringify({ result: { text } }));
+    const packet = new Uint8Array(8 + body.length);
+    packet.set([0x11, 0x90 | flags, 0x10, 0]);
+    new DataView(packet.buffer).setUint32(4, body.length);
+    packet.set(body, 8);
+    socket.receive(packet.buffer);
+  }
   act(() => {
-    socket.emit({ action: 'started', code: '0' });
-    mockSendChunk(new Uint8Array(1286));
-    socket.result('临时结果', 1, '1');
-    socket.result('你好', 1);
-    socket.result('你好', 1);
+    socket.emit({ ready: true });
+    mockSendChunk(new Uint8Array(6400));
+    receive(0, 'preview');
     result.current.stop();
+    jest.advanceTimersByTime(210);
+    receive(2, 'final');
   });
-  expect(mockStopTrack).toHaveBeenCalledTimes(1);
-  expect(insert.mock.calls).toEqual([['你好', true]]);
-  expect(socket.send.mock.calls[0][0]).toBeInstanceOf(Uint8Array);
-  expect(socket.send.mock.calls[0][0]).toHaveLength(1280);
-  act(() => jest.advanceTimersByTime(80));
-  expect(socket.send.mock.calls[1][0]).toHaveLength(6);
-  expect(String.fromCharCode(...socket.send.mock.calls[2][0])).toBe('{"end":true}');
-  act(() => {
-    socket.result('世界', 2);
-    socket.onclose?.({ wasClean: true });
-  });
-  expect(insert.mock.calls).toEqual([['你好', true], ['你好世界', true], ['你好世界']]);
+  expect(socket.send.mock.calls.slice(1).map(([frame]) => new Uint8Array(frame)[1])).toEqual([0x20, 0x22]);
+  expect(insert.mock.calls).toEqual([['preview', true], ['final', true], ['final']]);
 });
 
 it('keeps visible dictation text when the controls are closed', async () => {
@@ -175,11 +175,10 @@ it('keeps visible dictation text when the controls are closed', async () => {
   const socket = TestSocket.last!;
   act(() => {
     socket.onopen?.();
-    socket.emit({ action: 'started', code: '0' });
-    socket.result('已经识别的文字', 1);
+    socket.result('visible', 1);
     result.current.close();
   });
-  expect(insert.mock.calls).toEqual([['已经识别的文字', true], ['已经识别的文字']]);
+  expect(insert.mock.calls).toEqual([['visible', true], ['visible']]);
   expect(result.current.active).toBe(false);
   expect(socket.close).toHaveBeenCalledTimes(1);
 });
@@ -189,7 +188,7 @@ it('ignores a result from the old dictation after its input is unmounted', async
   const { result, unmount } = renderHook(() => useDictation(() => insert));
   await act(async () => result.current.start());
   const socket = TestSocket.last!;
-  act(() => socket.emit({ action: 'started', code: '0' }));
+  act(() => socket.onopen?.());
   const receive = socket.onmessage;
   unmount();
   receive?.({ data: JSON.stringify({ action: 'started', code: '0' }) });
@@ -217,12 +216,16 @@ it('shows configuration loading and microphone permission separately, and reads 
       })
   );
   const { result } = renderHook(() => useDictation());
+  let start: Promise<void>;
   act(() => {
-    void result.current.start();
+    start = result.current.start();
   });
   expect(result.current.status).toBe('voice.dictationLoadingConfig');
   expect(mockGetUserMedia).not.toHaveBeenCalled();
-  await act(async () => resolveConfig(config));
+  await act(async () => {
+    resolveConfig(config);
+    await start;
+  });
   expect(result.current.status).toBe('voice.microphoneWaiting');
   act(() => result.current.cancel());
   await act(async () => grantPermission({ getTracks: () => [{ stop: mockStopTrack }] }));
@@ -233,25 +236,10 @@ it('shows configuration loading and microphone permission separately, and reads 
 });
 
 it.each([
-  ['raw provider detail', /鉴权.*10105/],
-  ['illegal access|no appid info', /未找到该应用.*10105/],
-  ['illegal access|illegal client_ip: 192.0.2.1', /IP 未通过.*10105/],
-])('reports provider authorization details without exposing the raw response', async (desc, hint) => {
-  const error = jest.spyOn(message, 'error').mockImplementation(jest.fn());
-  try {
-    const { result } = renderHook(() => useDictation());
-    await act(async () => result.current.start());
-    act(() => TestSocket.last!.emit({ action: 'error', code: '10105', desc }));
-    expect(error).toHaveBeenCalledWith(expect.stringMatching(hint));
-    expect(error).not.toHaveBeenCalledWith(expect.stringContaining(desc));
-  } finally {
-    error.mockRestore();
-  }
-});
-
-it.each([
-  [undefined, /尚未配置讯飞转写/],
-  ['{broken', /讯飞转写配置有误/],
+  [undefined, /尚未配置语音转写/],
+  ['{broken', /语音转写配置有误/],
+  ['{"type":"xunfei-iat-v2"}', /语音转写配置有误/],
+  ['{"type":"volcengine-streaming-asr-v2","resourceId":"volc.bigasr.sauc.duration"}', /语音转写配置有误/],
 ])('distinguishes absent and invalid managed settings', async (paramValue, hint) => {
   const error = jest.spyOn(message, 'error').mockImplementation(jest.fn());
   try {
@@ -271,7 +259,7 @@ it('reports a handshake timeout as a connection problem', async () => {
     const { result } = renderHook(() => useDictation());
     await act(async () => result.current.start());
     act(() => jest.advanceTimersByTime(10000));
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('等待讯飞连接确认超时'));
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('等待转写连接确认超时'));
   } finally {
     error.mockRestore();
   }

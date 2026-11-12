@@ -358,17 +358,18 @@ export default {
   'voice.dictationConfigTimeout': 'Loading dictation settings timed out. Try again.',
   'voice.dictationConfigFetchFailed': 'Could not load dictation settings. Try again.',
   'voice.dictationConfigMissing':
-    'Xunfei dictation is not configured. Ask your administrator to set XUNFEI_SERVICE_CONFIG.',
+    'Dictation is not configured. Ask your administrator to set VOICE_STREAM_SERVICE_CONFIG.',
   'voice.dictationConfigInvalid':
-    'Invalid Xunfei settings. Ask your administrator to check the format, encrypted credentials, and service URL.',
+    'Invalid dictation settings. Ask your administrator to check the format, encrypted credentials, and resource ID.',
   'voice.dictationConnectionTimeout':
-    'Xunfei did not confirm the connection in time. Check your network and try again.',
-  'voice.dictationConnectionFailed': 'Could not connect to Xunfei. Check your network or contact your administrator.',
-  'voice.dictationDisconnected': 'The Xunfei connection was interrupted. Check your network and try again.',
-  'voice.dictationResultInterrupted': 'Xunfei disconnected before returning the complete transcript.',
-  'voice.dictationResultTimeout': 'Timed out waiting for the final Xunfei transcript.',
-  'voice.dictationAudioSendFailed': 'Could not send audio to Xunfei. Check your network and try again.',
-  'voice.dictationInvalidResponse': 'Xunfei returned an unreadable response. Try again.',
+    'The speech service did not confirm the connection in time. Check your network and try again.',
+  'voice.dictationConnectionFailed':
+    'Could not connect to the speech service. Check your network or contact your administrator.',
+  'voice.dictationDisconnected': 'The speech service connection was interrupted. Check your network and try again.',
+  'voice.dictationResultInterrupted': 'The speech service disconnected before returning the complete transcript.',
+  'voice.dictationResultTimeout': 'Timed out waiting for the final transcript.',
+  'voice.dictationAudioSendFailed': 'Could not send audio to the speech service. Check your network and try again.',
+  'voice.dictationInvalidResponse': 'The speech service returned an unreadable response. Try again.',
   'voice.dictationAuthFailed':
     'Xunfei authentication failed. Ask your administrator to check the credentials and IP allowlist ({code}).',
   'voice.dictationAppNotFound':
