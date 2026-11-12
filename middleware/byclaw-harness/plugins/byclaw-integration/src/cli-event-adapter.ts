@@ -109,10 +109,11 @@ export class CodexEventAdapter {
       this.failed = true
     }
     if (event.type === 'error' || event.type === 'turn.failed') {
-      const message = event.type === 'error' ? event.message : record(event.error)?.message
-      this.diagnostic = summarizeCodingDiagnostic(typeof message === 'string' ? message : '')
+      const error = record(event.error)
+      const message = event.type === 'error' ? event.message ?? error?.message : error?.message
+      this.diagnostic = summarizeCodingDiagnostic(typeof message === 'string' ? message : '', event.code ?? error?.code)
         ?? { category: 'unknown', retryMessages: 0 }
-      // Log only classified metadata, including errors with no message. Never affect execution.
+      // Preserve sanitized error evidence immediately, including code-only errors. Never affect execution.
       try { this.onDiagnostic(event.type, { ...this.diagnostic }) } catch { /* Diagnostic sinks cannot fail a turn. */ }
     }
     // A recoverable transport error can be followed by a successful completed turn.

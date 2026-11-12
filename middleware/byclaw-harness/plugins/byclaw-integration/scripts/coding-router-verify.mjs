@@ -335,11 +335,14 @@ test('native error diagnostics are reported immediately for every error without 
   assert.equal(diagnostics[0].diagnostic.category, 'network')
   assert.equal(diagnostics[0].diagnostic.httpStatus, 502)
   assert.equal(diagnostics[0].snapshot.eventCount, 1)
-  adapter.write(jsonl({ type: 'error' }, { type: 'turn.failed', error: { message: 'HTTP 429 private-body' } }))
+  adapter.write(jsonl({ type: 'error' }, { type: 'turn.failed', error: { code: 'rate_limit_exceeded', message: 'HTTP 429 quota exhausted; token=private-body' } }))
   assert.deepEqual(diagnostics.map(x => x.eventType), ['error', 'error', 'turn.failed'])
   assert.equal(diagnostics[1].diagnostic.category, 'unknown')
   assert.equal(diagnostics[2].diagnostic.category, 'rate_limit')
-  assert.ok(!/private-|Bearer|https:/u.test(JSON.stringify(diagnostics)))
+  assert.ok(!/private-|https:/u.test(JSON.stringify(diagnostics)))
+  assert.ok(diagnostics[0].diagnostic.message.includes('Reconnecting HTTP 502'))
+  assert.equal(diagnostics[2].diagnostic.errorCode, 'rate_limit_exceeded')
+  assert.ok(diagnostics[2].diagnostic.message.includes('quota exhausted'))
   assert.deepEqual(publicEvents, [], 'diagnostics must not become model reasoning or tool output')
   assert.throws(() => adapter.finish(1), /CODEX_EXIT_FAILED/)
 })
@@ -413,7 +416,8 @@ test('diagnostics identify queue, allocation, first output, execution and cleanu
   for (const stage of ['queue', 'sandbox', 'first_stdout', 'first_activity', 'exec', 'cleanup', 'request']) assert.ok(f.logs.some(entry => entry.stage === stage), stage)
   assert.equal(f.logs.find(entry => entry.stage === 'stderr').diagnostic.category, 'network')
   assert.ok(f.logs.every(entry => entry.sessionId === 's1' && entry.messageId === 'm1' && entry.traceId === 'trace' && Number.isFinite(entry.elapsedMs)))
-  assert.ok(!/private-task-text|private-value|Bearer|Reconnecting/u.test(JSON.stringify(f.logs)))
+  assert.ok(!/private-task-text|private-value/u.test(JSON.stringify(f.logs)))
+  assert.ok(f.logs.find(entry => entry.stage === 'stderr').diagnostic.message.includes('Reconnecting'))
 })
 
 test('successful output waits for cleanup and failed cleanup cannot become a successful answer', async () => {
@@ -495,7 +499,7 @@ test('native snapshots distinguish silence, tools, terminal answer and completio
 
 test('failed native lifecycle logs retain the last event without inventing a final answer', async () => {
   const f = fixture({ execute: async ({ onStdout }) => {
-    onStdout(jsonl({ type: 'turn.started' }, { type: 'turn.failed', error: { message: 'HTTP 503 private-provider-body' } }))
+    onStdout(jsonl({ type: 'turn.started' }, { type: 'turn.failed', error: { message: 'HTTP 503 upstream overloaded; token=private-provider-body' } }))
     return { exitCode: 1, stdout: '', stderr: '' }
   } })
   await assert.rejects(f.run(), /EXECUTION_FAILED/)
@@ -520,4 +524,18 @@ test('unphased legacy messages remain candidates until a completed turn confirms
   parser.write(jsonl({ type: 'turn.completed' }))
   assert.equal(parser.snapshot().finalAnswerSeen, true)
   assert.equal(parser.finish(0), 'legacy final')
+})
+
+
+test('native diagnostics retain code-only errors and nested recoverable error evidence', () => {
+  const diagnostics = []
+  const adapter = new CodexEventAdapter(undefined, undefined, undefined, (_type, diagnostic) => diagnostics.push(diagnostic))
+  adapter.write(jsonl({ type: 'error', code: 'UPSTREAM_RESET' },
+    { type: 'error', error: { code: 'TLS_ERROR', message: 'certificate verify failed' } }))
+  assert.equal(diagnostics[0].errorCode, 'UPSTREAM_RESET')
+  assert.equal(diagnostics[0].message, undefined)
+  assert.equal(diagnostics[1].errorCode, 'TLS_ERROR')
+  assert.equal(diagnostics[1].message, 'certificate verify failed')
+  adapter.write(completed('完成'))
+  assert.equal(adapter.finish(0), '完成')
 })

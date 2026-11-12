@@ -38,10 +38,10 @@ test('public text and final answers redact complete and truncated SSH private ke
 test('native errors are logged before process completion and remain visible during silence', { timeout: 3000 }, async () => {
   const release = Promise.withResolvers(), waiting = Promise.withResolvers()
   const f = executionFixture(async onStdout => {
-    onStdout(jsonl({ type: 'error', message: 'Reconnecting HTTP 502 Bearer private-key https://private.example/path' }))
+    onStdout(jsonl({ type: 'error', code: 'UPSTREAM_STREAM_RESET', message: 'Reconnecting HTTP 502: stream disconnected before completion; Bearer private-key https://private.example/path' }))
     await release.promise
     onStdout(completed())
-    return { exitCode: 0, stdout: '', stderr: 'private unrelated warning' }
+    return { exitCode: 0, stdout: '', stderr: 'warning: CODEX_AUTH=private-warning' }
   }, entry => { if (entry.stage === 'exec' && entry.status === 'waiting' && entry.nativeDiagnostic) waiting.resolve() })
   const task = f.run()
   const waitingTimeout = setTimeout(() => waiting.reject(new Error('native diagnostic heartbeat missing')), 1500)
@@ -52,6 +52,8 @@ test('native errors are logged before process completion and remain visible duri
   assert.equal(immediate.native.turnCompleted, false)
   assert.equal(immediate.nativeDiagnostic.category, 'network')
   assert.equal(immediate.nativeDiagnostic.httpStatus, 502)
+  assert.equal(immediate.nativeDiagnostic.errorCode, 'UPSTREAM_STREAM_RESET')
+  assert.ok(immediate.nativeDiagnostic.message.includes('stream disconnected before completion'))
   assert.ok(f.logs.some(entry => entry.status === 'waiting' && entry.nativeDiagnostic?.category === 'network'))
   assert.ok(!f.logs.some(entry => entry.stage === 'request'), 'diagnostic is available before exit')
   release.resolve(); assert.equal((await task).finalAnswer, '完成')
@@ -59,16 +61,18 @@ test('native errors are logged before process completion and remain visible duri
   assert.equal(result.diagnostic.category, 'network', 'unknown stderr cannot mask the native error')
   assert.equal(result.stderrDiagnostic.category, 'unknown')
   assert.equal(result.nativeDiagnostic.category, 'network')
-  assert.ok(!/private|Bearer|https:/u.test(JSON.stringify(f.logs)))
+  assert.ok(!/private-key|private-warning|https:/u.test(JSON.stringify(f.logs)))
+  assert.equal(result.nativeDiagnostic.message, immediate.nativeDiagnostic.message)
+  assert.equal(result.nativeDiagnostic.errorCode, 'UPSTREAM_STREAM_RESET')
   assert.ok(!f.events.some(event => /Reconnecting|private/u.test(JSON.stringify(event))))
 })
 
 test('native and stderr diagnostics stay separate with deterministic useful-summary selection', async () => {
   for (const [native, stderr, expected] of [
-    ['HTTP 429 private-body', 'HTTP 503 private-warning', 'rate_limit'],
-    ['private unclassified error', 'HTTP 503 private-warning', 'provider'],
-    ['private unclassified error', 'private warning', 'unknown'],
-    [undefined, 'HTTP 401 private-warning', 'authentication'],
+    ['HTTP 429 quota exhausted; token=private-body', 'HTTP 503 token=private-warning', 'rate_limit'],
+    ['unclassified error; token=private-body', 'HTTP 503 token=private-warning', 'provider'],
+    ['unclassified error; token=private-body', 'warning token=private-warning', 'unknown'],
+    [undefined, 'HTTP 401 token=private-warning', 'authentication'],
     [undefined, '', undefined],
   ]) {
     const f = executionFixture(async onStdout => {
@@ -86,8 +90,8 @@ test('native and stderr diagnostics stay separate with deterministic useful-summ
 
 test('terminal native errors retain classified metadata without changing failure semantics', async () => {
   const f = executionFixture(async onStdout => {
-    onStdout(jsonl({ type: 'turn.failed', error: { message: 'HTTP 401 private-error' } }))
-    return { exitCode: 0, stdout: '', stderr: 'private unrelated warning' }
+    onStdout(jsonl({ type: 'turn.failed', error: { code: 'invalid_api_key', message: 'HTTP 401 invalid API key; token=private-error' } }))
+    return { exitCode: 0, stdout: '', stderr: 'warning: CODEX_AUTH=private-warning' }
   })
   await assert.rejects(f.run(), error => error.cause?.message === 'CODEX_TURN_FAILED')
   assert.equal(f.logs.find(entry => entry.stage === 'native_error').nativeErrorType, 'turn.failed')
@@ -95,6 +99,9 @@ test('terminal native errors retain classified metadata without changing failure
   assert.equal(result.status, 'error')
   assert.equal(result.nativeDiagnostic.category, 'authentication')
   assert.equal(result.diagnostic.category, 'authentication')
+  assert.equal(result.nativeDiagnostic.errorCode, 'invalid_api_key')
+  assert.ok(result.nativeDiagnostic.message.includes('invalid API key'))
+  assert.ok(!JSON.stringify(f.logs).includes('private-error'))
   assert.equal(result.stderrDiagnostic.category, 'unknown')
 })
 

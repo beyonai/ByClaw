@@ -20,11 +20,22 @@ export interface CodingDiagnosticSummary {
   category: 'authentication' | 'rate_limit' | 'network' | 'provider' | 'unknown'
   httpStatus?: number
   retryMessages: number
+  message?: string
+  messageTruncated?: boolean
+  errorCode?: string
 }
 
-/** Classify text in memory; messages/URLs/headers/credentials never leave this function. */
-export function summarizeCodingDiagnostic(text: string): CodingDiagnosticSummary | undefined {
-  if (!text.trim()) return undefined
+/** Keep bounded error evidence, excluding credentials, headers and endpoint URLs. */
+export function summarizeCodingDiagnostic(text: string, code?: unknown): CodingDiagnosticSummary | undefined {
+  const errorCode = (typeof code === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/u.test(code) && codingPublicText(code) === code)
+    || (typeof code === 'number' && Number.isSafeInteger(code)) ? String(code) : undefined
+  if (!text.trim() && errorCode === undefined) return undefined
+  // Redact before truncating so a partial key/header cannot escape sanitization.
+  const sanitized = codingPublicText(text
+    .replace(/\b(?:authorization|proxy-authorization|cookie|set-cookie)\s*[:=]\s*[^\r\n]*/giu, '[REDACTED HEADER]')
+    .replace(/\b(?:Bearer|Basic)\s+[^\s"'`,;]+/giu, '[REDACTED CREDENTIAL]')
+    .replace(/\b(?:https?|wss?|ssh):\/\/[^\s<>"'`]+/giu, '[REDACTED URL]'), Number.MAX_SAFE_INTEGER)
+  const message = sanitized.slice(0, 2048)
   const sample = text.slice(-32 * 1024)
   const status = /(?:HTTP(?:\/\d(?:\.\d)?)?\s*|status(?:\s+code)?[\s:=]+)([45]\d{2})\b/iu.exec(sample)?.[1]
   const httpStatus = status === undefined ? undefined : Number(status)
@@ -33,5 +44,8 @@ export function summarizeCodingDiagnostic(text: string): CodingDiagnosticSummary
     : httpStatus === 429 || /rate.?limit|too many requests/iu.test(sample) ? 'rate_limit'
     : /reconnect|retry|timed?\s*out|timeout|ECONN|ENOTFOUND|connection|network|stream disconnected/iu.test(sample) ? 'network'
     : httpStatus !== undefined && httpStatus >= 500 ? 'provider' : 'unknown'
-  return { category, ...(httpStatus === undefined ? {} : { httpStatus }), retryMessages: [...sample.matchAll(/\b(?:reconnecting|retrying|retry)\b/giu)].length }
+  return { category, ...(httpStatus === undefined ? {} : { httpStatus }),
+    retryMessages: [...sample.matchAll(/\b(?:reconnecting|retrying|retry)\b/giu)].length,
+    ...(message ? { message, ...(sanitized.length > message.length ? { messageTruncated: true } : {}) } : {}),
+    ...(errorCode === undefined ? {} : { errorCode }) }
 }
