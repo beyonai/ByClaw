@@ -24,7 +24,17 @@ docker build -f middleware/byclaw-harness/Dockerfile.tools.browser --build-arg H
   --build-arg TOOLS_IMAGE=byclaw-harness-tools:<tag>_base_slim -t byclaw-harness-tools:<tag>_browser .
 ```
 
-When A changes, rebuild the family from it: A refuses a B whose SSH helper differs from its own. Verify the already-built local image from the repository root with the following command. Set `IMAGE` to the image to inspect, preferably by its tested immutable digest.
+Every parent image has an internal Harbor default (`192.168.0.81:8080`: A is `byclaw/byclaw-harness:D0.6.0_slim`, the runtime is `library/python:3.12-slim-trixie`, and each layer's parent is the previous `byclaw-harness-tools:D0.6.0_<layer>` tag), so on the internal network the family builds in order with no build arguments:
+
+```bash
+for layer in base-slim:base_slim browser:browser general:general; do
+  docker build -f "middleware/byclaw-harness/Dockerfile.tools.${layer%%:*}" \
+    -t "192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_${layer##*:}" . &&
+  docker push "192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_${layer##*:}" || break
+done
+```
+
+Docker uses a parent tag already present locally; pushing keeps Harbor current for other build hosts. On an Alibaba Cloud build host, add `--build-arg BYCLAW_APT_MIRROR=http://mirrors.cloud.aliyuncs.com` for a faster Debian mirror. When A changes, rebuild the family from it: A refuses a B whose SSH helper differs from its own. Verify the already-built local image from the repository root with the following command. Set `IMAGE` to the image to inspect, preferably by its tested immutable digest.
 
 ```bash
 IMAGE='' # Required: the already-built local browser image or digest.

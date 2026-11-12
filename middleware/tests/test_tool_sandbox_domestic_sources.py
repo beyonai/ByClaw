@@ -64,7 +64,7 @@ class ToolSandboxDomesticSourcesTest(unittest.TestCase):
         for name, variable in expected.items():
             source = (HARNESS / name).read_text()
             defaults = re.findall(rf'(?m)^ARG {variable}=(\S+)$', source)
-            if name in {'Dockerfile', 'Dockerfile.extensions', 'Dockerfile.slim', 'Dockerfile.tools', 'Dockerfile.tool_slim', 'Dockerfile.tools.browser', 'Dockerfile.tools.media', 'Dockerfile.tools.unity', 'Dockerfile.tools.godot', 'Dockerfile.tools.general'}:
+            if name in {'Dockerfile', 'Dockerfile.extensions', 'Dockerfile.slim', 'Dockerfile.tools', 'Dockerfile.tool_slim', 'Dockerfile.tools.browser', 'Dockerfile.tools.media', 'Dockerfile.tools.unity', 'Dockerfile.tools.godot', 'Dockerfile.tools.general', 'Dockerfile.tools.base-slim'}:
                 self.assertEqual(len(defaults), 1, name)
                 self.assertTrue(defaults[0].startswith('192.168.0.81:8080/byclaw/'), name)
             else:
@@ -146,6 +146,16 @@ class ToolSandboxDomesticSourcesTest(unittest.TestCase):
         self.assertNotIn('COPY --from=transport /workspace/ /workspace/', source)
         ignore = (HARNESS / 'Dockerfile.tools.base-slim.dockerignore').read_text()
         self.assertIn('!middleware/byclaw-harness/plugins/dsh-tool-env/docker/collect-closure.sh', ignore)
+
+    def test_tool_family_builds_from_internal_harbor_without_arguments(self):
+        for name in ('Dockerfile.tools.base-slim', 'Dockerfile.tools.browser', 'Dockerfile.tools.general'):
+            source = (HARNESS / name).read_text()
+            for variable in re.findall(r'(?m)^FROM \$\{(\w+)\}', source):
+                defaults = re.findall(rf'(?m)^ARG {variable}=(\S+)$', source)
+                self.assertEqual(len(defaults), 1, f'{name}: {variable} needs a default')
+                self.assertTrue(defaults[0].startswith('192.168.0.81:8080/'), f'{name}: {variable}')
+        runtime = re.findall(r'(?m)^ARG RUNTIME_IMAGE=(\S+)$', (HARNESS / 'Dockerfile.tools.base-slim').read_text())
+        self.assertEqual(runtime, ['192.168.0.81:8080/library/python:3.12-slim-trixie'])
 
 
 if __name__ == '__main__':
