@@ -8,5 +8,8 @@
 !middleware/byclaw-harness/plugins/dsh-tool-env/scripts/
 !middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-env-sshd.sh
 !middleware/byclaw-harness/plugins/dsh-tool-env/scripts/ws-bridge.py
+!middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-base-entrypoint.py
+!middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-workload.sh
 !middleware/byclaw-harness/plugins/dsh-tool-env/docker/
 !middleware/byclaw-harness/plugins/dsh-tool-env/docker/trace-*.mjs
+!middleware/byclaw-harness/plugins/dsh-tool-env/docker/collect-closure.sh

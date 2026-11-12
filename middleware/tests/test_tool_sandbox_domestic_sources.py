@@ -76,8 +76,7 @@ class ToolSandboxDomesticSourcesTest(unittest.TestCase):
                     continue
                 image, stage = match.groups()
                 self.assertTrue(image == 'scratch' or image in stages or image == '${' + variable + '}'
-                                or (name == 'Dockerfile.tools.browser' and image == '${BROWSER_DONOR_IMAGE}')
-                                or (name == 'Dockerfile.tools.browser' and image == '${INSTALLED_BROWSER_IMAGE}')
+                                or (name == 'Dockerfile.tools.browser' and image == '${HARNESS_IMAGE}')
                                 or (name == 'Dockerfile.tools.base-slim' and image == '${RUNTIME_IMAGE}')
                                 or (name == 'Dockerfile.tools.unity' and image == '${UNITY_DONOR_IMAGE}'),
                                 f'{name}: implicit external image {image}')
@@ -117,6 +116,16 @@ class ToolSandboxDomesticSourcesTest(unittest.TestCase):
                       'HYPERFRAMES_FFMPEG_PATH=/usr/bin/ffmpeg',
                       'PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1'):
             self.assertIn(value, media)
+
+    def test_browser_layer_needs_only_base_slim_and_its_harness(self):
+        source = (HARNESS / 'Dockerfile.tools.browser').read_text()
+        self.assertEqual(re.findall(r'(?m)^FROM (\S+)', source), ['${HARNESS_IMAGE}', '${TOOLS_IMAGE}'])
+        for donor in ('BROWSER_DONOR_IMAGE', 'INSTALLED_BROWSER_IMAGE'):
+            self.assertNotIn(donor, source)
+        self.assertIn('playwright-core/package.json', source)
+        self.assertIn('PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright', source)
+        self.assertIn('playwright install --with-deps chromium', source)
+        self.assertIn('"@sovovs/bycli@${BYCLI_VERSION}"', source)
 
 
 if __name__ == '__main__':

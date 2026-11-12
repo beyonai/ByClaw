@@ -218,6 +218,10 @@ ENV BYCLAW_BROWSER_EXECUTABLE_PATH=/usr/local/bin/byclaw-playwright-chromium \
 
 
 COPY --chmod=0755 middleware/byclaw-harness/scripts/tool-slim-entrypoint.sh /usr/local/bin/byclaw-tool-slim-entrypoint
+# SSH, the bridge and byCLI's browser run as independent services of the tool entrypoint.
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-base-entrypoint.py /usr/local/bin/byclaw-tool-base-entrypoint
+COPY --chmod=0755 middleware/byclaw-harness/plugins/dsh-tool-env/scripts/tool-workload.sh /usr/local/bin/byclaw-tool-workload
+COPY --chmod=0644 middleware/byclaw-harness/tool-sandbox/services.d/browser.json /etc/byclaw-tool-sandbox/services.d/browser.json
 # Existing BE/OpenSandbox specs explicitly invoke the legacy path with "tools".
 # Route that path to the B launcher too, so neither path bypasses byCLI supervision.
 RUN mv /usr/local/bin/byclaw-dsh-entrypoint /usr/local/bin/byclaw-dsh-full-entrypoint \

@@ -74,6 +74,8 @@ def stop(signum, _frame):
     raise SystemExit(0)
 signal.signal(signal.SIGTERM, stop)
 signal.signal(signal.SIGINT, stop)
+if os.environ.get("FAKE_BROWSER_MODE") == "exit23-alone":
+    raise SystemExit(23)
 if os.environ.get("FAKE_BROWSER_MODE") == "exit23":
     deadline = time.monotonic() + 3
     while not os.path.exists(os.environ["FAKE_DSH_RECORD"]):
@@ -305,6 +307,7 @@ def fixture(
     bycli_recovery_delay: float = 0,
     bycli_doctor_sequence: str = "ready",
     browser_profile: Path | None = None,
+    service: bool = False,
 ):
     browser = directory / "fake-browserd.py"
     dsh = directory / "fake-dsh.py"
@@ -385,7 +388,10 @@ def fixture(
         ])
     if prepare:
         command.extend(["--prepare-command", str(prepare_command)])
-    command.extend(["--", str(dsh), "web", "--port", "8080", "--no-open"])
+    if service:
+        command.append("--browser-service")
+    else:
+        command.extend(["--", str(dsh), "web", "--port", "8080", "--no-open"])
     return command, env, socket_path, browser_record, dsh_record
 
 
@@ -1028,6 +1034,46 @@ def run_lazy_secret_file(root: Path) -> None:
     assert len(secret_file.read_text()) >= 32
 
 
+def run_browser_service_on_demand(root: Path) -> None:
+    command, env, path, browser_record, dsh_record = fixture(root, service=True)
+    env["BYCLAW_BROWSER_STARTUP"] = "on-demand"
+    process = subprocess.Popen(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 3
+        while not path.exists():
+            assert process.poll() is None, process.communicate()
+            assert time.monotonic() < deadline, "service never listened for activation"
+            time.sleep(0.02)
+        time.sleep(0.3)
+        assert process.poll() is None, "a waiting browser service must keep running"
+        assert not browser_record.exists(), "browser started before the first browser request"
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(3)
+            client.connect(str(path))
+        wait_for(browser_record, process)
+        assert not dsh_record.exists(), "a browser service starts no main command"
+    finally:
+        process.terminate()
+        process.communicate(timeout=5)
+    assert process.returncode == 128 + signal.SIGTERM, process.returncode
+    assert not path.exists()
+
+
+def run_browser_service_browser_exit(root: Path) -> None:
+    command, env, _socket, browser_record, dsh_record = fixture(root, browser_mode="exit23-alone", service=True)
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    # A failed browser ends only this process; the tool entrypoint restarts it.
+    assert result.returncode != 0 and "browserd-exited:23" in result.stderr, result
+    assert not dsh_record.exists()
+
+
+def run_browser_service_rejects_command(root: Path) -> None:
+    command, env, *_ = fixture(root, service=True)
+    command.extend(["--", "true"])
+    result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == 2 and "--browser-service runs no command" in result.stderr, result
+
+
 def run_lazy_unused_exit(root: Path) -> None:
     profile = root / "unused-profile"
     command, env, path, browser_record, _ = fixture(
@@ -1072,6 +1118,9 @@ def main() -> None:
         for name, check in [
             ("versioned-extension-path", run_versioned_extension_path),
             ("lazy-activation", run_lazy_activation),
+            ("browser-service-on-demand", run_browser_service_on_demand),
+            ("browser-service-browser-exit", run_browser_service_browser_exit),
+            ("browser-service-rejects-command", run_browser_service_rejects_command),
             ("lazy-extension-verification-failure", run_lazy_extension_verification_failure),
             ("lazy-unused-exit", run_lazy_unused_exit),
             ("lazy-port-activation", run_lazy_port_activation),

@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { ToolEnvIdentity } from '../src/identity.ts'
-import { ToolEnvConnection, launchEnvironment, scrubEnvironment } from '../src/connection.ts'
+import { ToolEnvConnection, WORKLOAD_WRAPPER, asWorkload, launchEnvironment, scrubEnvironment } from '../src/connection.ts'
 import { DeferredToolEnvironmentWork } from '../src/deferred-work.ts'
 import { resolveLocalExecutable } from '../src/local-executable.ts'
 import { answerWhileDown, isCleanupRequest } from '../src/pending-directories.ts'
@@ -76,8 +76,9 @@ describe('scrubEnvironment', () => {
       launchEnv: { BYCLAW_DEPLOY_ENABLED: '1', BYCLAW_DEPLOY_PRIVATE_KEY: secret, USER_CODE: 'alice' },
     }, backend, new ToolEnvIdentity('/unused'))
     const seen: Array<{ argv: string[]; env: Record<string, string> }> = []
-    const transport = { connection: { request: async (_method: string, input: typeof seen[number]) => {
-      seen.push(input); return null
+    const transport = { connection: { request: async (method: string, input: typeof seen[number]) => {
+      if (method === 'process.prepare') seen.push(input)
+      return null
     } } }
     const use = vi.spyOn(connection as unknown as { use: (callback: (value: typeof transport) => unknown) => Promise<unknown> }, 'use')
       .mockImplementation(async callback => callback(transport))
@@ -137,6 +138,55 @@ describe('scrubEnvironment', () => {
     expect(scrubEnvironment(params)).toBe(params)
     expect(scrubEnvironment(undefined)).toBeUndefined()
     expect(scrubEnvironment({ env: undefined })).toEqual({ env: undefined })
+  })
+})
+
+describe('workload wrapper', () => {
+  function harness(stat: (call: number) => unknown) {
+    const ctx = new Context()
+    const backend = { ensure: vi.fn(async () => { throw new Error('no network') }), pause: vi.fn(async () => {}) }
+    const connection = new ToolEnvConnection(ctx, { ssh: {} as never,
+      ptcLaunch: { kind: 'node-script', executable: 'node', bootstrapPath: '/unused' }, idleMs: 0,
+    }, backend, new ToolEnvIdentity('/unused'))
+    const calls: Array<{ method: string; params: { argv?: string[]; target?: { targetKey: string } } }> = []
+    let stats = 0
+    const transport = { connection: { request: async (method: string, params: (typeof calls)[number]['params']) => {
+      calls.push({ method, params })
+      if (method === 'fs.stat') return stat(++stats)
+      return null
+    } } }
+    vi.spyOn(connection as unknown as { use: (callback: (value: typeof transport) => unknown) => Promise<unknown> }, 'use')
+      .mockImplementation(async callback => callback(transport))
+    return { ctx, connection, calls, prepared: () => calls.filter(call => call.method === 'process.prepare').map(call => call.params.argv) }
+  }
+
+  it('runs every command through the wrapper on a B that has it, asking once per connection', async () => {
+    const { ctx, connection, calls, prepared } = harness(() => ({ type: 'file' }))
+    try {
+      await connection.request('process.prepare', { argv: ['bash', '-lc', 'echo hi'] }, {} as never)
+      await connection.request('process.prepare', { argv: ['node', 'process.js'] }, {} as never)
+      await connection.request('fs.readText', { target: { targetKey: '/by/a', displayPath: 'a' } }, {} as never)
+      expect(prepared()).toEqual([[WORKLOAD_WRAPPER, 'bash', '-lc', 'echo hi'], [WORKLOAD_WRAPPER, 'node', 'process.js']])
+      expect(calls.filter(call => call.method === 'fs.stat').map(call => call.params.target?.targetKey)).toEqual([WORKLOAD_WRAPPER])
+      expect(calls.find(call => call.method === 'fs.readText')?.params).toEqual({ target: { targetKey: '/by/a', displayPath: 'a' } })
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('leaves commands unchanged on an older B, or when the probe fails', async () => {
+    for (const stat of [() => null, () => { throw new Error('helper refused') }]) {
+      const { ctx, connection, prepared } = harness(stat)
+      try {
+        await connection.request('process.prepare', { argv: ['bash'] }, {} as never)
+        expect(prepared()).toEqual([['bash']])
+      } finally { await ctx.fiber.dispose() }
+    }
+  })
+
+  it('wraps a command once and leaves malformed requests alone', () => {
+    expect(asWorkload({ argv: ['sh'], cwd: '/by' })).toEqual({ argv: [WORKLOAD_WRAPPER, 'sh'], cwd: '/by' })
+    const wrapped = { argv: [WORKLOAD_WRAPPER, 'sh'] }
+    expect(asWorkload(wrapped)).toBe(wrapped)
+    for (const params of [null, 'x', { argv: [] }, { env: {} }]) expect(asWorkload(params)).toBe(params)
   })
 })
 
