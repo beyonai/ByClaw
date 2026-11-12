@@ -259,11 +259,39 @@ export class ManagedUserRegistry {
   }
   handleProcessError(error, origin) {
     const entry = this.scope.getStore()
-    if (!entry) { this.log(origin, String(error)); return }
+    let diagnostic
+    try { diagnostic = processErrorDiagnostic(error, origin) }
+    catch { diagnostic = { origin: 'unknown', causes: [] } }
+    // Keep the initiating failure before remove() can replace it with a busy error.
+    if (!entry || !entry.processFailure) {
+      if (entry) entry.processFailure = diagnostic
+      try { this.log(`context.process_error ${JSON.stringify({ hostId: this.hostId,
+        ...(entry ? { contextKey: entry.user, ...fence(entry.request), alreadyDraining: entry.draining === true } : {}),
+        ...diagnostic })}`) } catch { /* Diagnostics must not change draining behavior. */ }
+    }
+    if (!entry) return
     // Unknown failures cannot establish quiescence. Fence and stop admission.
     entry.draining = true
     void this.remove(entry.user, entry.request).catch(error => this.log(String(error)))
     return entry.user
   }
   async disposeAll() { this.closing = true; await Promise.allSettled([...this.entries.values()].map(e => this.remove(e.user, e.request))) }
+}
+
+/** Allowlisted metadata only: errors may contain prompts, credentials or provider bodies. */
+function processErrorDiagnostic(error, origin) {
+  const causes = []
+  const seen = new Set()
+  for (let current = error; current && typeof current === 'object' && !seen.has(current) && causes.length < 3; current = current.cause) {
+    seen.add(current)
+    const name = ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'AbortError', 'AggregateError'].includes(current.name) ? current.name : 'Error'
+    const code = typeof current.code === 'string' && /^(?:E[A-Z0-9]{2,30}|ERR_[A-Z0-9_]{1,48}|(?:EXECUTION|CODEX|SANDBOX)_[A-Z_]{1,48})$/.test(current.code) ? current.code : undefined
+    // Retain code locations, never the first stack line or arbitrary error text.
+    const frames = typeof current.stack === 'string' ? current.stack.split('\n').slice(1)
+      .map(line => /^\s+at .*[/\\]([A-Za-z0-9_.-]+\.(?:mjs|cjs|js|ts)):(\d+):(\d+)\)?$/.exec(line))
+      .filter(Boolean).slice(0, 8).map(match => ({ file: match[1], line: Number(match[2]), column: Number(match[3]) })) : []
+    const reason = typeof current.message === 'string' && /^(?:EXECUTION|CODEX|SANDBOX)_[A-Z_]{1,48}$/.test(current.message) ? current.message : undefined
+    causes.push({ name, ...(code ? { code } : {}), ...(reason ? { reason } : {}), frames })
+  }
+  return { origin: ['unhandledRejection', 'uncaughtException'].includes(origin) ? origin : 'unknown', causes }
 }

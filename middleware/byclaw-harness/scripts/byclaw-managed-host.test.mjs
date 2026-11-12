@@ -361,3 +361,45 @@ for (const version of [3, 4]) test(`personal NAS binding uses the same persisten
   assert.throws(() => validateStorageBinding(a, { ...binding, parentSpaceKey: 'd'.repeat(64) }))
   assert.throws(() => validateStorageBinding(a, { ...binding, home: `${binding.home}/../other` }))
 })
+
+
+test('managed process errors retain the first safe diagnostic before busy cleanup', async t => {
+  const logs = []
+  const r = await registry(t, { log: (...parts) => logs.push(parts.join(' ')),
+    boot: async () => ({ activity: () => ({ activeRequests: 1, busy: true }), stopAdmission: async () => {} }) })
+  await r.ensure('tenant-a', request())
+  const original = Object.assign(new TypeError('private-prompt Bearer private-token'), { code: 'ECONNRESET',
+    cause: Object.assign(new Error('private-provider-body'), { code: 'ETIMEDOUT' }) })
+  original.stack = 'TypeError: private-prompt\n    at execute (file:///opt/byclaw/coding-router.ts:12:3)'
+  r.scope.run(r.get('tenant-a'), () => r.handleProcessError(original, 'unhandledRejection'))
+  await r.serial
+  await new Promise(resolve => setImmediate(resolve))
+  r.scope.run(r.get('tenant-a'), () => r.handleProcessError(new Error('secondary-private-error'), 'uncaughtException'))
+  await r.serial
+  await new Promise(resolve => setImmediate(resolve))
+  const records = logs.filter(line => line.startsWith('context.process_error '))
+  assert.equal(records.length, 1)
+  const diagnostic = JSON.parse(records[0].slice('context.process_error '.length))
+  assert.equal(diagnostic.contextKey, 'tenant-a')
+  assert.equal(diagnostic.mappingId, mappingId)
+  assert.equal(diagnostic.origin, 'unhandledRejection')
+  assert.deepEqual(diagnostic.causes.map(cause => cause.code), ['ECONNRESET', 'ETIMEDOUT'])
+  assert.deepEqual(diagnostic.causes[0].frames, [{ file: 'coding-router.ts', line: 12, column: 3 }])
+  assert.equal(r.get('tenant-a').draining, true)
+  assert.ok(!JSON.stringify(records).match(/private-|Bearer|file:\/\/|\/opt\//))
+  assert.ok(logs.some(line => line.includes('context is busy; draining')))
+})
+
+test('diagnostic failures cannot prevent managed context draining', async t => {
+  const r = await registry(t, { log: () => {},
+    boot: async () => ({ activity: () => ({ activeRequests: 1, busy: true }), stopAdmission: async () => {} }) })
+  await r.ensure('tenant-a', request())
+  // Let the cleanup log succeed after the initiating diagnostic logger fails.
+  let calls = 0
+  r.log = () => { if (++calls === 1) throw new Error('logger unavailable') }
+  const error = Object.defineProperty({}, 'name', { get() { throw new Error('unsafe getter') } })
+  r.scope.run(r.get('tenant-a'), () => r.handleProcessError(error, 'unhandledRejection'))
+  await r.serial
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(r.get('tenant-a').draining, true)
+})
