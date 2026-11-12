@@ -1,0 +1,20 @@
+# Repository-root build context: image inputs only; no credentials or user data.
+**
+!middleware/
+!middleware/builtin/
+!middleware/builtin/**
+!middleware/byclaw-harness/
+!middleware/byclaw-harness/tool-sandbox/
+!middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh
+!middleware/byclaw-harness/tool-sandbox/general.capabilities.json
+!middleware/byclaw-harness/vendor/
+!middleware/byclaw-harness/vendor/content-creation/
+!middleware/byclaw-harness/vendor/content-creation/**
+!middleware/byclaw-harness/scripts/
+!middleware/byclaw-harness/scripts/install-search-runtime.sh
+!middleware/byclaw-harness/scripts/searxng-cli-constraints.txt
+!middleware/byclaw-harness/scripts/searxng-cli/
+!middleware/byclaw-harness/scripts/searxng-cli/**
+**/node_modules
+**/__pycache__
+**/*.pyc
