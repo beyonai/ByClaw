@@ -1,0 +1,18 @@
+{
+  "name": "browser",
+  "command": [
+    "/usr/local/bin/byclaw-browser-supervisor",
+    "--browser-user", "byclaw",
+    "--dsh-user", "root",
+    "--socket-path", "/run/byclaw-browser/browserd.sock",
+    "--secret-file", "/run/byclaw-browser/broker.secret",
+    "--readiness-timeout", "60",
+    "--activation-port", "19825",
+    "--browser-service"
+  ],
+  "user": "root",
+  "group": "work",
+  "oomScoreAdj": 500,
+  "restart": "always",
+  "skipIfEnv": { "BYCLAW_BYCLI_ENABLED": ["false", "0"] }
+}

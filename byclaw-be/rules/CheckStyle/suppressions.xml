@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suppressions PUBLIC "-//Puppy Crawl//DTD Suppressions 1.1//EN" "http://www.puppycrawl.com/dtds/suppressions_1_1.dtd">
+<suppressions>
+<!-- BSS -->
+  <!-- DEV1 -->
+	<!-- BC一次性算费中使用到的python相关 -->
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\bizcommon\\fc\\rating\\ratingcall\\ratingengine\\common\\python"/>
+  <!-- BC历史遗留代码，之前放在流程中屏蔽，现在放到例外文件中 -->
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\product\\price\\bll\\PricePlanManager.java"/>
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\product\\price\\servlet\\PricePlanExportServlet.java"/>
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\profile\\cdr\\bll\\Eval.java"/>
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\profile\\cust\\bs\\FileOperationManager.java"/>
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\res\\dao\\abstractimpl\\AccNbrExDAO.java"/>
+
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\bizcommon\\rating\\common\\python\\PythonEvent.java"/>
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\bizcommon\\rating\\common\\python\\PythonCall.java"/>
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\bizcommon\\rating\\common\\python\\IPythonEvent.java"/>
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\bizcommon\\rating\\common\\python\\EventAttr.java"/>
+  <!-- VIETICS使用到的python相关 -->
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\vietics\\common\\rating\\PythonEventVietics.java"/>
+  <!-- PRM使用到的python相关 -->
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\prm\\rating\\domain\\event\\JythonEvent.java"/>
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\prm\\rating\\domain\\event\\EventAttr.java"/>
+	<!-- BL欠费规则，话单查询，文件托收相关，类或者方法超长，有项目使用不易修改 -->
+  <suppress checks="FileLength|MethodLength" files="\\com\\ztesoft\\zsmart\\bss\\billing\\common\\dao\\abstractimpl\\AccountQueryDAO.java"/>
+  <suppress checks="FileLength|NestedIfDepth" files="\\com\\ztesoft\\zsmart\\bss\\billing\\common\\bll\\AccountQuery.java"/>
+  <suppress checks="FileLength|MethodLength" files="\\com\\ztesoft\\zsmart\\bss\\billing\\common\\bll\\ARFileDealMgr.java"/>
+  <suppress checks="FileLength" files="\\com\\ztesoft\\zsmart\\bss\\billing\\setup\\bll\\DebitManagerRule.java"/>
+  <suppress checks="FileLength" files="\\com\\ztesoft\\zsmart\\bss\\billing\\collection\\bll\\DebitManagerEngine.java"/>
+  <suppress checks="FileLength" files="\\com\\ztesoft\\zsmart\\bss\\billing\\chrg\\bll\\BillingFlowMonitor.java"/>
+  <!-- FBF 类或者方法超长，不易修改 -->
+  <suppress checks="FileLength|MethodLength" files="\\com\\ztesoft\\zsmart\\bfm\\dao\\impl\\EntityMetadataFactory.java"/>
+  <suppress checks="FileLength" files="\\com\\ztesoft\\zsmart\\bfm\dao\\impl\\ProductDaoTemplate.java"/>
+  <suppress checks="FileLength|MethodLength" files="\\com\\ztesoft\\zsmart\\bfm\\dao\\impl\\SimpleDaoTemplate.java"/>
+  <suppress checks="MethodName" files="\\com\\ztesoft\\zsmart\\bfm\\el\\ELInput.java"/>
+  <suppress checks="MethodName" files="\\com\\ztesoft\\zsmart\\bfm\\el\\ElFunctions.java"/>
+  <suppress checks="FileLength" files="\\com\\ztesoft\\zsmart\\bfm\\rule\\dao\\oracleimpl\\RuleDataDAOOracle.java"/>
+  <suppress checks="FileLength" files="\\com\\ztesoft\\zsmart\\bfm\\rule\\services\\RuleDataService.java"/>
+  <suppress checks="PackageName" files="\\com\\ztesoft\\zsmart\\bfm\\sessionMonitor\\SessionMonitorService.java"/>
+  <suppress checks="FileLength" files="\\com\\ztesoft\\zsmart\\bss\\busiorder\\dao\\abstractimpl\\WfWorkOrderDAO.java"/>
+  <suppress checks="FileLength|NestedIfDepth|NestedForDept" files="\\com\\ztesoft\\zsmart\\bss\\common\\config\\bll\\BusiConfigurationFactory.java"/>
+  <suppress checks="StaticVariableName" files="\\com\\ztesoft\\zsmart\\bss\\common\\export\\util\\DataFormatUtil.java"/>
+  <suppress checks="FileLength|MethodLength|NestedIfDepth" files="\\com\\ztesoft\\zsmart\\bss\\common\\utils\\BoUtil.java"/>
+  <suppress checks="FileLength" files="\\com\\ztesoft\\zsmart\\bss\\common\\utils\\BusiBaseDAO.java"/>
+  <suppress checks="FileLength" files="\\com\\ztesoft\\zsmart\\bfm\\dao\\impl\\ProductDaoTemplate.java"/>
+  <suppress checks="RegexpSinglelineJava" files="\\org\\aopalliance\\aop\\AspectException.java"/>
+  <suppress checks="MethodName" files="\\com\\ztesoft\\zsmart\\bfm\\pojorule\\util\\PojoELInput.java" />
+
+	<!-- DEV2 DEV5,在用的项目存在较多的形如“基类_事件”的类名，不易修改 -->  
+  <suppress checks="TypeName" files="\\profile\\lifecycle.*\\bll\\scanner\\.*_.*java" />
+
+  <!-- DEV2 -->
+  <!-- 已经在用的项目，命名空间被定义为大写了，无法再修改 -->
+  <suppress checks="PackageName" files="\\(irantamin|mneTelenor|portuZAPP|canadaPMI|mauriMTML|kenyaYu|vanuatuFT|haitiViettel)" />
+  <!-- report包属框架代码，很多商用版本调用，无法修改函数，变量，包等命名规范问题-->
+	<suppress checks="PackageName|TypeName|MethodName|MemberName|StaticVariableName" files="com\\ztesoft\\zsmart\\report\\.*\.java" />
+	<suppress checks="TypeName" files="\\com\\ztesoft\\zsmart\\bss\\contact\\dispatch\\mml\\services\\BuildMMLRetCode_Desc.java" />
+  <!-- 自服务项目的代码不需要检查 -->
+  <suppress checks="" files="\\customer_selfservice\\(Fiji|irantamin|Mongolia|myanmar)" />
+  <suppress checks="" files="\\(custselfservice_mauriMTML|mobileselfservice)" />
+
+  <!-- DEV4 -->
+  <!-- 定义静态变量与配置文件保持一致，不适用驼峰命名法 -->
+  <suppress checks="StaticVariableName" files="BillGenerateCfg\.java" />
+  <suppress checks="StaticVariableName" files="ReportJobConfig\.java" />
+  <!-- MainServlet.java customreport项目启动时调用，需要在控制台打印启动成功信息 -->
+  <suppress checks="RegexpSinglelineJava" files="\\customreport\\servlet\\MainServlet\.java" />
+  <!-- BaseBillCtrl.java report启动批量打印账单进程需要提示信息，需要在控制台打信息 -->
+  <suppress checks="RegexpSinglelineJava" files="BaseBillCtrl\.java" />
+  <suppress checks="RegexpSinglelineJava" files="\\report\\printqry\\bll\\BatchBillPrint\.java" />
+  <!-- 从三方jar包拷过来的，用来与ireport整合的，不好修改 -->
+  <suppress checks="ParameterNumber" files="\\report\\util" />
+
+  <!-- DEV5 -->
+  <!-- 已经在用的项目，命名空间被定义为大写了，无法再修改 -->
+  <suppress checks="PackageName" files="\\(Common|angolaMvl|sTel)" />
+
+  <!-- DEV10 -->
+  <suppress checks="TypeName" files="\\com\\ztesoft\\provisioning\\.*_Stub\.java" />
+  <suppress checks="TypeName" files="\\com\\ztesoft\\zsmart\\smc\\.+\\.*_.*\.java" />
+
+  <suppress checks="" files="\\com\\ztesoft\\provisioning\\protocols\\webservice" />
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\provisioning\\webPublic\\comverseIn" />
+
+  <!-- DEV13 -->
+  <!-- 调用flex工具线程不退出，暂时只能用System.exit(-1) -->
+  <suppress checks="RegexpSinglelineJava" files="\\DailyCIApp.java" />
+<!-- webservice -->
+	<!-- WebServices.java中不能识别自定义的异常[bss/ws/common/WebServiceException.java] -->
+	<suppress checks="RedundantThrows" files="\\com\\ztesoft\\zsmart\\bss\\ws\\.*\\WebServices.*.java" />
+	<suppress checks="RedundantThrows" files="\\com\\ztesoft\\zsmart\\bss\\ws\\.*\\ServiceSoap.*.java" />
+  <!-- portal下的ws -->
+  <suppress checks="" files="com\\publicmobile\\services" />
+  <!-- webservice客户端代码，不检查 -->
+  <suppress checks="" files="\\ws[Cc]lient" />
+  <suppress checks="" files="\\wsMelletClient" />
+  <suppress checks="" files="\\client[Dd]river" />
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\sfa\\common\\wsclient" />
+  <!-- 使用wsdl生成的代码-->
+  <suppress checks="MethodName" files="\\ocswebservices\\src\\com\\ztesoft\\ocsws\\services\\.*java" />
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\ws\\customization\\" />
+  
+  <!-- ebs项目 -->
+  <suppress checks="" files="(SendSMSSvcServiceStub|CSVAllTests|CsvReader|CsvWriter)\.java" />
+  <suppress checks="" files="ws\\oppstage\\sobject\\Opportunity\.java" />
+  <!-- v8 开通 -->
+  <suppress checks=""  files="com\\ztesoft\\zsmart\\provisioning\\core\\helpers\\CsvReader.java"/>
+	<suppress checks=""  files="com\\ztesoft\\zsmart\\provisioning\\core\\ipc\\transport\\rmi\\RmiBusiService_Stub.java"/>
+	<suppress checks=""  files="com\\ztesoft\\zsmart\\provisioning\\core\\monitor\\rmi\\RemoteMonitor_Stub.java"/>
+	<suppress checks="RegexpSinglelineJava"  files="com\\ztesoft\\zsmart\\provisioning\\core\\starter\\ServiceActiveRun.java"/>
+	<suppress checks="RegexpSinglelineJava"  files="com\\ztesoft\\zsmart\\provisioning\\core\\starter\\WorkFLowEngineRun.java"/>
+	<suppress checks=""  files="com\\ztesoft\\zsmart\\provisioning\\core\\northadapter\\StandardOrder_3rdParty.xml"/> 
+	<suppress checks=""  files="com\\ztesoft\\zsmart\\provisioning\\plugins\\sa\\dataaccesses\\support\\synchronalaccess\\SynchronalRequest_Stub.java"/>
+	<suppress checks="FileLength" files="\\com\\ztesoft\\zsmart\\bss\\cc\\abe\\order\\OrderItem.java"/>
+	<suppress checks="FileLength" files="\\com\\ztesoft\\zsmart\\bss\\res\\bll\\FileOperationAccNbrManager.java"/>
+	
+	<!-- PRM -->
+	<suppress checks="MethodName" files="\\com\\ztesoft\\zsmart\\bss\\prm\\rating\\price\\EventAttr.java"/>
+	<suppress checks="MethodName" files="\\com\\ztesoft\\zsmart\\bss\\prm\\rating\\price\\JythonEvent.java"/>
+
+	<!-- Base64 code-->
+  <suppress checks="" files="\\com\\ztesoft\\zsmart\\bss\\common\\helper\\Base64Kpn.java"/>
+  
+  <suppress checks="" files="\\spring\\EngineConfig.xml"/>
+  <suppress checks="" files="\\.*\\mapper\\.*.xml"/>
+  <suppress checks="" files="\\.*\\.*.drl"/>
+  <suppress checks="" files="\\log.*.xml"/>
+  
+  
+</suppressions>

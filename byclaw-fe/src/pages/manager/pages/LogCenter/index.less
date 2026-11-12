@@ -1,0 +1,128 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  height: 100%;
+  padding: 24px;
+  box-sizing: border-box;
+  overflow: auto;
+}
+
+.filterCard {
+  flex-shrink: 0;
+  border-radius: 10px;
+}
+
+.resultsCard {
+  flex-shrink: 0;
+}
+
+.tableViewport {
+  min-width: 0;
+}
+
+.filterHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.timeTrigger {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.secondaryFilters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 28px;
+  margin-bottom: 20px;
+}
+.instanceFilter,
+.levelFilter {
+  min-width: 0;
+}
+.paginationFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 20px;
+  flex-shrink: 0;
+  background: #fff;
+}
+.pageSizeSelect {
+  width: 120px;
+}
+.keywordRow {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+.queryActions {
+  flex-shrink: 0;
+}
+.keywordFilter {
+  flex: 1;
+  min-width: 0;
+}
+.searchIcon {
+  color: #bfbfbf;
+}
+.timePanel {
+  width: min(480px, calc(100vw - 48px));
+  padding: 8px;
+}
+.timePanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.timePresets {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  button {
+    width: 100%;
+  }
+}
+.customTime {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
+}
+.fullWidth {
+  width: 100%;
+}
+.timeConfirm {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+@media (max-width: 767px) {
+  .timeTrigger {
+    width: 100%;
+    height: auto;
+    min-height: 32px;
+    white-space: normal;
+  }
+  .keywordRow {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .secondaryFilters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .timePresets {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}

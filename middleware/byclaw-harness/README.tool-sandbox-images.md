@@ -15,7 +15,27 @@ GDScript is provided by Godot. There is no separate GDScript image or service.
 
 Use `192.168.0.81:8080/byclaw/byclaw-harness-tools:<tag>` for Dockerfile parent defaults and pin the tested digest for release builds. Keep exact donor-image digests, source SHA manifests, image/rootfs sizes, registry digests and validation logs with the release receipt. A changed canonical tag must not silently retarget an existing sandbox; validate a new template and update only the explicitly selected aliyun83 service configuration. Existing running instances retain their lifecycle.
 
-For a reviewed browser supervisor or viewer-asset correction, `Dockerfile.tools.browser --target browser-runtime-update` can reuse an already validated slim browser through an immutable `INSTALLED_BROWSER_IMAGE` digest. Both this target and the complete browser build copy the current noVNC page and its connection bridge directly from this repository, after inherited viewer assets. Verify the already-built local image from the repository root with the following command. Set `IMAGE` to the image to inspect, preferably by its tested immutable digest.
+The whole family is built from one Harness (A) image and no other image: `base-slim` collects the SSH helper closure from A, `browser` takes A's native browser runtime and installs the Playwright release that runtime pins (Chromium from the domestic mirror) plus byCLI and noVNC, and every purpose layer builds on `browser`. Build in that order, passing the same A by digest:
+
+```bash
+A='<the A image>@sha256:<digest>'
+docker build -f middleware/byclaw-harness/Dockerfile.tools.base-slim --build-arg TOOLS_IMAGE="$A" \
+  --build-arg RUNTIME_IMAGE='<Debian 13 Python runtime>@sha256:<digest>' -t byclaw-harness-tools:<tag>_base_slim .
+docker build -f middleware/byclaw-harness/Dockerfile.tools.browser --build-arg HARNESS_IMAGE="$A" \
+  --build-arg TOOLS_IMAGE=byclaw-harness-tools:<tag>_base_slim -t byclaw-harness-tools:<tag>_browser .
+```
+
+Every parent image has an internal Harbor default (`192.168.0.81:8080`: A is `byclaw/byclaw-harness:D0.6.0_slim`, the runtime is the public `python:3.12-slim-trixie`, and each layer's parent is the previous `byclaw-harness-tools:D0.6.0_<layer>` tag), so on the internal network the family builds in order with no build arguments:
+
+```bash
+for layer in base-slim:base_slim browser:browser general:general; do
+  docker build -f "middleware/byclaw-harness/Dockerfile.tools.${layer%%:*}" \
+    -t "192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_${layer##*:}" . &&
+  docker push "192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_${layer##*:}" || break
+done
+```
+
+Docker uses a parent tag already present locally; pushing keeps Harbor current for other build hosts. On an Alibaba Cloud build host, add `--build-arg BYCLAW_APT_MIRROR=http://mirrors.cloud.aliyuncs.com` for a faster Debian mirror. When A changes, rebuild the family from it: A refuses a B whose SSH helper differs from its own. Verify the already-built local image from the repository root with the following command. Set `IMAGE` to the image to inspect, preferably by its tested immutable digest.
 
 ```bash
 IMAGE='' # Required: the already-built local browser image or digest.

@@ -2,15 +2,21 @@
 set -euo pipefail
 
 # Keep dependency resolution on domestic mirrors, including later SSH sessions.
+# BYCLAW_APT_MIRROR selects another Debian mirror (for example the Alibaba Cloud
+# internal http://mirrors.cloud.aliyuncs.com on an ECS build host); it also replaces
+# the default mirror an earlier layer wrote.
+apt_mirror="${BYCLAW_APT_MIRROR:-https://mirrors.aliyun.com}"
+apt_mirror="${apt_mirror%/}"
 for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
   [ -f "$source" ] || continue
   sed -i \
-    -e 's|http://deb.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
-    -e 's|https://deb.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
-    -e 's|http://security.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
-    -e 's|https://security.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
-    -e 's|http://deb.debian.org/debian|https://mirrors.aliyun.com/debian|g' \
-    -e 's|https://deb.debian.org/debian|https://mirrors.aliyun.com/debian|g' "$source"
+    -e "s|http://deb.debian.org/debian-security|${apt_mirror}/debian-security|g" \
+    -e "s|https://deb.debian.org/debian-security|${apt_mirror}/debian-security|g" \
+    -e "s|http://security.debian.org/debian-security|${apt_mirror}/debian-security|g" \
+    -e "s|https://security.debian.org/debian-security|${apt_mirror}/debian-security|g" \
+    -e "s|http://deb.debian.org/debian|${apt_mirror}/debian|g" \
+    -e "s|https://deb.debian.org/debian|${apt_mirror}/debian|g" \
+    -e "s|https://mirrors.aliyun.com/debian|${apt_mirror}/debian|g" "$source"
 done
 printf '%s\n' '[global]' 'index-url = https://pypi.tuna.tsinghua.edu.cn/simple' > /etc/pip.conf
 npm config set registry https://registry.npmmirror.com --location=global

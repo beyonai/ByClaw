@@ -68,6 +68,32 @@ class ToolSandboxRuntimeSourcesTest(unittest.TestCase):
             self.assertIn('config set registry https://registry.npmmirror.com --location=global',
                           (root / 'npm.log').read_text())
 
+    def test_build_host_can_choose_another_debian_mirror(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            etc = root / 'etc'
+            (etc / 'apt/sources.list.d').mkdir(parents=True)
+            # An earlier layer already moved this source to the default mirror.
+            (etc / 'apt/sources.list.d/debian.sources').write_text(
+                'Types: deb\nURIs: https://mirrors.aliyun.com/debian\nSuites: trixie\n'
+                'Types: deb\nURIs: https://mirrors.aliyun.com/debian-security\nSuites: trixie-security\n')
+            (etc / 'apt/sources.list').write_text('deb http://deb.debian.org/debian trixie main\n')
+            executable_dir = root / 'bin'
+            executable_dir.mkdir()
+            (executable_dir / 'npm').write_text('#!/bin/sh\nexit 0\n')
+            (executable_dir / 'npm').chmod(0o755)
+            isolated = root / 'configure.sh'
+            isolated.write_text(SCRIPT.read_text().replace('/etc/', str(etc) + '/'))
+            environment = dict(os.environ, PATH=str(executable_dir) + os.pathsep + os.environ['PATH'],
+                               BYCLAW_APT_MIRROR='http://mirrors.cloud.aliyuncs.com/')
+            subprocess.run(['bash', str(isolated)], env=environment, check=True, capture_output=True)
+            sources = (etc / 'apt/sources.list.d/debian.sources').read_text() + (etc / 'apt/sources.list').read_text()
+            self.assertIn('URIs: http://mirrors.cloud.aliyuncs.com/debian\n', sources)
+            self.assertIn('URIs: http://mirrors.cloud.aliyuncs.com/debian-security\n', sources)
+            self.assertIn('deb http://mirrors.cloud.aliyuncs.com/debian trixie main', sources)
+            self.assertNotIn('mirrors.aliyun.com', sources)
+            self.assertNotIn('//debian', sources)
+
 
 if __name__ == '__main__':
     unittest.main()
