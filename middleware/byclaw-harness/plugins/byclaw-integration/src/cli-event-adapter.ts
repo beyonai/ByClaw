@@ -50,6 +50,7 @@ export class CodexEventAdapter {
     private readonly emit: (event: CodingEvent) => void = () => {},
     private readonly onActivity: () => void = () => {},
     private readonly onWorkspace: (event: Record<string, unknown>) => void = () => {},
+    private readonly onDiagnostic: (eventType: 'error' | 'turn.failed', diagnostic: CodingDiagnosticSummary) => void = () => {},
   ) {}
 
   /** Metadata for lifecycle logs; no model/tool text or arguments. */
@@ -106,12 +107,13 @@ export class CodexEventAdapter {
     }
     if (event.type === 'turn.failed') {
       this.failed = true
-      const error = record(event.error)
-      if (typeof error?.message === 'string') this.diagnostic = summarizeCodingDiagnostic(error.message)
     }
-    if (event.type === 'error' && typeof event.message === 'string') {
-      this.diagnostic = summarizeCodingDiagnostic(event.message)
-      // Do not display the provider's arbitrary error body or pretend it is model reasoning.
+    if (event.type === 'error' || event.type === 'turn.failed') {
+      const message = event.type === 'error' ? event.message : record(event.error)?.message
+      this.diagnostic = summarizeCodingDiagnostic(typeof message === 'string' ? message : '')
+        ?? { category: 'unknown', retryMessages: 0 }
+      // Log only classified metadata, including errors with no message. Never affect execution.
+      try { this.onDiagnostic(event.type, { ...this.diagnostic }) } catch { /* Diagnostic sinks cannot fail a turn. */ }
     }
     // A recoverable transport error can be followed by a successful completed turn.
     if (event.type === 'turn.completed') this.completed = true

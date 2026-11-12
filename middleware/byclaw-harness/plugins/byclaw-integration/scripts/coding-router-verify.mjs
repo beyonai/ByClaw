@@ -326,6 +326,33 @@ test('recoverable transport errors are classified without leaking diagnostics or
   assert.deepEqual(events, [])
 })
 
+test('native error diagnostics are reported immediately for every error without raw provider data', () => {
+  const diagnostics = [], publicEvents = []
+  const adapter = new CodexEventAdapter(event => publicEvents.push(event), undefined, undefined,
+    (eventType, diagnostic) => diagnostics.push({ eventType, diagnostic, snapshot: adapter.snapshot() }))
+  adapter.write(jsonl({ type: 'error', message: 'Reconnecting HTTP 502 Bearer private-value https://private.example/path' }))
+  assert.equal(diagnostics.length, 1, 'must not wait for process exit')
+  assert.equal(diagnostics[0].diagnostic.category, 'network')
+  assert.equal(diagnostics[0].diagnostic.httpStatus, 502)
+  assert.equal(diagnostics[0].snapshot.eventCount, 1)
+  adapter.write(jsonl({ type: 'error' }, { type: 'turn.failed', error: { message: 'HTTP 429 private-body' } }))
+  assert.deepEqual(diagnostics.map(x => x.eventType), ['error', 'error', 'turn.failed'])
+  assert.equal(diagnostics[1].diagnostic.category, 'unknown')
+  assert.equal(diagnostics[2].diagnostic.category, 'rate_limit')
+  assert.ok(!/private-|Bearer|https:/u.test(JSON.stringify(diagnostics)))
+  assert.deepEqual(publicEvents, [], 'diagnostics must not become model reasoning or tool output')
+  assert.throws(() => adapter.finish(1), /CODEX_EXIT_FAILED/)
+})
+
+test('a failing diagnostic sink cannot prevent recovery or change terminal failure handling', () => {
+  const adapter = new CodexEventAdapter(undefined, undefined, undefined, () => { throw new Error('logger unavailable') })
+  adapter.write(jsonl({ type: 'error', message: 'stream disconnected; retrying' }) + completed('恢复成功'))
+  assert.equal(adapter.finish(0), '恢复成功')
+  const failed = new CodexEventAdapter(undefined, undefined, undefined, () => { throw new Error('logger unavailable') })
+  failed.write(jsonl({ type: 'turn.failed' }))
+  assert.throws(() => failed.finish(0), /CODEX_TURN_FAILED/)
+})
+
 test('failed, cancelled or timed-out runs settle active CLI cards and never publish the candidate answer', async () => {
   for (const mode of ['cancel', 'timeout', 'failure']) {
     const started = Promise.withResolvers()
