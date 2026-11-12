@@ -1,5 +1,5 @@
 {
-  "image": "byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness:D0.6.0_coding",
+  "image": "byclaw-acr-registry-vpc.cn-beijing.cr.aliyuncs.com/byclaw/byclaw-harness:D0.7.0_coding",
   "startup": {
     "entrypoint": ["/usr/local/bin/byclaw-coding-entrypoint", "tools"]
   },
@@ -41,7 +41,7 @@
       "contract": "byclaw.tool-sandbox/v1",
       "purpose": "coding",
       "enabled": "true",
-      "description": "Codex 开发环境，支持内置应用模板和 Nginx 预览。先读 /etc/byclaw-tool-sandbox/APP_PREVIEW.md；用 sandbox-template 显式初始化项目，用 sandbox-app 返回预览链接。",
+      "description": "通用 Codex 开发环境，支持 Git、项目依赖安装和 Nginx 临时预览。源码来自用户工作空间；先读 /etc/byclaw-tool-sandbox/APP_PREVIEW.md，应用就绪后用 sandbox-app 获取链接。",
       "capabilities": "[\"process.exec\",\"filesystem\",\"browser.automation\"]"
     }
   }

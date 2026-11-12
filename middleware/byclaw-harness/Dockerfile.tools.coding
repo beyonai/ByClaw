@@ -1,6 +1,6 @@
 # Build from the ByClaw repository root. Codex only; keep browser/SSH transport.
-ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
-FROM ${BROWSER_IMAGE} AS coding-core
+ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_browser
+FROM ${BROWSER_IMAGE} AS tools-coding
 USER root
 ARG TARGETARCH
 RUN test "${TARGETARCH}" = amd64
@@ -14,7 +14,7 @@ COPY middleware/byclaw-harness/scripts/install-codex.py /tmp/install-codex.py
 RUN set -eu; \
     bash /tmp/configure-cn-sources.sh; \
     apt-get -o APT::Update::Error-Mode=any update; \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nginx openssh-client; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nginx openssh-client build-essential pkg-config python3-dev python3-venv ripgrep; \
     rm -rf /var/lib/apt/lists/*; \
     python3 /tmp/install-codex.py --release /tmp/codex.release.json --prefix /opt/byclaw/codex; \
     ln -s /opt/byclaw/codex/bin/codex /usr/local/bin/codex; \
@@ -47,14 +47,13 @@ RUN npm install --prefix /usr/local/lib/byclaw/agent-skills --registry=https://r
     && rm -rf /root/.npm
 COPY middleware/byclaw-harness/tool-sandbox/coding.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
 COPY --chmod=0755 middleware/byclaw-harness/scripts/sandbox-app.py /usr/local/bin/sandbox-app
-COPY --chmod=0755 middleware/byclaw-harness/scripts/sandbox-template.py /usr/local/bin/sandbox-template
 COPY --chmod=0755 middleware/byclaw-harness/scripts/coding-entrypoint.py /usr/local/bin/byclaw-coding-entrypoint
 COPY middleware/byclaw-harness/tool-sandbox/APP_PREVIEW.md /etc/byclaw-tool-sandbox/APP_PREVIEW.md
 RUN set -eu; \
     su -s /bin/sh byclaw -c 'codex --version'; \
     env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env; \
     chmod 0644 /etc/byclaw-tool-env.session-env
-RUN python3 -m py_compile /usr/local/bin/sandbox-app /usr/local/bin/sandbox-template /usr/local/bin/byclaw-coding-entrypoint /usr/local/bin/server-ssh \
+RUN python3 -m py_compile /usr/local/bin/sandbox-app /usr/local/bin/byclaw-coding-entrypoint /usr/local/bin/server-ssh \
     && ssh -V && command -v scp && server-ssh --help >/dev/null \
     && nginx -V \
     && ln -sfn /usr/local/bin/byclaw-coding-entrypoint /usr/local/bin/byclaw-dsh-entrypoint
@@ -77,9 +76,3 @@ RUN set -eu; \
         mv /tmp/helper.sha256 /etc/byclaw-tool-sandbox/helper.sha256; \
     fi; \
     rm /tmp/prepare-tool-helper-env.mjs
-
-# Bundled applications are initialized explicitly, never during sandbox startup.
-# --target coding-core omits the transitional preinstalled media environment.
-FROM coding-core AS tools-coding
-COPY middleware/byclaw-harness/templates/easel/ /opt/byclaw/templates/easel/
-RUN bash /opt/byclaw/templates/easel/install.sh

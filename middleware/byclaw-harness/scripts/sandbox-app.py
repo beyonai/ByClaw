@@ -19,7 +19,6 @@ from urllib.parse import urlsplit
 STATE = Path(os.environ.get('BYCLAW_APP_STATE', '/run/byclaw-apps'))
 NGINX = os.environ.get('BYCLAW_APP_NGINX', '/usr/sbin/nginx')
 DEFAULT_DOMAIN = 'cn-beijing.sandbox.aliyuncs.com'
-TEMPLATES = Path('/opt/byclaw/templates')
 
 
 def port_number(value):
@@ -54,13 +53,6 @@ http {{
 
 def route_config(app):
     prefix = '/a/' + app['id']
-    compatibility = ''
-    if app.get('profile'):
-        profile = app['profile']
-        if not re.fullmatch(r'[a-z][a-z0-9-]{0,47}', profile):
-            raise ValueError('Invalid preview profile')
-        # Root-owned image templates supply optional compatibility, never project files.
-        compatibility = (TEMPLATES / profile / 'preview.conf').read_text()
     return f'''location = {prefix} {{ return 308 {prefix}/; }}
 location = {prefix}/_gateway_health {{ default_type text/plain; return 200 '{app['id']}'; }}
 location ^~ {prefix}/ {{
@@ -76,7 +68,6 @@ location ^~ {prefix}/ {{
   proxy_read_timeout 3600s;
   proxy_redirect ~^(/.*)$ {prefix}$1;
   proxy_cookie_path / {prefix}/;
-  {compatibility}
 }}
 '''
 
@@ -197,8 +188,7 @@ def expose(args):
         apps = load_apps()
         previous = apps.get(args.name)
         app = {'id': previous['id'] if previous else secrets.token_hex(16),
-               'name': args.name, 'port': args.port,
-               'profile': getattr(args, 'profile', None)}
+               'name': args.name, 'port': args.port}
         gateway_port = port_number(os.environ.get('BYCLAW_APP_PORT', '8082'))
         app['url'] = address(args.sandbox_id, args.domain, gateway_port, app['id'], args.public_base)
         app['browserReady'] = bool(args.public_base) or not args.domain.endswith('aliyuncs.com')
@@ -229,7 +219,6 @@ def main():
     commands.add_parser('init')
     expose_parser = commands.add_parser('expose')
     expose_parser.add_argument('--name', required=True)
-    expose_parser.add_argument('--profile', help='Optional bundled template preview profile')
     expose_parser.add_argument('--port', type=port_number, required=True)
     expose_parser.add_argument('--sandbox-id', default=os.environ.get('E2B_SANDBOX_ID'))
     expose_parser.add_argument('--domain', default=os.environ.get('BYCLAW_APP_DOMAIN', DEFAULT_DOMAIN))
