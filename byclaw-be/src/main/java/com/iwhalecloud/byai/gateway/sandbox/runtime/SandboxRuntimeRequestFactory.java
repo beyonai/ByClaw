@@ -217,6 +217,10 @@ final class SandboxRuntimeRequestFactory {
             item.put("uid", volume.getUid());
             item.put("gid", volume.getGid());
             item.put("mode", volume.getMode());
+            // 新增：
+            if (volume.getHost() != null && StringUtils.isNotBlank(volume.getHost().getPath())) {
+                item.put("host", Map.of("path", volume.getHost().getPath()));
+            }
             payload.add(item);
         }
         return payload.isEmpty() ? null : payload;
