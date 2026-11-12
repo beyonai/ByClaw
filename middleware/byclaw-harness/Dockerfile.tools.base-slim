@@ -1,10 +1,12 @@
-# Repository-root context. Supply immutable, controlled image references.
+# Repository-root context. The defaults build from the internal Harbor; pin
+# digests for a release.
 # The transport donor must match the Harness (A) that will use this base (B).
-# Use that A image itself (for example D0.7.0_slim): the closure below is collected
+# Use that A image itself (for example D0.6.0_slim): the closure below is collected
 # from it here, so B carries the very helper A verifies by digest. An older
 # transport-only tool image still works; collecting from a closure is idempotent.
-ARG TOOLS_IMAGE
-ARG RUNTIME_IMAGE
+ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_slim
+# Debian 13 with Python 3.12, the same runtime as the slim Harness.
+ARG RUNTIME_IMAGE=192.168.0.81:8080/library/python:3.12-slim-trixie
 FROM ${TOOLS_IMAGE} AS transport
 USER root
 COPY middleware/byclaw-harness/plugins/dsh-tool-env/docker/ /tmp/tool-env-docker/
