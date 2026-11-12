@@ -59,14 +59,13 @@ try {
   for (const name of ['lean-harness-entrypoint.sh', 'tool-slim-entrypoint.sh']) {
     assert.equal(spawnSync('bash', ['-n', join(moduleRoot, 'scripts', name)]).status, 0)
   }
-  // The supervisor's anonymous secret FD must not reach SSH session configuration.
-  const sshd = join(root, 'sshd')
-  await writeFile(sshd, '#!/usr/bin/env python3\nimport os\nassert "BYCLAW_BROWSER_SECRET_FD" not in os.environ\nassert "BYCLAW_BROWSER_SECRET" not in os.environ\ntry:\n os.fstat(3)\nexcept OSError:\n pass\nelse:\n raise AssertionError("secret FD leaked")\n')
-  await chmod(sshd, 0o755)
-  const detached = spawnSync('bash', [join(moduleRoot, 'scripts/tool-slim-entrypoint.sh'), '--sshd'], {
-    env: { ...process.env, BYCLAW_TOOL_SLIM_SSHD: sshd, BYCLAW_BROWSER_SECRET_FD: '3', BYCLAW_BROWSER_SECRET: 'test-only' },
-    stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
-  })
-  assert.equal(detached.status, 0, detached.stderr?.toString())
+  // SSH no longer runs under the browser supervisor, so the supervisor's secret FD
+  // cannot reach it: the tool entrypoint starts sshd, the bridge and the browser as
+  // separate services.
+  const slimEntrypoint = await readFile(join(moduleRoot, 'scripts/tool-slim-entrypoint.sh'), 'utf8')
+  assert.match(slimEntrypoint, /^exec \/usr\/local\/bin\/byclaw-tool-base-entrypoint tools$/m)
+  assert.doesNotMatch(slimEntrypoint, /byclaw-browser-supervisor|--sshd/)
+  assert.match(tools, /tool-base-entrypoint\.py \/usr\/local\/bin\/byclaw-tool-base-entrypoint/)
+  assert.match(tools, /services\.d\/browser\.json/)
   console.log('Slim image layout, startup routing and secret FD checks passed')
 } finally { await rm(root, { recursive: true, force: true }) }
