@@ -19,6 +19,7 @@ import type { ToolEnvIdentity } from './identity.ts'
 import { DeferredToolEnvironmentWork } from './deferred-work.ts'
 import { resolveLocalExecutable } from './local-executable.ts'
 import { answerWhileDown, isCleanupRequest } from './pending-directories.ts'
+import { markEnvironmentFailure, reportLeaseWarning, toolTransportError, trackLeaseRelease, withLeaseFailure } from './transport-failure.ts'
 
 type Hello = Awaited<SshConnection['ready']>
 
@@ -193,13 +194,29 @@ export class ToolEnvConnection extends Service {
 
   async connectStream(endpoint: SshStreamEndpoint, signal?: AbortSignal): Promise<Socket> {
     this.noteStartReason('stream', endpoint)
-    const finish = await this.backend.beginUse?.()
+    let finish: (() => Promise<void>) | undefined
+    try { finish = await this.backend.beginUse?.() } catch (error) {
+      signal?.throwIfAborted()
+      throw markEnvironmentFailure(toolTransportError(error, false))
+    }
     let socket: Socket
     try { socket = await this.use(lease => lease.connection.connectStream(endpoint, signal), signal, false) }
-    catch (error) { await finish?.().catch(() => {}); throw error }
+    catch (error) {
+      try { await finish?.() } catch (cleanup) {
+        signal?.throwIfAborted()
+        throw markEnvironmentFailure(withLeaseFailure(toolTransportError(error, false), cleanup))
+      }
+      signal?.throwIfAborted()
+      throw error
+    }
     this.streams.add(socket)
     this.touch()
-    socket.once('close', () => { this.streams.delete(socket); this.touch(); void finish?.().catch(() => {}) })
+    const release = trackLeaseRelease(() => socket.destroyed, async () => {
+      try { await finish?.() } catch (error) {
+        this.ctx.logger('byclaw-tool-env').warn(reportLeaseWarning(error, false))
+      }
+    })
+    socket.once('close', () => { this.streams.delete(socket); this.touch(); void release() })
     return socket
   }
 
@@ -231,6 +248,7 @@ export class ToolEnvConnection extends Service {
 
   private async use<T>(operation: (lease: Lease) => Promise<T>, signal?: AbortSignal, acquireUse = true): Promise<T> {
     let finish: (() => Promise<void>) | undefined
+    let primary: Error | undefined
     this.inflight++
     this.residualSince = undefined
     this.touch()
@@ -239,15 +257,25 @@ export class ToolEnvConnection extends Service {
       if (acquireUse) finish = await this.backend.beginUse?.()
       const epoch = this.connectionEpoch
       const lease = await this.lease()
+      signal?.throwIfAborted()
       if (epoch !== this.connectionEpoch) throw new Error('TOOL_LEASE_INVALIDATED')
       try { return await operation(lease) } catch (error) {
         if (isBroken(lease.connection)) void this.drop(lease)
-        throw error
+        signal?.throwIfAborted()
+        throw toolTransportError(error, true)
       }
+    } catch (error) {
+      signal?.throwIfAborted()
+      primary = markEnvironmentFailure(toolTransportError(error, false))
+      throw primary
     } finally {
       this.inflight--
       this.touch()
-      await finish?.()
+      try { await finish?.() } catch (error) {
+        signal?.throwIfAborted()
+        if (primary) throw markEnvironmentFailure(withLeaseFailure(primary, error))
+        this.ctx.logger('byclaw-tool-env').warn(reportLeaseWarning(error))
+      }
     }
   }
 
