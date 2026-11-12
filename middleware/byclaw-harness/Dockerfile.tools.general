@@ -7,8 +7,8 @@
 #   docker build -f middleware/byclaw-harness/Dockerfile.tools.general \
 #     --build-arg BROWSER_IMAGE=<browser image>@sha256:<digest> \
 #     --build-arg HARNESS_IMAGE=<the A (_slim) image>@sha256:<digest> \
-#     -t byclaw-harness-tools:<tag>_general .
-ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
+#     -t byclaw-harness:<tag>_general .
+ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_browser
 ARG HARNESS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_slim
 
 # --- A's installed connector CLIs and plugin Skills, at A's paths (same Node as B) ---

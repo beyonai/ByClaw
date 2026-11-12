@@ -1,6 +1,6 @@
 # Unity tool sandbox
 
-`Dockerfile.tools.unity` builds on the slim-derived browser layer at `192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser`. It adds the existing Unity Editor, Linux Player/WebGL toolchains, Hub, game bridge commands, project template, Unity skill and game desktop. It does not inherit the full historical Unity image or copy its user homes, projects, licenses, Hub sign-in or keyring state.
+`Dockerfile.tools.unity` builds on the slim-derived browser layer at `192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_browser`. It adds the existing Unity Editor, Linux Player/WebGL toolchains, Hub, game bridge commands, project template, Unity skill and game desktop. It does not inherit the full historical Unity image or copy its user homes, projects, licenses, Hub sign-in or keyring state.
 
 Build from the repository root on linux/amd64. `UNITY_DONOR_IMAGE` is required and must identify a controlled installation image by digest. The inspected donor is Editor `2022.3.62f3c1` with digest `sha256:b9e082db17b2ca04b0eb715eb80059f5c5a4e8748410ec07d5d630d58916a987`:
 
@@ -8,7 +8,7 @@ Build from the repository root on linux/amd64. `UNITY_DONOR_IMAGE` is required a
 docker build --platform linux/amd64 \
   -f middleware/byclaw-harness/Dockerfile.tools.unity \
   --build-arg UNITY_DONOR_IMAGE='127.0.0.1:8080/byclaw/byclaw-harness-tools-unity@sha256:b9e082db17b2ca04b0eb715eb80059f5c5a4e8748410ec07d5d630d58916a987' \
-  -t '192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_unity' .
+  -t '192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_unity' .
 ```
 
 `BROWSER_IMAGE` can pin the tested browser artifact's digest on the same LAN Harbor repository. The browser layer must provide its normal SSH entrypoint at `/usr/local/bin/byclaw-dsh-entrypoint`. The Unity wrapper installs the skill into the runtime home, starts the game desktop and then executes that entrypoint. Cloud deployment may copy the resulting artifact to ACR; ACR is not the Dockerfile's default parent registry.

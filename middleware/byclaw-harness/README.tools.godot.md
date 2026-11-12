@@ -6,7 +6,7 @@ Default parents and release tags use the LAN Harbor repository:
 
 | Dockerfile | Default parent | Output tag |
 | --- | --- | --- |
-| `Dockerfile.tools.godot` | `192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser` | `D0.6.0_godot` |
+| `Dockerfile.tools.godot` | `192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_browser` | `D0.6.0_godot` |
 
 Build from the repository root for linux/amd64. Pin the tested parent digest through `BROWSER_IMAGE` for release reproducibility. ACR copies are cloud deployment artifacts, not default Dockerfile parents. Build unique candidate tags and validate them before updating any approved release pointer; do not replace existing instances or service specs.
 
@@ -25,7 +25,7 @@ On build host 53, the previously verified payload is `/data/byai/releases/godot-
 docker build --platform linux/amd64 \
   -f middleware/byclaw-harness/Dockerfile.tools.godot \
   --build-context godot-assets=/data/byai/releases/godot-tools-20261103/assets \
-  -t '192.168.0.81:8080/byclaw/byclaw-harness-tools:<unique-godot-candidate>' .
+  -t '192.168.0.81:8080/byclaw/byclaw-harness:<unique-godot-candidate>' .
 ```
 
 Templates reside in immutable `/opt/godot/export_templates/4.6.3.stable`. Godot 4.6.3 uses its user data directory for template lookup, so the `godot` wrapper creates a version symlink under `${XDG_DATA_HOME:-$HOME/.local/share}/godot/export_templates` on invocation. It preserves existing owner-provided template entries and works with a fresh writable mounted home without duplicating templates. `XDG_DATA_DIRS` alone does not configure template lookup; this follows [upstream EditorPaths](https://github.com/godotengine/godot/blob/4.6.3-stable/editor/file_system/editor_paths.cpp).
