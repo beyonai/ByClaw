@@ -15,7 +15,24 @@ function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 }
 
+export interface CodexEventSnapshot {
+  eventCount: number
+  lastEventType?: string
+  lastEventAgeMs?: number
+  toolsStarted: number
+  toolsCompleted: number
+  activeTools: number
+  turnCompleted: boolean
+  turnFailed: boolean
+  finalAnswerSeen: boolean
+}
+
 export class CodexEventAdapter {
+  private eventCount = 0
+  private lastEventType: string | undefined
+  private lastEventAt: number | undefined
+  private toolsStarted = 0
+  private toolsCompleted = 0
   private pending = ''
   private answer = ''
   private completed = false
@@ -34,6 +51,16 @@ export class CodexEventAdapter {
     private readonly onActivity: () => void = () => {},
     private readonly onWorkspace: (event: Record<string, unknown>) => void = () => {},
   ) {}
+
+  /** Metadata for lifecycle logs; no model/tool text or arguments. */
+  snapshot(): CodexEventSnapshot {
+    return { eventCount: this.eventCount,
+      ...(this.lastEventType === undefined ? {} : { lastEventType: this.lastEventType }),
+      ...(this.lastEventAt === undefined ? {} : { lastEventAgeMs: Math.max(0, Math.round(performance.now() - this.lastEventAt)) }),
+      toolsStarted: this.toolsStarted, toolsCompleted: this.toolsCompleted, activeTools: this.activeTools.size,
+      turnCompleted: this.completed, turnFailed: this.failed,
+      finalAnswerSeen: Boolean((this.explicitAnswer ?? this.answer).trim()) }
+  }
 
   write(chunk: string): void {
     this.pending += chunk
@@ -68,6 +95,10 @@ export class CodexEventAdapter {
     let event: Record<string, unknown> | undefined
     try { event = record(JSON.parse(line)) } catch { throw new Error('CODEX_INVALID_JSONL') }
     if (!event || typeof event.type !== 'string') throw new Error('CODEX_INVALID_EVENT')
+    this.eventCount++
+    this.lastEventAt = performance.now()
+    this.lastEventType = ['byclaw.workspace', 'byclaw.file_changes', 'thread.started', 'turn.started', 'turn.failed',
+      'error', 'turn.completed', 'item.started', 'item.updated', 'item.completed'].includes(event.type) ? event.type : 'unknown'
     if (event.type === 'byclaw.workspace' || event.type === 'byclaw.file_changes') { this.onWorkspace(event); return }
     if (event.type === 'thread.started' && typeof event.thread_id === 'string') this.threadId = event.thread_id
     if (event.type === 'turn.started') {
@@ -135,8 +166,13 @@ export class CodexEventAdapter {
         ...(input === undefined ? {} : { input }),
         ...(Object.keys(output).length ? { output: { ...record(previous?.output), ...output } } : {}),
       }
-      if (tool.phase === 'start') this.activeTools.set(id, tool)
-      else this.activeTools.delete(id)
+      if (tool.phase === 'start') {
+        if (!this.activeTools.has(id)) this.toolsStarted++
+        this.activeTools.set(id, tool)
+      } else {
+        this.toolsCompleted++
+        this.activeTools.delete(id)
+      }
       this.emit(tool)
     }
   }

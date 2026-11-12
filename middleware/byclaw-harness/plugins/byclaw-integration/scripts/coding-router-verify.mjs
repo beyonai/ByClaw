@@ -433,3 +433,49 @@ test('diagnostic classification and public redaction preserve normal text and ma
   assert.equal(summarizeCodingDiagnostic('ETIMEDOUT connection').category, 'network')
   assert.equal(summarizeCodingDiagnostic(''), undefined)
 })
+
+
+test('native snapshots distinguish silence, tools, terminal answer and completion without text', async () => {
+  const parser = new CodexEventAdapter()
+  assert.deepEqual(parser.snapshot(), { eventCount: 0, toolsStarted: 0, toolsCompleted: 0, activeTools: 0,
+    turnCompleted: false, turnFailed: false, finalAnswerSeen: false })
+  parser.write(jsonl({ type: 'turn.started' },
+    { type: 'item.started', item: { id: 'tool', type: 'command_execution', command: 'private-command' } }))
+  const active = parser.snapshot()
+  assert.equal(active.activeTools, 1)
+  assert.equal(active.toolsStarted, 1)
+  assert.equal(active.lastEventType, 'item.started')
+  assert.ok(active.lastEventAgeMs >= 0)
+  const done = { type: 'item.completed', item: { id: 'tool', type: 'command_execution', status: 'completed' } }
+  parser.write(jsonl(done, done,
+    { type: 'item.completed', item: { id: 'answer', type: 'agent_message', phase: 'final_answer', text: 'private-answer' } },
+    { type: 'turn.completed' }))
+  const snapshot = parser.snapshot()
+  assert.equal(snapshot.activeTools, 0)
+  assert.equal(snapshot.toolsCompleted, 1, 'duplicate snapshots cannot inflate tool completion counts')
+  assert.equal(snapshot.turnCompleted, true)
+  assert.equal(snapshot.finalAnswerSeen, true)
+  assert.equal(snapshot.lastEventType, 'turn.completed')
+  assert.ok(!JSON.stringify(snapshot).includes('private-'))
+  assert.equal(parser.finish(0), 'private-answer')
+  const f = fixture()
+  await f.run()
+  const terminal = f.logs.find(entry => entry.stage === 'request' && entry.status === 'success')
+  assert.equal(terminal.native.turnCompleted, true)
+  assert.equal(terminal.native.finalAnswerSeen, true)
+  assert.ok(terminal.native.stdoutBytes > 0)
+})
+
+test('failed native lifecycle logs retain the last event without inventing a final answer', async () => {
+  const f = fixture({ execute: async ({ onStdout }) => {
+    onStdout(jsonl({ type: 'turn.started' }, { type: 'turn.failed', error: { message: 'HTTP 503 private-provider-body' } }))
+    return { exitCode: 1, stdout: '', stderr: '' }
+  } })
+  await assert.rejects(f.run(), /EXECUTION_FAILED/)
+  const terminal = f.logs.find(entry => entry.stage === 'request' && entry.status === 'error')
+  assert.equal(terminal.native.lastEventType, 'turn.failed')
+  assert.equal(terminal.native.turnFailed, true)
+  assert.equal(terminal.native.turnCompleted, false)
+  assert.equal(terminal.native.finalAnswerSeen, false)
+  assert.ok(!JSON.stringify(f.logs).includes('private-provider-body'))
+})

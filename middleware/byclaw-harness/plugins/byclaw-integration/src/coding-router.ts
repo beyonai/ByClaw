@@ -1,7 +1,7 @@
 /** Deterministic employee execution routing before the DSH model gets the request. */
 import { createHash } from 'node:crypto'
 import type { AskAgentCommand, AgentContext } from '@byclaw/by-framework'
-import { CodexEventAdapter, type CodingEvent } from './cli-event-adapter.ts'
+import { CodexEventAdapter, type CodingEvent, type CodexEventSnapshot } from './cli-event-adapter.ts'
 import { summarizeCodingDiagnostic, type CodingDiagnosticSummary } from './coding-diagnostics.ts'
 import { CODING_WORKSPACE_RUNNER, codingFinalOutput, codingRunManifest, type CodingContext } from './coding-context.ts'
 import type { FileChangesSummaryPayload } from './file-changes.ts'
@@ -51,6 +51,7 @@ export interface ExecutionDiagnostic {
   exitCode?: number | null
   reason?: string
   diagnostic?: CodingDiagnosticSummary
+  native?: CodexEventSnapshot & { stdoutBytes: number }
 }
 export interface ExecutionRouterEnvironment {
   BYCLAW_AGENT_EXECUTION_MAP?: string
@@ -167,6 +168,7 @@ export class ByClawExecutionRouter {
     let forwarding = Promise.resolve()
     let forwardingError: unknown
     let sequence = 0
+    let stdoutBytes = 0
     const emit = (event: CodingEvent, origin: ExecutionRouteEvent['origin'] = 'runtime') => {
       const routed: ExecutionRouteEvent = { ...event, employeeId: target.resourceId, executionType, origin, sequence: ++sequence }
       forwarding = forwarding.then(async () => {
@@ -178,7 +180,8 @@ export class ByClawExecutionRouter {
       // Only allowlisted fields reach the logger. No prompt, argv, stdout, stderr or Error object.
       try { this.options.log?.({ sessionId: String(command.header.sessionId), messageId: String(command.header.messageId),
         traceId: context.traceId, employeeId: target.resourceId, executionType, templateKey: definition.templateKey,
-        stage, status, elapsedMs: Math.round(now - startedAt), totalElapsedMs: Math.round(now - queuedAt), ...extra }) } catch { /* Logging cannot break a task. */ }
+        stage, status, elapsedMs: Math.round(now - startedAt), totalElapsedMs: Math.round(now - queuedAt),
+        ...(['exec', 'request', 'stderr'].includes(stage) ? { native: { ...parser.snapshot(), stdoutBytes } } : {}), ...extra }) } catch { /* Logging cannot break a task. */ }
     }
     let stage: { id: 'sandbox' | 'exec' | 'cleanup'; title: string; startedAt: number } | undefined
     let heartbeat: ReturnType<typeof setInterval> | undefined
@@ -254,6 +257,7 @@ export class ByClawExecutionRouter {
       const execute = deployment ? sandbox.executeWithDeployment : sandbox.execute
       if (!execute) throw new Error('EXECUTION_DEPLOYMENT_UNAVAILABLE')
       const processResult = await execute.call(sandbox, actor, lease.leaseId, argv, lease.workspaceRoot, signal, chunk => {
+        stdoutBytes += Buffer.byteLength(chunk, 'utf8')
         if (!firstStdout && chunk) { firstStdout = true; log('first_stdout', 'success', executionStarted) }
         parser.write(chunk)
       })
