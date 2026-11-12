@@ -383,3 +383,47 @@ The pinned helper build patch covers the shared ordinary/terminal environment
 assembly and keeps workspace/profile copies aligned for digest verification.
 Run `node --test middleware/byclaw-harness/scripts/tool-helper-env.test.mjs`
 from the repository root. Image builds and live SSH still require validation.
+
+## Preparation and tool failures
+
+Tool execution errors become native failed tool results. Remote preparation
+failures also reach the model as required runtime context, allowing ordinary
+chat to continue without claiming that unavailable files were read. Reasons
+are redacted; successful later preparation supersedes the previous failure
+notice. Cancellation and unrelated plugin errors retain their original behavior.
+
+Preparation recovery decorates only the callbacks returned by native Cordis
+`events.dispatch` for `system-prompt/assemble`. Native filtering, binding,
+ordering and listener snapshots remain authoritative. A failed contributor
+continues its remaining chain, or preserves the completed downstream result if
+it already called `next()`. No contributor or terminal continuation is replayed,
+and no old prompt snapshot is reused. Errors caught locally by a preparation
+provider are observed at the SSH boundary as well. The adapter is removed on
+plugin unload; SDK upgrades must rerun the dispatch contract tests.
+
+Nested provider `AggregateError` wrappers are recoverable only when every child
+and explicit cause traces to the tool environment. Mixed policy/configuration
+failures, empty aggregates and cycles still propagate. Aggregate diagnostics
+include redacted child reasons. Successful preparation reads retain their
+context when lease release fails, with `TOOL_ENV_LEASE_RELEASE_FAILED` sent to
+the model as required runtime context. Reads are not replayed or mislabeled as
+failed; later warning-free preparation supersedes the old warning.
+
+Redacted remote application errors retain their `RemoteOperationError` type and
+code. Repeated wrapping and lease-release diagnostics preserve the original
+classification instead of relabeling application timeouts as connection failures.
+
+Stream establishment failures include both the connection and lease-release
+errors. Close releases run once and retain their original diagnostic scope.
+Preparation/tool boundaries await releases for destroyed/closed streams or
+already-started releases; live streams do not block a result. Close warnings do
+not imply that the remote operation succeeded. Release failures arriving after
+a result are queued to the owning agent through native `agent.inject` for a
+later model request, without waking idle chat or replaying tools. Already-sent
+requests and returned tool results are not changed. Cancellation/disposal can
+discard pending injected context; warnings remain logged.
+
+Connection waits retain the existing timeouts. Local tests cover real SSH
+filesystem/working-directory provider composition, routing and role policies,
+complete prompts, suppressed optional context, cancellation and agent isolation.
+They do not replace live container, SSH or model-channel validation.
