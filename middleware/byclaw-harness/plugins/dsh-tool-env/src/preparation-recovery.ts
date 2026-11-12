@@ -1,6 +1,25 @@
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Events } from '@deepseek-ai/cordis'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { AssembleContext, PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
-import { injectLeaseWarning, isEnvironmentFailure, observeEnvironmentFailures, observeLeaseWarnings, toolFailureReason } from './transport-failure.ts'
+import { injectLeaseWarning, isEnvironmentFailure, isEnvironmentTransportFailure, observeEnvironmentFailures, observeLeaseWarnings, toolFailureReason } from './transport-failure.ts'
+
+type StopContext = Parameters<Events['agent/turn-stopping']>[0]
+type StepContext = Parameters<Events['agent/pre-step']>[0]
+type StepDecision = Awaited<ReturnType<Events['agent/pre-step']>>
+
+function lifecycleNotice(stage: string, error: unknown): string {
+  return `TOOL_ENV_CHECK_INCOMPLETE: ${stage}检查未完成：${toolFailureReason(error)}\n工具沙箱暂不可用，可以继续普通对话；未完成的检查不能视为通过，不得声明已验证修改，角色权限和沙箱路由限制仍然有效。`
+}
+
+async function observeLifecycle<T>(stage: string, notices: Set<string>, work: () => T,
+  lateWarning: (warning: string) => void): Promise<Awaited<T>> {
+  return observeEnvironmentFailures(error => {
+    if (isEnvironmentTransportFailure(error)) notices.add(lifecycleNotice(stage, error))
+  }, () => observeLeaseWarnings((warning, late) => {
+    if (late) lateWarning(warning)
+    else notices.add(warning)
+  }, work))
+}
 
 const NOTICE = 'byclaw:tool-environment-preparation-failure'
 const installations = new WeakMap<Context['events'], { users: number; dispose: () => void }>()
@@ -39,6 +58,48 @@ export function registerPreparationRecovery(ctx: Context): void {
       const dispatch: typeof original = function (this: Context['events'], type, args) {
         const event = typeof args[0] === 'object' || typeof args[0] === 'function' ? args[1] : args[0]
         const callbacks = original.call(this, type, args)
+        if (active && type === 'serial' && event === 'agent/turn-stopping') {
+          return callbacks.map(callback => async (payload: StopContext) => {
+            const notices = new Set<string>()
+            try { return await observeLifecycle('结束', notices, () => callback(payload),
+              warning => injectLeaseWarning(ctx, payload.agent, warning, payload.signal)) } catch (error) {
+              payload.signal.throwIfAborted()
+              if (!isEnvironmentTransportFailure(error)) throw error
+              notices.add(lifecycleNotice('结束', error))
+              return undefined
+            } finally {
+              if (!payload.signal.aborted && notices.size > 0) {
+                const text = [...notices].join('\n')
+                ctx.logger('byclaw-tool-env').warn(text)
+                // Durable context is projected to the UI and reaches the next normal
+                // request. inject/steer here would force a new step and repeat checks.
+                payload.agent.session.append('user/message', createUserMessage({
+                  content: [{ type: 'text', text }], source: { kind: 'byclaw-tool-env-warning' },
+                }), { surfaceOp: 'append' })
+              }
+            }
+          })
+        }
+        if (active && type === 'waterfall' && event === 'agent/pre-step') {
+          return callbacks.map(callback => async (payload: StepContext, next: () => Promise<StepDecision>) => {
+            const notices = new Set<string>()
+            let continuation: Promise<StepDecision> | undefined
+            const proceed = () => continuation = Promise.resolve().then(next)
+            let result: StepDecision
+            try { result = await observeLifecycle('准备', notices, () => callback(payload, proceed),
+              warning => injectLeaseWarning(ctx, payload.agent, warning, payload.signal)) } catch (error) {
+              payload.signal.throwIfAborted()
+              if (!isEnvironmentTransportFailure(error)) throw error
+              notices.add(lifecycleNotice('准备', error))
+              result = await (continuation ?? proceed())
+            }
+            payload.signal.throwIfAborted()
+            if (result.kind !== 'enter' || notices.size === 0) return result
+            return { ...result, messages: [...result.messages, createUserMessage({
+              content: [{ type: 'text', text: [...notices].join('\n') }], source: { kind: 'byclaw-tool-env-warning' },
+            })] }
+          })
+        }
         if (!active || type !== 'waterfall' || event !== 'system-prompt/assemble') return callbacks
         const context = args[1] as AssembleContext
         const state = { signal: context.signal, reasons: new Set<string>() }

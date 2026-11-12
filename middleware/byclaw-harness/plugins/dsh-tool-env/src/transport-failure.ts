@@ -43,6 +43,22 @@ export class ToolEnvironmentTransportError extends Error {
   override readonly name = 'ToolEnvironmentTransportError'
 }
 
+/** Lifecycle recovery must not turn authority/application failures into successful checks. */
+export function isEnvironmentTransportFailure(error: unknown): boolean {
+  const visiting = new Set<Error>()
+  const visit = (value: unknown): boolean => {
+    if (!(value instanceof Error) || visiting.has(value)) return false
+    if (value instanceof ToolEnvironmentTransportError) return true
+    visiting.add(value)
+    try {
+      if (value instanceof AggregateError) return value.errors.length > 0 && value.errors.every(visit)
+        && (value.cause === undefined || visit(value.cause))
+      return visit(value.cause)
+    } finally { visiting.delete(value) }
+  }
+  return isEnvironmentFailure(error) && visit(error)
+}
+
 /** Classify transport outcomes without relabeling application or authority failures. */
 export function isToolTransportFailure(error: unknown): boolean {
   if (!(error instanceof Error) || applicationErrors.has(error) || error instanceof RemoteOperationError || /digest|host key|permission denied|TOOL_LEASE_|Beyond-Token|unauthorized|(?:HTTP |-> )(?:401|403|407)\b/i.test(error.message)) return false

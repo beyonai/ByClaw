@@ -423,6 +423,27 @@ later model request, without waking idle chat or replaying tools. Already-sent
 requests and returned tool results are not changed. Cancellation/disposal can
 discard pending injected context; warnings remain logged.
 
+## Unavailable lifecycle checks
+
+Remote discovery in `agent/pre-step` and checks in `agent/turn-stopping` can also
+access the tool sandbox (for example, iron-rule discovery reads `.git` after a
+file update). These boundaries recover only proven tool-environment transport
+failures. Authority, authentication, actual rule violations, mixed aggregates,
+and unrelated plugin errors keep their existing behavior. Native listener
+filtering, order, snapshots, downstream admission rejection, role guards, and
+sandbox routing remain in force; remaining stop listeners still execute.
+
+`TOOL_ENV_CHECK_INCOMPLETE` explicitly reports unverified checks with redacted
+reasons. Pre-step notices reach the current model request. Stop notices are
+appended as durable session context, available to the existing UI projection and
+the next normal model request. No inject/steer is issued during stopping, so a
+notice does not force another model step or replay checks/tools. Transport loss
+alone no longer changes an answered turn into a failed turn. Existing connection
+timeouts and cancellation behavior remain unchanged. Regression tests use the
+real iron-rule hook with simulated writes, connection loss, ordinary rule
+violations, follow-up chat, and policy rejection; live deployment remains a
+separate verification step.
+
 Connection waits retain the existing timeouts. Local tests cover real SSH
 filesystem/working-directory provider composition, routing and role policies,
 complete prompts, suppressed optional context, cancellation and agent isolation.

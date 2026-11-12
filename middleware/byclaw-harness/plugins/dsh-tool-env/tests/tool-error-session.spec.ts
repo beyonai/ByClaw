@@ -16,6 +16,9 @@ import { registerLeaseWarnings } from '../src/transport-failure.ts'
 import { registerPreparationRecovery } from '../src/preparation-recovery.ts'
 import { SshFileSystem } from '@deepseek-ai/dsh-fs-ssh'
 import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
+import { applyCheck as applyIronChecks } from '../../iron-rules/src/check.ts'
+import { applyInject as applyIronContext } from '../../iron-rules/src/inject.ts'
+import { toolEnvironmentRuleFiles } from '../../iron-rules/src/files.ts'
 import { ToolSandboxManager } from '../src/catalog.ts'
 import { registerCatalogTools } from '../src/catalog-tools.ts'
 import {
@@ -76,6 +79,196 @@ async function harness(responses: any[][], setup?: (ctx: Context) => void) {
   }
   return { ctx, ssh, backend, inner, adapter, agent, prompt, errors, commands: () => commands }
 }
+
+const ironConfig = { rulesDir: '.iron-rules', maxBytes: 32768, checkTimeoutMs: 120000,
+  checkOutputMaxChars: 2000, maxRetries: 2, requireApproval: false }
+
+it('keeps the real iron-rule stop check from failing a completed answer when the tool environment drops', async () => {
+  const h = await harness([call('write'), text('文件更新完成，但尚未完成检查。'), text('可以继续普通聊天。')])
+  try {
+    new SshFileSystem(h.ctx)
+    applyIronChecks(h.ctx, ironConfig, toolEnvironmentRuleFiles(h.ctx))
+    h.ctx.tools.register(defineTool({ name: 'write', description: 'Simulate a file update without writing files.', parameters: {},
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      execute: async () => {
+        vi.mocked(h.backend.ensure).mockRejectedValue(new Error('tool environment bridge wss://host/?token=secret is not reachable'))
+        return 'simulated file updated'
+      },
+    }))
+    await h.prompt('更新脚本')
+    expect(h.errors).toEqual([])
+    expect(h.adapter.requests).toHaveLength(2)
+    expect(h.agent.session.snapshotEvents().filter(event => event.type === 'turn/end').at(-1)?.data.reason.kind).toBe('completed')
+    const notices = h.agent.session.snapshotEvents().filter(event => event.type === 'user/message'
+      && event.data.source.kind === 'byclaw-tool-env-warning')
+    expect(JSON.stringify(notices)).toContain('结束检查未完成')
+    expect(JSON.stringify(notices)).not.toContain('secret')
+    expect(h.backend.ensure).toHaveBeenCalledTimes(1)
+    await h.prompt('继续聊聊')
+    expect(h.errors).toEqual([])
+    expect(h.adapter.requests).toHaveLength(3)
+    expect(JSON.stringify(h.adapter.requests[2])).toContain('TOOL_ENV_CHECK_INCOMPLETE')
+    expect(h.backend.ensure).toHaveBeenCalledTimes(2)
+  } finally { await h.ctx.fiber.dispose() }
+})
+
+it('continues ordinary chat through the real iron-rule pre-step when the sandbox remains unavailable', async () => {
+  const h = await harness([text('可以聊天。'), text('仍然可以聊天。')])
+  try {
+    new SshFileSystem(h.ctx)
+    applyIronContext(h.ctx, ironConfig, toolEnvironmentRuleFiles(h.ctx))
+    vi.mocked(h.backend.ensure).mockRejectedValue(new Error('SSH helper disconnected'))
+    await h.prompt('你好')
+    await h.prompt('继续')
+    expect(h.errors).toEqual([])
+    expect(h.adapter.requests).toHaveLength(2)
+    for (const request of h.adapter.requests) expect(JSON.stringify(request)).toContain('准备检查未完成')
+    expect(h.backend.ensure).toHaveBeenCalledTimes(2)
+  } finally { await h.ctx.fiber.dispose() }
+})
+
+it('continues remaining stop listeners after an infrastructure failure without hiding policy failures', async () => {
+  const h = await harness([text('正常回答。')])
+  const policy = vi.fn(async () => { throw new Error('policy check failed') })
+  try {
+    vi.mocked(h.backend.ensure).mockRejectedValue(new Error('SSH helper disconnected'))
+    h.ctx.on('agent/turn-stopping', async () => { await h.ssh.request('fs.stat', {}, z.string()) })
+    h.ctx.on('agent/turn-stopping', policy)
+    await h.prompt('你好')
+    expect(policy).toHaveBeenCalledTimes(1)
+    expect(h.errors).toHaveLength(1)
+    expect(String(h.errors[0])).toContain('policy check failed')
+    expect(h.adapter.requests).toHaveLength(1)
+  } finally { await h.ctx.fiber.dispose() }
+})
+
+it.each(['permission denied', 'Host key verification failed', 'ordinary application error'])('does not downgrade non-transport stop failures: %s', async message => {
+  const h = await harness([text('正常回答。')])
+  try {
+    vi.mocked(h.backend.ensure).mockRejectedValue(new Error(message))
+    h.ctx.on('agent/turn-stopping', async () => { await h.ssh.request('fs.stat', {}, z.string()) })
+    await h.prompt('你好')
+    expect(h.errors).toHaveLength(1)
+    expect(String(h.errors[0])).toContain(message)
+  } finally { await h.ctx.fiber.dispose() }
+})
+
+it('keeps cancellation authoritative during stop checks', async () => {
+  const h = await harness([text('正常回答。')])
+  try {
+    h.ctx.on('agent/turn-stopping', async ({ signal }) => {
+      await h.ssh.request('fs.stat', {}, z.string(), signal)
+    })
+    vi.mocked(h.backend.ensure).mockImplementationOnce(async () => {
+      h.agent.cancel({ kind: 'user' } as never)
+      throw new Error('SSH helper disconnected')
+    })
+    await h.prompt('你好')
+    expect(h.adapter.requests).toHaveLength(1)
+    expect(h.agent.session.snapshotEvents().filter(event => event.type === 'turn/end').at(-1)?.data.reason.kind).toBe('aborted')
+    expect(JSON.stringify(h.agent.session.snapshotEvents())).not.toContain('TOOL_ENV_CHECK_INCOMPLETE')
+  } finally { await h.ctx.fiber.dispose() }
+})
+
+it('preserves real iron-rule violations and their forced continuation', async () => {
+  const h = await harness([call('write'), text('文件已更新。'), text('规则校验未通过，尚不能验收。')])
+  const execute = vi.fn(async () => ({ result: async () => ({ exitCode: 1,
+    stdout: { text: 'required rule violation' }, stderr: { text: '' } }) }))
+  try {
+    h.ctx.provide('shell', { resolve: (spec: unknown) => spec, execute } as never)
+    applyIronChecks(h.ctx, ironConfig, {
+      exists: async () => true,
+      subdirectories: async () => ['required-check'],
+      readText: async () => '---\ntitle: Required check\nowner: admin\n---\nRequired rule.',
+      writeText: async () => { throw new Error('test must not write files') },
+      removeTree: async () => { throw new Error('test must not remove files') },
+    })
+    h.ctx.tools.register(defineTool({ name: 'write', description: 'Simulate a file update.', parameters: {},
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      execute: async () => 'simulated file updated',
+    }))
+    await h.prompt('更新脚本')
+    expect(h.errors).toEqual([])
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(h.adapter.requests).toHaveLength(3)
+    expect(JSON.stringify(h.adapter.requests[2])).toContain('铁律检查未通过')
+    expect(JSON.stringify(h.adapter.requests[2])).toContain('required rule violation')
+    expect(JSON.stringify(h.adapter.requests)).not.toContain('TOOL_ENV_CHECK_INCOMPLETE')
+  } finally { await h.ctx.fiber.dispose() }
+})
+
+it('preserves a downstream pre-step rejection after a remote discovery failure', async () => {
+  const h = await harness([])
+  try {
+    vi.mocked(h.backend.ensure).mockRejectedValue(new Error('SSH helper disconnected'))
+    h.ctx.on('agent/pre-step', async (_payload, next) => {
+      await h.ssh.request('fs.stat', {}, z.string())
+      return next()
+    })
+    const rejected = { kind: 'reject', reason: 'policy denied' } as never
+    const terminal = vi.fn(async () => rejected)
+    const decision = await h.ctx.waterfall('agent/pre-step', { agent: h.agent,
+      signal: new AbortController().signal } as never, terminal)
+    expect(decision).toBe(rejected)
+    expect(terminal).toHaveBeenCalledTimes(1)
+  } finally { await h.ctx.fiber.dispose() }
+})
+
+it('reports stop discovery failures even when an awareness check catches them locally', async () => {
+  const h = await harness([text('正常回答。'), text('此前结束检查未完成。')])
+  try {
+    vi.mocked(h.backend.ensure).mockRejectedValue(new Error('SSH helper disconnected'))
+    h.ctx.on('agent/turn-stopping', async () => {
+      await h.ssh.request('fs.stat', {}, z.string()).catch(() => {})
+    })
+    await h.prompt('你好')
+    expect(h.errors).toEqual([])
+    expect(h.adapter.requests).toHaveLength(1)
+    expect(JSON.stringify(h.agent.session.snapshotEvents())).toContain('结束检查未完成')
+    await h.prompt('继续')
+    expect(JSON.stringify(h.adapter.requests[1])).toContain('结束检查未完成')
+    expect(h.adapter.requests).toHaveLength(2)
+  } finally { await h.ctx.fiber.dispose() }
+})
+
+it.each(['employee', 'super-assistant'])('retains routing and role policy after a failed stop check and on the next chat: %s', async role => {
+  const manager = new ToolSandboxManager([
+    { templateKey: 'browser', serviceKey: 'browser', capabilities: ['browser.automation'], enabled: true },
+  ], async () => { throw new Error('must not acquire') })
+  const policy = new SuperAssistantPolicy()
+  const h = await harness([text('正常回答。'), text('可以继续聊天，先前检查未完成。')], ctx => {
+    registerCatalogTools(ctx, manager)
+    if (role === 'super-assistant') ctx.on('agent/created', ({ agent }) => { policy.bind(agent.ctx, agent) })
+  })
+  try {
+    vi.mocked(h.backend.ensure).mockRejectedValue(new Error('SSH helper disconnected'))
+    h.ctx.on('agent/pre-step', async (_payload, next) => {
+      const result = await next()
+      await h.ssh.request('fs.stat', {}, z.string())
+      return result
+    })
+    h.ctx.on('agent/turn-stopping', async () => { await h.ssh.request('fs.stat', {}, z.string()) })
+    await h.prompt('你好')
+    await h.prompt('继续聊聊')
+    expect(h.errors).toEqual([])
+    expect(h.adapter.requests).toHaveLength(2)
+    for (const request of h.adapter.requests) {
+      expect(JSON.stringify(request)).toContain('工具沙箱执行路由')
+      expect(JSON.stringify(request)).toContain('不得用普通 bash/browser/web_fetch 或通用环境替代专用模板')
+      if (role === 'super-assistant') {
+        expect(JSON.stringify(request)).toContain(JSON.stringify(SUPER_ASSISTANT_POLICY).slice(1, -1))
+        expect(request.tools.every((tool: { name: string }) => SUPER_ASSISTANT_TOOLS.has(tool.name))).toBe(true)
+      }
+    }
+    expect(JSON.stringify(h.adapter.requests[1])).toContain('结束检查未完成')
+    if (role === 'super-assistant') {
+      const result = await h.ctx.tools.execute({ name: 'remote_command', arguments: {},
+        callId: ToolCallId('forbidden'), agent: h.agent, signal: new AbortController().signal })
+      expect(JSON.stringify(result)).toContain('SUPER_ASSISTANT_EXECUTION_DENIED')
+      expect(h.commands()).toBe(0)
+    }
+  } finally { await h.ctx.fiber.dispose(); await manager.dispose() }
+})
 
 it.each([false, true])('keeps redacted application timeouts distinct from transport errors: cleanup=%s', async cleanup => {
   const h = await harness([call(), text('远程应用请求超时。')])
