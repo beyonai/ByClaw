@@ -1175,7 +1175,9 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       resolveTarget: resolveInboundTarget,
       sandbox: () => (ctx.get('ssh') as ExecutionToolEnvironment | undefined)?.sandboxCatalog,
       onActivityChange: () => sandboxBusy?.activityChanged(),
-      log: entry => ctx.logger('byclaw-execution').info(`execution.lifecycle ${JSON.stringify(entry)}`),
+      // The managed profile may have no console exporter for its isolated logger.
+      // The router only supplies allowlisted metadata; write it to the host journal.
+      log: entry => console.info(new Date().toISOString(), '[byclaw-execution]', `execution.lifecycle ${JSON.stringify(entry)}`),
       prepareContext: async (command, target, lease) => {
         const template = await templateRuntime.prepareEmployee(`byclaw-employee-${target.resourceId}`, groupCoordinationFromExtra(command.extraPayload))
         lease.signal.throwIfAborted()
