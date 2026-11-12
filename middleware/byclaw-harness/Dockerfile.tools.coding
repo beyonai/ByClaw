@@ -1,5 +1,5 @@
 # Build from the ByClaw repository root. Codex only; keep browser/SSH transport.
-ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
+ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_browser
 FROM ${BROWSER_IMAGE} AS coding-core
 USER root
 ARG TARGETARCH

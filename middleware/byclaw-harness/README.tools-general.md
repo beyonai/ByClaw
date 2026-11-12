@@ -13,14 +13,14 @@ All images are `linux/amd64` and built from the repository root. Pin every input
 docker build -f middleware/byclaw-harness/Dockerfile.tools.base-slim \
   --build-arg TOOLS_IMAGE='<A, e.g. byclaw-harness:D0.7.0_slim>@sha256:<digest>' \
   --build-arg RUNTIME_IMAGE='<Debian 13 Python runtime>@sha256:<digest>' \
-  -t byclaw-harness-tools:<tag>_base_slim .
+  -t byclaw-harness:<tag>_base_slim .
 # 2. Browser layer (see Dockerfile.tools.browser).
 # 3. General layer.
 docker build -f middleware/byclaw-harness/Dockerfile.tools.general \
-  --build-arg BROWSER_IMAGE='byclaw-harness-tools:<tag>_browser@sha256:<digest>' \
+  --build-arg BROWSER_IMAGE='byclaw-harness:<tag>_browser@sha256:<digest>' \
   --build-arg HARNESS_IMAGE='<the same A>@sha256:<digest>' \
-  -t byclaw-harness-tools:<tag>_general .
-docker run --rm --entrypoint bash -u byclaw byclaw-harness-tools:<tag>_general \
+  -t byclaw-harness:<tag>_general .
+docker run --rm --entrypoint bash -u byclaw byclaw-harness:<tag>_general \
   -c "$(cat middleware/byclaw-harness/scripts/tool-general-slim-smoke.sh)"
 ```
 
