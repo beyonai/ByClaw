@@ -1,3 +1,4 @@
+import { readGroupResponses } from "./group-response-query.js";
 import { groupFileMessagePage } from "./group-file-page.js";
 import { messageAcknowledgements } from "./message-ack-reader.js";
 import { invitationPreview } from "./group-invitation.js";
@@ -23,6 +24,9 @@ export class SqlHistoryRepository implements HistoryRepository {
     private readonly db: SqlSession,
     private readonly tenantId: string,
   ) {}
+  responses(groupId: string, after: string, limit: number, ids?: string[]) {
+    return readGroupResponses(this.db, this.tenantId, groupId, after, limit, ids);
+  }
   private async read(sql: string, parameters: unknown[] = []): Promise<Row[]> {
     return (await this.db.query(sql, parameters)).map(camel);
   }

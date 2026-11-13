@@ -15,6 +15,8 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatResponseNotifier;
 
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -35,6 +37,9 @@ public class TenantGroupAgentDispatcher {
     private static final Logger log = LoggerFactory.getLogger(TenantGroupAgentDispatcher.class);
     private final ExecutorService workers = new ThreadPoolExecutor(4, 4, 0L, TimeUnit.MILLISECONDS,
         new ArrayBlockingQueue<>(128));
+    @Autowired
+    private GroupChatResponseNotifier responseNotifier;
+
     private final UserService users;
     private final SandboxUserContextRunner userContext;
     private final AssistantChatService chat;
@@ -50,13 +55,16 @@ public class TenantGroupAgentDispatcher {
 
     public void dispatch(TenantRequestContext tenant, Long groupId, String sourceMessageId,
         String content, List<GroupDispatch> dispatches) {
-        if (dispatches == null) return;
+        if (dispatches == null) {
+            return;
+        }
         for (GroupDispatch dispatch : dispatches) {
             try {
                 workers.execute(() -> execute(tenant, groupId, sourceMessageId, content, dispatch));
             }
             catch (RejectedExecutionException error) {
                 log.error("租户群任务队列已满, groupId={}, taskId={}", groupId, dispatch.taskSessionId(), error);
+                failDispatch(tenant, groupId, dispatch);
             }
         }
     }
@@ -69,7 +77,10 @@ public class TenantGroupAgentDispatcher {
             claimed = Boolean.TRUE.equals(node.command(tenant, "POST",
                 "/internal/v1/group-chats/" + groupId + "/tasks/" + dispatch.taskSessionId() + "/claim",
                 groupId.toString(), "CLAIM_TASK", new GroupTaskClaim(dispatch.taskSessionId())).claimed());
-            if (!claimed) return;
+            if (!claimed) {
+                return;
+            }
+            notifyResponse(tenant, groupId, dispatch);
             Users user = users.findById(tenant.userId());
             if (user == null || user.getUserCode() == null) {
                 throw new IllegalStateException(I18nUtil.get("groupchat.task.initiatorUnavailable"));
@@ -85,12 +96,15 @@ public class TenantGroupAgentDispatcher {
                 request.setClientRequestId("group-" + sourceMessageId + "-" + dispatch.targetAgentId());
                 Map<String, Object> params = new java.util.HashMap<>();
                 params.put("tenantGroupTask", dispatch.taskSessionId());
-                if (dispatch.groupCoordination() != null) params.put("groupCoordination", dispatch.groupCoordination());
+                if (dispatch.groupCoordination() != null) {
+                    params.put("groupCoordination", dispatch.groupCoordination());
+                }
                 request.setExtParams(params);
                 try {
                     chat.chat(request, new DiscardingResponseStream(), null);
                 }
                 catch (java.io.IOException error) {
+                    log.error("租户群响应启动失败, taskId={}", dispatch.taskSessionId(), error);
                     throw new IllegalStateException(I18nUtil.get("groupchat.task.executeFailed"), error);
                 }
             });
@@ -100,19 +114,34 @@ public class TenantGroupAgentDispatcher {
         catch (Exception error) {
             log.error("租户群任务执行失败, groupId={}, taskId={}", groupId, dispatch.taskSessionId(), error);
             if (claimed) {
-                try {
-                    node.command(tenant, "PATCH", "/internal/v1/group-chats/" + groupId + "/tasks/"
-                        + dispatch.taskSessionId(), groupId.toString(), "UPDATE_TASK",
-                        new GroupTaskUpdate(dispatch.taskSessionId(), "ACTIVE", "FAILED"),
-                        "group-task-failed-" + dispatch.taskSessionId());
-                }
-                catch (Exception updateError) {
-                    log.error("租户群任务失败状态写入失败, taskId={}", dispatch.taskSessionId(), updateError);
-                }
+                failDispatch(tenant, groupId, dispatch);
             }
         }
         finally {
             TenantRequestContextHolder.clear();
+        }
+    }
+
+    /** 队列拒绝与运行启动失败都必须结束候选响应，避免群内永久等待。 */
+    private void failDispatch(TenantRequestContext tenant, Long groupId, GroupDispatch dispatch) {
+        try {
+            node.command(tenant, "PATCH", "/internal/v1/group-chats/" + groupId + "/tasks/"
+                + dispatch.taskSessionId(), groupId.toString(), "UPDATE_TASK",
+                new GroupTaskUpdate(dispatch.taskSessionId(), "ACTIVE", "FAILED"),
+                "group-task-failed-" + dispatch.taskSessionId());
+            notifyResponse(tenant, groupId, dispatch);
+        }
+        catch (Exception error) {
+            log.error("租户群响应失败状态写入失败, taskId={}", dispatch.taskSessionId(), error);
+        }
+    }
+
+    /** Node 状态提交后同步群响应视图，直接协调任务复用 task 身份。 */
+    private void notifyResponse(TenantRequestContext tenant, Long groupId, GroupDispatch dispatch) {
+        if (dispatch.dispatchId() != null) {
+            String prefix = dispatch.groupCoordination() != null
+                && "COORDINATED".equals(dispatch.groupCoordination().get("mode")) ? "task:" : "execution:";
+            responseNotifier.changed(groupId, prefix + dispatch.dispatchId(), tenant.userId(), tenant);
         }
     }
 

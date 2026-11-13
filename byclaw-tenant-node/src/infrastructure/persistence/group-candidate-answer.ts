@@ -175,6 +175,7 @@ export async function projectGroupCandidateAnswer(
     storage_version: "1",
     metadata: JSON.stringify({
       scene: "GROUP_CHAT",
+      responseId: `execution:${candidate.executionId}`,
       kind: kind === "TASK" ? "TASK_ACK" : "CHAT_REPLY",
       targetAgentId: candidate.targetAgentId,
       sourceMessageId: candidate.sourceMessageId,

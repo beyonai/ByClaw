@@ -30,6 +30,11 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Service
 public class GroupChatWebSocketService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatResponseQueryService responseQuery;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatResponseNotifier responseNotifier;
+
     @Autowired
     private com.iwhalecloud.byai.manager.domain.tenant.TenantGroupCoordinationService tenantCoordination;
     private final GroupChatApplicationService applicationService;
@@ -90,6 +95,10 @@ public class GroupChatWebSocketService {
             Long messageId = applicationService.acceptUserMessage(message);
             JSONObject ack = event(message, "GROUP_CHAT_ACCEPTED");
             ack.put("messageId", messageId);
+            if (responseQuery != null) {
+                try { ack.put("responses", responseQuery.forSource(message.getSessionId(), messageId)); }
+                catch (Exception error) { log.error("群响应回执摘要读取失败, messageId={}", messageId, error); }
+            }
             Object scope = applicationService.coordinationForMessage(messageId);
             if (scope != null) ack.put("groupCoordination", scope);
             return ack;
@@ -180,6 +189,18 @@ public class GroupChatWebSocketService {
         JSONObject ack = event(message, "GROUP_CHAT_ACCEPTED");
         ack.put("messageId", messageId);
         ack.put("enterpriseId", Long.toString(tenant.enterpriseId()));
+        if (responseQuery != null && result.dispatches() != null) {
+            try {
+                java.util.List<String> ids = result.dispatches().stream().map(dispatch ->
+                    (dispatch.groupCoordination() != null && "COORDINATED".equals(dispatch.groupCoordination().get("mode"))
+                        ? "task:" : "execution:") + dispatch.dispatchId()).toList();
+                ack.put("responses", responseQuery.resolveFor(message.getSessionId(), ids, tenant.userId(), tenant).get("items"));
+                if (responseNotifier != null) {
+                    ids.forEach(id -> responseNotifier.changed(message.getSessionId(), id, tenant.userId(), tenant));
+                }
+            }
+            catch (Exception error) { log.error("租户群响应回执摘要读取失败, messageId={}", messageId, error); }
+        }
         if (scope != null) {
             ack.put("groupCoordination", scope);
             ack.put("taskId", scope.get("taskSessionId"));

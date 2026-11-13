@@ -1,3 +1,4 @@
+import { GroupResponseHistory } from "./history/group-responses.js";
 import type { HistoryRepository } from "./history/contracts.js";
 import { HistoryAccess } from "./history/access.js";
 import { TraditionalHistory } from "./history/traditional.js";
@@ -11,6 +12,7 @@ export { bounded } from "./history/paging.js";
 
 /** 历史查询统一入口；权限与各类投影交由小型用例类处理，保持 HTTP 和 Worker 语义一致。 */
 export class HistoryService {
+  private readonly responseQuery: GroupResponseHistory;
   private readonly permission: HistoryAccess;
   private readonly basic: TraditionalHistory;
   private readonly group: GroupHistory;
@@ -21,6 +23,7 @@ export class HistoryService {
     tenantId: string,
     private readonly repository: HistoryRepository,
   ) {
+    this.responseQuery = new GroupResponseHistory(tenantId, repository);
     this.permission = new HistoryAccess(tenantId, repository);
     this.basic = new TraditionalHistory(tenantId, repository);
     this.group = new GroupHistory(tenantId, repository);
@@ -28,6 +31,10 @@ export class HistoryService {
     this.topic = new TopicHistory(tenantId, repository);
     this.fileQuery = new GroupFileHistory(tenantId, repository);
   }
+  responses = (...args: Parameters<GroupResponseHistory["responses"]>) =>
+    this.responseQuery.responses(...args);
+  resolveResponses = (...args: Parameters<GroupResponseHistory["resolveResponses"]>) =>
+    this.responseQuery.resolveResponses(...args);
   access = (...args: Parameters<HistoryAccess["access"]>) => this.permission.access(...args);
   async sessionExtensions(actor: string, sessionId: string) {
     await this.permission.access(actor, sessionId);

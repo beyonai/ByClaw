@@ -35,6 +35,8 @@ public class GroupChatContextResponse {
 
     @Data
     public static class Message {
+        /** 稳定群响应身份，正式消息仍保留独立 messageId。 */
+        private String responseId;
         private java.util.Map<String, Object> groupCoordination;
 
         /** 关联发送队列，支持广播早于 ACK 或重连后的确认恢复。 */

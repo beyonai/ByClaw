@@ -286,7 +286,10 @@ public final class TenantNodeModels {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record GroupDispatch(String taskSessionId, String targetAgentId,
-                                java.util.Map<String, Object> groupCoordination) {
+                                java.util.Map<String, Object> groupCoordination, String dispatchId) {
+        public GroupDispatch(String taskSessionId, String targetAgentId, java.util.Map<String, Object> groupCoordination) {
+            this(taskSessionId, targetAgentId, groupCoordination, null);
+        }
         public GroupDispatch(String taskSessionId, String targetAgentId) {
             this(taskSessionId, targetAgentId, null);
         }

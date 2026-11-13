@@ -20,6 +20,18 @@ export function historyRoutes(app: FastifyInstance, service: HistoryService) {
   };
   const queryLimit = (req: any) =>
     bounded(req.query.limit === undefined ? undefined : Number(req.query.limit), 20, 50);
+  app.get("/internal/v1/group-chats/:id/responses", async (req: any) =>
+    service.responses(
+      actor(req),
+      session(req),
+      req.query.cursor,
+      req.query.limit === undefined ? 50 : Number(req.query.limit),
+    ),
+  );
+  app.post("/internal/v1/group-chats/:id/responses/resolve", async (req: any) =>
+    service.resolveResponses(actor(req), session(req), body(req).responseIds),
+  );
+
   app.get<{ Params: { messageId: string } }>(
     "/internal/v1/messages/:messageId/trace",
     async (req) => {

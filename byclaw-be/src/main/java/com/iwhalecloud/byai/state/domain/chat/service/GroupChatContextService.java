@@ -291,6 +291,12 @@ public class GroupChatContextService {
                     && String.valueOf(currentUserId).equals(String.valueOf(resource.getResourceId())))
                 && messageAcks.stream().noneMatch(ack -> currentUserId.equals(ack.getUserId())));
             message.setClientRequestId(toClientRequestId(source.getMetadata()));
+            String responseId = toMetadataString(source.getMetadata(), "responseId");
+            String groupTurnId = toMetadataString(source.getMetadata(), "groupTurnId");
+            if (responseId == null && groupTurnId != null) {
+                responseId = "turn:" + groupTurnId;
+            }
+            message.setResponseId(passive ? null : responseId);
             message.setGroupCoordination(passive ? null : toCoordination(source.getMetadata()));
             message.setTaskId(passive ? null : toMetadataString(source.getMetadata(), "taskId"));
             message.setUsage(source.getUsage());

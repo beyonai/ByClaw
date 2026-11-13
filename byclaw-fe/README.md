@@ -348,3 +348,9 @@ Jest 默认最多使用两个 worker，避免完整 Ant Design 表单在共享 r
 ### 沙箱存活时长
 
 租户资源、用户资源和共享资源在创建时间旁展示存活时长。运行记录每秒在本地更新，不额外请求接口；已释放记录以释放时间截止，缺失或非法时间显示 `-`，支持毫秒时间戳、ISO 和现有日期字符串，中英文按天、小时、分钟和秒展示。
+
+### Shared message previews
+
+`MsgRendererV2/MessagePreview` owns one-line preview selection and the cached `loadThinkingPreviewGetter(contentType)` dispatch. `ThinkingBlock` and downstream group response previews share this component; transport event names do not choose a content renderer. The component retains the existing ended/first and running/latest selection and ignores stale asynchronous getters.
+
+`utils/appendV2Message` holds the existing segment accumulation used by chat and group previews. Stateful content updates by order ID; text increments by segment. Group callers retain authorization/run/watermark checks outside this utility. Focused preview tests are authored but not executed in this change; desktop/mobile/embedded-browser verification remains pending.

@@ -82,7 +82,7 @@ export async function changeTask(context: CommandContext): Promise<void> {
   if (!task && command.operation === "UPDATE_TASK" && p.turnStatus === "FAILED") {
     const candidate = await first(
       db,
-      "UPDATE byai.byai_group_chat_execution SET status='FAILED',finish_time=CURRENT_TIMESTAMP WHERE candidate_session_id=$1 AND group_session_id=$2 AND initiator_user_id=$3 AND status='RUNNING' RETURNING candidate_session_id",
+      "UPDATE byai.byai_group_chat_execution SET status='FAILED',finish_time=CURRENT_TIMESTAMP WHERE candidate_session_id=$1 AND group_session_id=$2 AND initiator_user_id=$3 AND status IN ('QUEUED','RUNNING') RETURNING candidate_session_id",
       [taskId, command.sessionId, command.userId],
     );
     if (candidate) return;

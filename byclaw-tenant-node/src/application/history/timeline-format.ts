@@ -87,6 +87,7 @@ export async function displayMessages(
       // Notification consumers must verify a committed complete message before delivery.
       complete: row.isComplete === true,
       clientRequestId: meta.clientRequestId,
+      responseId: isSnapshotOnly(meta) ? undefined : meta.responseId,
       mentionAllUsers: !recalled(source) && !isSnapshotOnly(meta) && meta.mentionAllUsers === true,
       topicId: row.topicId,
       taskId: passive ? undefined : meta.taskId,

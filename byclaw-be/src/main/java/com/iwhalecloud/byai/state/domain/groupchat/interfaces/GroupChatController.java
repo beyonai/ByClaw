@@ -34,6 +34,7 @@ import com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatTask;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextRequest;
 import com.iwhalecloud.byai.state.domain.chat.dto.GroupChatContextResponse;
 import com.iwhalecloud.byai.state.domain.chat.service.GroupChatContextService;
@@ -168,8 +169,8 @@ public class GroupChatController {
     }
 
     @GetMapping("/{sessionId}/tasks")
-    public ResponseUtil<List<ByaiGroupChatTask>> tasks(@PathVariable Long sessionId) {
-        return ResponseUtil.successResponse(taskService.list(sessionId));
+    public ResponseUtil<List<JSONObject>> tasks(@PathVariable Long sessionId) {
+        return ResponseUtil.successResponse(taskService.listResponseViews(sessionId));
     }
 
     @PostMapping("/{sessionId}/context")

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.groupchat.ByaiGroupChatResponseMapper">
+  <resultMap id="responseRow" type="java.util.HashMap">
+    <result column="responseId" property="responseId"/>
+    <result column="groupSessionId" property="groupSessionId"/>
+    <result column="sourceMessageId" property="sourceMessageId"/>
+    <result column="targetAgentId" property="targetAgentId"/>
+    <result column="initiatorUserId" property="initiatorUserId"/>
+    <result column="candidateSessionId" property="candidateSessionId"/>
+    <result column="status" property="status"/>
+    <result column="disposition" property="disposition"/>
+    <result column="createTime" property="createTime"/>
+    <result column="traceId" property="traceId"/>
+    <result column="answerMessageId" property="answerMessageId"/>
+    <result column="sourceContent" property="sourceContent"/>
+    <result column="sourceMetadata" property="sourceMetadata"/>
+    <result column="sourceName" property="sourceName"/>
+    <result column="sourceCreatorId" property="sourceCreatorId"/>
+    <result column="sourceCreateTime" property="sourceCreateTime"/>
+    <result column="sourceRecalledAt" property="sourceRecalledAt"/>
+    <result column="agentName" property="agentName"/>
+    <result column="taskSessionId" property="taskSessionId"/>
+    <result column="taskName" property="taskName"/>
+    <result column="taskStatus" property="taskStatus"/>
+    <result column="taskTurnStatus" property="taskTurnStatus"/>
+    <result column="resultMessageId" property="resultMessageId"/>
+    <result column="resultContent" property="resultContent"/>
+    <result column="resultMetadata" property="resultMetadata"/>
+    <result column="resultCreateTime" property="resultCreateTime"/>
+    <result column="resultRecalledAt" property="resultRecalledAt"/>
+  </resultMap>
+  <select id="selectIdsBySource" resultType="java.lang.String">
+    SELECT 'turn:' || execution_id FROM byai_group_chat_turn WHERE group_session_id=#{groupId} AND source_message_id=#{sourceId}
+    UNION ALL
+    SELECT 'execution:' || execution_id FROM byai_group_chat_execution e WHERE group_session_id=#{groupId}
+      AND source_message_id=#{sourceId} AND status &lt;&gt; 'CONVERSATION'
+      AND NOT EXISTS (SELECT 1 FROM byai_group_chat_turn t WHERE t.anchor_execution_id=e.execution_id)
+  </select>
+  <select id="selectResponses" resultMap="responseRow">
+    WITH executions AS (
+      SELECT 'turn:' || execution_id AS response_id, execution_id, group_session_id, source_message_id,
+        target_agent_id, initiator_user_id, candidate_session_id, status, disposition, create_time,
+        trace_id, answer_message_id, ack_message_id FROM byai_group_chat_turn WHERE group_session_id=#{groupId}
+      UNION ALL
+      SELECT 'execution:' || execution_id, execution_id, group_session_id, source_message_id,
+        target_agent_id, initiator_user_id, candidate_session_id, status, disposition, create_time,
+        trace_id, answer_message_id, ack_message_id FROM byai_group_chat_execution
+        WHERE group_session_id=#{groupId} AND status &lt;&gt; 'CONVERSATION'
+          AND NOT EXISTS (SELECT 1 FROM byai_group_chat_turn u WHERE u.anchor_execution_id=byai_group_chat_execution.execution_id)
+    )
+    SELECT e.response_id AS "responseId", e.group_session_id AS "groupSessionId",
+      e.source_message_id AS "sourceMessageId", e.target_agent_id AS "targetAgentId",
+      e.initiator_user_id AS "initiatorUserId", e.candidate_session_id AS "candidateSessionId",
+      e.status AS "status", e.disposition AS "disposition", e.create_time AS "createTime",
+      e.trace_id AS "traceId", e.answer_message_id AS "answerMessageId",
+      s.message_content AS "sourceContent", s.metadata AS "sourceMetadata", s.creator_name AS "sourceName",
+      s.creator_id AS "sourceCreatorId", s.create_time AS "sourceCreateTime", s.recalled_at AS "sourceRecalledAt",
+      m.mem_name AS "agentName", t.task_session_id AS "taskSessionId", t.task_name AS "taskName",
+      t.status AS "taskStatus", t.turn_status AS "taskTurnStatus", r.message_id AS "resultMessageId",
+      r.message_content AS "resultContent", r.metadata AS "resultMetadata", r.create_time AS "resultCreateTime",
+      r.recalled_at AS "resultRecalledAt"
+    FROM executions e
+    JOIN byai_message s ON s.message_id=e.source_message_id AND s.session_id=e.group_session_id
+    LEFT JOIN byai_session_member m ON m.session_id=e.group_session_id AND m.mem_obj_type='AGENT' AND m.mem_obj_id=e.target_agent_id
+    LEFT JOIN byai_group_chat_task t ON t.task_session_id=e.candidate_session_id AND t.dispatch_id=e.execution_id
+    LEFT JOIN byai_message r ON r.message_id=e.answer_message_id AND r.session_id=e.group_session_id
+    <!-- 候选执行没有任务行；兼容空字符串等同 NULL 的数据库。 -->
+    WHERE (t.status IS NULL OR t.status &lt;&gt; 'PRIVATE')
+    <choose>
+      <when test="ids != null and ids.size() > 0">
+        AND e.response_id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+      </when>
+      <otherwise>
+        <if test="cursor != null and cursor != ''">AND e.response_id &gt; #{cursor}</if>
+        AND e.status IN ('QUEUED','RUNNING') AND e.disposition &lt;&gt; 'TASK'
+      </otherwise>
+    </choose>
+    ORDER BY e.response_id LIMIT #{limit}
+  </select>
+</mapper>

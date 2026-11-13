@@ -38,3 +38,21 @@ describe("tenant group task claim", () => {
     ).toContain("status='QUEUED' AND disposition='UNKNOWN'");
   });
 });
+
+it("ends a queued candidate when BE cannot enqueue its worker", async () => {
+  const { changeTask } = await import("../src/infrastructure/persistence/task-writer.js");
+  const query = vi.fn(async (sql: string) =>
+    sql.startsWith("UPDATE byai.byai_group_chat_execution") ? [{ candidate_session_id: "60" }] : [],
+  );
+  const context = new CommandContext(
+    { query },
+    command({
+      operation: "UPDATE_TASK",
+      payload: { taskSessionId: "60", status: "ACTIVE", turnStatus: "FAILED" },
+    }),
+  );
+  await changeTask(context);
+  expect(
+    query.mock.calls.find(([sql]) => sql.startsWith("UPDATE byai.byai_group_chat_execution"))?.[0],
+  ).toContain("status IN ('QUEUED','RUNNING')");
+});

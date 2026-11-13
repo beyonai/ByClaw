@@ -24,6 +24,7 @@ export interface MessageFilter {
   endTime?: number;
 }
 export interface HistoryRepository {
+  responses?(groupId: string, after: string, limit: number, ids?: string[]): Promise<Row[]>;
   groupProjectAccess(
     actor: string,
     projectId: string,

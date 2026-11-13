@@ -53,6 +53,9 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 @Service
 public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserver {
     @Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatResponseNotifier responseNotifier;
+
+    @Autowired
     private GroupChatTopicService topicService;
     @Autowired
     private ByaiGroupChatTurnMapper turnMapper;
@@ -379,6 +382,7 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         message.setUpdateTime(new Date());
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("scene", "GROUP_CHAT");
+        metadata.put("responseId", (execution instanceof ByaiGroupChatTurn ? "turn:" : "execution:") + execution.getExecutionId());
         if (execution instanceof ByaiGroupChatTurn) {
             metadata.put("groupTurnId", execution.getExecutionId());
             metadata.put("rootMessageId", execution.getRootMessageId());
@@ -439,6 +443,7 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
             throw new IllegalStateException("Group turn completion changed concurrently: " + execution.getExecutionId());
         }
         execution.setStatus("SUCCEEDED");
+        if (responseNotifier != null) { responseNotifier.afterCommit(execution); }
         wakeNext(execution);
     }
 
@@ -446,6 +451,7 @@ public class GroupChatExecutionEventHandler implements ChatTurnPersistenceObserv
         if (execution instanceof ByaiGroupChatTurn) { turnMapper.markFailed(execution.getExecutionId(), code, message, new Date()); }
         else { executionMapper.markFailed(execution.getExecutionId(), code, message, new Date()); }
         execution.setStatus("FAILED");
+        if (responseNotifier != null) { responseNotifier.afterCommit(execution); }
         wakeNext(execution);
     }
 

@@ -8074,6 +8074,127 @@
           }
         }
       }
+    },
+    "/internal/v1/group-chats/{id}/responses": {
+      "get": {
+        "summary": "Discover active group responses without private candidate content",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResponsePage"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Actor is not a current member or the resource is inaccessible"
+          }
+        }
+      }
+    },
+    "/internal/v1/group-chats/{id}/responses/resolve": {
+      "post": {
+        "summary": "Resolve active or terminal responses for a current group member",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/enterprise"
+          },
+          {
+            "$ref": "#/components/parameters/generation"
+          },
+          {
+            "$ref": "#/components/parameters/actor"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "responseIds"
+                ],
+                "properties": {
+                  "responseIds": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^(execution|task):[0-9]+$"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResponseResolution"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Actor is not a current member or the resource is inaccessible"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8802,7 +8923,117 @@
             }
           }
         },
-        "required": ["pageNum", "pageSize", "total", "totalPages", "list"]
+        "required": [
+          "pageNum",
+          "pageSize",
+          "total",
+          "totalPages",
+          "list"
+        ]
+      },
+      "GroupResponseView": {
+        "type": "object",
+        "required": [
+          "responseId",
+          "groupSessionId",
+          "sourceMessageId",
+          "targetAgentId",
+          "initiatorUserId",
+          "phase",
+          "replyTo"
+        ],
+        "properties": {
+          "groupSessionId": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "sourceMessageId": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "targetAgentId": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "initiatorUserId": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "responseId": {
+            "type": "string",
+            "pattern": "^(execution|task):[0-9]+$"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "RUNNING",
+              "TASK",
+              "CHAT_COMPLETED",
+              "FAILED",
+              "CANCELLED"
+            ]
+          },
+          "disposition": {
+            "type": "string"
+          },
+          "agentName": {
+            "type": "string"
+          },
+          "createdAt": {},
+          "replyTo": {
+            "type": "object"
+          },
+          "task": {
+            "type": "object",
+            "description": "Renderable formal task; required in TASK."
+          },
+          "resultMessage": {
+            "type": "object",
+            "description": "Committed group message, never candidate answer; required in CHAT_COMPLETED."
+          },
+          "canReadContent": {
+            "type": "boolean"
+          }
+        }
+      },
+      "GroupResponsePage": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupResponseView"
+            }
+          },
+          "nextCursor": {
+            "type": "string"
+          }
+        }
+      },
+      "GroupResponseResolution": {
+        "type": "object",
+        "required": [
+          "items",
+          "unavailableIds"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupResponseView"
+            }
+          },
+          "unavailableIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       }
     }
   }

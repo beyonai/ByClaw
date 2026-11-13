@@ -33,6 +33,9 @@ import org.springframework.stereotype.Service;
 /** Commits the existing chat pipeline's messages through the tenant Node REST boundary. */
 @Service
 public class TenantChatMirrorService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatResponseNotifier responseNotifier;
+
     private static final Logger log = LoggerFactory.getLogger(TenantChatMirrorService.class);
 
     private final TenantNodeClient node;
@@ -211,6 +214,10 @@ public class TenantChatMirrorService {
             Object messageId = task.get("publishMessageId");
             Object groupId = task.get("groupSessionId");
             if (groupId == null) return;
+            if (responseNotifier != null && candidate && params.get("groupDispatch") instanceof Map<?, ?> dispatch) {
+                responseNotifier.changed(Long.valueOf(groupId.toString()), "execution:" + dispatch.get("dispatchId"),
+                    context.tenantContext.userId(), context.tenantContext);
+            }
             if (candidate && formalTask) {
                 Map<String, Object> persisted = node.request(context.tenantContext, "GET",
                     "/internal/v1/group-chat/tasks/" + taskId, null, new TypeReference<Map<String, Object>>() { });

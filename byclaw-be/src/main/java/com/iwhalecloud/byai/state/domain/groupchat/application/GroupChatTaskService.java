@@ -71,6 +71,9 @@ import com.iwhalecloud.byai.state.domain.message.enums.MsgStatus;
 @Service
 public class GroupChatTaskService {
     @Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatResponseNotifier responseNotifier;
+
+    @Autowired
     private GroupChatCoordinationService coordinationService;
     // Chat preparation depends on the task guard; defer resolving the reverse stop dependency.
     @Autowired
@@ -171,6 +174,7 @@ public class GroupChatTaskService {
         }
         candidateSessionService.promote(task.getTaskSessionId(), taskName);
         publishTaskEvent(task, "TASK_CREATED", null);
+        if (responseNotifier != null) { responseNotifier.afterCommit(execution); }
         if (StringUtils.isNotBlank(ackText)) {
             Long messageId = createGroupMessage(task, ackText, "TASK_ACK", null, null, null);
             if (execution instanceof ByaiGroupChatTurn) { turnMapper.setAckMessage(execution.getExecutionId(), messageId); }
@@ -503,6 +507,7 @@ public class GroupChatTaskService {
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("scene", "GROUP_CHAT");
         metadata.put("kind", kind);
+        if ("TASK_ACK".equals(kind)) { metadata.put("responseId", responseId(task)); }
         metadata.put("targetAgentId", task.getTargetAgentId());
         if (!privateConversation) {
             metadata.put("taskId", task.getTaskSessionId());
@@ -524,6 +529,7 @@ public class GroupChatTaskService {
         event.put("sessionId", String.valueOf(task.getGroupSessionId()));
         event.put("messageId", String.valueOf(messageId));
         event.put("topicId", String.valueOf(message.getTopicId()));
+        if ("TASK_ACK".equals(kind)) { event.put("responseId", responseId(task)); }
         if (replyTo != null) {
             event.put("messageRef", replyTo);
             event.put("replyToMessageId", replyTo);
@@ -579,6 +585,30 @@ public class GroupChatTaskService {
         return reply;
     }
 
+    /** 群任务列表补充响应身份，不向持久化实体添加非表字段。 */
+    public List<JSONObject> listResponseViews(Long groupId) {
+        return list(groupId).stream().map(task -> {
+            JSONObject view = JSON.parseObject(JSON.toJSONString(task));
+            // JSONObject 不应用实体上的 Jackson Long 序列化注解，显式保留 ID 精度。
+            for (String field : List.of("taskSessionId", "groupSessionId", "sourceMessageId", "dispatchId",
+                "initiatorUserId", "targetAgentId", "currentTurnId", "publishMessageId", "publishBy")) {
+                if (view.get(field) != null) {
+                    view.put(field, view.getString(field));
+                }
+            }
+            if (task.getDispatchId() != null && !"PRIVATE".equals(task.getStatus())) {
+                view.put("responseId", responseId(task));
+            }
+            return view;
+        }).toList();
+    }
+
+    /** 已有 turn 身份优先；旧执行不与会话 anchor 混淆。 */
+    private String responseId(ByaiGroupChatTask task) {
+        return (turnMapper != null && task.getDispatchId() != null && turnMapper.selectById(task.getDispatchId()) != null
+            ? "turn:" : "execution:") + task.getDispatchId();
+    }
+
     private void publishTaskEvent(ByaiGroupChatTask task, String eventName, Long messageId) {
         JSONObject event = new JSONObject();
         event.put("type", "GROUP_CHAT_EVENT");
@@ -586,6 +616,7 @@ public class GroupChatTaskService {
         event.put("sessionId", String.valueOf(task.getGroupSessionId()));
         event.put("taskId", String.valueOf(task.getTaskSessionId()));
         event.put("taskName", task.getTaskName());
+        event.put("responseId", responseId(task));
         if (coordinationService != null) {
             coordinationService.attach(task);
             if (task.getGroupCoordination() != null) event.put("groupCoordination", task.getGroupCoordination());

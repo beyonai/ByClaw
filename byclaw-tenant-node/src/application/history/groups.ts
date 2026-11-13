@@ -206,6 +206,11 @@ export class GroupHistory extends HistoryAccess {
         const scope = await this.coordination(task.taskSessionId);
         return {
           ...task,
+          ...(task.dispatchId && task.status !== "PRIVATE"
+            ? {
+                responseId: `${scope?.mode === "COORDINATED" ? "task" : "execution"}:${task.dispatchId}`,
+              }
+            : {}),
           executionBackend: "REMOTE",
           ...(scope ? { groupCoordination: scope } : {}),
         };

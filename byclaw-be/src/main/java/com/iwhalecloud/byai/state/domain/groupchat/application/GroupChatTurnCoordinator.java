@@ -61,6 +61,9 @@ import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 @Service
 public class GroupChatTurnCoordinator {
     @Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatResponseNotifier responseNotifier;
+
+    @Autowired
     private GroupChatCoordinationService coordination;
     @Autowired
     @org.springframework.context.annotation.Lazy
@@ -324,6 +327,7 @@ public class GroupChatTurnCoordinator {
             }
         }
         turns.insert(turn);
+        if (responseNotifier != null) { responseNotifier.afterCommit(turn); }
         if ("QUEUED".equals(turn.getStatus())) {
             wakeAfterCommit(turn.getCandidateSessionId());
         }
@@ -422,6 +426,7 @@ public class GroupChatTurnCoordinator {
                             && (persisted.getTraceId() == null || (isPreparationFailure(error)
                                 && Objects.equals(persisted.getTraceId(), turn.getTraceId())))) {
                             turns.markFailed(turn.getExecutionId(), "START_FAILED", error.getMessage(), new Date());
+                            if (responseNotifier != null) { responseNotifier.afterCommit(turn); }
                             if (coordination != null && coordination.isCoordinated(persisted.getCandidateSessionId())) {
                                 taskService.failTurnStart(persisted.getCandidateSessionId(), persisted.getExecutionId());
                             }
@@ -464,6 +469,7 @@ public class GroupChatTurnCoordinator {
             return null;
         }
         first.setStatus("RUNNING");
+        if (responseNotifier != null) { responseNotifier.afterCommit(first); }
         return first;
     }
 
@@ -532,6 +538,9 @@ public class GroupChatTurnCoordinator {
         turn.setErrorCode(reason);
         turn.setFinishTime(new Date());
         turns.updateById(turn);
+        if (responseNotifier != null) {
+            responseNotifier.afterCommit(turn);
+        }
         if (coordination != null && coordination.isCoordinated(turn.getCandidateSessionId())) {
             ByaiGroupChatTask task = tasks.selectById(turn.getCandidateSessionId());
             if (task != null && Objects.equals(task.getDispatchId(), turn.getExecutionId())

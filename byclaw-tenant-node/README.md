@@ -401,3 +401,22 @@ ACS 使用 `type=persistent / volumeRef=workspace` 将数据库与 Node 状态�
 
 
 配额及转发幂等写入使用既有 `Database.transaction` Redis 锁，锁随事务提交/回滚释放，支持续租和提交前所有权检查。配额不再使用 session 自更新作为保护，转发请求预留改为锁后查重再普通 INSERT；生产源码不使用 PostgreSQL `ON CONFLICT`。真实 openGauss、Redis 单机/Cluster、跨实例竞争及提交时丢锁仍需环境验收；模拟测试不代表这些环境已验证。共享工作区的 Java 主库与租户 Node 独立库使用各自的锁域，不构成跨数据库的强一致配额账本。
+
+### Group response views
+
+The BE-only `/internal/v1/group-chats/{id}/responses` endpoints expose active discovery (GET,
+`cursor`, `limit` 1–100), exact resolution (POST `/resolve`, `responseIds` up to 100). Initiator responses include a private
+`stream` session/trace binding; no separate binding or content endpoint is needed. Existing tenant generation,
+actor authentication and current group membership checks apply to every read.
+
+Single mentions retain `execution:<executionId>`; coordinated mentions create a formal
+`task:<dispatchId>` immediately. A completed CHAT resolves the public message referenced by
+`ack_message_id`, never the private candidate answer. Source recall overrides the response
+body. Public views do not contain trace IDs, candidate prompts, partial answers or tool data.
+Only the initiator receives the private `stream` session/trace fields in list/resolve; BE adds
+a same-run snapshot for initial recovery. Live text uses the existing CHAT_STREAM events.
+Node's classification mirror sequence is unchanged.
+BE worker queue rejection can end either a QUEUED or RUNNING candidate as FAILED.
+
+See `openapi.json` for the additive contract. New focused tests have been authored but not
+executed in this implementation session; database and end-to-end validation remain pending.
