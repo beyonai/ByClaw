@@ -4,6 +4,8 @@ export type LogSearch = {
   from: number;
   to: number;
   sandboxId?: string;
+  moduleCode?: string;
+  instanceID?: string;
   keyword?: string;
   level?: string;
   pageSize: number;

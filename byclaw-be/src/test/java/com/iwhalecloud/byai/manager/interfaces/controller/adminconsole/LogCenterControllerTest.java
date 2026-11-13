@@ -63,6 +63,8 @@ class LogCenterControllerTest {
         logSearchReq.setFrom(1000L);
         logSearchReq.setTo(2000L);
         logSearchReq.setPageToken("opaque-page-token");
+        logSearchReq.setModuleCode("byclaw-be");
+        logSearchReq.setInstanceID("instance-1");
         return logSearchReq;
     }
 
@@ -90,6 +92,8 @@ class LogCenterControllerTest {
         assertEquals("cn-hangzhou", logSearchReq.getRegion());
         assertEquals("test-project", logSearchReq.getProject());
         assertEquals("test-store", logSearchReq.getLogstore());
+        assertEquals("byclaw-be", logSearchReq.getModuleCode());
+        assertEquals("instance-1", logSearchReq.getInstanceID());
         verify(platformRemoteGateway).call("logs", "search", logSearchReq);
     }
 

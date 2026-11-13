@@ -130,6 +130,7 @@ export default function LogCenter() {
           labelCol={{ flex: '76px' }}
           wrapperCol={{ flex: 'auto' }}
           labelAlign="left"
+          colon={false}
           disabled={loading}
           initialValues={{ range: initialRange.current }}
           onFinish={search}
@@ -144,79 +145,89 @@ export default function LogCenter() {
               </Typography.Title>
               <Typography.Text type="secondary">检索与查看平台运行日志</Typography.Text>
             </div>
-            <Popover
-              trigger="click"
-              placement="bottomRight"
-              open={timeOpen}
-              onOpenChange={setTimeOpen}
-              content={
-                <div className={styles.timePanel}>
-                  <div className={styles.timePanelHeader}>
-                    <Typography.Text strong>时间选择</Typography.Text>
-                    <Checkbox checked={alignHour} onChange={(event) => setAlignHour(event.target.checked)}>
-                      整点时间
-                    </Checkbox>
+            <div className={styles.timeRangeField}>
+              <label htmlFor="log-center-time-range" className={styles.timeRangeLabel}>
+                时间范围
+              </label>
+              <Popover
+                trigger="click"
+                placement="bottomRight"
+                open={timeOpen}
+                onOpenChange={setTimeOpen}
+                content={
+                  <div className={styles.timePanel}>
+                    <div className={styles.timePanelHeader}>
+                      <Typography.Text strong>时间选择</Typography.Text>
+                      <Checkbox checked={alignHour} onChange={(event) => setAlignHour(event.target.checked)}>
+                        整点时间
+                      </Checkbox>
+                    </div>
+                    <div className={styles.timePresets}>
+                      {getTimePresets().map(({ label, range, disabled }) => (
+                        <Tooltip key={label} title={disabled ? '当前单次查询最长支持24小时' : undefined}>
+                          <span>
+                            <Button
+                              type="text"
+                              disabled={loading || disabled}
+                              onClick={() => {
+                                const end = range[1].startOf('hour');
+                                const start = range[0].startOf('hour');
+                                const roundedRange = [start.isBefore(end) ? start : end.subtract(1, 'hour'), end];
+                                form.setFieldValue('range', alignHour ? roundedRange : range);
+                                setError('');
+                                setTimeOpen(false);
+                              }}
+                            >
+                              {label}
+                            </Button>
+                          </span>
+                        </Tooltip>
+                      ))}
+                    </div>
+                    <div className={styles.customTime}>
+                      <Typography.Text strong>自定义时间</Typography.Text>
+                      <DatePicker.RangePicker
+                        showTime
+                        allowClear={false}
+                        className={styles.fullWidth}
+                        value={displayedRange}
+                        onChange={(range) => {
+                          if (range?.[0] && range[1]) {
+                            form.setFieldValue('range', range);
+                            setError('');
+                          }
+                        }}
+                      />
+                      <Typography.Text type="secondary">单次查询最长24小时，结束时间不包含在范围内</Typography.Text>
+                    </div>
+                    <div className={styles.timeConfirm}>
+                      <Button type="primary" onClick={() => setTimeOpen(false)}>
+                        确认
+                      </Button>
+                    </div>
                   </div>
-                  <div className={styles.timePresets}>
-                    {getTimePresets().map(({ label, range, disabled }) => (
-                      <Tooltip key={label} title={disabled ? '当前单次查询最长支持24小时' : undefined}>
-                        <span>
-                          <Button
-                            type="text"
-                            disabled={loading || disabled}
-                            onClick={() => {
-                              const end = range[1].startOf('hour');
-                              const start = range[0].startOf('hour');
-                              const roundedRange = [start.isBefore(end) ? start : end.subtract(1, 'hour'), end];
-                              form.setFieldValue('range', alignHour ? roundedRange : range);
-                              setError('');
-                              setTimeOpen(false);
-                            }}
-                          >
-                            {label}
-                          </Button>
-                        </span>
-                      </Tooltip>
-                    ))}
-                  </div>
-                  <div className={styles.customTime}>
-                    <Typography.Text strong>自定义时间</Typography.Text>
-                    <DatePicker.RangePicker
-                      showTime
-                      allowClear={false}
-                      className={styles.fullWidth}
-                      value={displayedRange}
-                      onChange={(range) => {
-                        if (range?.[0] && range[1]) {
-                          form.setFieldValue('range', range);
-                          setError('');
-                        }
-                      }}
-                    />
-                    <Typography.Text type="secondary">单次查询最长24小时，结束时间不包含在范围内</Typography.Text>
-                  </div>
-                  <div className={styles.timeConfirm}>
-                    <Button type="primary" onClick={() => setTimeOpen(false)}>
-                      确认
-                    </Button>
-                  </div>
-                </div>
-              }
-            >
-              <Button
-                aria-label="选择时间范围"
-                disabled={loading}
-                className={styles.timeTrigger}
-                icon={<CalendarOutlined />}
+                }
               >
-                <span>
-                  {displayedRange[0].format('YYYY-MM-DD HH:mm:ss')} ~ {displayedRange[1].format('YYYY-MM-DD HH:mm:ss')}
-                </span>
-                <DownOutlined />
-              </Button>
-            </Popover>
+                <Button
+                  aria-label="选择时间范围"
+                  id="log-center-time-range"
+                  disabled={loading}
+                  className={styles.timeTrigger}
+                  icon={<CalendarOutlined />}
+                >
+                  <span>
+                    {displayedRange[0].format('YYYY-MM-DD HH:mm:ss')} ~{' '}
+                    {displayedRange[1].format('YYYY-MM-DD HH:mm:ss')}
+                  </span>
+                  <DownOutlined />
+                </Button>
+              </Popover>
+            </div>
           </div>
           <div className={styles.secondaryFilters}>
+            <Form.Item name="moduleCode" label="模块编码" className={styles.instanceFilter} style={{ marginBottom: 0 }}>
+              <Input placeholder="输入模块编码，留空查询全部模块" allowClear />
+            </Form.Item>
             <Form.Item name="sandboxId" label="实例标识" className={styles.instanceFilter} style={{ marginBottom: 0 }}>
               <Input placeholder="输入实例标识，留空查询全部实例" allowClear />
             </Form.Item>
@@ -278,6 +289,7 @@ export default function LogCenter() {
                 width: 190,
                 render: (value) => dayjs.unix(value).format('YYYY-MM-DD HH:mm:ss'),
               },
+              { title: '模块编码', dataIndex: ['attributes', 'moduleCode'], width: 160 },
               { title: '级别', dataIndex: 'level', width: 90 },
               { title: '来源', dataIndex: 'source', width: 180 },
               {

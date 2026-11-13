@@ -25,6 +25,10 @@ public class LogSearchReq {
 
     private String sandboxId;
 
+    private String moduleCode;
+
+    private String instanceID;
+
     private String keyword;
 
     private String level;

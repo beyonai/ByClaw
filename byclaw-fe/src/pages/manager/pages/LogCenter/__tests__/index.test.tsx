@@ -27,6 +27,45 @@ describe('Log center', () => {
     searchMock.mockReset();
   });
 
+  it('displays the module code from log attributes in the table', async () => {
+    searchMock.mockResolvedValue({
+      items: [
+        { timestamp: 1800000000, message: '模块日志', attributes: { moduleCode: 'byclaw-be' } },
+        { timestamp: 1800000001, message: '无模块日志', attributes: {} },
+      ],
+      complete: true,
+    });
+    render(<LogCenter />);
+    await waitForInitialQuery();
+    expect(screen.getByRole('columnheader', { name: '模块编码' })).toBeInTheDocument();
+    const headers = screen.getAllByRole('columnheader').map((header) => header.textContent);
+    expect(headers.indexOf('模块编码')).toBeLessThan(headers.indexOf('级别'));
+    expect(screen.getByRole('cell', { name: 'byclaw-be' })).toBeInTheDocument();
+    expect(screen.getByText('无模块日志')).toBeInTheDocument();
+  });
+
+  it('submits the module filter, preserves it on pagination and clears it on reset', async () => {
+    searchMock.mockResolvedValue({ items: [], complete: false, nextPageToken: 'module-next-token' });
+    render(<LogCenter />);
+    await waitForInitialQuery();
+    const moduleInput = screen.getByPlaceholderText('输入模块编码，留空查询全部模块');
+    fireEvent.change(moduleInput, { target: { value: 'byclaw-be' } });
+    await submit();
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled());
+    expect(searchMock.mock.calls[1][0].moduleCode).toBe('byclaw-be');
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(() => expect(searchMock).toHaveBeenCalledTimes(3));
+    expect(searchMock.mock.calls[2][0]).toEqual({
+      ...searchMock.mock.calls[1][0],
+      pageToken: 'module-next-token',
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: /重\s*置/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: /重\s*置/ }));
+    expect(screen.getByPlaceholderText('输入模块编码，留空查询全部模块')).toHaveValue('');
+    await submit();
+    expect(searchMock.mock.calls[3][0].moduleCode).toBeUndefined();
+  });
+
   it('blocks non-admin users without querying', () => {
     mockUser = { userCode: 'ordinary-user' };
     render(<LogCenter />);

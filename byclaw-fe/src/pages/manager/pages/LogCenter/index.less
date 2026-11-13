@@ -11,6 +11,22 @@
 .filterCard {
   flex-shrink: 0;
   border-radius: 10px;
+
+  :global(.ant-form-item-label) {
+    padding-bottom: 0;
+  }
+
+  :global(.ant-form-item-label > label) {
+    height: 36px;
+    color: #595959;
+    font-size: 13px;
+  }
+
+  :global(.ant-input-affix-wrapper),
+  :global(.ant-select-single),
+  :global(.ant-btn) {
+    height: 36px;
+  }
 }
 
 .resultsCard {
@@ -27,19 +43,41 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 16px;
-  margin-bottom: 24px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid #f0f0f0;
+  margin-bottom: 20px;
+}
+.timeRangeField {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  max-width: 100%;
+  min-width: 0;
+}
+.timeRangeLabel {
+  flex-shrink: 0;
+  color: #595959;
+  font-size: 13px;
 }
 .timeTrigger {
-  margin-left: auto;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  padding-inline: 12px;
+  text-align: left;
   font-variant-numeric: tabular-nums;
+
+  > span:nth-child(2) {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 .secondaryFilters {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px 28px;
-  margin-bottom: 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(200px, 0.7fr);
+  gap: 16px;
+  margin-bottom: 16px;
 }
 .instanceFilter,
 .levelFilter {
@@ -61,14 +99,31 @@
 .keywordRow {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 16px;
 }
 .queryActions {
   flex-shrink: 0;
+
+  :global(.ant-btn) {
+    min-width: 80px;
+  }
 }
 .keywordFilter {
   flex: 1;
   min-width: 0;
+}
+
+.instanceFilter,
+.levelFilter,
+.keywordFilter {
+  :global(.ant-form-item-row) {
+    flex-wrap: nowrap;
+  }
+
+  :global(.ant-form-item-label) {
+    flex: 0 0 76px;
+    text-align: left;
+  }
 }
 .searchIcon {
   color: #bfbfbf;
@@ -107,7 +162,18 @@
   justify-content: flex-end;
   margin-top: 16px;
 }
+@media (max-width: 1199px) {
+  .secondaryFilters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 767px) {
+  .page {
+    gap: 16px;
+    padding: 16px;
+  }
+
   .timeTrigger {
     width: 100%;
     height: auto;
@@ -121,6 +187,9 @@
   }
   .secondaryFilters {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .queryActions {
+    align-self: flex-end;
   }
   .timePresets {
     grid-template-columns: repeat(4, 1fr);
