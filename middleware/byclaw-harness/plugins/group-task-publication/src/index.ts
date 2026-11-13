@@ -52,7 +52,6 @@ export function apply(ctx: Context, config: Config): Promise<void> {
       binding: { taskId: binding.taskId, userCode: binding.userCode,
         ...(binding.privateGroupId === undefined ? {} : { privateGroupId: binding.privateGroupId }),
         ...(binding.enterpriseId === undefined ? {} : { enterpriseId: binding.enterpriseId }) },
-      baseUrl: host.baseUrl,
       prepare: (args, signal) => client.prepare(binding, args, signal) }
   })
   return ready.then(() => undefined)

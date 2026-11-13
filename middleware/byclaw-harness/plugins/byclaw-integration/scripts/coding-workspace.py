@@ -17,13 +17,18 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import tomllib
 import uuid
 
 
+OUTPUT_LOCK = threading.Lock()
+
+
 def emit(kind, **values):
-    print(json.dumps(dict(type=kind, **values), ensure_ascii=False), flush=True)
+    with OUTPUT_LOCK:
+        print(json.dumps(dict(type=kind, **values), ensure_ascii=False), flush=True)
 
 
 def atomic_text(path, text):
@@ -47,9 +52,8 @@ import json
 import os
 from pathlib import Path
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
+import time
+import uuid
 
 
 TOOL_NAME = 'prepare_group_task_publication'
@@ -78,84 +82,48 @@ def config():
     if path.is_symlink() or not path.is_file():
         raise RuntimeError('发布工具配置不可读取。')
     data = json.loads(path.read_text(encoding='utf-8'))
-    binding = data.get('binding')
-    if not isinstance(binding, dict) or not isinstance(binding.get('taskId'), str):
-        raise RuntimeError('发布工具任务绑定无效。')
+    directory = data.get('bridgeDirectory')
+    if not isinstance(directory, str) or not Path(directory).is_dir() or any(p.is_symlink() for p in (Path(directory), *Path(directory).parents)):
+        raise RuntimeError('发布工具桥接不可用。')
     return data
-
-
-def validate_args(arguments, root):
-    if not isinstance(arguments, dict):
-        raise ValueError('参数无效。')
-    text = arguments.get('text', '')
-    paths = arguments.get('sourcePaths', [])
-    if not isinstance(text, str) or len(text) > 100000:
-        raise ValueError('正文参数无效。')
-    if not isinstance(paths, list) or len(paths) > 100:
-        raise ValueError('附件列表参数无效。')
-    if not text.strip() and not paths:
-        raise ValueError('正文和附件至少提供一项。')
-    for source in paths:
-        if not isinstance(source, str) or not source or len(source) > 4096:
-            raise ValueError('附件路径参数无效。')
-        if not source.startswith('/by/') or '\\' in source or '\x00' in source:
-            raise ValueError('附件必须是当前用户工作区内的 /by/ 绝对文件路径。')
-        parts = source.split('/')
-        if any(part in ('.', '..') for part in parts):
-            raise ValueError('附件路径不能包含相对路径段。')
-        candidate = Path(source)
-        try:
-            resolved = candidate.resolve(strict=True)
-            resolved.relative_to(root)
-            if not resolved.is_file():
-                raise ValueError('附件必须是普通文件。')
-        except (OSError, ValueError):
-            raise ValueError('附件不存在、不可读取，或不是当前用户 /by/ 工作区内的普通文件。') from None
-    return {'text': text, 'sourcePaths': paths}
 
 
 def prepare(arguments):
     data = config()
-    root = Path('/by').resolve(strict=True)
-    parsed = validate_args(arguments, root)
-    binding = data['binding']
-    base = str(data.get('baseUrl') or os.environ.get('BYAI_SERVICE_BASE_URL') or '').strip().rstrip('/')
-    if not base:
-        raise RuntimeError('BE 服务地址不可用。')
-    parsed_url = urllib.parse.urlsplit(base)
-    if parsed_url.scheme not in ('http', 'https') or parsed_url.username or parsed_url.password or parsed_url.query or parsed_url.fragment:
-        raise RuntimeError('BE 服务地址配置无效。')
-    prefix = parsed_url.path.rstrip('/') or '/byaiService'
-    path = prefix + '/group-chat/tasks/' + urllib.parse.quote(binding['taskId'], safe='') + '/pending-publication'
-    url = urllib.parse.urlunsplit((parsed_url.scheme, parsed_url.netloc, path, '', ''))
-    token = os.environ.get('BEYOND_TOKEN', '').strip()
-    if not token:
-        raise RuntimeError('BE 用户认证不可用。')
-    headers = {'Beyond-Token': token, 'Content-Type': 'application/json'}
-    if not binding.get('privateGroupId') and binding.get('enterpriseId'):
-        headers['X-Enterprise-Id'] = str(binding['enterpriseId'])
-    request = urllib.request.Request(url, method='POST', headers=headers,
-        data=json.dumps(parsed, ensure_ascii=False).encode('utf-8'))
+    if not isinstance(arguments, dict):
+        raise ValueError('参数无效。')
+    # The bound host callback owns argument, identity, tenant, file and authentication checks.
+    payload = json.dumps({'arguments': arguments}, ensure_ascii=False)
+    if len(payload.encode('utf-8')) > 1024 * 1024:
+        raise ValueError('发布工具参数过大。')
+    directory = Path(data['bridgeDirectory'])
+    request_id = str(uuid.uuid4())
+    request = directory / (request_id + '.request.json')
+    response = directory / (request_id + '.response.json')
+    temporary = directory / (request_id + '.tmp')
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode('utf-8'))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
-        raise RuntimeError('准备待发布内容失败，结果不确定；请查询当前待发布卡片，不要自动重试。') from None
-    if not isinstance(payload, dict):
-        raise RuntimeError('BE 返回的待发布数据无效，结果不确定；请查询当前待发布卡片。')
-    if payload.get('code') not in (0, '0'):
-        raise RuntimeError('BE 拒绝准备待发布卡片；请确认任务状态、登录权限及附件路径。')
-    result = payload.get('data')
-    if (not isinstance(result, dict) or str(result.get('taskId')) != binding['taskId']
-            or not isinstance(result.get('pendingPublicationId'), (str, int))
-            or (isinstance(result.get('pendingPublicationId'), int) and result['pendingPublicationId'] <= 0)
-            or (isinstance(result.get('pendingPublicationId'), str) and not result['pendingPublicationId'].strip())
-            or (result.get('text') is not None and not isinstance(result.get('text'), str))
-            or not isinstance(result.get('sourcePaths'), list)
-            or not all(isinstance(path, str) for path in result['sourcePaths'])
-            or not isinstance(result.get('createTime'), str) or not result['createTime'].strip()):
-        raise RuntimeError('BE 返回的待发布数据无效，结果不确定；请查询当前待发布卡片。')
-    return {'content': [{'type': 'text', 'text': json.dumps(result, ensure_ascii=False)}]}
+        with open(temporary, 'x', encoding='utf-8') as output:
+            os.chmod(temporary, 0o600)
+            output.write(payload)
+        os.replace(temporary, request)
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            if response.is_file():
+                if response.is_symlink() or response.stat().st_size > 1024 * 1024:
+                    raise RuntimeError('发布工具桥接响应无效。')
+                result = json.loads(response.read_text(encoding='utf-8'))
+                if not isinstance(result, dict):
+                    raise RuntimeError('发布工具桥接响应无效。')
+                if isinstance(result.get('error'), str):
+                    raise RuntimeError(result['error'])
+                if 'result' not in result:
+                    raise RuntimeError('发布工具桥接响应无效。')
+                return {'content': [{'type': 'text', 'text': json.dumps(result['result'], ensure_ascii=False)}]}
+            time.sleep(0.05)
+        raise RuntimeError('准备待发布内容超时，结果不确定；请查询最新待发布卡片，不要自动重试。')
+    finally:
+        # A request may already be in flight; cleanup never resends it.
+        temporary.unlink(missing_ok=True)
 
 
 def main():
@@ -195,6 +163,60 @@ def main():
 if __name__ == '__main__':
     main()
 '''
+
+
+class PublicationBridge:
+    """Forward local MCP requests over the existing runner stdout/lease file channel."""
+
+    def __init__(self, directory, bridge_id):
+        self.directory = directory
+        self.bridge_id = bridge_id
+        self.stopped = threading.Event()
+        self.seen = set()
+        self.worker = threading.Thread(target=self.watch, daemon=True)
+
+    def start(self):
+        self.worker.start()
+
+    def close(self):
+        self.stopped.set()
+        self.worker.join(timeout=2)
+        # Only this turn's flat IPC directory is disposable, never project/session contents.
+        if not self.worker.is_alive() and not self.directory.is_symlink():
+            for path in self.directory.iterdir():
+                if path.is_file() or path.is_symlink():
+                    path.unlink(missing_ok=True)
+            try:
+                self.directory.rmdir()
+            except OSError:
+                pass
+
+    def watch(self):
+        while not self.stopped.wait(0.05):
+            for path in self.directory.glob('*.request.json'):
+                if self.stopped.is_set():
+                    return
+                request_id = path.name.removesuffix('.request.json')
+                if request_id in self.seen or not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', request_id):
+                    continue
+                self.seen.add(request_id)
+                try:
+                    if len(self.seen) > 100:
+                        raise ValueError('request limit exceeded')
+                    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+                    with os.fdopen(fd, 'rb') as source:
+                        info = os.fstat(source.fileno())
+                        if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024 or path.is_symlink():
+                            raise ValueError('invalid request')
+                        payload = source.read(1024 * 1024 + 1)
+                        if len(payload) > 1024 * 1024:
+                            raise ValueError('request too large')
+                        data = json.loads(payload)
+                    emit('byclaw.publication.request', bridgeId=self.bridge_id, requestId=request_id,
+                         arguments=data.get('arguments'))
+                except (OSError, ValueError, AttributeError):
+                    atomic_text(self.directory / (request_id + '.response.json'),
+                                json.dumps({'error': '发布工具桥接请求无效。'}, ensure_ascii=False))
 
 
 @contextlib.contextmanager
@@ -458,6 +480,7 @@ def setup_config(manifest, home, cwd, default_config):
     skills = data.setdefault('skills', {})
     skills['config'] = connect_skills(home, manifest['skills'], cwd)
     publication = manifest.get('publication')
+    bridge_directory = None
     if isinstance(publication, dict) and publication.get('mode') == 'mcp':
         binding = publication.get('binding')
         if not isinstance(binding, dict) or not isinstance(binding.get('taskId'), str) or not isinstance(binding.get('userCode'), str):
@@ -466,9 +489,13 @@ def setup_config(manifest, home, cwd, default_config):
         binding_file = home / 'byclaw-publication-binding.json'
         atomic_text(bridge, PUBLICATION_MCP_SERVER)
         os.chmod(bridge, 0o700)
-        binding_data = {'binding': binding}
-        if isinstance(publication.get('baseUrl'), str):
-            binding_data['baseUrl'] = publication['baseUrl']
+        bridge_id = publication.get('bridgeId', '')
+        if not isinstance(bridge_id, str) or not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', bridge_id):
+            raise ValueError('EXECUTION_PUBLICATION_BRIDGE_INVALID')
+        bridge_directory = home / '.publication' / bridge_id
+        safe_directory(bridge_directory, home)
+        os.chmod(bridge_directory, 0o700)
+        binding_data = {'bridgeDirectory': str(bridge_directory)}
         atomic_text(binding_file, json.dumps(binding_data, ensure_ascii=False))
         os.chmod(binding_file, 0o600)
         servers = data.setdefault('mcp_servers', {})
@@ -480,6 +507,7 @@ def setup_config(manifest, home, cwd, default_config):
         }
     atomic_text(home / 'config.toml', toml_document(data))
     atomic_text(home / 'AGENTS.md', manifest['persona'] + '\n')
+    return bridge_directory
 
 
 def prepare_agent_skills(manifest, root):
@@ -682,7 +710,7 @@ def run(manifest, prompt, root):
         default_config = default_home / 'config.toml'
         if manifest.get('prepareAgentSkills'):
             prepare_agent_skills(manifest, root)
-        setup_config(manifest, home, cwd, default_config)
+        bridge_directory = setup_config(manifest, home, cwd, default_config)
         thread = resume_id(home, manifest['identity'], cwd)
         emit('byclaw.workspace', status='resumed' if thread else 'created')
         args = ['codex', 'exec', '--json', '--skip-git-repo-check']
@@ -713,7 +741,10 @@ def run(manifest, prompt, root):
         environment = deployment.__enter__()
         deploying = 'BYCLAW_DEPLOY_CONTEXT' in environment
         child = None
+        bridge = PublicationBridge(bridge_directory, publication['bridgeId']) if bridge_directory is not None else None
         try:
+            if bridge is not None:
+                bridge.start()
             # stdin avoids argv limits and "Reading additional input" ambiguity in Codex.
             child = subprocess.Popen(args + ['-'], cwd=cwd, env=environment, stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=None, text=True, encoding='utf-8',
@@ -728,8 +759,9 @@ def run(manifest, prompt, root):
                             threadId=event['thread_id'], cwd=str(cwd), home=str(home))))
                 except json.JSONDecodeError:
                     raise ValueError('CODEX_INVALID_JSONL')
-                sys.stdout.write(line)
-                sys.stdout.flush()
+                with OUTPUT_LOCK:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
             code = child.wait()
         finally:
             try:
@@ -748,6 +780,8 @@ def run(manifest, prompt, root):
                             child.wait()
                     child.stdout.close()
             finally:
+                if bridge is not None:
+                    bridge.close()
                 deployment.__exit__(None, None, None)
             for path in roots:
                 file_changes(path, Path(manifest['workspace']['sessionRoot']).name, before[path], scan(path), root)

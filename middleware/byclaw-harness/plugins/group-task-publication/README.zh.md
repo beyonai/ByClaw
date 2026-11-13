@@ -14,7 +14,7 @@
 
 宿主在 Agent setup 和复用会话接收输入前等待该事件，包括后台团队运行期间的追问。状态持久化先于工具注册，并在工厂发布新建或恢复的 Agent 前完成。工具只通过目标 Agent context 注册；重复 setup 不会重复注册，Agent 销毁或发布插件卸载时会注销工具。加载插件不注册全局模型工具，也不请求 BE。
 
-Codex 固定路由通过通用 `byclaw/coding-setup` 事件复用相同启用状态与任务绑定，无需创建 DSH Agent。符合条件时在专用 `CODEX_HOME` 注册 DSH 兼容的 `prepare_group_task_publication` MCP 工具；Codex 调用工具后由工具桥接复用原客户端准备 `text + sourcePaths`。文件检查使用本轮 coding 租约，认证由工具侧运行环境读取；仅准备待确认内容，不上传、不发群、不完成任务，不确定失败不重试。最终 JSON 的 `publication` 必须为空，避免宿主重复准备。
+Codex 固定路由通过 `byclaw/coding-setup` 复用相同启用状态与任务绑定，无需创建 DSH Agent。符合条件时在专用 `CODEX_HOME` 注册 `prepare_group_task_publication`。MCP 将请求写入本轮私有目录，runner 经 stdout 通知 Harness；Harness 调用已绑定的 `publication.prepare()`，复用原 DSH 客户端，每次通过宿主刷新当前用户认证。MCP 不需要 `BEYOND_TOKEN`，不直接请求 BE。文件检查与结果回传使用同一 coding 租约；仓库开发模式只准备正文和真实 Git 提交状态，不附源码。重复事件不重复发请求，取消后不启动排队请求，CLI 退出后清理本轮桥接目录。工具仅准备待确认内容，不上传、不发群、不完成任务，不确定失败不重试。最终 JSON 的 `publication` 必须为空，避免重复准备。
 
 ## 实现分工
 

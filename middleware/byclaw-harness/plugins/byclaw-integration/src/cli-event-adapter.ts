@@ -98,9 +98,9 @@ export class CodexEventAdapter {
     if (!event || typeof event.type !== 'string') throw new Error('CODEX_INVALID_EVENT')
     this.eventCount++
     this.lastEventAt = performance.now()
-    this.lastEventType = ['byclaw.workspace', 'byclaw.file_changes', 'thread.started', 'turn.started', 'turn.failed',
+    this.lastEventType = ['byclaw.workspace', 'byclaw.file_changes', 'byclaw.publication.request', 'thread.started', 'turn.started', 'turn.failed',
       'error', 'turn.completed', 'item.started', 'item.updated', 'item.completed'].includes(event.type) ? event.type : 'unknown'
-    if (event.type === 'byclaw.workspace' || event.type === 'byclaw.file_changes') { this.onWorkspace(event); return }
+    if (event.type === 'byclaw.workspace' || event.type === 'byclaw.file_changes' || event.type === 'byclaw.publication.request') { this.onWorkspace(event); return }
     if (event.type === 'thread.started' && typeof event.thread_id === 'string') this.threadId = event.thread_id
     if (event.type === 'turn.started') {
       this.answer = ''; this.explicitAnswer = undefined; this.candidate = undefined; this.completed = false

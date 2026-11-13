@@ -50,8 +50,9 @@ coding-workspace.py〔在实际 coding 租约中执行〕
 
 - 在原 cwd 与 sessionRoot 做有界前后扫描，包含 Shell 创建的多层文件；排除 executors、.git、node_modules 等目录。单个文本最多 256 KiB，总文本 16 MiB，最多 10000 个文件；超限显示扫描不完整，不凭缺项推断删除。
 - 文件详情写入原 v2 快照目录，再通过 3016 发送摘要；二进制保留路径、大小和存在状态。未在这两个目录中的文件不纳入扫描。
-- 安装 `group-task-publication` 且符合原任务绑定条件时，CLI 在专用 `CODEX_HOME` 注册 DSH 兼容的 `prepare_group_task_publication` MCP 工具。Codex 只在用户明确要求发到群里或准备回群成果时调用该工具；工具桥接复用原客户端准备待确认卡片，路径在同一 coding 租约校验，认证由工具侧运行环境读取。最终答复仍使用结构化 JSON，`publication` 必须为 `null`，避免宿主重复准备。
-- 不具备群任务或关联私聊绑定时不注册该工具；普通独立私聊不会获得群成果发布能力。工具配置、任务绑定和桥接脚本只写入本执行身份的 `CODEX_HOME`，任务结束后由租约清理。
+- 安装 `group-task-publication` 且符合原任务绑定条件时，CLI 在专用 `CODEX_HOME` 注册 DSH 兼容的 `prepare_group_task_publication` MCP 工具。Codex 只在用户明确要求发到群里或准备回群成果时调用该工具。MCP 将请求写入本轮私有目录，runner 通过现有 stdout 事件通知 Harness；Harness 调用已绑定的 `publication.prepare()`，再通过同一 coding 租约写回结果。
+- 认证与 DSH 共用 `GroupTaskPublicationClient` 和宿主 `resolveAuthHeaders()`，每次调用读取当前用户认证；MCP 无需 `BEYOND_TOKEN`，不再自行请求 BE。任务、用户和租户由宿主绑定，附件在同一租约校验。仓库开发模式只准备正文和真实提交状态，不附源码文件。成功仅表示准备好待确认卡片；最终 JSON 的 `publication` 必须为 `null`，避免重复准备。
+- 不具备群任务或关联私聊绑定时不注册该工具；普通独立私聊不会获得群成果发布能力。每轮桥接 ID、请求 ID 和响应路径绑定当前租约；重复事件不重复发请求，取消后不再启动待执行请求。本轮 IPC 目录在 CLI 退出后清理，专用配置和脚本下轮重建，不保存登录凭据。
 - 未安装可选插件时保持普通最终答复。准备请求失败不自动重试；不会自动上传、发群或完成任务。
 
 ## 代码入口
@@ -61,6 +62,7 @@ coding-workspace.py〔在实际 coding 租约中执行〕
 | `src/index.ts` | 组合已有能力、可选扩展、原 3016 发送 |
 | `src/coding-context.ts` | 白名单上下文、原目录映射、租约文件查询、执行清单 |
 | `src/coding-router.ts` | 原队列内准备、执行、接收文件摘要、调用成果回调 |
+| `src/coding-publication-bridge.ts` | 将本轮 MCP 请求交给原 DSH 发布回调，并在同一租约返回结果 |
 | `scripts/coding-workspace.py` | 调用工具侧准备程序、专用配置、Skill 链接、原生续聊、文件快照 |
 | `scripts/prepare-agent-skills.mjs`、`src/skill-sync.ts` | 原 HTTP 接口查询 agent 关联资源，复用版本检查、下载与原子缓存 |
 | `src/template-runtime.ts` | 无 DSH Agent 的授权模板准备入口；原 SkillRuntime 继续服务 DSH |

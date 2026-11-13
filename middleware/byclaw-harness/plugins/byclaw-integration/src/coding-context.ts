@@ -1,5 +1,5 @@
 /** Deterministic projection of existing ByClaw context into an external coding session. */
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { posix } from 'node:path'
 import type { AskAgentCommand } from '@byclaw/by-framework'
@@ -165,14 +165,14 @@ export async function codingRepositoryState(sandbox: ExecutionSandbox, actor: st
   return { revision: state.revision, dirty: state.dirty }
 }
 
-export function codingRunManifest(prepared: CodingContext, identity: string, messageId: string): Record<string, unknown> {
+export function codingRunManifest(prepared: CodingContext, identity: string, messageId: string, bridgeId = randomUUID()): Record<string, unknown> {
   if (!/^\d+$/u.test(prepared.employeeId)) throw new Error('EXECUTION_INVALID_EMPLOYEE_ID')
   const home = posix.join(prepared.workspace.sessionRoot, 'executors', prepared.employeeId, 'codex-home')
   const publication = prepared.publication === undefined ? undefined : {
     description: prepared.publication.description,
     ...(prepared.publication.mode === undefined ? {} : { mode: prepared.publication.mode }),
+    ...(prepared.publication.mode !== 'mcp' ? {} : { bridgeId }),
     ...(prepared.publication.binding === undefined ? {} : { binding: prepared.publication.binding }),
-    ...(prepared.publication.baseUrl === undefined ? {} : { baseUrl: prepared.publication.baseUrl }),
   }
   const manifest = { version: 1, identity: createHash('sha256').update(identity).digest('hex'), messageId,
     employeeId: prepared.employeeId, workspace: prepared.workspace, home, persona: prepared.persona, skills: prepared.skills,

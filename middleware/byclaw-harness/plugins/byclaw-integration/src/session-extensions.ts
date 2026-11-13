@@ -57,15 +57,13 @@ export interface ByClawCodingSetup {
     description: string
     /** Codex can use the DSH-compatible tool bridge instead of final-output publication. */
     mode?: 'structured' | 'mcp'
-    /** Non-secret binding passed to a lease-local tool bridge. */
+    /** Non-secret eligibility metadata; the host callback retains the authoritative binding. */
     binding?: {
       taskId: string
       userCode: string
       privateGroupId?: string
       enterpriseId?: string
     }
-    /** Non-secret service origin/prefix used by the lease-local tool bridge. */
-    baseUrl?: string
     prepare(args: { text: string; sourcePaths: string[] }, signal: AbortSignal): Promise<unknown>
   }
 }

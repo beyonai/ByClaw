@@ -1,5 +1,6 @@
 /** Deterministic employee execution routing before the DSH model gets the request. */
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { CodingPublicationBridge } from './coding-publication-bridge.ts'
 import { CodingModelConfigurationError, type CodingModelError } from './coding-model.ts'
 import type { AskAgentCommand, AgentContext } from '@byclaw/by-framework'
 import { CodexEventAdapter, type CodingEvent, type CodexEventSnapshot } from './cli-event-adapter.ts'
@@ -219,10 +220,14 @@ export class ByClawExecutionRouter {
     let executionStarted = queuedAt
     let firstActivity = false
     let prepared: CodingContext | undefined
+    let publicationBridge: CodingPublicationBridge | undefined
     const parser = new CodexEventAdapter(event => emit(event, 'cli'), () => {
       if (!firstActivity) { firstActivity = true; log('first_activity', 'success', executionStarted) }
     }, event => {
-      if (event.type === 'byclaw.workspace') {
+      if (event.type === 'byclaw.publication.request') {
+        if (publicationBridge === undefined) throw new Error('EXECUTION_PUBLICATION_SCOPE_MISMATCH')
+        publicationBridge.accept(event)
+      } else if (event.type === 'byclaw.workspace') {
         const statuses: Record<string, string> = { waiting: '等待共享执行锁', resumed: '已续接 Codex 会话',
           'skills-started': '准备内置 Skill 和当前员工关联 Skill', 'skills-ready': '员工 Skill 已准备，未变化的版本复用缓存',
           created: '已准备 Codex 工作空间', recreated: '原生状态缺失或工作目录变化，重建 Codex 会话', partial: '文件变更扫描不完整，部分文件未纳入展示' }
@@ -262,7 +267,29 @@ export class ByClawExecutionRouter {
       signal.throwIfAborted()
       const prompt = prepared.prompt
       if (Buffer.byteLength(prompt, 'utf8') > 64 * 1024) throw new Error('EXECUTION_INPUT_TOO_LARGE')
-      const argv = ['python3', '-c', CODING_WORKSPACE_RUNNER, JSON.stringify(codingRunManifest(prepared, identity, String(command.header.messageId))), prompt, lease.workspaceRoot]
+      const bridgeId = randomUUID()
+      const manifest = codingRunManifest(prepared, identity, String(command.header.messageId), bridgeId)
+      if (prepared.publication?.mode === 'mcp') {
+        const bound = prepared
+        publicationBridge = new CodingPublicationBridge({ bridgeId, home: String(manifest.home), sandbox, actor,
+          leaseId: lease.leaseId, workspaceRoot: lease.workspaceRoot, signal,
+          abort: () => control.abort(new Error('EXECUTION_PUBLICATION_BRIDGE_FAILED')),
+          prepare: async (args, callSignal) => {
+            await settleDisposition()
+            callSignal.throwIfAborted()
+            if (bound.workspace.repository !== undefined) {
+              if (args === null || typeof args !== 'object' || Array.isArray(args)
+                || !('text' in args) || typeof args.text !== 'string' || !args.text.trim()
+                || Object.keys(args).some(key => key !== 'text' && key !== 'sourcePaths')) throw new Error('EXECUTION_PUBLICATION_TEXT_REQUIRED')
+              const state = await codingRepositoryState(sandbox!, actor, lease.leaseId, bound.workspace.repository, lease.workspaceRoot, callSignal)
+              const version = `仓库当前提交：${state.revision}；${state.dirty ? '存在未提交改动，尚未形成完整交付版本' : '工作区干净'}。`
+              args = { text: `${args.text}\n\n${version}`, sourcePaths: [] }
+            }
+            return bound.publication!.prepare(args as { text: string; sourcePaths: string[] }, callSignal)
+          },
+        })
+      }
+      const argv = ['python3', '-c', CODING_WORKSPACE_RUNNER, JSON.stringify(manifest), prompt, lease.workspaceRoot]
       executionStarted = performance.now()
       let firstStdout = false
       const deployment = await this.options.deploymentEnabled?.() ?? this.options.environment().BYCLAW_DEPLOY_ENABLED === '1'
@@ -330,6 +357,8 @@ export class ByClawExecutionRouter {
       endStage('error', knownReason ?? code, processOutcome)
     } finally {
       if (heartbeat) clearInterval(heartbeat)
+      try { await publicationBridge?.close() }
+      catch { failure ??= new Error('EXECUTION_PUBLICATION_BRIDGE_FAILED') }
       await settleDisposition()
       if (sandbox) {
         startStage('cleanup', '归还 coding 工具沙箱租约')
