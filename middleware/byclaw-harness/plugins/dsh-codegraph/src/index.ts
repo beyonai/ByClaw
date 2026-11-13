@@ -11,6 +11,7 @@ import * as McpClient from '@deepseek-ai/dsh-mcp-client'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import { HandshakeCache, McpRelay, type RelayServer } from './mcp-relay.js'
+import { HANDSHAKE_SEED } from './handshake-seed.js'
 
 /** Cordis plugin name. */
 export const name = 'dsh-codegraph'
@@ -148,8 +149,11 @@ async function applyToolEnvironment(ctx: Context, config: Config): Promise<void>
   const command = serverCommand(config)
   // Keyed by the server command and this host's copy of the executable: the tool environment runs
   // the same image build, so a rebuilt image starts over.
+  // The default command's answers ship with the plugin: a context starting before any server has
+  // run (a new user, a rebuilt image) registers the tool without starting the tool sandbox.
   const cache = new HandshakeCache(join(stateDir, 'mcp-cache.json'),
-    JSON.stringify([command.argv, command.cwd, command.env, await executableStamp(command.argv[0]!)]))
+    JSON.stringify([command.argv, command.cwd, command.env, await executableStamp(command.argv[0]!)]),
+    isDefaultCommand(command) ? HANDSHAKE_SEED : {})
   await cache.load()
   const live = new Set<Socket>()
   const server = createServer(socket => {
@@ -200,6 +204,12 @@ function listen(server: Server, path: string): Promise<void> {
 }
 
 /** The CodeGraph server to start on the tool environment, with the defaults the bundle's row uses. */
+/** Whether `command` is the one {@link HANDSHAKE_SEED} was captured from. */
+function isDefaultCommand(command: ReturnType<typeof serverCommand>): boolean {
+  return JSON.stringify([command.argv, command.cwd, command.env])
+    === JSON.stringify([['codegraph', 'serve', '--mcp'], '/by', { CODEGRAPH_MCP_TOOLS: 'explore' }])
+}
+
 function serverCommand(config: Config): { argv: string[]; cwd: string; env: Record<string, string> } {
   return {
     argv: [config.command ?? 'codegraph', ...config.args ?? ['serve', '--mcp']],

@@ -10,7 +10,8 @@
  * handshake (`server/discover`, `initialize`, `tools/list`) are cached (also on
  * disk, per server command),
  * so registering the tool at context start needs no server at all once any
- * context has started one.
+ * context has started one, or from the start for the default server command, whose
+ * answers ship with the plugin.
  */
 import { randomUUID } from 'node:crypto'
 import { readFile, rename, writeFile } from 'node:fs/promises'
@@ -43,12 +44,16 @@ function lasting(message: Message): Answer | undefined {
   return error?.code === METHOD_NOT_FOUND ? { error } : undefined
 }
 
-/** What the relay remembers of the server's handshake, keyed by the server command. */
+/**
+ * What the relay remembers of the server's handshake, keyed by the server command. Without
+ * a remembered answer it gives the seed's: what the expected server answers, known in advance.
+ */
 export class HandshakeCache {
   private answers: { key: string; methods: Record<string, Answer> } | undefined
   private writing: Promise<void> = Promise.resolve()
 
-  constructor(private readonly path: string, private readonly key: string) {}
+  constructor(private readonly path: string, private readonly key: string,
+    private readonly seed: Readonly<Record<string, Answer>> = {}) {}
 
   async load(): Promise<void> {
     try {
@@ -60,7 +65,7 @@ export class HandshakeCache {
   }
 
   get(method: string): Answer | undefined {
-    return this.answers?.methods[method]
+    return this.answers?.methods[method] ?? this.seed[method]
   }
 
   async set(method: string, answer: Answer): Promise<void> {
