@@ -1,8 +1,8 @@
-# Harness-owned by-framework package
+# Pinned by-framework package
 
-Both business Dockerfiles install `@byclaw/by-framework@1.7.0-byclaw.1` from this directory. No npm publication or developer checkout is required to build the image. The package includes compiled JavaScript, TypeScript source, tests and the upstream Apache-2.0 license.
+Both business Dockerfiles install `@byclaw/by-framework@1.9.0` from this directory, so an image build needs neither registry access nor a developer checkout. The archive is the official npm release, byte for byte: `artifact.json` records its SHA-256, the registry's `integrity` value and the source tag.
 
-Source: [beyonai/by-framework-ts](https://github.com/beyonai/by-framework-ts), commit `e840492139e02439d31859023bde682387d2727d`, based on 1.7.0 (`cdaabf0ab5e5838b881dcef92f182f65d91049e9`). `source.patch` is the readable source/test/documentation delta (zero context; apply with `git apply --unidiff-zero`). `artifact.json` records the package SHA-256 and source commits. The packaging script adds the local version and provenance metadata; it does not change runtime code.
+Source: [beyonai/by-framework-ts](https://github.com/beyonai/by-framework-ts), tag `v1.9.0`. Earlier images carried `1.7.0-byclaw.1`, a harness-built 1.7.0 with uncapped dispatch patched in; that change is part of 1.9.0, as is the clean-up of what dead workers leave in Redis (1.8.0), so nothing is patched here any more.
 
 The runner admits messages independently of business task completion. Deprecated `maxConcurrency` and `BYAI_WORKER_CONCURRENCY` no longer limit dispatch. In-flight tracking still drains tasks on shutdown. Stale consumption is unhealthy even when tasks remain unfinished. Node and Redis already use asynchronous I/O; this change removes a scheduling barrier, not a physical resource limit or a new Netty-style transport implementation. Redis polling batches, ACKs, cancellation and per-session ordering remain in place.
 
@@ -36,10 +36,12 @@ node middleware/byclaw-harness/scripts/by-framework-package.test.mjs
 
 ## Update the artifact
 
-Install the framework's development dependencies, check out the exact source commit pinned in `scripts/pack-by-framework.mjs`, and keep tracked files clean. With Node 24 and npm available, run from the ByClaw repository root:
+From this directory, with the new version in place of `1.9.0`:
 
 ```sh
-node middleware/byclaw-harness/scripts/pack-by-framework.mjs /path/to/by-framework-ts
+npm pack @byclaw/by-framework@1.9.0
+npm view @byclaw/by-framework@1.9.0 dist.integrity
+sha256sum byclaw-by-framework-1.9.0.tgz
 ```
 
-The script rebuilds the source, packages it, and regenerates the hash and patch. For a new revision, review source changes and tests, update the pinned commits/local version, then regenerate all three artifacts together. Do not manually edit compiled files inside the archive.
+Check that the archive's SHA-512 (`openssl dgst -sha512 -binary <file> | base64 -w0`, prefixed `sha512-`) equals the registry's `integrity`, then update `artifact.json` and the version in `scripts/prepare-by-framework.mjs`, `scripts/docker-workspace-prepare.mjs`, `scripts/verify-by-framework-runtime.mjs` and `scripts/by-framework-package.test.mjs`, and remove the old archive. Do not edit files inside the archive.

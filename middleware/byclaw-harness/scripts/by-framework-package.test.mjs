@@ -45,7 +45,7 @@ try {
     /checksum mismatch/)
   await json(metadataPath, { ...metadata, version: '1.6.0' })
   assert.match(node('prepare-by-framework.mjs', ['vendor/by-framework', 'plugins/wrong'], root, false).stderr,
-    /1\.7\.0-byclaw\.1/)
+    /1\.9\.0/)
   await json(metadataPath, metadata)
 
   // Old and qualified dependency overrides must not win over the staged package.
