@@ -26,6 +26,11 @@ export class DeferredToolEnvironmentWork {
     return [...this.created]
   }
 
+  /** Whether the work behind `key` needs no repeat: a directory this host already created stays. */
+  isDone(key: string): boolean {
+    return key.startsWith('mkdir:') && this.created.has(key.slice('mkdir:'.length))
+  }
+
   /** Record that the work behind `key` ran, whether queued here or run directly because B was up. */
   noteDone(key: string): void {
     if (key.startsWith('mkdir:')) this.created.add(key.slice('mkdir:'.length))

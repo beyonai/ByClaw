@@ -51,6 +51,35 @@ describe('tool environment idle lifecycle', () => {
     vi.useRealTimers()
   })
 
+  it('creates a directory once and answers its probes here even while B is connected', async () => {
+    const mkdir = vi.fn().mockResolvedValue(undefined)
+    await ssh.request('spawn', {}, z.string())
+    expect(ssh.connected).toBe(true)
+    await ssh.whenConnected('mkdir:/by/.sessions/7', mkdir)
+    await ssh.whenConnected('mkdir:/by/.sessions/7', mkdir)
+    expect(mkdir).toHaveBeenCalledTimes(1)
+    inner.request.mockClear()
+    const target = await ssh.request('fs.resolve', { path: '/by/.sessions/7' }, z.object({ targetKey: z.string(), displayPath: z.string() }))
+    const info = await ssh.request('fs.stat', { target }, z.object({ type: z.string() }).passthrough())
+    expect(info.type).toBe('directory')
+    expect(inner.request).not.toHaveBeenCalled()
+    // Anything else under it is still B's to answer.
+    await ssh.request('fs.stat', { target: { targetKey: '/by/.sessions/7/a.md', displayPath: 'a.md' } }, z.string())
+    expect(inner.request).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not queue a directory this host already created while B is down', async () => {
+    const mkdir = vi.fn().mockResolvedValue(undefined)
+    await ssh.request('spawn', {}, z.string())
+    await ssh.whenConnected('mkdir:/by/.sessions/8', mkdir)
+    await (ssh as unknown as { drop(): Promise<void> }).drop()
+    expect(ssh.connected).toBe(false)
+    const deferred = ssh as unknown as { deferred: { size: number } }
+    await ssh.whenConnected('mkdir:/by/.sessions/8', mkdir)
+    expect(deferred.deferred.size).toBe(0)
+    expect(mkdir).toHaveBeenCalledTimes(1)
+  })
+
   it('fences a pending SSH handshake when its Platform lease is invalidated', async () => {
     const ready = Promise.withResolvers<unknown>()
     const connector = ssh as unknown as { connect(): Promise<unknown> }

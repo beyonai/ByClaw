@@ -7,7 +7,7 @@ import { ToolEnvIdentity } from '../src/identity.ts'
 import { ToolEnvConnection, WORKLOAD_WRAPPER, asWorkload, launchEnvironment, scrubEnvironment } from '../src/connection.ts'
 import { DeferredToolEnvironmentWork } from '../src/deferred-work.ts'
 import { resolveLocalExecutable } from '../src/local-executable.ts'
-import { answerWhileDown, isCleanupRequest } from '../src/pending-directories.ts'
+import { answerCreatedDirectory, answerWhileDown, isCleanupRequest } from '../src/pending-directories.ts'
 
 
 describe('connector bootstrap identity', () => {
@@ -243,6 +243,10 @@ describe('DeferredToolEnvironmentWork', () => {
     work.noteDone('mkdir:/by/.sessions/3')
     work.noteDone('write:/by/.sessions/3/a')
     expect(work.createdDirectories()).toEqual(['/by/.sessions/1', '/by/.sessions/3'])
+    // A created directory needs no second mkdir; a failed one and other work do.
+    expect(work.isDone('mkdir:/by/.sessions/1')).toBe(true)
+    expect(work.isDone('mkdir:/by/.sessions/2')).toBe(false)
+    expect(work.isDone('write:/by/.sessions/1/a')).toBe(false)
   })
   it('keeps the latest operation per key, runs in order and survives failures', async () => {
     const logs: string[] = []
@@ -269,6 +273,21 @@ describe('resolveLocalExecutable', () => {
     expect(await resolveLocalExecutable('definitely-not-a-command-xyz', undefined, { PATH: '/bin' })).toBeUndefined()
     expect(await resolveLocalExecutable('relative/sh')).toBeUndefined()
     expect(await resolveLocalExecutable('sh', undefined, { PATH: 'bin:relative' })).toBeUndefined()
+  })
+})
+
+describe('answerCreatedDirectory', () => {
+  const created = ['/by/.sessions/42/']
+  it('answers resolve and stat of a directory this host created, and nothing else', () => {
+    expect(answerCreatedDirectory('fs.resolve', { path: '/by/.sessions/42' }, created)).toEqual({ targetKey: '/by/.sessions/42', displayPath: '/by/.sessions/42' })
+    expect(answerCreatedDirectory('fs.resolve', { path: '42', cwd: '/by/.sessions' }, created)).toEqual({ targetKey: '/by/.sessions/42', displayPath: '/by/.sessions/42' })
+    expect(answerCreatedDirectory('fs.stat', { target: { targetKey: '/by/.sessions/42', displayPath: 'x' } }, created)).toEqual({ version: 'created', type: 'directory' })
+    expect(answerCreatedDirectory('fs.lstat', { path: '/by/.sessions/42/' }, created)).toEqual({ version: 'created', type: 'directory' })
+    expect(answerCreatedDirectory('fs.stat', { target: { targetKey: '/by/.sessions/42/notes.md', displayPath: 'x' } }, created)).toBeUndefined()
+    expect(answerCreatedDirectory('fs.resolve', { path: '/by/.sessions' }, created)).toBeUndefined()
+    expect(answerCreatedDirectory('fs.list', { target: { targetKey: '/by/.sessions/42', displayPath: 'x' } }, created)).toBeUndefined()
+    expect(answerCreatedDirectory('fs.resolve', { path: 'relative' }, created)).toBeUndefined()
+    expect(answerCreatedDirectory('fs.stat', { target: { targetKey: '/by/.sessions/42', displayPath: 'x' } }, [])).toBeUndefined()
   })
 })
 

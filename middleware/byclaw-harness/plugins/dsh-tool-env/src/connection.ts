@@ -21,7 +21,7 @@ import type { ToolEnvIdentity } from './identity.ts'
 import { describeResidual } from './busy.ts'
 import { DeferredToolEnvironmentWork } from './deferred-work.ts'
 import { resolveLocalExecutable } from './local-executable.ts'
-import { answerWhileDown, isCleanupRequest } from './pending-directories.ts'
+import { answerCreatedDirectory, answerWhileDown, isCleanupRequest } from './pending-directories.ts'
 import { markEnvironmentFailure, reportLeaseWarning, toolTransportError, trackLeaseRelease, withLeaseFailure } from './transport-failure.ts'
 
 type Hello = Awaited<SshConnection['ready']>
@@ -177,9 +177,11 @@ export class ToolEnvConnection extends Service {
   /**
    * Run `operation` on B now if it is connected, otherwise once it connects, before
    * the first operation of that connection is served. Deferred work with the same
-   * key is replaced, so repeated writes to one path cost one write.
+   * key is replaced, so repeated writes to one path cost one write; a `mkdir:` key
+   * this host already ran is not run again (the directory outlives B).
    */
   async whenConnected(key: string, operation: () => Promise<void>): Promise<void> {
+    if (this.deferred.isDone(key)) return
     if (this.connected) {
       await operation()
       this.deferred.noteDone(key)
@@ -216,6 +218,9 @@ export class ToolEnvConnection extends Service {
         if (local !== undefined) return result.parse(local)
       }
     }
+    // Directories this host created: connected or not, B would only confirm what is known here.
+    const created = answerCreatedDirectory(method, params, this.deferred.createdDirectories())
+    if (created !== undefined) { return result.parse(created) }
     // What this host can say without B (queued directories, DSH's own homes, path resolution);
     // everything else, a turn's instruction-file and Skill probes included, goes to B and starts it.
     if (!this.connected && this.current === undefined && !this.closed) {
