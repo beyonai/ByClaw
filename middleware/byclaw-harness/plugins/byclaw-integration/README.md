@@ -22,6 +22,12 @@ dsh --profile web --dump-config
 
 Copy the repository [`.env.example`](../.env.example) to the DSH launch directory, fill the deployment values, and keep the resulting `.env` untracked. The bundled patch enables this plugin. Fatal configuration or core Redis connection failures log the complete setup error, release partially opened resources, and leave the DSH host running with the ByClaw runtime disabled. Resource snapshots, group runtimes, template generations, and Skill downloads instead use the tolerant resource path described below, so those failures do not block Worker registration.
 
+## Dedicated tenant Worker
+
+Start with the `web` profile. The launcher passes `BYCLAW_HARNESS_TENANT_ID=<enterpriseId>` and `BYCLAW_HARNESS_WORKER_ID=tenant-harness-<enterpriseId>-<recordId>`. Both IDs are positive decimal strings. The plugin registers `BYCLAW_DSH_TENANT_<enterpriseId>` in the same Redis registry as BE. Redis Cluster uses `REDIS_KEY_SCHEMA_VERSION=v2`. For TLS, set `REDIS_TLS=true`.
+
+Tenant mode provides Worker registration and heartbeats. Group task execution is enabled separately. This mode requires no personal `USER_CODE`. The slim image can use `BYCLAW_DSH_TOOL_ENV=none` for registration-only startup.
+
 ## Runtime structure
 
 The plugin registers a `BYCLAW_DSH` Worker and projects ByClaw-authorized resources into two reusable template kinds:

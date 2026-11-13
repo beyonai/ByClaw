@@ -1,7 +1,14 @@
 import JsonCodeEditor from '@/pages/manager/components/JsonCodeEditor';
 import ModalDrawer from '@/pages/manager/components/ModalDrawer';
 import { getPreferredServiceKey, removePreferredServiceKey } from '@/pages/manager/service/SandboxMgr';
-import { listTenants, provisionTenant, restartTenantSandbox, type TenantItem } from '@/pages/manager/service/TenantMgr';
+import {
+  listTenants,
+  PLATFORM_ENTERPRISE_ID,
+  provisionTenant,
+  restartTenantSandbox,
+  TENANT_HARNESS_TYPE,
+  type TenantItem,
+} from '@/pages/manager/service/TenantMgr';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 import { isAdminVip } from '@/pages/manager/utils/auth';
 import { getMultiTenancyRevision, useMultiTenancy } from '@/utils/multiTenancy';
@@ -66,6 +73,7 @@ import {
 } from './serviceSpecUtils';
 
 import EndpointLinks from './EndpointLinks';
+import PlatformTenantHarnessLaunch from './PlatformTenantHarnessLaunch';
 import SandboxLifetime from './SandboxLifetime';
 import ServiceSpecCatalog from './ServiceSpecCatalog';
 import ToolSandboxCover from './ToolSandboxCover';
@@ -568,7 +576,7 @@ const SandboxMgr = () => {
       st?: string,
       silent?: boolean,
       scope = ownerScope,
-      tenantId = enterpriseId,
+      tenantId: string | null | undefined = enterpriseId,
       liveStatus = providerStatus,
       type = sandboxType
     ) => {
@@ -580,7 +588,7 @@ const SandboxMgr = () => {
         providerStatus: liveStatus || undefined,
         sandboxType: type || undefined,
         ownerScope: canViewTenantResources ? scope : 'USER',
-        enterpriseId: canViewTenantResources && scope === 'TENANT' ? tenantId : undefined,
+        enterpriseId: canViewTenantResources && scope === 'TENANT' ? (tenantId ?? undefined) : undefined,
         includePreferredServiceKeys: !canViewTenantResources || scope === 'USER',
       };
 
@@ -663,13 +671,24 @@ const SandboxMgr = () => {
 
   // Reload the visible resource scope when the system switch or role changes.
   useEffect(() => {
+    const type = !canViewTenantResources && sandboxType === TENANT_HARNESS_TYPE ? '' : sandboxType;
     if (!canViewTenantResources) {
       setOwnerScope('USER');
       setEnterpriseId(undefined);
       setTenantLaunchOpen(false);
+      setSandboxType(type);
     }
     setList([]);
-    loadData({ pageIndex: 1, pageSize: pageInfo.pageSize }, keyword, status);
+    loadData(
+      { pageIndex: 1, pageSize: pageInfo.pageSize },
+      keyword,
+      status,
+      false,
+      ownerScope,
+      enterpriseId,
+      providerStatus,
+      type
+    );
   }, [canViewTenantResources]);
 
   // Older backends omit the page-level preferences.
@@ -1458,6 +1477,24 @@ const SandboxMgr = () => {
     }
   }, [intl, keyword, loadData, pageInfo, status, tenantLaunchForm]);
 
+  const showPlatformHarnessRecords = useCallback(() => {
+    setKeyword('');
+    setStatus('');
+    setProviderStatus('');
+    setSandboxType(TENANT_HARNESS_TYPE);
+    setEnterpriseId(PLATFORM_ENTERPRISE_ID);
+    loadData(
+      { pageIndex: 1, pageSize: pageInfo.pageSize },
+      '',
+      '',
+      false,
+      'TENANT',
+      PLATFORM_ENTERPRISE_ID,
+      '',
+      TENANT_HARNESS_TYPE
+    );
+  }, [loadData, pageInfo.pageSize]);
+
   const handleRestartTenant = useCallback(
     async (record: SsSandboxRecord) => {
       if (record.enterpriseId === undefined || record.enterpriseId === null) return;
@@ -1558,6 +1595,9 @@ const SandboxMgr = () => {
       width: 180,
       render: (value: string | number | undefined, record: SsSandboxRecord) => {
         if (record.ownerScope !== 'TENANT' || value === null || value === undefined) return '-';
+        if (String(value) === PLATFORM_ENTERPRISE_ID) {
+          return renderEllipsisText(intl.formatMessage({ id: 'sandboxMgr.tenantHarness.platformEnterprise' }));
+        }
         const tenant = tenantOptions.find((item) => item.enterpriseId === String(value));
         return renderEllipsisText(tenant ? `${tenant.enterpriseName} (${value})` : value);
       },
@@ -1672,6 +1712,7 @@ const SandboxMgr = () => {
       align: 'center' as const,
       width: 130,
       render: (_value: boolean | undefined, record: SsSandboxRecord) => {
+        if (record.ownerScope === 'TENANT' && record.sandboxType !== TENANT_HARNESS_TYPE) return '-';
         const workerStatus = getWorkerLivenessStatus(record);
         const colors = { online: 'green', offline: 'red', unknown: 'default' } as const;
         return (
@@ -1787,6 +1828,7 @@ const SandboxMgr = () => {
       width: 160,
       render: (_: any, record: SsSandboxRecord) => {
         if (record.ownerScope === 'TENANT') {
+          if (record.sandboxType === TENANT_HARNESS_TYPE) return null;
           if (!showLaunchButton || !['RUNNING', 'FAILED'].includes(record.status)) return null;
           return (
             <Popconfirm
@@ -2197,6 +2239,7 @@ const SandboxMgr = () => {
     'endpoint',
     'status',
     'providerStatus',
+    'workerOnline',
     'createTime',
     'lifetime',
     'releaseTime',
@@ -2224,9 +2267,11 @@ const SandboxMgr = () => {
         setSharedOpen(key === 'SHARED');
         if (key === 'RECOVERY' || key === 'SHARED') return;
         const scope = key as 'TENANT' | 'USER';
+        const type = scope === 'USER' && sandboxType === TENANT_HARNESS_TYPE ? '' : sandboxType;
         setOwnerScope(scope);
         setEnterpriseId(undefined);
-        loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, scope, undefined);
+        setSandboxType(type);
+        loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, scope, null, providerStatus, type);
       }}
     />
   );
@@ -2322,7 +2367,14 @@ const SandboxMgr = () => {
               options={[
                 { value: '', label: intl.formatMessage({ id: 'sandboxMgr.filter.allTypes' }) },
                 ...[
-                  ...new Set([...sandboxTypes, ...['openclaw', 'byclaw-dsh', 'byclaw-sandbox', 'tenant-opengauss']]),
+                  ...new Set([
+                    ...sandboxTypes,
+                    'openclaw',
+                    'byclaw-dsh',
+                    'byclaw-sandbox',
+                    'tenant-opengauss',
+                    ...(ownerScope === 'TENANT' ? [TENANT_HARNESS_TYPE] : []),
+                  ]),
                 ].map((value) => ({ value, label: value })),
               ]}
             />
@@ -2336,12 +2388,20 @@ const SandboxMgr = () => {
                 style={{ width: 220 }}
                 onChange={(value?: string) => {
                   setEnterpriseId(value);
-                  loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, ownerScope, value);
+                  loadData({ ...pageInfo, pageIndex: 1 }, keyword, status, false, ownerScope, value ?? null);
                 }}
-                options={tenantOptions.map((item) => ({
-                  label: `${item.enterpriseName} (${item.enterpriseId})`,
-                  value: item.enterpriseId,
-                }))}
+                options={[
+                  {
+                    label: intl.formatMessage({ id: 'sandboxMgr.tenantHarness.platformEnterprise' }),
+                    value: PLATFORM_ENTERPRISE_ID,
+                  },
+                  ...tenantOptions
+                    .filter((item) => item.enterpriseId !== PLATFORM_ENTERPRISE_ID)
+                    .map((item) => ({
+                      label: `${item.enterpriseName} (${item.enterpriseId})`,
+                      value: item.enterpriseId,
+                    })),
+                ]}
               />
             )}
           </Space>
@@ -2359,6 +2419,9 @@ const SandboxMgr = () => {
               >
                 {intl.formatMessage({ id: 'sandboxMgr.tenant.launch' })}
               </Button>
+            )}
+            {isPlatformManager && ownerScope === 'TENANT' && (
+              <PlatformTenantHarnessLaunch onResourcesChanged={showPlatformHarnessRecords} />
             )}
             {showLaunchButton && ownerScope === 'USER' && (
               <Button type="primary" icon={<RocketOutlined />} onClick={handleOpenLaunchModal}>

@@ -1,4 +1,24 @@
-import { POST } from '@/service/common/request';
+import { GET, POST } from '@/service/common/request';
+
+export const PLATFORM_ENTERPRISE_ID = '1';
+export const TENANT_HARNESS_TYPE = 'tenant-harness';
+
+export interface TenantHarnessState {
+  status: 'NOT_REQUESTED' | 'PENDING' | 'RUNNING' | 'RETRY_WAIT' | 'SUCCEEDED' | 'MANUAL_REQUIRED' | 'FAILED';
+  workerReady: boolean;
+  taskId?: string | null;
+  recordId?: string | null;
+  sandboxId?: string | null;
+  profileKey?: string | null;
+  errorCode?: string | null;
+}
+
+const platformTenantHarnessPath = `/byaiService/admin/tenants/${PLATFORM_ENTERPRISE_ID}/harness`;
+const inlineError = { responseCfg: { hideErrorTips: true } };
+
+export const getPlatformTenantHarness = () => GET<TenantHarnessState>(platformTenantHarnessPath, {}, inlineError);
+export const ensurePlatformTenantHarness = (profileKey: string) =>
+  POST<TenantHarnessState>(`${platformTenantHarnessPath}/ensure`, { profileKey }, inlineError);
 
 export interface TenantItem {
   enterpriseId: string;

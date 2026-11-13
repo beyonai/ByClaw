@@ -259,8 +259,9 @@ public class TransactionAdviceConfig {
                     && "com.iwhalecloud.byai.gateway.sandbox.service.TenantSandboxService"
                         .equals(ClassUtils.getUserClass(targetClass).getName())
                     && ("launchOpenGauss".equals(method.getName()) || "launchDataNode".equals(method.getName())
+                        || "ensureHarness".equals(method.getName())
                         || "deleteTenantResources".equals(method.getName()))) {
-                    // Persist the retired record before inserting its replacement and calling OpenSandbox.
+                    // Publish launch reservations before the provider call and keep uncertain outcomes durable.
                     // Deletion also commits each release before asynchronous NAS cleanup may request a retry.
                     return notSurpportedTx;
                 }

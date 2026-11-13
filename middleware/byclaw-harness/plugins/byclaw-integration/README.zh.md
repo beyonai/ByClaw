@@ -28,6 +28,12 @@ dsh --profile web --dump-config
 
 把仓库根目录的 [`.env.example`](../.env.example) 复制到 DSH 启动目录，填写部署值，并确保生成的 `.env` 不被 Git 跟踪。包内 patch 会启用该插件。致命配置错误或核心 Redis 连接失败时，插件会记录完整初始化错误、释放已打开的资源，并让 DSH 宿主继续运行；本次 ByClaw runtime 保持停用。资源 snapshot、专家团运行配置、模板代次或 Skill 下载失败则走下文的降级资源路径，不会阻止 Worker 注册。
 
+## 专享租户 Worker
+
+以 `web` profile 启动。由启动服务传入 `BYCLAW_HARNESS_TENANT_ID=<enterpriseId>` 和 `BYCLAW_HARNESS_WORKER_ID=tenant-harness-<enterpriseId>-<recordId>`。两个 ID 均使用正整数十进制字符串。插件以 `BYCLAW_DSH_TENANT_<enterpriseId>` 注册到与 BE 相同的 Redis。Redis Cluster 使用现有 `REDIS_KEY_SCHEMA_VERSION=v2`，启用 TLS 时传入 `REDIS_TLS=true`。
+
+租户模式只接入 Worker 注册与心跳，群任务执行接入后单独启用。本模式无需个人 `USER_CODE`。Slim 镜像可设置 `BYCLAW_DSH_TOOL_ENV=none` 完成仅注册的启动。
+
 ## 运行结构
 
 普通 todo 计划也支持从步骤打开子代理：`ordinary-task-plan.ts` 回放父会话的 `todo/write` 和 `subagent/catalog`，把创建记录关联到当时唯一的进行中步骤，输出稳定的计划／步骤标识及真实 `child_turn` 执行记录。子代理开始和结束回合时重新投影，冷恢复时从只读持久化日志重建；使用 `plan` 事件进入后端已有的会话／消息绑定链路。没有唯一进行中步骤时不推断归属；修改或重排步骤会建立新计划，避免旧执行记录串到新步骤。前端沿用任务标题与历史轮次入口，标题栏不恢复子代理数量按钮。检查：`node --experimental-transform-types scripts/ordinary-task-plan-verify.mjs`。

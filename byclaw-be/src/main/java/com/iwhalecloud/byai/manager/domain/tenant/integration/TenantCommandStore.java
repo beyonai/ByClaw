@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /** 租户服务任务存储：按原请求查重，通过版本和执行权条件防止旧任务结果覆盖新状态。 */
 @Repository
@@ -32,6 +33,47 @@ public class TenantCommandStore {
     public Command byRequest(String source,String request) {
         return one("SELECT " + COMMAND_COLUMNS + " FROM byai.tenant_task WHERE source_system=? AND request_id=?",source,request);
     }
+
+    public void requeueHarness(Command command) {
+        jdbc.update("""
+            UPDATE byai.tenant_task SET status='PENDING',error_code=NULL,revision=revision+1,
+            next_attempt_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+            WHERE id=? AND type='HARNESS_START' AND revision=?
+            AND status IN ('FAILED','MANUAL_REQUIRED','SUCCEEDED')
+            """, Long.parseLong(command.commandId()), command.revision());
+    }
+
+    @Transactional
+    public void beginHarnessCreate(Lease lease, String providerRequestKey) {
+        fence(lease);
+        jdbc.update("""
+            INSERT INTO byai.tenant_task_step(command_id,step_key,status,provider_request_key)
+            SELECT ?,'HARNESS_CREATE','STARTED',? WHERE NOT EXISTS (
+                SELECT 1 FROM byai.tenant_task_step WHERE command_id=? AND step_key='HARNESS_CREATE')
+            """, lease.id(), providerRequestKey, lease.id());
+        jdbc.update("UPDATE byai.tenant_task SET stage='HARNESS_CREATE' WHERE id=?", lease.id());
+    }
+
+    @Transactional
+    public void recordHarnessInstance(Lease lease, long recordId) {
+        fence(lease);
+        if (jdbc.update("""
+            UPDATE byai.tenant_task_step SET status='SUCCEEDED',result=?,revision=revision+1
+            WHERE command_id=? AND step_key='HARNESS_CREATE'
+            """, Long.toString(recordId), lease.id()) != 1) {
+            throw new IllegalStateException("Missing Harness creation intent");
+        }
+        jdbc.update("UPDATE byai.tenant_task SET stage='HARNESS_WORKER_WAIT' WHERE id=?", lease.id());
+    }
+
+    @Transactional
+    public void deferHarnessTemplate(Lease lease) {
+        finish(lease, "RETRY_WAIT", "HARNESS_CREATE", "SANDBOX_TEMPLATE_PREPARING");
+        jdbc.update("""
+            UPDATE byai.tenant_task SET next_attempt_at=? WHERE id=? AND fencing_token=?
+            """, Timestamp.from(Instant.now().plusSeconds(5)), lease.id(), lease.fencingToken());
+    }
+
     /** 只有原资源任务已释放占用时，才允许续期技术就绪状态；任务编号为空即无占用。 */
     public boolean canRenewTechnicalLease(long enterpriseId) {
         Integer idle = jdbc.queryForObject("SELECT count(*) FROM byai.tenant_operation_state "
@@ -94,7 +136,7 @@ public class TenantCommandStore {
             """,lease.id(),lease.worker(),lease.fencingToken());
         if (changed != 1) throw new TenantCommandException(409,"STALE_COMMAND_LEASE");
     }
-    @org.springframework.transaction.annotation.Transactional
+    @Transactional
     public void finish(Lease lease,String status,String stage,String error) {
         fence(lease);
         int changed = jdbc.update("""

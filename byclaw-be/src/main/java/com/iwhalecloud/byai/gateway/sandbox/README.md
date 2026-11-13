@@ -4,6 +4,45 @@
 
 租户资源规格以 `sandbox_service_spec.owner_scope=TENANT` 标记，个人启动入口会拒绝该规格；登录自动启动和个人实例查询仅处理 `owner_scope=USER`。租户 DB/Node 实例须经独立开通流程创建，不能保存为个人首选规格后启动。
 
+## 平台企业专享 Harness
+
+在「沙箱配置管理 → 租户沙箱」创建规格，`Service Key` 和 `Service Type` 均为 `tenant-harness`。
+在「服务规格配置」为该类型启用一个带资源限制的档位。镜像使用包含租户 Worker 的 Harness 构建和现有
+`web` 启动入口，端点和挂载按所用 Provider 配置。Slim 镜像在仅注册 Worker 的场景可设置
+`BYCLAW_DSH_TOOL_ENV=none`。
+
+Spec JSON 的 `env` 使用以下占位符，由启动服务填入实例身份和 BE 所用的 Redis 配置。Redis Cluster 使用
+数据库 `0` 和 `REDIS_KEY_SCHEMA_VERSION=v2`。
+
+```json
+{
+  "env": {
+    "BYCLAW_HARNESS_TENANT_ID": "${envVars.BYCLAW_HARNESS_TENANT_ID}",
+    "BYCLAW_HARNESS_WORKER_ID": "${envVars.BYCLAW_HARNESS_WORKER_ID}",
+    "REDIS_MODE": "${envVars.REDIS_MODE}",
+    "REDIS_HOST": "${envVars.REDIS_HOST}",
+    "REDIS_PORT": "${envVars.REDIS_PORT}",
+    "REDIS_DATABASE": "${envVars.REDIS_DATABASE}",
+    "REDIS_USERNAME": "${envVars.REDIS_USERNAME}",
+    "REDIS_PASSWORD": "${envVars.REDIS_PASSWORD}",
+    "REDIS_CLUSTER_HOST": "${envVars.REDIS_CLUSTER_HOST}",
+    "REDIS_CLUSTER_NODES": "${envVars.REDIS_CLUSTER_NODES}",
+    "REDIS_TLS": "${envVars.REDIS_TLS}",
+    "REDIS_KEY_SCHEMA_VERSION": "${envVars.REDIS_KEY_SCHEMA_VERSION}"
+  }
+}
+```
+
+平台管理员在「租户资源」选择「启动平台租户 Harness」和已启用的档位。接口
+`POST /byaiService/admin/tenants/1/harness/ensure` 接收 `{"profileKey":"s"}`，请替换为实际档位。
+`GET /byaiService/admin/tenants/1/harness` 返回任务状态、实例 ID 和 `workerReady`。
+
+企业 `1` 的 Harness 启动任务和实例记录保存在平台库，分别沿用 `tenant_task`、`tenant_task_step` 和
+`ss_sandbox_record`。部署侧 Worker 领取任务，`BE_ENV=development` 的进程会拒绝提交启动。
+重复提交沿用原任务和档位。Provider 确认模板仍在准备时自动重试。创建结果无法确认时保留实例占位，需人工核对
+Provider 和记录。当前实例的 Worker 以 `BYCLAW_DSH_TENANT_1` 和 `tenant-harness-1-<recordId>`
+注册后，管理页显示就绪。企业群任务需要后续接入授权、工作区和 Gateway 路由。
+
 ## 管理页当前引擎清单
 
 用户资源与租户资源只展示**当前执行引擎仍存在的实例**，不展示数据库中孤立的运行记录或已删除实例的历史。

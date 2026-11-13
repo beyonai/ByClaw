@@ -1368,15 +1368,34 @@ public class SandboxService {
         return true;
     }
 
+    /** The worker lease must belong to the current instance, including when an older lease still exists. */
+    public static boolean isTenantHarnessWorkerOnline(WorkerRegistry registry, long enterpriseId, long recordId) {
+        var result = registry.hasOnlineAgentType(TenantSandboxService.harnessAgentType(enterpriseId), true);
+        return result != null && result.exists && result.workerIds != null
+            && result.workerIds.contains(TenantSandboxService.harnessWorkerId(enterpriseId, recordId));
+    }
+
     public SandboxRecordView buildRecordView(SsSandboxRecord record) {
         if (record == null) {
             return null;
         }
         SandboxRecordView view = new SandboxRecordView();
         BeanUtils.copyProperties(record, view);
-        // Historical records and tenant databases have no live user worker lease.
-        // Avoid remote Redis lookups for every row of the management table.
-        if (!STATUS_RUNNING.equals(record.getStatus()) || "TENANT".equals(record.getOwnerScope())) {
+        if (!STATUS_RUNNING.equals(record.getStatus())) {
+            return view;
+        }
+        if ("TENANT".equals(record.getOwnerScope())) {
+            if (TenantSandboxService.HARNESS_TYPE.equals(record.getSandboxType())
+                    && record.getEnterpriseId() != null && record.getId() != null) {
+                long enterpriseId = record.getEnterpriseId();
+                long recordId = record.getId();
+                view.setWorkerId(TenantSandboxService.harnessWorkerId(enterpriseId, recordId));
+                try {
+                    view.setWorkerOnline(isTenantHarnessWorkerOnline(gatewayWorkerRegistry, enterpriseId, recordId));
+                } catch (RuntimeException unavailable) {
+                    LOGGER.debug("读取租户 Harness Worker 失败，recordId={}", recordId);
+                }
+            }
             return view;
         }
         String workerId = buildSandboxWorkerId(record.getUserCode(), record.getSandboxType());

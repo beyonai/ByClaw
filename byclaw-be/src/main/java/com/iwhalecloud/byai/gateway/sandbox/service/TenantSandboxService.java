@@ -30,6 +30,7 @@ import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import org.slf4j.Logger;
@@ -62,6 +63,9 @@ public class TenantSandboxService {
 
     private static final String DB_TYPE = "tenant-opengauss";
     private static final String NODE_TYPE = "tenant-data-node";
+    public static final String HARNESS_TYPE = "tenant-harness";
+    private static final String HARNESS_TENANT_ID_ENV = "BYCLAW_HARNESS_TENANT_ID";
+    private static final String HARNESS_WORKER_ID_ENV = "BYCLAW_HARNESS_WORKER_ID";
     private static final Set<String> PROFILES = Set.of("s", "m", "l");
 
     private final SandboxLifecycleFacade lifecycleFacade;
@@ -124,6 +128,159 @@ public class TenantSandboxService {
         this.nodeAdvertiseHost = nodeAdvertiseHost;
     }
 
+    public void validateHarnessProfile(String profileKey) {
+        validateHarnessProfileKey(profileKey);
+        harnessSpec(profileKey);
+    }
+
+    public SsSandboxRecord latestHarnessRecord(long enterpriseId) {
+        return recordMapper.selectLatestTenantByResourceAndType(enterpriseId, HARNESS_TYPE);
+    }
+
+    public static String harnessAgentType(long enterpriseId) {
+        return "BYCLAW_DSH_TENANT_" + enterpriseId;
+    }
+
+    public static String harnessWorkerId(long enterpriseId, long recordId) {
+        return HARNESS_TYPE + "-" + enterpriseId + "-" + recordId;
+    }
+
+    /** Starts the enterprise Harness independently of the tenant database and data node. */
+    public TenantSandboxView ensureHarness(long enterpriseId, String profileKey, String providerRequestKey) {
+        if (enterpriseId <= 0 || providerRequestKey == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.harness.launch.invalid");
+        }
+        validateProviderRequestKey(providerRequestKey);
+        validateHarnessProfileKey(profileKey);
+        SsSandboxRecord active = recordMapper.selectActiveTenantByResourceAndType(enterpriseId, HARNESS_TYPE);
+        boolean waitingForTemplate = active != null && isWaitingForTemplate(active, profileKey, providerRequestKey);
+        if (active != null && !waitingForTemplate) {
+            if (!"RUNNING".equals(active.getStatus()) || active.getSandboxId() == null
+                || active.getSandboxId().isBlank() || active.getLockVersion() == null) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.harness.launch.inProgress");
+            }
+            SandboxRuntimeInstance instance = observeProvider(active);
+            if (instance != null) {
+                if (!"Running".equalsIgnoreCase(instance.getState())) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.harness.launch.notRunning");
+                }
+                if (!profileKey.equals(active.getProfileKey())) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.harness.profile.alreadyActive");
+                }
+                return new TenantSandboxView(active.getId(), active.getSandboxId(), active.getEndpoint());
+            }
+        }
+
+        SandboxServiceSpec spec = harnessSpec(profileKey);
+        boolean cluster = "cluster".equals(redisMode) || !valueOrEmpty(redisClusterHost).isBlank()
+            || !valueOrEmpty(redisClusterNodes).isBlank();
+        if (!Set.of("standalone", "cluster").contains(redisMode)
+            || (cluster && (valueOrEmpty(redisClusterHost).isBlank() && valueOrEmpty(redisClusterNodes).isBlank()
+                || !"0".equals(redisDatabase) || !"v2".equalsIgnoreCase(redisKeySchemaVersion)))
+            || (!cluster && valueOrEmpty(redisHost).isBlank())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.harness.redis.configuration.invalid");
+        }
+
+        if (active != null && !waitingForTemplate) {
+            if (recordMapper.updateStatusToReleased(active.getId(), "tenant Harness absent from provider",
+                    new Date(), active.getLockVersion()) != 1) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.harness.launch.inProgress");
+            }
+            active = null;
+        }
+        SsSandboxRecord record;
+        try {
+            record = beginTenantLaunch(active, spec, enterpriseId, HARNESS_TYPE, profileKey, providerRequestKey);
+        }
+        catch (DuplicateKeyException duplicate) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.harness.launch.inProgress");
+        }
+        if (record.getId() == null) {
+            throw new IllegalStateException("tenant Harness record ID was not generated");
+        }
+        String owner = Long.toString(enterpriseId);
+        String recordId = Long.toString(record.getId());
+        SandboxLaunchRequest request = new SandboxLaunchRequest();
+        request.setUserCode(record.getUserCode());
+        request.setSandboxType(HARNESS_TYPE);
+        request.setProfileKey(profileKey);
+        request.setSkipReusableSandbox(true);
+        request.setUserInfo(Map.of("enterpriseId", owner));
+        request.setMetadata(correlatedMetadata(Map.of("ownerScope", "TENANT", "enterpriseId", owner,
+            "resourceId", owner, "recordId", recordId), providerRequestKey));
+        Map<String, String> envs = new LinkedHashMap<>();
+        envs.put("TENANT_ID", owner);
+        envs.put(HARNESS_TENANT_ID_ENV, owner);
+        envs.put(HARNESS_WORKER_ID_ENV, harnessWorkerId(enterpriseId, record.getId()));
+        envs.put("BYCLAW_SANDBOX_FILE_VOLUME_ROOT", valueOrEmpty(volumeRoot));
+        putRedisEnvironment(envs, cluster);
+        request.setEnvs(envs);
+
+        SandboxResponse<SandboxLaunchData> response;
+        try {
+            response = lifecycleFacade.launchSandbox(request);
+        }
+        catch (RuntimeException failure) {
+            LOG.warn("Tenant Harness provider outcome unknown, enterpriseId={}, recordId={}, errorType={}",
+                enterpriseId, record.getId(), failure.getClass().getSimpleName());
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.harness.launch.outcomeUnknown");
+        }
+        if (isTemplatePreparingResponse(response, providerRequestKey)) {
+            throw recordLaunchFailure(record, response, TemplatePreparingException.CODE, providerRequestKey);
+        }
+        SandboxLaunchData data = response == null ? null : response.getData();
+        if (response == null || !response.isSuccess() || data == null
+            || data.getSandboxId() == null || data.getSandboxId().isBlank()) {
+            // A provider timeout can occur after creation. Keep STARTING to hold the unique active slot.
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.harness.launch.outcomeUnknown");
+        }
+        if (recordMapper.updateLaunchSuccess(record.getId(), data.getSandboxId(), data.getEndpoint(),
+                data.getGatewayToken(), data.getTimeoutSeconds(), data.getRemoteExpiresAt(), null, null,
+                new Date(), record.getLockVersion()) != 1) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.harness.launch.changedDuringLaunch");
+        }
+        return new TenantSandboxView(record.getId(), data.getSandboxId(), data.getEndpoint());
+    }
+
+    private static void validateHarnessProfileKey(String profileKey) {
+        if (profileKey == null || !profileKey.matches("[A-Za-z0-9_-]{1,64}")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "tenant.harness.profile.invalid");
+        }
+    }
+
+    private SandboxServiceSpec harnessSpec(String profileKey) {
+        SandboxServiceSpec spec = specRepository.findByServiceKeyAndProfile(HARNESS_TYPE, profileKey)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT, "tenant.harness.profile.unavailable"));
+        if (!"TENANT".equals(spec.getOwnerScope()) || !HARNESS_TYPE.equals(spec.getServiceType())
+            || !profileKey.equals(spec.getProfileKey()) || valueOrEmpty(spec.getImage()).isBlank()
+            || spec.getResourceLimits() == null || spec.getResourceLimits().isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.harness.profile.unavailable");
+        }
+        Map<String, String> env = spec.getEnv();
+        if (env == null || !("${envVars." + HARNESS_TENANT_ID_ENV + "}").equals(env.get(HARNESS_TENANT_ID_ENV))
+            || !("${envVars." + HARNESS_WORKER_ID_ENV + "}").equals(env.get(HARNESS_WORKER_ID_ENV))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "tenant.harness.spec.identityEnvironmentMissing");
+        }
+        return spec;
+    }
+
+    private static String valueOrEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private void putRedisEnvironment(Map<String, String> envs, boolean cluster) {
+        envs.put("REDIS_MODE", cluster ? "cluster" : "standalone");
+        envs.put("REDIS_CLUSTER_HOST", valueOrEmpty(redisClusterHost));
+        envs.put("REDIS_CLUSTER_NODES", valueOrEmpty(redisClusterNodes));
+        envs.put("REDIS_KEY_SCHEMA_VERSION", valueOrEmpty(redisKeySchemaVersion));
+        envs.put("REDIS_TLS", redisTls);
+        envs.put("REDIS_HOST", valueOrEmpty(redisHost));
+        envs.put("REDIS_PORT", redisPort);
+        envs.put("REDIS_DATABASE", redisDatabase);
+        envs.put("REDIS_USERNAME", redisUsername);
+        envs.put("REDIS_PASSWORD", redisPassword);
+    }
+
     public TenantSandboxView launchDataNode(long enterpriseId, String profileKey, long dbRecordId,
                                             long generation) {
         return launchDataNode(enterpriseId, profileKey, dbRecordId, generation, null);
@@ -178,16 +335,7 @@ public class TenantSandboxService {
         envs.put("BE_INTERNAL_URL", beInternalUrl);
         envs.put("KMS_DECRYPT_URL", beInternalUrl + "/internal/v1/tenantKms/decrypt");
         envs.put("INTERNAL_API_TOKEN", internalToken);
-        envs.put("REDIS_MODE",cluster?"cluster":"standalone");
-        envs.put("REDIS_CLUSTER_HOST",redisClusterHost==null?"":redisClusterHost);
-        envs.put("REDIS_CLUSTER_NODES",redisClusterNodes==null?"":redisClusterNodes);
-        envs.put("REDIS_KEY_SCHEMA_VERSION",redisKeySchemaVersion==null?"":redisKeySchemaVersion);
-        envs.put("REDIS_TLS",redisTls);
-        envs.put("REDIS_HOST", redisHost==null?"":redisHost);
-        envs.put("REDIS_PORT", redisPort);
-        envs.put("REDIS_DATABASE", redisDatabase);
-        envs.put("REDIS_USERNAME", redisUsername);
-        envs.put("REDIS_PASSWORD", redisPassword);
+        putRedisEnvironment(envs, cluster);
         request.setEnvs(envs);
         request.setMetadata(correlatedMetadata(Map.of("ownerScope", "TENANT", "enterpriseId", Long.toString(enterpriseId),
             "recordId", Long.toString(record.getId())), providerRequestKey));
@@ -453,7 +601,13 @@ public class TenantSandboxService {
         record.setEnterpriseId(enterpriseId);
         record.setResourceId(enterpriseId);
         // OpenSandbox uses userCode in a volume name, which accepts lowercase DNS labels only.
-        record.setUserCode((DB_TYPE.equals(sandboxType) ? "tenant-" : "tenant-node-") + enterpriseId);
+        String ownerPrefix = switch (sandboxType) {
+            case DB_TYPE -> "tenant-";
+            case NODE_TYPE -> "tenant-node-";
+            case HARNESS_TYPE -> HARNESS_TYPE + "-";
+            default -> throw new IllegalArgumentException("unsupported tenant sandbox type");
+        };
+        record.setUserCode(ownerPrefix + enterpriseId);
         record.setSandboxType(sandboxType);
         record.setServiceType(sandboxType);
         record.setProfileKey(profileKey);
@@ -474,8 +628,7 @@ public class TenantSandboxService {
     private ResponseStatusException recordLaunchFailure(SsSandboxRecord record, SandboxResponse<?> response,
                                                          String reason, String providerRequestKey) {
         // Platform returns this exact response during template resolution, before it can create a sandbox.
-        if (providerRequestKey != null && response != null && response.getCode() == SandboxResponse.RESPONSE_ERROR
-                && response.getData() == null && TemplatePreparingException.CODE.equals(response.getMessage())) {
+        if (isTemplatePreparingResponse(response, providerRequestKey)) {
             if (recordMapper.updateTenantTemplateWait(record.getId(), null, templateWaitMarker(providerRequestKey),
                     new Date(), record.getLockVersion()) == 1) {
                 return new TemplatePreparingException();
@@ -484,6 +637,11 @@ public class TenantSandboxService {
         }
         recordMapper.updateStatusToFailed(record.getId(), reason, new Date(), record.getLockVersion());
         return new ResponseStatusException(HttpStatus.BAD_GATEWAY, reason);
+    }
+
+    private static boolean isTemplatePreparingResponse(SandboxResponse<?> response, String providerRequestKey) {
+        return providerRequestKey != null && response != null && response.getCode() == SandboxResponse.RESPONSE_ERROR
+            && response.getData() == null && TemplatePreparingException.CODE.equals(response.getMessage());
     }
 
     private static String templateWaitMarker(String providerRequestKey) {
@@ -528,7 +686,8 @@ public class TenantSandboxService {
         for (SandboxDetail resource : resources) {
             var metadata = resource.getMetadata();
             if (metadata == null || !Long.toString(enterpriseId).equals(metadata.get("enterpriseId"))
-                || !"TENANT".equals(metadata.get("ownerScope")) || !Set.of(DB_TYPE, NODE_TYPE).contains(metadata.get("serviceKey"))) {
+                || !"TENANT".equals(metadata.get("ownerScope"))
+                || !Set.of(DB_TYPE, NODE_TYPE, HARNESS_TYPE).contains(metadata.get("serviceKey"))) {
                 return new RecoveryResource("RESOURCE_IDENTITY_MISMATCH", null, null);
             }
             if (type.equals(metadata.get("serviceKey"))) candidates.add(resource);

@@ -35,11 +35,28 @@ import {
 import { Config, resolveWorkerAgentTypes, rosterPrompt } from '../lib/index.js'
 import * as integrationPlugin from '../lib/index.js'
 import * as templateRuntime from '../lib/template-runtime.js'
+import { tenantHarnessWorkerIdentity } from '../lib/tenant-worker-identity.js'
 import { superviseWorker } from '../lib/worker-runtime.js'
 import { ByClawDshCommandHandler } from '../lib/worker.js'
 import { ByClawSessionActivityTracker } from '../lib/session-activity.js'
 
 if (BYCLAW_DSH_AGENT_TYPE !== 'BYCLAW_DSH') throw new Error('worker type is not BYCLAW_DSH')
+
+assert.equal(tenantHarnessWorkerIdentity({ USER_CODE: 'personal' }), undefined)
+assert.deepEqual(tenantHarnessWorkerIdentity({
+  BYCLAW_HARNESS_TENANT_ID: '1',
+  BYCLAW_HARNESS_WORKER_ID: 'tenant-harness-1-9223372036854775807',
+}), {
+  agentType: 'BYCLAW_DSH_TENANT_1',
+  workerId: 'tenant-harness-1-9223372036854775807',
+})
+assert.throws(() => tenantHarnessWorkerIdentity({ BYCLAW_HARNESS_TENANT_ID: '01' }), /canonical positive tenant ID/)
+for (const workerId of [undefined, 'tenant-harness-2-1', 'tenant-harness-1-0', 'tenant-harness-1-9223372036854775808']) {
+  assert.throws(() => tenantHarnessWorkerIdentity({
+    BYCLAW_HARNESS_TENANT_ID: '1',
+    BYCLAW_HARNESS_WORKER_ID: workerId,
+  }), /same tenant ID and a positive sandbox record ID/)
+}
 
 let snapshotRefreshes = 0
 const snapshotQueue = new ByClawSnapshotRefreshQueue(async () => {

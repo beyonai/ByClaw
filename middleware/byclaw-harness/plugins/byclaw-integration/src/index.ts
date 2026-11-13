@@ -80,6 +80,8 @@ import type { ByClawSessionHost } from './session-extensions.ts'
 import { registerByClawAgentWorkspacePolicy, ByClawSessionWorkspaceRegistry } from './session-workspace.ts'
 import { resolveByClawByRoot, resolveByClawLocalE2eStorageRoot, resolveByClawInboundPath } from './inbound-context.ts'
 import { ByClawDshWorkerRuntime } from './worker-runtime.ts'
+import { tenantHarnessWorkerIdentity } from './tenant-worker-identity.ts'
+import { installTenantHarnessWorker } from './tenant-worker.ts'
 import { ByClawExecutionRouter, type ExecutionSandbox } from './coding-router.ts'
 import { codingEventPresentation } from './coding-presentation.ts'
 import { codingLeaseFileChecks, codingPreviousCwd, prepareCodingContext } from './coding-context.ts'
@@ -536,6 +538,16 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     () => installDefaultWebSearchPolicy(ctx.tools),
     'byclaw-dsh.disable-default-web-search',
   )
+  try {
+    const tenantWorker = tenantHarnessWorkerIdentity(process.env)
+    if (tenantWorker !== undefined) {
+      ctx.effect(() => installTenantHarnessWorker(tenantWorker, ctx.logger), 'byclaw-dsh.tenant-worker')
+      return
+    }
+  } catch (error: unknown) {
+    ctx.logger.error(`[byclaw-dsh] tenant Worker startup failed: ${startupErrorDetail(error)}`)
+    return
+  }
   const startup = new ByClawStartupLog(config.userCode?.trim() || process.env['USER_CODE']?.trim() || '')
   startup.point('plugin-apply')
   try {
