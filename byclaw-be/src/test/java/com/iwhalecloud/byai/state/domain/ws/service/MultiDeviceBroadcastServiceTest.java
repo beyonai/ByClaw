@@ -25,6 +25,111 @@ import static org.mockito.Mockito.when;
 
 class MultiDeviceBroadcastServiceTest {
 
+    @Test
+    void forwardedGroupMessagePublishesRemotelyWithoutDuplicatingLocalWrite() {
+        var channels = mock(ChannelManager.class);
+        var local = new EmbeddedChannel();
+        var remoteChannel = new EmbeddedChannel();
+        local.attr(com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_ENTERPRISE_ID).set("10");
+        remoteChannel.attr(com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_ENTERPRISE_ID).set("10");
+        when(channels.getChannels(7L)).thenReturn(Set.of(local));
+        var redis = mock(StringRedisTemplate.class);
+        var source = service("instance-a", channels, redis);
+        var publisher = new com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher(
+            mock(com.iwhalecloud.byai.state.domain.session.service.SessionMemberService.class), channels);
+        org.springframework.test.util.ReflectionTestUtils.setField(publisher, "multiDeviceBroadcastService", source);
+        var remoteChannels = mock(ChannelManager.class);
+        when(remoteChannels.getChannels(7L)).thenReturn(Set.of(remoteChannel));
+        var remote = service("instance-b", remoteChannels, mock(StringRedisTemplate.class));
+        try {
+            publisher.publishForwardMembers(10L, java.util.List.of(7L, 7L), new JSONObject(java.util.Map.of(
+                "type", "GROUP_CHAT_EVENT", "event", "MESSAGE_CREATED", "messageId", "901")));
+            TextWebSocketFrame frame = local.readOutbound();
+            assertThat(frame.text()).contains("901");
+            frame.release();
+            assertThat((Object) local.readOutbound()).isNull();
+            var envelope = ArgumentCaptor.forClass(String.class);
+            verify(redis).convertAndSend(eq(MultiDeviceBroadcastService.DEFAULT_PUBSUB_TOPIC), envelope.capture());
+            assertThat(source.handleRemoteBroadcast(envelope.getValue())).isZero();
+            assertThat(remote.handleRemoteBroadcast(envelope.getValue())).isEqualTo(1);
+            TextWebSocketFrame remoteFrame = remoteChannel.readOutbound();
+            assertThat(remoteFrame.text()).contains("901");
+            remoteFrame.release();
+        } finally {
+            local.finishAndReleaseAll();
+            remoteChannel.finishAndReleaseAll();
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "MESSAGE_CREATED,personal", "RESPONSE_CHANGED,personal", "TASK_CREATED,personal",
+        "MESSAGE_CREATED,shared", "RESPONSE_CHANGED,shared", "TASK_CREATED,shared",
+        "MESSAGE_CREATED,node", "RESPONSE_CHANGED,node", "TASK_CREATED,node"
+    })
+    void groupPublisherReachesRemoteMemberWithoutLocalConnection(String eventType, String mode) {
+        boolean tenant = !"personal".equals(mode);
+        var originChannels = mock(ChannelManager.class);
+        var redis = mock(StringRedisTemplate.class);
+        var source = service("instance-a", originChannels, redis);
+        var members = mock(com.iwhalecloud.byai.state.domain.session.service.SessionMemberService.class);
+        var publisher = new com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatEventPublisher(members, originChannels);
+        org.springframework.test.util.ReflectionTestUtils.setField(publisher, "multiDeviceBroadcastService", source);
+        var sessions = mock(com.iwhalecloud.byai.state.domain.session.service.SessionService.class);
+        var extensions = mock(com.iwhalecloud.byai.state.domain.session.service.SessionExtService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(publisher, "sessionService", sessions);
+        org.springframework.test.util.ReflectionTestUtils.setField(publisher, "sessionExtService", extensions);
+        var session = new com.iwhalecloud.byai.manager.entity.session.ByaiSession();
+        session.setEnterpriseId(10L);
+        when(sessions.findById(30L)).thenReturn(session);
+        var ownership = new com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt();
+        ownership.setExtParamValue(tenant ? "10" : "NONE");
+        when(extensions.findOneByExtParamCode(30L,
+            com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.BUSINESS_ENTERPRISE_EXT)).thenReturn(ownership);
+        var member = new com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember();
+        member.setMemObjId(7L);
+        when(members.findSessionMembers(30L, "USER", null)).thenReturn(java.util.List.of(member));
+        var selected = new EmbeddedChannel();
+        var foreign = new EmbeddedChannel();
+        selected.attr(com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_ENTERPRISE_ID).set(tenant ? "10" : null);
+        foreign.attr(com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_ENTERPRISE_ID).set("11");
+        var remoteChannels = mock(ChannelManager.class);
+        when(remoteChannels.getChannels(7L)).thenReturn(Set.of(selected, foreign));
+        var remoteRedis = mock(StringRedisTemplate.class);
+        var remote = service("instance-b", remoteChannels, remoteRedis);
+        var event = new JSONObject(java.util.Map.of("type", "GROUP_CHAT_EVENT", "event", eventType,
+            "sessionId", "30", "responseId", "turn:11467695", "content", "final answer"));
+        try {
+            if ("node".equals(mode)) {
+                var context = new com.iwhalecloud.byai.manager.domain.tenant.TenantRequestContext(99L, 10L, "MEMBER");
+                var node = mock(com.iwhalecloud.byai.manager.domain.tenant.TenantNodeClient.class);
+                org.springframework.test.util.ReflectionTestUtils.setField(publisher, "tenantNodeClient", node);
+                when(node.request(eq(context), eq("GET"), eq("/internal/v1/group-chats/30"),
+                    org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(java.util.Map.of("members", java.util.List.of(
+                        java.util.Map.of("memObjType", "USER", "memObjId", "7"),
+                        java.util.Map.of("memObjType", "AGENT", "memObjId", "8"))));
+                assertThat(publisher.publishTenant(context, 30L, event)).isZero();
+                org.mockito.Mockito.verifyNoInteractions(members);
+            } else {
+                assertThat(publisher.publish(30L, event, null)).isZero();
+            }
+            var envelope = ArgumentCaptor.forClass(String.class);
+            verify(redis).convertAndSend(eq(MultiDeviceBroadcastService.DEFAULT_PUBSUB_TOPIC), envelope.capture());
+            assertThat(remote.handleRemoteBroadcast(envelope.getValue())).isEqualTo(1);
+            TextWebSocketFrame frame = selected.readOutbound();
+            assertThat(frame.text()).contains(eventType).contains("turn:11467695").contains("final answer");
+            frame.release();
+            assertThat(source.handleRemoteBroadcast(envelope.getValue())).isZero();
+            assertThat((Object) foreign.readOutbound()).isNull();
+            verify(remoteRedis, never()).convertAndSend(anyString(), anyString());
+            assertThat(event.containsKey("enterpriseId")).isFalse();
+        } finally {
+            selected.finishAndReleaseAll();
+            foreign.finishAndReleaseAll();
+        }
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void tenantChildProjectionReachesRemoteInstanceWithNoLocalChannel(boolean selected) {

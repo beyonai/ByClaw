@@ -32,6 +32,12 @@ class GroupChatTenantEventPublisherTest {
         ChannelManager channels = mock(ChannelManager.class);
         GroupChatEventPublisher publisher = new GroupChatEventPublisher(mock(SessionMemberService.class), channels);
         ReflectionTestUtils.setField(publisher, "tenantNodeClient", node);
+        var runtime = mock(com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeInstance.class);
+        when(runtime.getInstanceId()).thenReturn("instance-a");
+        var redis = mock(org.springframework.data.redis.core.StringRedisTemplate.class);
+        ReflectionTestUtils.setField(publisher, "multiDeviceBroadcastService",
+            new com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService(channels, redis,
+                mock(org.springframework.data.redis.listener.RedisMessageListenerContainer.class), runtime, "test-topic"));
         TenantRequestContext tenant = new TenantRequestContext(7L, 10L, "MEMBER");
         when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/group-chats/30"), isNull(), any()))
             .thenReturn(Map.of("members", List.of(

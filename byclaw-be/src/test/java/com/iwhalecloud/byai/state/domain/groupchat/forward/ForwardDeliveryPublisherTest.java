@@ -17,6 +17,8 @@ class ForwardDeliveryPublisherTest {
     @Test void boundRecipientsUseExactEnterpriseAndObservableWriteFailure() {
         var channels=mock(com.iwhalecloud.byai.state.domain.ws.manager.ChannelManager.class);
         var publisher=new GroupChatEventPublisher(mock(com.iwhalecloud.byai.state.domain.session.service.SessionMemberService.class),channels);
+        org.springframework.test.util.ReflectionTestUtils.setField(publisher, "multiDeviceBroadcastService", mock(com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(publisher, "sessionExtService", mock(com.iwhalecloud.byai.state.domain.session.service.SessionExtService.class));
         var chosen=new io.netty.channel.embedded.EmbeddedChannel();var other=new io.netty.channel.embedded.EmbeddedChannel();
         chosen.attr(com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_ENTERPRISE_ID).set("1");other.attr(com.iwhalecloud.byai.state.domain.ws.constant.Constant.ATT_ENTERPRISE_ID).set("2");
         when(channels.getChannels(31L)).thenReturn(Set.of(chosen,other));

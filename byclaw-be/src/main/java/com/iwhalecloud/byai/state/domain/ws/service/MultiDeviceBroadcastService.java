@@ -560,6 +560,31 @@ public class MultiDeviceBroadcastService implements MessageListener {
         return sentCount;
     }
 
+    /** 按已鉴权的接收人与业务租户投递群事件，不依赖发送线程的身份上下文。 */
+    public int broadcastRawToUserInScope(Long userId, Long enterpriseId, JSONObject message, Channel excludedChannel) {
+        JSONObject delivery = new JSONObject();
+        delivery.putAll(message);
+        if (enterpriseId == null) {
+            delivery.remove("enterpriseId");
+            return broadcastRawToUser(userId, delivery, excludedChannel);
+        }
+        delivery.put("enterpriseId", enterpriseId.toString());
+        String frameText = ChatReplyLog.frame(delivery.toJSONString());
+        String messageType = delivery.getString("type");
+        int sent = broadcastLocally(userId, enterpriseId.toString(), frameText, excludedChannel, messageType);
+        publish(userId, enterpriseId.toString(), frameText, messageType);
+        return sent;
+    }
+
+    /** 转发消息已自行等待本机写入结果，此入口仅补充远端实例投递，避免本机重复发送。 */
+    public void publishRawToRemoteUser(Long userId, long enterpriseId, JSONObject message) {
+        JSONObject delivery = new JSONObject();
+        delivery.putAll(message);
+        delivery.put("enterpriseId", Long.toString(enterpriseId));
+        publish(userId, Long.toString(enterpriseId), ChatReplyLog.frame(delivery.toJSONString()),
+            delivery.getString("type"));
+    }
+
     /**
      * Redis 订阅回调的可测试入口。远端消息只能本地发送，不能再次发布，避免广播环路。
      */

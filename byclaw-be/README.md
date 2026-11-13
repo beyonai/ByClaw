@@ -1347,3 +1347,16 @@ Redis 批量资源读取按原键逐个 GET，不拼接跨槽 MGET，不更改�
 商业版收藏补齐 `TOOL` 原子工具，沿用已有收藏、取消、幂等计数、租户隔离、权限和排序逻辑；`SKILL_GROUP` 仍不参与。本次不新增迁移，实际部署仍需具备已有收藏表。
 
 自测入口：`ConversationResourceRetirementTest`、`RedisResourceRetirementIntegrationTest`、`ResourceFavorite*Test`、`DigitalEmployee*Test` 和 `*EmployeePublication*Test`。真实 Redis Cluster 测试通过 `BYCLAW_TEST_REDIS_CLUSTER_PORT` 指向仅绑定本机、可销毁的专用测试集群；不得指向应用 Redis。模块完整检查使用 `mvn -B -f byclaw-be/pom.xml verify`。本地回归不能代替部署后的权限、历史会话、实际模型调用及动态包装工具验收。
+
+### 群聊 WebSocket 跨实例投递
+
+`GroupChatEventPublisher` 统一通过 `MultiDeviceBroadcastService` 的既有 Redis Pub/Sub 投递
+`GROUP_CHAT_EVENT`，覆盖普通消息、`RESPONSE_CHANGED`、最终回复及任务卡片事件。
+公共库路径使用群持久化的业务企业归属（`group_business_enterprise_id=NONE` 为个人群），
+独立租户路径从 Node 获取真人成员并使用准确的企业范围；收件人不依赖发起人的连接或线程上下文。
+本机先投递，远端实例消费后只投递本机连接，忽略来源实例自身的回环消息。
+返回数量仅统计本机通道，不能作为远端在线或已收件证明。转发入口保留本机写入失败检测，并补充远端广播。
+
+该链路复用现有 Pub/Sub 的尽力投递语义，不提供离线重放或远端客户端确认；断线恢复继续通过现有查询恢复。
+发起人专属流式内容仍沿原 `CHAT_STREAM` 通道发送，不加入群广播。
+本次补充了个人群、公共库企业群、独立 Node 群的跨实例回归用例；未执行测试、构建或双实例运行验证。

@@ -32,6 +32,8 @@ class WorkgroupEventPublisherTest {
         SessionService sessions = mock(SessionService.class);
         WorkgroupMessageEvents messageEvents = mock(WorkgroupMessageEvents.class);
         GroupChatEventPublisher publisher = new GroupChatEventPublisher(members, channels);
+        org.springframework.test.util.ReflectionTestUtils.setField(publisher, "multiDeviceBroadcastService", mock(com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(publisher, "sessionExtService", mock(com.iwhalecloud.byai.state.domain.session.service.SessionExtService.class));
         ReflectionTestUtils.setField(publisher, "sessionService", sessions);
         ReflectionTestUtils.setField(publisher, "messageEvents", messageEvents);
         ByaiSession group = new ByaiSession();
@@ -55,6 +57,8 @@ class WorkgroupEventPublisherTest {
     void forwardSocketFailureCannotSuppressAlreadyCommittedFact() {
         var channels = mock(ChannelManager.class);
         var publisher = new GroupChatEventPublisher(mock(SessionMemberService.class), channels);
+        org.springframework.test.util.ReflectionTestUtils.setField(publisher, "multiDeviceBroadcastService", mock(com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(publisher, "sessionExtService", mock(com.iwhalecloud.byai.state.domain.session.service.SessionExtService.class));
         var messageEvents = mock(WorkgroupMessageEvents.class);
         ReflectionTestUtils.setField(publisher, "messageEvents", messageEvents);
         var failing = new io.netty.channel.embedded.EmbeddedChannel(new io.netty.channel.ChannelOutboundHandlerAdapter() {

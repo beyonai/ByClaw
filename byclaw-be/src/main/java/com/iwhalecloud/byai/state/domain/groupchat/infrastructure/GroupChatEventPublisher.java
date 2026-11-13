@@ -29,6 +29,13 @@ public class GroupChatEventPublisher {
     private com.iwhalecloud.byai.state.domain.session.service.SessionService sessionService;
     private final SessionMemberService memberService;
     private final ChannelManager channelManager;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService multiDeviceBroadcastService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.session.service.SessionExtService sessionExtService;
+
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private TenantNodeClient tenantNodeClient;
     @org.springframework.beans.factory.annotation.Autowired
@@ -39,16 +46,22 @@ public class GroupChatEventPublisher {
         this.channelManager = channelManager;
     }
 
+    /** 群成员由服务端解析，返回值只统计本机投递；其他实例通过既有 Redis 广播异步发送。 */
     public int publish(Long sessionId, JSONObject event, Channel excludedChannel) {
         if (sessionId == null || event == null) {
             return 0;
         }
         Long groupEnterpriseId = null;
-        if (sessionService != null && !"GROUP_DISSOLVED".equals(event.getString("event"))) {
+        Long businessEnterpriseId = null;
+        if (sessionService != null) {
             com.iwhalecloud.byai.manager.entity.session.ByaiSession session = sessionService.findById(sessionId);
-            if (session == null || com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService
-                .DISSOLVED_STATE.equals(session.getState())) return 0;
+            if (session == null || (!"GROUP_DISSOLVED".equals(event.getString("event"))
+                && com.iwhalecloud.byai.state.domain.groupchat.authorization.GroupChatAuthorizationService
+                .DISSOLVED_STATE.equals(session.getState()))) {
+                return 0;
+            }
             groupEnterpriseId = session.getEnterpriseId();
+            businessEnterpriseId = resolveBusinessEnterpriseId(sessionId, groupEnterpriseId);
         }
         int sent = 0;
         List<ByaiSessionMember> members = memberService.findSessionMembers(sessionId, MemObjType.USER.name(), null);
@@ -58,18 +71,8 @@ public class GroupChatEventPublisher {
             // 群主交接提示只推送给新群主的在线设备。
             if ("OWNERSHIP_TRANSFERRED".equals(event.getString("event"))
                 && !String.valueOf(member.getMemObjId()).equals(event.getString("recipientUserId"))) continue;
-            for (Channel channel : channelManager.getChannels(member.getMemObjId())) {
-                if (channel.equals(excludedChannel) || !channel.isActive()) {
-                    continue;
-                }
-                try {
-                    channel.writeAndFlush(new TextWebSocketFrame(event.toJSONString()));
-                    sent++;
-                }
-                catch (Exception error) {
-                    log.warn("群聊事件广播失败, sessionId={}, userId={}", sessionId, member.getMemObjId(), error);
-                }
-            }
+            sent += multiDeviceBroadcastService.broadcastRawToUserInScope(member.getMemObjId(),
+                businessEnterpriseId, event, excludedChannel);
         }
         return sent;
     }
@@ -97,17 +100,8 @@ public class GroupChatEventPublisher {
                 && !String.valueOf(rawId).equals(event.getString("recipientUserId"))) continue;
             if (rawId == null || !rawId.toString().matches("[1-9][0-9]*")) continue;
             recipientIds.add(Long.valueOf(rawId.toString()));
-            for (Channel channel : channelManager.getChannels(Long.valueOf(rawId.toString()))) {
-                if (!channel.isActive() || !Objects.equals(String.valueOf(tenant.enterpriseId()),
-                    channel.attr(Constant.ATT_ENTERPRISE_ID).get())) continue;
-                try {
-                    channel.writeAndFlush(new TextWebSocketFrame(deliveryEvent.toJSONString()));
-                    sent++;
-                }
-                catch (Exception error) {
-                    log.warn("租户工作组事件广播失败, sessionId={}, userId={}", event.getString("sessionId"), rawId, error);
-                }
-            }
+            sent += multiDeviceBroadcastService.broadcastRawToUserInScope(Long.valueOf(rawId.toString()),
+                tenant.enterpriseId(), deliveryEvent, null);
         }
         publishCommitted(tenant.enterpriseId(), event, recipientIds);
         return sent;
@@ -124,6 +118,7 @@ public class GroupChatEventPublisher {
         List<io.netty.channel.ChannelFuture> sends=new java.util.ArrayList<>();
         try {
             for(Long id:new java.util.LinkedHashSet<>(recipientIds)) {
+                multiDeviceBroadcastService.publishRawToRemoteUser(id, enterpriseId, deliveryEvent);
                 for(Channel channel:channelManager.getChannels(id)) {
                     if(!channel.isActive()||!Objects.equals(Long.toString(enterpriseId),channel.attr(Constant.ATT_ENTERPRISE_ID).get()))continue;
                     sends.add(channel.writeAndFlush(new TextWebSocketFrame(deliveryEvent.toJSONString())));
@@ -139,6 +134,26 @@ public class GroupChatEventPublisher {
         } catch(RuntimeException failure) {
             throw new IllegalStateException("FORWARD_DELIVERY_UNAVAILABLE");
         }
+    }
+
+    /** 个人群的存储企业不代表业务归属；后台完成通知必须读取持久化归属。 */
+    private Long resolveBusinessEnterpriseId(Long sessionId, Long storageEnterpriseId) {
+        var ownership = sessionExtService.findOneByExtParamCode(sessionId,
+            com.iwhalecloud.byai.common.quota.SharedQuotaAdmission.BUSINESS_ENTERPRISE_EXT);
+        if (ownership == null) {
+            return storageEnterpriseId == null || storageEnterpriseId <= 0 ? null : storageEnterpriseId;
+        }
+        String value = ownership.getExtParamValue();
+        if ("NONE".equals(value)) {
+            return null;
+        }
+        // 无法确认归属时禁止降级为个人广播，避免向错误的租户通道投递。
+        if (value == null || !value.matches("[1-9][0-9]*")
+            || !value.equals(String.valueOf(storageEnterpriseId))) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "groupchat.quota.enterprise.unconfirmed");
+        }
+        return storageEnterpriseId;
     }
 
     /** External consumers cannot change an already committed message or its existing ACK/broadcast semantics. */
