@@ -30,7 +30,7 @@ A (byclaw-dsh sandbox)                         B (tool sandbox, same image)
 - **Lease:** the first remote operation creates B, or resumes it when paused, and
   waits for its sshd.
 - **Idle:** after `BYCLAW_TOOL_ENV_IDLE_MS` (default 5 min) without operations
-  or open streams, the SSH connection is detached. For `byclaw-be`, real turns hold separate Platform leases and their final return starts the shared idle deadline. Actorless IO/streams hold temporary leases until completion. OpenSandbox pauses on the connection timer.
+  or open streams, the SSH connection is detached. For `byclaw-be`, real turns hold separate Platform leases and their final return starts the shared idle deadline. Actorless IO/streams hold temporary leases until 5 seconds after completion. OpenSandbox pauses on the connection timer.
 - **Gone:** a deleted or expired B is recreated on the next lease. The workspace
   is a host volume shared with A, so pausing or recreating B loses no files; only
   B's own root filesystem (e.g. ad-hoc installs) is lost on recreation.
@@ -101,7 +101,9 @@ The first actual tool IO acquires only its own session lease, carried through to
 (cancellation/failure) and agent disposal return only that session's tokens after
 its in-flight IO finishes. Catalog acquisitions also hold independent remote
 leases per actor/acquisition. With no session, a request/stream gets a transient
-operation lease, returned after its final operation/stream closes. Merely opening
+operation lease, returned 5 seconds after its final operation/stream closes, so a
+turn's preparation (session directory, working-directory and Skill checks) shares
+one lease instead of acquiring and returning one around every request. Merely opening
 history, refreshing the catalog or booting a user context acquires no lease.
 
 The last returned or expired lease starts Platform's idle countdown, default
