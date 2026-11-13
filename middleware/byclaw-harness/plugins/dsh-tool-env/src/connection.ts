@@ -26,6 +26,19 @@ import { markEnvironmentFailure, reportLeaseWarning, toolTransportError, trackLe
 
 type Hello = Awaited<SshConnection['ready']>
 
+/** Minimum time between two re-creations of this host's directories after a missing-path failure. */
+const RECREATE_INTERVAL_MS = 5000
+
+/** A failure that names a missing path (`ENOENT`, e.g. `spawn bash ENOENT` when the working directory is gone). */
+function isMissingPath(error: unknown): boolean {
+  for (let current: unknown = error, depth = 0; current !== undefined && current !== null && depth < 5; depth++) {
+    const { code, message, cause } = current as { code?: unknown; message?: unknown; cause?: unknown }
+    if (code === 'ENOENT' || (typeof message === 'string' && /\bENOENT\b/u.test(message))) return true
+    current = cause
+  }
+  return false
+}
+
 /** Static coordinates shared by every inner connection. */
 export interface ToolEnvConnectionOptions {
   /** Bound at construction for authenticated BE connector bootstrap; other backends leave it absent. */
@@ -84,6 +97,7 @@ export class ToolEnvConnection extends Service {
   /** Set while deferred work runs: its own requests go straight to B instead of waiting for themselves. */
   private readonly deferredScope = new AsyncLocalStorage<true>()
   private flushing: Promise<void> | undefined
+  private lastRecreate = 0
   /** Whether each B (one per inner connection) has the workload wrapper; asked once per connection. */
   private readonly workloadWrappers = new WeakMap<object, Promise<boolean>>()
 
@@ -189,7 +203,7 @@ export class ToolEnvConnection extends Service {
     if (this.deferred.isDone(key)) return
     if (this.connected && !key.startsWith('mkdir:')) {
       await operation()
-      this.deferred.noteDone(key)
+      this.deferred.noteDone(key, operation)
       return
     }
     this.deferred.defer(key, operation)
@@ -239,7 +253,12 @@ export class ToolEnvConnection extends Service {
       const input = scrubbed as { env?: Readonly<Record<string, string | null>> }
       scrubbed = { ...input, env: { ...input.env, ...deployment } }
     }
-    if (method !== 'process.prepare') return await this.use(lease => lease.connection.request(method, scrubbed, result, signal, wait), signal)
+    if (method !== 'process.prepare') {
+      try { return await this.use(lease => lease.connection.request(method, scrubbed, result, signal, wait), signal) } catch (error) {
+        if (method.startsWith('process.') && isMissingPath(error)) await this.recreateDirectories()
+        throw error
+      }
+    }
     return await this.use(async lease => {
       const params = await this.hasWorkloadWrapper(lease.connection) ? asWorkload(scrubbed) : scrubbed
       return lease.connection.request(method, params, result, signal, wait)
@@ -357,6 +376,24 @@ export class ToolEnvConnection extends Service {
         signal?.throwIfAborted()
         if (primary) throw markEnvironmentFailure(withLeaseFailure(primary, error))
         this.ctx.logger('byclaw-tool-env').warn(reportLeaseWarning(error))
+      }
+    }
+  }
+
+  /**
+   * A process failed because a path is missing — typically its working directory, which this host
+   * created once and no longer re-creates every turn: one removed on B's volume (by a command or a
+   * file manager) would otherwise fail every command until the context restarts. Create this host's
+   * directories again (`mkdir -p`, harmless when they exist), at most every few seconds, so the
+   * model's next attempt runs; the failed one is still reported as it happened.
+   */
+  private async recreateDirectories(): Promise<void> {
+    const now = Date.now()
+    if (now - this.lastRecreate < RECREATE_INTERVAL_MS || this.deferredScope.getStore() === true) return
+    this.lastRecreate = now
+    for (const [path, operation] of this.deferred.creations()) {
+      try { await this.deferredScope.run(true, operation) } catch (error) {
+        this.ctx.logger('byclaw-tool-env').warn(`could not create ${path} again on the tool environment: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
   }

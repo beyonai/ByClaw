@@ -75,6 +75,29 @@ describe('tool environment idle lifecycle', () => {
     expect(order).toEqual(['mkdir', 'process.start', 'fs.stat'])
   })
 
+  it('creates its directories again when a process fails for a missing path, at most every few seconds', async () => {
+    const mkdir = vi.fn().mockResolvedValue(undefined)
+    await ssh.request('spawn', {}, z.string())
+    await ssh.whenConnected('mkdir:/by/.shared/project_-1', mkdir)
+    await ssh.request('process.start', {}, z.string())
+    expect(mkdir).toHaveBeenCalledTimes(1)
+    const missing = Object.assign(new Error('spawn bash ENOENT'), { code: 'ENOENT' })
+    inner.request.mockImplementation(async (method: string) => { if (method === 'process.done') throw missing; return 'done' })
+    await expect(ssh.request('process.done', {}, z.string())).rejects.toThrow()
+    expect(mkdir).toHaveBeenCalledTimes(2)
+    await expect(ssh.request('process.done', {}, z.string())).rejects.toThrow()
+    expect(mkdir).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(5000)
+    await expect(ssh.request('process.done', {}, z.string())).rejects.toThrow()
+    expect(mkdir).toHaveBeenCalledTimes(3)
+    // Other failures, and missing paths outside processes, leave the directories alone.
+    await vi.advanceTimersByTimeAsync(5000)
+    inner.request.mockImplementation(async (method: string) => { throw method === 'process.done' ? new Error('exit 1') : missing })
+    await expect(ssh.request('process.done', {}, z.string())).rejects.toThrow()
+    await expect(ssh.request('fs.stat', { target: { targetKey: '/by/a', displayPath: 'a' } }, z.string())).rejects.toThrow()
+    expect(mkdir).toHaveBeenCalledTimes(3)
+  })
+
   it('lets deferred work reach B itself while it runs, and shares one run between concurrent operations', async () => {
     await ssh.request('spawn', {}, z.string())
     inner.request.mockClear()

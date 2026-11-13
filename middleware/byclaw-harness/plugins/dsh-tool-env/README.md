@@ -79,7 +79,9 @@ queued even while B is connected and created right before the next operation tha
 reaches B, once per context; connected or not, resolve/stat probes of a queued or
 created directory are answered here: B's volume outlives B, so they stay
 directories. A model-only turn therefore sends nothing to B. A directory removed on B behind the
-host's back is therefore not recreated until the context restarts.
+host's back (a command, a file manager) shows up as a process failing with
+`ENOENT` (`spawn bash ENOENT`); the host then runs `mkdir -p` for its directories
+again (at most every 5 s), so the next attempt runs in the directory.
 After a failed launch the `byclaw-be` backend waits before trying again
 (1 s, doubling to 30 s) and reports the cause instead of calling BE on every
 operation.
