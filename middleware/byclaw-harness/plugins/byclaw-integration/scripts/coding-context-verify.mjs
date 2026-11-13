@@ -97,8 +97,8 @@ test('publication file checks run on the coding lease rather than the default to
   assert.ok(calls.every(args => args[0] === 'current-actor' && args[1] === 'coding-lease'))
 })
 
-function fixture({ publication, answer = 'done', extra = [], prepareFailure, emitFailure, repository = false, dirty = false } = {}) {
-  const calls = [], summaries = [], events = [], releases = []
+function fixture({ publication, answer = 'done', extra = [], prepareFailure, emitFailure, repository = false, dirty = false, mcpRequests } = {}) {
+  const calls = [], summaries = [], events = [], releases = [], responses = []
   let preparedCount = 0
   const router = new ByClawExecutionRouter({
     userCode: 'user1', environment: () => ({ BYCLAW_AGENT_EXECUTION_MAP: '{"1001":"CODEX_CLI"}' }),
@@ -115,7 +115,16 @@ function fixture({ publication, answer = 'done', extra = [], prepareFailure, emi
       acquire: async () => ({ leaseId: 'coding-lease', workspaceRoot: '/by' }),
       execute: async (...args) => {
         if (args[2][3] === '--revision') return { exitCode: 0, stdout: JSON.stringify({ revision: 'a'.repeat(40), dirty }), stderr: '' }
+        if (args[2][4] === 'writeText') {
+          responses.push({ path: args[2][5], ...JSON.parse(JSON.parse(args[2][6]).content) })
+          return { exitCode: 0, stdout: '{"value":null}', stderr: '' }
+        }
         calls.push(args)
+        if (mcpRequests) {
+          const manifest = JSON.parse(args[2][3])
+          for (const request of mcpRequests) args[5](jsonl({ type: 'byclaw.publication.request',
+            bridgeId: manifest.publication?.bridgeId, requestId: '12345678-1234-4234-8234-123456789abc', ...request }))
+        }
         const stdout = jsonl(...extra, ...completed(answer))
         args[5](stdout)
         return { stdout, stderr: '', exitCode: 0 }
@@ -128,7 +137,7 @@ function fixture({ publication, answer = 'done', extra = [], prepareFailure, emi
       summaries.push({ payload, workspace })
     },
   })
-  return { router, calls, summaries, events, releases, get preparedCount() { return preparedCount } }
+  return { router, calls, summaries, events, releases, responses, get preparedCount() { return preparedCount } }
 }
 
 test('the production preparation runs once after acquiring the actual lease and receives a dedicated home', async () => {
@@ -240,4 +249,33 @@ test('repo publication is text-only, includes real git revision, and retains con
 test('dirty repo reports an incomplete delivery version rather than claiming everything committed', async () => {
   const result = await fixture({ repository: true, dirty: true }).router.ask(command(), context, target.text)
   assert.ok(result.finalAnswer.includes('存在未提交改动'))
+})
+
+test('MCP requests execute the bound host callback once and repository publication stays text-only', async () => {
+  const prepared = []
+  const publication = { mode: 'mcp', description: 'wait', binding: { taskId: 's1', userCode: 'user1' },
+    prepare: async args => { prepared.push(args); return { taskId: 's1', pendingPublicationId: '4001' } } }
+  const request = { arguments: { text: '修改完成', sourcePaths: ['/by/source.ts'] } }
+  const f = fixture({ repository: true, publication, answer: JSON.stringify({ answer: '待确认', publication: null }),
+    mcpRequests: [request, request] })
+  const result = await f.router.ask(command(), context, target.text)
+  assert.equal(prepared.length, 1)
+  assert.deepEqual(prepared[0].sourcePaths, [])
+  assert.ok(prepared[0].text.includes('a'.repeat(40)))
+  assert.equal(f.responses.length, 1)
+  assert.equal(f.responses[0].result.pendingPublicationId, '4001')
+  assert.ok(f.responses[0].path.startsWith('/by/.sessions/s1/executors/1001/codex-home/.publication/'))
+  assert.ok(result.finalAnswer.includes('待确认'))
+  assert.equal(f.releases.length, 1)
+})
+
+test('ordinary conversations and foreign turn events cannot access the publication callback', async () => {
+  const request = { arguments: { text: 'forged', sourcePaths: [] } }
+  const ordinary = fixture({ mcpRequests: [request] })
+  await assert.rejects(ordinary.router.ask(command(), context, target.text), /EXECUTION_FAILED/)
+  let calls = 0
+  const publication = { mode: 'mcp', description: 'wait', prepare: async () => { calls++ } }
+  const foreign = fixture({ publication, mcpRequests: [{ ...request, bridgeId: 'foreign-turn' }] })
+  await assert.rejects(foreign.router.ask(command(), context, target.text), /EXECUTION_FAILED/)
+  assert.equal(calls, 0)
 })

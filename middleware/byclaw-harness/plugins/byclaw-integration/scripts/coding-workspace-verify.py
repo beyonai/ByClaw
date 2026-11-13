@@ -8,8 +8,10 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import unittest
+import uuid
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('coding_workspace', Path(__file__).with_name('coding-workspace.py'))
@@ -262,6 +264,7 @@ class WorkspaceTests(unittest.TestCase):
         manifest = dict(self.manifest, publication={
             'description': 'publication fixture',
             'mode': 'mcp',
+            'bridgeId': str(uuid.uuid4()),
             'binding': {'taskId': '3001', 'userCode': 'fixture-user', 'groupSessionId': '2001'},
             'baseUrl': 'http://example.invalid/byaiService',
         })
@@ -273,9 +276,94 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(Path(server['args'][1]), self.home / 'byclaw-publication-binding.json')
         self.assertIn('prepare_group_task_publication', (self.home / 'byclaw-publication-mcp.py').read_text(encoding='utf-8'))
         binding = json.loads((self.home / 'byclaw-publication-binding.json').read_text(encoding='utf-8'))
-        self.assertEqual(binding['binding']['taskId'], '3001')
-        self.assertEqual(binding['baseUrl'], 'http://example.invalid/byaiService')
+        self.assertEqual(binding['bridgeDirectory'], str(self.home / '.publication' / manifest['publication']['bridgeId']))
+        self.assertNotIn('binding', binding)
+        self.assertNotIn('baseUrl', binding)
+        self.assertNotIn('env', server)
+        self.assertNotIn('env_vars', server)
+        self.assertNotIn('BEYOND_TOKEN', (self.home / 'byclaw-publication-mcp.py').read_text(encoding='utf-8'))
+        self.assertFalse(Path(binding['bridgeDirectory']).exists(), 'turn-local IPC is cleaned after CLI exit')
         self.assertNotIn('test-auth', (self.home / 'byclaw-publication-binding.json').read_text(encoding='utf-8'))
+
+    def mcp_call(self, respond, arguments=None):
+        directory = self.home / '.publication' / str(uuid.uuid4())
+        directory.mkdir(parents=True)
+        bridge = runner.PublicationBridge(directory, directory.name)
+        program = self.root / 'publication-mcp.py'
+        program.write_text(runner.PUBLICATION_MCP_SERVER, encoding='utf-8')
+        binding = self.root / 'bridge.json'
+        binding.write_text(json.dumps({'bridgeDirectory': str(directory)}), encoding='utf-8')
+        received = []
+        def host(kind, **event):
+            self.assertEqual(kind, 'byclaw.publication.request')
+            self.assertEqual(event['bridgeId'], directory.name)
+            received.append(event)
+            runner.atomic_text(directory / (event['requestId'] + '.response.json'), json.dumps(respond(event)))
+        with patch.object(runner, 'emit', host):
+            bridge.start()
+            try:
+                process = subprocess.run([sys.executable, str(program), str(binding)],
+                    input=json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                        'params': {'name': 'prepare_group_task_publication', 'arguments': arguments or {'text': '成果', 'sourcePaths': []}}}) + '\n',
+                    env=dict({key: value for key, value in os.environ.items() if key not in ('BEYOND_TOKEN', 'SSO_TOKEN')}, PYTHONIOENCODING='utf-8'),
+                    capture_output=True, text=True, encoding='utf-8', timeout=10)
+            finally:
+                bridge.close()
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertEqual(len(received), 1)
+        self.assertFalse(directory.exists())
+        return json.loads(process.stdout)['result'], received[0]
+
+    def test_real_mcp_process_uses_host_response_without_login_environment(self):
+        card = {'taskId': '3001', 'pendingPublicationId': '4001', 'text': '成果', 'sourcePaths': [], 'createTime': 'fixture-time'}
+        result, request = self.mcp_call(lambda event: {'result': card})
+        self.assertNotIn('isError', result)
+        self.assertEqual(json.loads(result['content'][0]['text']), card)
+        self.assertEqual(request['arguments'], {'text': '成果', 'sourcePaths': []})
+        self.assertNotIn('userCode', request)
+        self.assertNotIn('taskId', request)
+
+    def test_real_mcp_returns_host_error_without_retrying(self):
+        result, _ = self.mcp_call(lambda event: {'error': 'host publication failed; check pending card'})
+        self.assertTrue(result['isError'])
+        self.assertIn('host publication failed', result['content'][0]['text'])
+
+    def test_bridge_forwards_each_request_once_and_stops_on_close(self):
+        directory = self.root / 'ipc'
+        directory.mkdir()
+        bridge = runner.PublicationBridge(directory, str(uuid.uuid4()))
+        request = directory / (str(uuid.uuid4()) + '.request.json')
+        request.write_text(json.dumps({'arguments': {'text': 'fixture'}}), encoding='utf-8')
+        events = []
+        with patch.object(runner, 'emit', lambda *args, **kwargs: events.append(kwargs)):
+            bridge.start()
+            try:
+                deadline = time.monotonic() + 2
+                while not events and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                time.sleep(0.15)
+            finally:
+                bridge.close()
+        self.assertEqual(len(events), 1)
+        self.assertFalse(bridge.worker.is_alive())
+
+    def test_bridge_rejects_invalid_request_json_without_forwarding(self):
+        directory = self.root / 'ipc'
+        directory.mkdir()
+        request_id = str(uuid.uuid4())
+        (directory / (request_id + '.request.json')).write_text('invalid-json', encoding='utf-8')
+        bridge = runner.PublicationBridge(directory, str(uuid.uuid4()))
+        with patch.object(runner, 'emit') as forwarded:
+            bridge.start()
+            try:
+                response = directory / (request_id + '.response.json')
+                deadline = time.monotonic() + 2
+                while not response.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertIn('error', json.loads(response.read_text(encoding='utf-8')))
+            finally:
+                bridge.close()
+            forwarded.assert_not_called()
 
     def test_missing_native_state_recreates_but_foreign_identity_rejects(self):
         self.run_cli()
