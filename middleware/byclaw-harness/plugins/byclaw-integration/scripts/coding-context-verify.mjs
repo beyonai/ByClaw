@@ -179,6 +179,7 @@ test('publication uses only the bound existing callback once and leaves confirma
   assert.ok(failed.events.some(event => event.id === 'publication' && event.phase === 'error'))
   assert.throws(() => codingFinalOutput('not-json', true), /INVALID_FINAL_OUTPUT/)
   assert.deepEqual(codingFinalOutput('{"answer":"9","publication":null}', true), { answer: '9' })
+  assert.throws(() => codingFinalOutput('{"answer":"9","publication":{"text":"x","sourcePaths":[]}}', true, false), /PUBLICATION_TOOL_REQUIRED/)
 })
 
 test('preparation failure releases the lease and never starts the CLI', async () => {

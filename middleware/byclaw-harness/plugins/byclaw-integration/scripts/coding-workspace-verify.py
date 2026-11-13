@@ -257,6 +257,26 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(original.read_text(), 'project policy')
         self.assertEqual((self.defaults / 'config.toml').read_text(), self.default_config)
 
+    def test_mcp_publication_tool_is_scoped_to_the_lease(self):
+        self.cwd.mkdir(parents=True)
+        manifest = dict(self.manifest, publication={
+            'description': 'publication fixture',
+            'mode': 'mcp',
+            'binding': {'taskId': '3001', 'userCode': 'fixture-user', 'groupSessionId': '2001'},
+            'baseUrl': 'http://example.invalid/byaiService',
+        })
+        self.run_cli(manifest=manifest)
+        config = tomllib.loads((self.home / 'config.toml').read_text(encoding='utf-8'))
+        server = config['mcp_servers']['byclaw_group_task_publication']
+        self.assertEqual(server['command'], 'python3')
+        self.assertEqual(Path(server['args'][0]), self.home / 'byclaw-publication-mcp.py')
+        self.assertEqual(Path(server['args'][1]), self.home / 'byclaw-publication-binding.json')
+        self.assertIn('prepare_group_task_publication', (self.home / 'byclaw-publication-mcp.py').read_text(encoding='utf-8'))
+        binding = json.loads((self.home / 'byclaw-publication-binding.json').read_text(encoding='utf-8'))
+        self.assertEqual(binding['binding']['taskId'], '3001')
+        self.assertEqual(binding['baseUrl'], 'http://example.invalid/byaiService')
+        self.assertNotIn('test-auth', (self.home / 'byclaw-publication-binding.json').read_text(encoding='utf-8'))
+
     def test_missing_native_state_recreates_but_foreign_identity_rejects(self):
         self.run_cli()
         for file in (self.home / 'sessions').glob('*'):

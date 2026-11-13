@@ -168,10 +168,16 @@ export async function codingRepositoryState(sandbox: ExecutionSandbox, actor: st
 export function codingRunManifest(prepared: CodingContext, identity: string, messageId: string): Record<string, unknown> {
   if (!/^\d+$/u.test(prepared.employeeId)) throw new Error('EXECUTION_INVALID_EMPLOYEE_ID')
   const home = posix.join(prepared.workspace.sessionRoot, 'executors', prepared.employeeId, 'codex-home')
+  const publication = prepared.publication === undefined ? undefined : {
+    description: prepared.publication.description,
+    ...(prepared.publication.mode === undefined ? {} : { mode: prepared.publication.mode }),
+    ...(prepared.publication.binding === undefined ? {} : { binding: prepared.publication.binding }),
+    ...(prepared.publication.baseUrl === undefined ? {} : { baseUrl: prepared.publication.baseUrl }),
+  }
   const manifest = { version: 1, identity: createHash('sha256').update(identity).digest('hex'), messageId,
     employeeId: prepared.employeeId, workspace: prepared.workspace, home, persona: prepared.persona, skills: prepared.skills,
     prepareAgentSkills: true,
-    publication: prepared.publication === undefined ? undefined : { description: prepared.publication.description } }
+    publication }
   if (Buffer.byteLength(JSON.stringify(manifest)) > 96 * 1024) throw new Error('EXECUTION_CONFIG_TOO_LARGE')
   return manifest
 }
@@ -255,7 +261,7 @@ finally:
 }
 
 /** Native structured final output is used only when the existing publication plugin is active. */
-export function codingFinalOutput(answer: string, enabled: boolean): { answer: string; publication?: { text: string; sourcePaths: string[] } } {
+export function codingFinalOutput(answer: string, enabled: boolean, allowPublication = true): { answer: string; publication?: { text: string; sourcePaths: string[] } } {
   if (!enabled) return { answer }
   let parsed: unknown
   try { parsed = JSON.parse(answer) as unknown } catch { throw new Error('EXECUTION_INVALID_FINAL_OUTPUT') }
@@ -263,6 +269,7 @@ export function codingFinalOutput(answer: string, enabled: boolean): { answer: s
   if (!data || typeof data.answer !== 'string' || !data.answer.trim()
     || Object.keys(data).some(key => !['answer', 'publication'].includes(key))) throw new Error('EXECUTION_INVALID_FINAL_OUTPUT')
   if (data.publication === null) return { answer: data.answer }
+  if (!allowPublication) throw new Error('EXECUTION_PUBLICATION_TOOL_REQUIRED')
   const publication = object(data.publication)
   if (!publication || typeof publication.text !== 'string' || !Array.isArray(publication.sourcePaths)
     || !publication.sourcePaths.every(path => typeof path === 'string')

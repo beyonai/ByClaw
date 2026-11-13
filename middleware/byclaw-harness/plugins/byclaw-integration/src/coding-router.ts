@@ -288,7 +288,8 @@ export class ByClawExecutionRouter {
       }
       // The backend must see the task decision before this request completes or prepares a publication.
       await settleDisposition()
-      const output = codingFinalOutput(parser.finish(processResult.exitCode), prepared?.publication !== undefined)
+      const output = codingFinalOutput(parser.finish(processResult.exitCode), prepared?.publication !== undefined,
+        prepared?.publication?.mode !== 'mcp')
       if (prepared.workspace.repository !== undefined) {
         const state = await codingRepositoryState(sandbox, actor, lease.leaseId, prepared.workspace.repository, lease.workspaceRoot, signal)
         const version = `仓库当前提交：${state.revision}；${state.dirty ? '存在未提交改动，尚未形成完整交付版本' : '工作区干净'}。`

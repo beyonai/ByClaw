@@ -48,7 +48,11 @@ export function apply(ctx: Context, config: Config): Promise<void> {
     const binding = await (await ready).select(command)
     if (binding === undefined) return
     const client = new GroupTaskPublicationClient({ ...host, timeoutMs: config.timeoutMs })
-    setup.publication = { description: GROUP_TASK_PUBLICATION_DESCRIPTION,
+    setup.publication = { description: GROUP_TASK_PUBLICATION_DESCRIPTION, mode: 'mcp',
+      binding: { taskId: binding.taskId, userCode: binding.userCode,
+        ...(binding.privateGroupId === undefined ? {} : { privateGroupId: binding.privateGroupId }),
+        ...(binding.enterpriseId === undefined ? {} : { enterpriseId: binding.enterpriseId }) },
+      baseUrl: host.baseUrl,
       prepare: (args, signal) => client.prepare(binding, args, signal) }
   })
   return ready.then(() => undefined)

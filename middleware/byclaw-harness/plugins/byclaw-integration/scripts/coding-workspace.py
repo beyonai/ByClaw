@@ -42,6 +42,161 @@ def atomic_text(path, text):
             os.unlink(temporary)
 
 
+PUBLICATION_MCP_SERVER = r'''#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+TOOL_NAME = 'prepare_group_task_publication'
+TOOL_DESCRIPTION = ('用户明确要求发到群里、发布到群里或准备回群成果时调用；只准备待确认卡片，'
+                    '不上传附件、不发送群消息、不完成任务。成功后等待用户确认。')
+
+
+def respond(message_id, result=None, error=None):
+    value = {'jsonrpc': '2.0', 'id': message_id}
+    if error is not None:
+        value['error'] = error
+    else:
+        value['result'] = result
+    sys.stdout.write(json.dumps(value, ensure_ascii=False) + '\n')
+    sys.stdout.flush()
+
+
+def fail(message):
+    return {'content': [{'type': 'text', 'text': message}], 'isError': True}
+
+
+def config():
+    if len(sys.argv) != 2:
+        raise RuntimeError('发布工具配置缺失。')
+    path = Path(sys.argv[1])
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError('发布工具配置不可读取。')
+    data = json.loads(path.read_text(encoding='utf-8'))
+    binding = data.get('binding')
+    if not isinstance(binding, dict) or not isinstance(binding.get('taskId'), str):
+        raise RuntimeError('发布工具任务绑定无效。')
+    return data
+
+
+def validate_args(arguments, root):
+    if not isinstance(arguments, dict):
+        raise ValueError('参数无效。')
+    text = arguments.get('text', '')
+    paths = arguments.get('sourcePaths', [])
+    if not isinstance(text, str) or len(text) > 100000:
+        raise ValueError('正文参数无效。')
+    if not isinstance(paths, list) or len(paths) > 100:
+        raise ValueError('附件列表参数无效。')
+    if not text.strip() and not paths:
+        raise ValueError('正文和附件至少提供一项。')
+    for source in paths:
+        if not isinstance(source, str) or not source or len(source) > 4096:
+            raise ValueError('附件路径参数无效。')
+        if not source.startswith('/by/') or '\\' in source or '\x00' in source:
+            raise ValueError('附件必须是当前用户工作区内的 /by/ 绝对文件路径。')
+        parts = source.split('/')
+        if any(part in ('.', '..') for part in parts):
+            raise ValueError('附件路径不能包含相对路径段。')
+        candidate = Path(source)
+        try:
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(root)
+            if not resolved.is_file():
+                raise ValueError('附件必须是普通文件。')
+        except (OSError, ValueError):
+            raise ValueError('附件不存在、不可读取，或不是当前用户 /by/ 工作区内的普通文件。') from None
+    return {'text': text, 'sourcePaths': paths}
+
+
+def prepare(arguments):
+    data = config()
+    root = Path('/by').resolve(strict=True)
+    parsed = validate_args(arguments, root)
+    binding = data['binding']
+    base = str(data.get('baseUrl') or os.environ.get('BYAI_SERVICE_BASE_URL') or '').strip().rstrip('/')
+    if not base:
+        raise RuntimeError('BE 服务地址不可用。')
+    parsed_url = urllib.parse.urlsplit(base)
+    if parsed_url.scheme not in ('http', 'https') or parsed_url.username or parsed_url.password or parsed_url.query or parsed_url.fragment:
+        raise RuntimeError('BE 服务地址配置无效。')
+    prefix = parsed_url.path.rstrip('/') or '/byaiService'
+    path = prefix + '/group-chat/tasks/' + urllib.parse.quote(binding['taskId'], safe='') + '/pending-publication'
+    url = urllib.parse.urlunsplit((parsed_url.scheme, parsed_url.netloc, path, '', ''))
+    token = os.environ.get('BEYOND_TOKEN', '').strip()
+    if not token:
+        raise RuntimeError('BE 用户认证不可用。')
+    headers = {'Beyond-Token': token, 'Content-Type': 'application/json'}
+    if not binding.get('privateGroupId') and binding.get('enterpriseId'):
+        headers['X-Enterprise-Id'] = str(binding['enterpriseId'])
+    request = urllib.request.Request(url, method='POST', headers=headers,
+        data=json.dumps(parsed, ensure_ascii=False).encode('utf-8'))
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode('utf-8'))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+        raise RuntimeError('准备待发布内容失败，结果不确定；请查询当前待发布卡片，不要自动重试。') from None
+    if not isinstance(payload, dict):
+        raise RuntimeError('BE 返回的待发布数据无效，结果不确定；请查询当前待发布卡片。')
+    if payload.get('code') not in (0, '0'):
+        raise RuntimeError('BE 拒绝准备待发布卡片；请确认任务状态、登录权限及附件路径。')
+    result = payload.get('data')
+    if (not isinstance(result, dict) or str(result.get('taskId')) != binding['taskId']
+            or not isinstance(result.get('pendingPublicationId'), (str, int))
+            or (isinstance(result.get('pendingPublicationId'), int) and result['pendingPublicationId'] <= 0)
+            or (isinstance(result.get('pendingPublicationId'), str) and not result['pendingPublicationId'].strip())
+            or (result.get('text') is not None and not isinstance(result.get('text'), str))
+            or not isinstance(result.get('sourcePaths'), list)
+            or not all(isinstance(path, str) for path in result['sourcePaths'])
+            or not isinstance(result.get('createTime'), str) or not result['createTime'].strip()):
+        raise RuntimeError('BE 返回的待发布数据无效，结果不确定；请查询当前待发布卡片。')
+    return {'content': [{'type': 'text', 'text': json.dumps(result, ensure_ascii=False)}]}
+
+
+def main():
+    for line in sys.stdin:
+        try:
+            request = json.loads(line)
+            method = request.get('method')
+            message_id = request.get('id')
+            if method == 'initialize':
+                respond(message_id, {'protocolVersion': '2024-11-05',
+                    'capabilities': {'tools': {'listChanged': False}},
+                    'serverInfo': {'name': 'byclaw-group-task-publication', 'version': '1.0.0'}})
+            elif method == 'notifications/initialized':
+                continue
+            elif method == 'tools/list':
+                respond(message_id, {'tools': [{'name': TOOL_NAME, 'description': TOOL_DESCRIPTION,
+                    'inputSchema': {'type': 'object', 'properties': {
+                        'text': {'type': 'string', 'maxLength': 100000},
+                        'sourcePaths': {'type': 'array', 'maxItems': 100, 'items': {'type': 'string', 'minLength': 1, 'maxLength': 4096}},
+                    }, 'additionalProperties': False}}]})
+            elif method == 'tools/call':
+                params = request.get('params') or {}
+                if params.get('name') != TOOL_NAME:
+                    respond(message_id, error={'code': -32601, 'message': 'Unknown tool'})
+                else:
+                    try:
+                        respond(message_id, prepare(params.get('arguments') or {}))
+                    except Exception as error:
+                        respond(message_id, fail(str(error)))
+            elif message_id is not None:
+                respond(message_id, error={'code': -32601, 'message': 'Method not found'})
+        except Exception as error:
+            if 'message_id' in locals() and message_id is not None:
+                respond(message_id, error={'code': -32603, 'message': str(error)})
+
+
+if __name__ == '__main__':
+    main()
+'''
+
+
 @contextlib.contextmanager
 def identity_lock(path):
     """OS-owned lock survives cross-worker contention, releases on process death."""
@@ -302,6 +457,27 @@ def setup_config(manifest, home, cwd, default_config):
     # Application identity is stable and explicit for scripts invoked through shared Skills.
     skills = data.setdefault('skills', {})
     skills['config'] = connect_skills(home, manifest['skills'], cwd)
+    publication = manifest.get('publication')
+    if isinstance(publication, dict) and publication.get('mode') == 'mcp':
+        binding = publication.get('binding')
+        if not isinstance(binding, dict) or not isinstance(binding.get('taskId'), str) or not isinstance(binding.get('userCode'), str):
+            raise ValueError('EXECUTION_PUBLICATION_BINDING_INVALID')
+        bridge = home / 'byclaw-publication-mcp.py'
+        binding_file = home / 'byclaw-publication-binding.json'
+        atomic_text(bridge, PUBLICATION_MCP_SERVER)
+        os.chmod(bridge, 0o700)
+        binding_data = {'binding': binding}
+        if isinstance(publication.get('baseUrl'), str):
+            binding_data['baseUrl'] = publication['baseUrl']
+        atomic_text(binding_file, json.dumps(binding_data, ensure_ascii=False))
+        os.chmod(binding_file, 0o600)
+        servers = data.setdefault('mcp_servers', {})
+        if not isinstance(servers, dict):
+            raise ValueError('EXECUTION_MCP_CONFIG_INVALID')
+        servers['byclaw_group_task_publication'] = {
+            'command': 'python3',
+            'args': [str(bridge), str(binding_file)],
+        }
     atomic_text(home / 'config.toml', toml_document(data))
     atomic_text(home / 'AGENTS.md', manifest['persona'] + '\n')
 
@@ -524,8 +700,11 @@ def run(manifest, prompt, root):
             schema = home / 'output-schema.json'
             atomic_text(schema, json.dumps(publication_schema()))
             args += ['--output-schema', str(schema)]
-            prompt += '\n\n最终输出遵循 JSON Schema。answer 填用户可读答复；仅当用户要求准备群任务成果时填写 publication.text 和完整 sourcePaths，否则 publication=null。' + publication['description']
-            prompt += '\n填写 publication 仅是请求；宿主调用成功后才表示已准备待确认内容，不得声称已上传、发群或完成任务。'
+            if publication.get('mode') == 'mcp':
+                prompt += '\n\n当前会话已提供 DSH 兼容的 prepare_group_task_publication 工具。用户明确要求发到群里、发布到群里或准备回群成果时，调用该工具；普通问候、只读检查或未完成任务不要调用。工具成功后只表示已准备待确认卡片，不得声称已经上传、发群或完成任务。最终输出仍遵循 JSON Schema：answer 填用户可读答复，publication 必须为 null。' + publication['description']
+            else:
+                prompt += '\n\n最终输出遵循 JSON Schema。answer 填用户可读答复；仅当用户要求准备群任务成果时填写 publication.text 和完整 sourcePaths，否则 publication=null。' + publication['description']
+                prompt += '\n填写 publication 仅是请求；宿主调用成功后才表示已准备待确认内容，不得声称已上传、发群或完成任务。'
         environment = dict(os.environ, BYCLAW_CODEX_API_KEY=connection['apiKey'], CODEX_HOME=str(home), BYCLAW_AGENT_ID=manifest['employeeId'], DSH_BYCLAW_AGENT_ID=manifest['employeeId'])
         roots = list(dict.fromkeys([cwd, Path(manifest['workspace']['sessionRoot'])]))
         before = {path: scan(path) for path in roots}

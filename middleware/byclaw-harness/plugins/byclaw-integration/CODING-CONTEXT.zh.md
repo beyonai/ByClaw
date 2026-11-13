@@ -50,7 +50,8 @@ coding-workspace.py〔在实际 coding 租约中执行〕
 
 - 在原 cwd 与 sessionRoot 做有界前后扫描，包含 Shell 创建的多层文件；排除 executors、.git、node_modules 等目录。单个文本最多 256 KiB，总文本 16 MiB，最多 10000 个文件；超限显示扫描不完整，不凭缺项推断删除。
 - 文件详情写入原 v2 快照目录，再通过 3016 发送摘要；二进制保留路径、大小和存在状态。未在这两个目录中的文件不纳入扫描。
-- 安装 `group-task-publication` 且符合原任务绑定条件时，CLI 使用结构化最终输出 `{answer, publication}`。宿主从 publication 取得 `text + sourcePaths`，通过原客户端准备待确认卡片；路径在同一 coding 租约校验，认证在宿主临时读取。
+- 安装 `group-task-publication` 且符合原任务绑定条件时，CLI 在专用 `CODEX_HOME` 注册 DSH 兼容的 `prepare_group_task_publication` MCP 工具。Codex 只在用户明确要求发到群里或准备回群成果时调用该工具；工具桥接复用原客户端准备待确认卡片，路径在同一 coding 租约校验，认证由工具侧运行环境读取。最终答复仍使用结构化 JSON，`publication` 必须为 `null`，避免宿主重复准备。
+- 不具备群任务或关联私聊绑定时不注册该工具；普通独立私聊不会获得群成果发布能力。工具配置、任务绑定和桥接脚本只写入本执行身份的 `CODEX_HOME`，任务结束后由租约清理。
 - 未安装可选插件时保持普通最终答复。准备请求失败不自动重试；不会自动上传、发群或完成任务。
 
 ## 代码入口
