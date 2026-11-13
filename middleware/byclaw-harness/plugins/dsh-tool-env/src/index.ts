@@ -1,3 +1,5 @@
+import { registerLeaseWarnings } from './transport-failure.ts'
+import { registerPreparationRecovery } from './preparation-recovery.ts'
 import { instanceRefsFor } from './instance-context.ts'
 /**
  * ByClaw tool environment: run DSH's file, process, terminal, PTC and sandbox
@@ -198,6 +200,10 @@ export class ToolEnv extends ToolEnvConnection {
         residualMaxMs: config.busyProcessMaxMs,
       },
     }, backend, identity)
+    if (registerCatalog) {
+      registerLeaseWarnings(ctx)
+      registerPreparationRecovery(ctx)
+    }
     this.beBackend = backend instanceof ByClawBeBackend ? backend : undefined
     this.catalogLaunchEnv = config.launchEnv
     this.catalogToken = config.byclawBe.token

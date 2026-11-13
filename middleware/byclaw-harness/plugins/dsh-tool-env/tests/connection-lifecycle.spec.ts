@@ -86,14 +86,54 @@ describe('tool environment idle lifecycle', () => {
     expect(finish).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps both failures and the dispatched outcome when lease release also fails', async () => {
+    const finish = vi.fn().mockRejectedValue(new Error('lease release ETIMEDOUT'))
+    backend.beginUse = vi.fn().mockResolvedValue(finish)
+    inner.request.mockRejectedValueOnce(new Error('SSH helper disconnected'))
+    const error = await ssh.request('spawn', {}, z.string()).catch(error => error)
+    expect(error.message).toContain('TOOL_ENV_OUTCOME_UNKNOWN')
+    expect(error.message).toContain('SSH helper disconnected')
+    expect(error.message).toContain('租约归还失败：lease release ETIMEDOUT')
+    expect(error.message).not.toContain('TOOL_ENV_UNAVAILABLE')
+    expect(error.cause).toBeInstanceOf(AggregateError)
+    expect(finish).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves the successful value when lease release fails', async () => {
+    backend.beginUse = vi.fn().mockResolvedValue(vi.fn().mockRejectedValue(new Error('lease release failed')))
+    expect(await ssh.request('spawn', {}, z.string())).toBe('done')
+  })
+
+  it('keeps cancellation authoritative when lease release also fails', async () => {
+    const controller = new AbortController()
+    const reason = new Error('user cancelled')
+    backend.beginUse = vi.fn().mockResolvedValue(vi.fn().mockRejectedValue(new Error('lease release failed')))
+    inner.request.mockImplementationOnce(async () => { controller.abort(reason); throw new Error('SSH helper disconnected') })
+    await expect(ssh.request('spawn', {}, z.string(), controller.signal)).rejects.toBe(reason)
+  })
+
+  it('keeps stream cancellation authoritative when its lease release fails', async () => {
+    const controller = new AbortController()
+    const reason = new Error('user cancelled')
+    const finish = vi.fn().mockRejectedValue(new Error('stream release failed'))
+    backend.beginUse = vi.fn().mockResolvedValue(finish)
+    inner.connectStream.mockImplementationOnce(async () => {
+      controller.abort(reason)
+      throw new Error('SSH helper disconnected')
+    })
+    await expect(ssh.connectStream({} as never, controller.signal)).rejects.toBe(reason)
+    expect(finish).toHaveBeenCalledTimes(1)
+  })
+
   it('releases an ensured environment after its first SSH handshake fails', async () => {
     const connector = ssh as unknown as { connect(): Promise<unknown> }
     vi.mocked(connector.connect).mockResolvedValueOnce({
       connection: { ...inner, ready: Promise.reject(new Error('SSH helper disconnected')) },
       fiber: { dispose() {} },
     })
-    await expect(ssh.request('spawn', { argv: ['bash'] }, z.string())).rejects.toThrow('SSH helper disconnected')
+    await expect(ssh.request('spawn', { argv: ['bash'] }, z.string())).rejects.toThrow('TOOL_ENV_UNAVAILABLE')
     expect(inner.request).not.toHaveBeenCalled()
+    expect(connector.connect).toHaveBeenCalledTimes(1)
     await vi.advanceTimersByTimeAsync(100)
     expect(backend.pause).toHaveBeenCalledTimes(1)
     await vi.advanceTimersByTimeAsync(300)

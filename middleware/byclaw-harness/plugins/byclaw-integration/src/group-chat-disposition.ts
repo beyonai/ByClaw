@@ -47,7 +47,7 @@ interface DispositionStore {
   publish(path: string, text: string, signal: AbortSignal): Promise<boolean>
   /** Atomically replace the current dispatch result, including a previous CHAT result. */
   replace(path: string, text: string, signal: AbortSignal): Promise<void>
-  historyTail(source: string, host: ByClawSessionHost, maxBytes: number, signal: AbortSignal): Promise<{ bytes: Buffer; truncated: boolean }>
+  historyTail(source: string, host: Pick<ByClawSessionHost, 'byRoot' | 'resolveSourcePath'>, maxBytes: number, signal: AbortSignal): Promise<{ bytes: Buffer; truncated: boolean }>
 }
 
 const system = `你负责判定用户请求类型，只输出一个 JSON 对象，不输出 Markdown、思考过程或答案。
@@ -90,7 +90,7 @@ function modelDecision(text: string, userText: string): Decision {
 function missing(error: unknown): boolean { return object(error)?.code === 'ENOENT' }
 
 /** Inline recent history because the auxiliary LLM has no filesystem tools. */
-async function historyContext(source: unknown, host: ByClawSessionHost, maxBytes: number, signal: AbortSignal, store: DispositionStore): Promise<{
+async function historyContext(source: unknown, host: Pick<ByClawSessionHost, 'byRoot' | 'resolveSourcePath'>, maxBytes: number, signal: AbortSignal, store: DispositionStore): Promise<{
   path: string; available: true; content: string; truncated: boolean
 }> {
   if (typeof source !== 'string' || !source.trim()) throw new Error('groupChat.groupHistoryPath must be a nonblank file path')
@@ -241,7 +241,7 @@ export function installGroupChatDisposition(ctx: Context, options: GroupChatDisp
 } {
   const environment = { ...(options.environment ?? process.env) }
   const enabled = environment['BYCLAW_GROUP_CHAT_DISPOSITION_ENABLED']?.trim() !== '0'
-  const store = options.files === undefined ? hostStore : toolEnvironmentStore(options.files, options.historyFiles)
+  const defaultStore = options.files === undefined ? hostStore : toolEnvironmentStore(options.files, options.historyFiles)
   const shutdown = new AbortController()
   const pending = new Map<string, { operation: Promise<void>; signal: AbortSignal }>()
   const queues = new Map<string, Promise<void>>()
@@ -269,7 +269,7 @@ export function installGroupChatDisposition(ctx: Context, options: GroupChatDisp
     ])).digest('hex')
   }
   const whenIdle = async () => { await Promise.allSettled([...pending.values()].map(job => job.operation)) }
-  const dispose = ctx.on('byclaw/session-setup', payload => {
+  const begin = (payload: { command: AskAgentCommand; host: Pick<ByClawSessionHost, 'byRoot' | 'resolveSourcePath'> }, store: DispositionStore) => {
     if (shutdown.signal.aborted) return
     let sessionId = ''
     try {
@@ -347,7 +347,12 @@ export function installGroupChatDisposition(ctx: Context, options: GroupChatDisp
       })
       pending.set(key, { operation, signal })
     } catch (error: unknown) { report(sessionId, 'classification-setup-failed', error) }
+  }
+  // Native coding turns have no DSH Agent. Use their already-owned lease, never the default tool environment.
+  const disposeCoding = ctx.on('byclaw/coding-setup', payload => {
+    begin(payload, toolEnvironmentStore(payload.host.userFiles, payload.host.userFiles))
   })
+  const dispose = ctx.on('byclaw/session-setup', payload => begin(payload, defaultStore))
   return { stop() { shutdown.abort(new Error('Group chat disposition runtime closed')) }, whenIdle,
     waitFor(command) {
       try {
@@ -360,6 +365,7 @@ export function installGroupChatDisposition(ctx: Context, options: GroupChatDisp
       } catch (error: unknown) { report(String(command.header.sessionId), 'classification-wait-failed', error); return undefined }
     }, async close() {
     dispose()
+    disposeCoding()
     shutdown.abort(new Error('Group chat disposition runtime closed'))
     await whenIdle()
     await Promise.allSettled(owned)

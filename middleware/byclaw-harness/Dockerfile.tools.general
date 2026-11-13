@@ -1,0 +1,158 @@
+# General tool sandbox (B): the user's own default tool environment of the split
+# deployment. Built from the browser business layer (itself from base-slim, whose
+# SSH helper is collected from the matching A), plus what everyday turns run on B:
+# builtin Skills and their CLIs, Python/Node business packages, Office and
+# document tools. Java/Maven belong to the coding sandbox and ffmpeg to media.
+# Build from the repository root, after the browser image of the same A:
+#   docker build -f middleware/byclaw-harness/Dockerfile.tools.general \
+#     --build-arg BROWSER_IMAGE=<browser image>@sha256:<digest> \
+#     --build-arg HARNESS_IMAGE=<the A (_slim) image>@sha256:<digest> \
+#     -t byclaw-harness:<tag>_general .
+ARG BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_browser
+ARG HARNESS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_slim
+
+# --- A's installed connector CLIs and plugin Skills, at A's paths (same Node as B) ---
+FROM ${HARNESS_IMAGE} AS harness-content
+USER root
+RUN set -eux; \
+    mkdir -p /payload/opt/nvm/current/lib/node_modules /payload/opt/byclaw/dsh-managed/plugins; \
+    cp -a /opt/nvm/current/lib/node_modules/@wecom /opt/nvm/current/lib/node_modules/@larksuite \
+        /payload/opt/nvm/current/lib/node_modules/; \
+    cd /opt/byclaw/dsh-managed/plugins; \
+    find . -mindepth 2 -maxdepth 3 -type d -name skills -not -path '*/node_modules/*' | while read -r skills; do \
+        mkdir -p "/payload/opt/byclaw/dsh-managed/plugins/$(dirname "${skills}")"; \
+        cp -a "${skills}" "/payload/opt/byclaw/dsh-managed/plugins/${skills#./}"; \
+    done
+
+FROM ${BROWSER_IMAGE} AS general
+USER root
+ARG TARGETARCH
+RUN test "${TARGETARCH}" = amd64
+# Optional Debian mirror for this build host; see configure-cn-sources.sh.
+ARG BYCLAW_APT_MIRROR
+ARG PNPM_VERSION=11.28.5
+ARG UV_VERSION=0.12.7
+ARG ALIBABACLOUD_MCP_PROXY_VERSION=0.2.17
+ARG BY_FRAMEWORK_VERSION=0.2.2.dev10
+ARG PYTHON_DOCX_VERSION=1.2.0
+ARG MATPLOTLIB_VERSION=3.10.3
+ARG ALIYUN_CLI_VERSION=3.4.11
+ARG ALIYUN_CLI_AMD64_SHA256=a7e3df497db14c10d4d7587795e9fa7849b0c51dfce02908b9de5a41fe717d5c
+ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    npm_config_registry=https://registry.npmmirror.com \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_EXTRA_INDEX_URL= \
+    UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_EXTRA_INDEX_URL= \
+    UV_PYTHON_DOWNLOADS=never \
+    COREPACK_NPM_REGISTRY=https://registry.npmmirror.com \
+    NVM_NODEJS_ORG_MIRROR=https://npmmirror.com/mirrors/node/ \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PUPPETEER_SKIP_DOWNLOAD=1 \
+    DSH_HOME=/home/byclaw/.dsh \
+    BYCLAW_RUNTIME_HOME=/opt/byclaw/builtin \
+    BYCLAW_SKILLS_DIR=/opt/byclaw/builtin/skills \
+    BYCLI_BRIDGE_BOOTSTRAP_SCRIPT=/opt/byclaw/builtin/skills/bycli/scripts/bridge-bootstrap.mjs \
+    BYCLAW_BROWSER_STARTUP=on-demand \
+    PATH=/opt/nvm/current/bin:/opt/byclaw/builtin/cli:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# System tools the general sandbox runs; no Java/Maven (coding) and no ffmpeg (media).
+COPY middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh /tmp/configure-cn-sources.sh
+RUN set -eux; \
+    bash /tmp/configure-cn-sources.sh; \
+    apt-get -o APT::Update::Error-Mode=any update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential pkg-config make fd-find file fonts-wqy-microhei fonts-wqy-zenhei \
+        gh imagemagick less libreoffice netcat-openbsd pandoc poppler-utils psmisc \
+        ripgrep sqlite3 tree; \
+    ln -sf /usr/bin/fdfind /usr/local/bin/fd; \
+    rm -rf /var/lib/apt/lists/* /tmp/configure-cn-sources.sh; \
+    for command in soffice libreoffice convert gh pandoc pdftotext file rg fd sqlite3 make; do command -v "${command}" >/dev/null; done; \
+    if command -v java || command -v mvn || command -v ffmpeg; then echo 'Java/Maven belong to coding and ffmpeg to media' >&2; exit 1; fi
+
+# Alibaba Cloud CLI, a single static binary. No rtk: the slim Harness does not ship it,
+# so A's bash provider never rewrites commands to `rtk …` for this sandbox.
+RUN set -eux; \
+    cli_archive="aliyun-cli-linux-${ALIYUN_CLI_VERSION}-amd64.tgz"; \
+    curl -fL --retry 5 --retry-delay 2 --connect-timeout 10 --max-time 120 \
+        "https://aliyuncli.alicdn.com/${cli_archive}" -o "/tmp/${cli_archive}"; \
+    echo "${ALIYUN_CLI_AMD64_SHA256}  /tmp/${cli_archive}" | sha256sum -c -; \
+    tar -xzf "/tmp/${cli_archive}" -C /usr/local/bin; \
+    chmod 0755 /usr/local/bin/aliyun; \
+    rm -f "/tmp/${cli_archive}"; \
+    aliyun version
+
+# Builtin Skills, their CLIs (dws) and Python CLI sources, as on A.
+COPY --chown=byclaw:byclaw middleware/builtin/ /opt/byclaw/builtin/
+COPY --chown=byclaw:byclaw middleware/builtin/skills/ /opt/byclaw/dsh-managed/skills/
+COPY --from=harness-content --chown=byclaw:byclaw /payload/opt/byclaw/ /opt/byclaw/
+COPY --from=harness-content /payload/opt/nvm/current/lib/node_modules/ /opt/nvm/current/lib/node_modules/
+RUN set -eux; \
+    ln -sf ../lib/node_modules/@wecom/cli/bin/wecom.js /opt/nvm/current/bin/wecom-cli; \
+    ln -sf ../lib/node_modules/@larksuite/cli/scripts/run.js /opt/nvm/current/bin/lark-cli; \
+    npm install --global --no-audit --no-fund --update-notifier=false "pnpm@${PNPM_VERSION}"; \
+    npm cache clean --force; \
+    su -s /bin/sh byclaw -c 'wecom-cli --version >/dev/null && lark-cli --help >/dev/null && pnpm --version >/dev/null'; \
+    /opt/byclaw/builtin/cli/dws --version >/dev/null
+
+# Python business packages: platform framework, builtin Python CLIs, the content
+# capabilities wheel with its PPT/document stack, and document/chart helpers.
+COPY middleware/byclaw-harness/vendor/content-creation/ /tmp/byclaw-content-runtime/
+RUN set -eux; \
+    cd /tmp/byclaw-content-runtime; \
+    sha256sum -c SHA256SUMS; \
+    python3 -m pip install --no-cache-dir \
+        "by-framework==${BY_FRAMEWORK_VERSION}" \
+        /opt/byclaw/builtin/python-clis/kbcli \
+        /opt/byclaw/builtin/python-clis/groksearchcli \
+        /opt/byclaw/builtin/python-clis/callcli \
+        "/opt/byclaw/builtin/python-clis/dbcli[all]" \
+        "./byclaw_caps-0.7.6-py3-none-any.whl[documents]" \
+        -r ppt-requirements.txt \
+        "python-docx==${PYTHON_DOCX_VERSION}" \
+        "matplotlib==${MATPLOTLIB_VERSION}" \
+        "uv==${UV_VERSION}" \
+        "alibabacloud.mcp-proxy==${ALIBABACLOUD_MCP_PROXY_VERSION}"; \
+    python3 -m pip check; \
+    cd /; \
+    rm -rf /tmp/byclaw-content-runtime; \
+    kbcli --help >/dev/null; groksearchcli --help >/dev/null; callcli --help >/dev/null; dbcli --help >/dev/null; \
+    uv --version; alibabacloud.mcp-proxy --help >/dev/null; \
+    python3 -c "import importlib; from importlib.metadata import version; assert version('byclaw-caps') == '0.7.6'; [importlib.import_module(m) for m in ('by_framework', 'byclaw_caps.article', 'byclaw_caps.compile', 'byclaw_caps.image', 'byclaw_caps.tts', 'byclaw_caps.raster', 'pypdf', 'numpy', 'PIL', 'pptx', 'docx', 'matplotlib', 'xlsxwriter', 'pathops', 'uharfbuzz', 'fitz', 'yaml', 'bs4', 'curl_cffi', 'ebooklib', 'edge_tts', 'flask', 'google.genai', 'mammoth', 'markdownify', 'nbconvert', 'openpyxl', 'redis', 'requests')]"
+
+# knowledge-collection's no-key search provider.
+COPY middleware/byclaw-harness/scripts/install-search-runtime.sh middleware/byclaw-harness/scripts/searxng-cli-constraints.txt /tmp/byclaw-search-runtime/
+COPY middleware/byclaw-harness/scripts/searxng-cli/ /tmp/byclaw-search-runtime/searxng-cli/
+ARG SEARXNG_WHEELHOUSE
+RUN sh /tmp/byclaw-search-runtime/install-search-runtime.sh \
+        /tmp/byclaw-search-runtime/searxng-cli/searxng_pack_settings.yml \
+        /tmp/byclaw-search-runtime/searxng-cli-constraints.txt \
+    && /opt/searxng-cli-venv/bin/python -m pip check \
+    && su -s /bin/sh byclaw -c 'searxng-cli --list-engines >/dev/null' \
+    && rm -rf /tmp/byclaw-search-runtime
+
+COPY middleware/byclaw-harness/tool-sandbox/general.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
+# The browser starts on first use; the home seed fills a persistent home volume at start.
+RUN set -eux; \
+    node -e 'const m=require("/etc/byclaw-tool-sandbox/capabilities.json"); if(m.purpose!=="general") process.exit(1)'; \
+    test -x /usr/local/bin/byclaw-tool-env-sshd; \
+    test -x /usr/local/bin/byclaw-tool-slim-entrypoint; \
+    test -x /usr/local/bin/byclaw-tool-base-entrypoint; \
+    test -x /usr/local/bin/byclaw-tool-workload; \
+    test -f /etc/byclaw-tool-sandbox/services.d/browser.json; \
+    test -x /usr/local/bin/byclaw-playwright-chromium; \
+    test -f /opt/byclaw/builtin/skills/bycli/scripts/bridge-bootstrap.mjs; \
+    sha256sum -c /etc/byclaw-tool-sandbox/helper.sha256; \
+    chown -R byclaw:byclaw /home/byclaw; \
+    rm -rf /usr/local/share/byclaw-tool-home; \
+    cp -a /home/byclaw /usr/local/share/byclaw-tool-home; \
+    env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env; \
+    chmod 0644 /etc/byclaw-tool-env.session-env; \
+    grep -q '^BYCLAW_BROWSER_STARTUP=on-demand$' /etc/byclaw-tool-env.session-env
+LABEL io.byclaw.tool-sandbox.contract="byclaw.tool-sandbox/v1" \
+      io.byclaw.tool-sandbox.purpose="general"
+WORKDIR /by
+EXPOSE 22 8022 8081 19825
+ENTRYPOINT ["/usr/local/bin/byclaw-tool-slim-entrypoint"]
+CMD ["tools"]

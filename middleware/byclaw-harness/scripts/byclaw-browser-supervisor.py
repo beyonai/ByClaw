@@ -116,11 +116,17 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     # On demand, hold byCLI's TCP port until first use: a client that reaches byCLI over
     # the network (BE's account login and recorder) starts the browser like the socket does.
     parser.add_argument("--activation-port", type=int, default=0)
+    # A tool sandbox runs SSH under its own entrypoint and this browser as one of its
+    # services: no main command, and a browser that ends only ends this process, which
+    # the entrypoint restarts into the on-demand wait.
+    parser.add_argument("--browser-service", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     options = parser.parse_args(argv)
     if options.command[:1] == ["--"]:
         options.command = options.command[1:]
-    if not options.command:
+    if options.browser_service and options.command:
+        parser.error("--browser-service runs no command")
+    if not options.browser_service and not options.command:
         parser.error("a DSH command is required after --")
     if options.readiness_timeout <= 0:
         parser.error("readiness timeout must be positive")
@@ -683,17 +689,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             start_browser()
 
-        dsh_environment = dict(base_environment)
-        dsh_environment["BYCLAW_BROWSER_OWNS_RUNTIME"] = "false"
-        dsh_environment["BYCLAW_DSH_PREPARED"] = "1"
-        dsh_environment.pop("DISPLAY", None)
-        dsh_secret_fd = secret_pipe(secret)
-        dsh_environment["BYCLAW_BROWSER_SECRET_FD"] = str(dsh_secret_fd)
-        try:
-            dsh = spawn(options.command, dsh_environment, dsh_account, dsh_secret_fd)
-        finally:
-            os.close(dsh_secret_fd)
-        children.append(dsh)
+        if not options.browser_service:
+            dsh_environment = dict(base_environment)
+            dsh_environment["BYCLAW_BROWSER_OWNS_RUNTIME"] = "false"
+            dsh_environment["BYCLAW_DSH_PREPARED"] = "1"
+            dsh_environment.pop("DISPLAY", None)
+            dsh_secret_fd = secret_pipe(secret)
+            dsh_environment["BYCLAW_BROWSER_SECRET_FD"] = str(dsh_secret_fd)
+            try:
+                dsh = spawn(options.command, dsh_environment, dsh_account, dsh_secret_fd)
+            finally:
+                os.close(dsh_secret_fd)
+            children.append(dsh)
         sys.stderr.write(
             "byclaw-browser-supervisor: startup phase=cli-spawned; "
             f"elapsedMs={round((time.monotonic() - startup_started) * 1000)}\n"
@@ -710,7 +717,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 for child in reversed(children):
                     terminate(child)
                 return 128 + received_signal
-            dsh_code = dsh.poll()
+            dsh_code = dsh.poll() if dsh is not None else None
             if dsh_code is not None:
                 if browserd is not None:
                     terminate(browserd)
@@ -743,7 +750,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     continue
             browser_code = browserd.poll()
             if browser_code is not None:
-                terminate(dsh)
+                if dsh is not None:
+                    terminate(dsh)
                 return normalized_returncode(browser_code) or 1
             now = time.monotonic()
             latest_browser_generation = read_browser_generation(

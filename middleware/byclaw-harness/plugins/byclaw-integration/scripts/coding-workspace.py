@@ -216,7 +216,7 @@ def prepare_agent_skills(manifest, root):
     emit('byclaw.workspace', status='skills-ready', count=len(manifest['skills']))
 
 
-EXCLUDED = {'.git', 'node_modules', '.venv', '__pycache__', 'executors', '.file_changes'}
+EXCLUDED = {'.byclaw', '.git', 'node_modules', '.venv', '__pycache__', 'executors', '.file_changes'}
 MAX_FILES = 10000
 MAX_TEXT = 256 * 1024
 MAX_TOTAL_TEXT = 16 * 1024 * 1024

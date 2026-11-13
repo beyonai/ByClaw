@@ -58,6 +58,15 @@ class WorkspaceTests(unittest.TestCase):
             if file.is_file():
                 self.assertNotIn(b'synthetic-only', file.read_bytes())
 
+    def test_internal_control_files_are_not_user_file_changes(self):
+        control = self.by / '.byclaw'
+        control.mkdir()
+        (control / 'group-chat-disposition.json').write_text('{"kind":"TASK"}')
+        (self.by / 'result.txt').write_text('deliverable')
+        entries, _ = runner.scan(self.by)
+        self.assertIn('result.txt', entries)
+        self.assertNotIn('.byclaw/group-chat-disposition.json', entries)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='coding-workspace-test-')
         self.addCleanup(self.temporary.cleanup)

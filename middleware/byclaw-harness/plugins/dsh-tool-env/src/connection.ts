@@ -21,6 +21,7 @@ import type { ToolEnvIdentity } from './identity.ts'
 import { DeferredToolEnvironmentWork } from './deferred-work.ts'
 import { resolveLocalExecutable } from './local-executable.ts'
 import { answerWhileDown, isCleanupRequest } from './pending-directories.ts'
+import { markEnvironmentFailure, reportLeaseWarning, toolTransportError, trackLeaseRelease, withLeaseFailure } from './transport-failure.ts'
 
 type Hello = Awaited<SshConnection['ready']>
 
@@ -79,6 +80,8 @@ export class ToolEnvConnection extends Service {
   private readonly deploymentScope = new AsyncLocalStorage<Readonly<Record<string, string>>>()
   private deploymentValues: Readonly<Record<string, string>> | undefined
   private readonly deferred = new DeferredToolEnvironmentWork(message => { this.ctx.logger('byclaw-tool-env').warn(message) })
+  /** Whether each B (one per inner connection) has the workload wrapper; asked once per connection. */
+  private readonly workloadWrappers = new WeakMap<object, Promise<boolean>>()
 
   constructor(
     ctx: Context,
@@ -197,7 +200,27 @@ export class ToolEnvConnection extends Service {
       const input = scrubbed as { env?: Readonly<Record<string, string | null>> }
       scrubbed = { ...input, env: { ...input.env, ...deployment } }
     }
-    return await this.use(lease => lease.connection.request(method, scrubbed, result, signal, wait), signal)
+    if (method !== 'process.prepare') return await this.use(lease => lease.connection.request(method, scrubbed, result, signal, wait), signal)
+    return await this.use(async lease => {
+      const params = await this.hasWorkloadWrapper(lease.connection) ? asWorkload(scrubbed) : scrubbed
+      return lease.connection.request(method, params, result, signal, wait)
+    }, signal)
+  }
+
+  /**
+   * B images with the transport entrypoint ship `byclaw-tool-workload`, which puts a
+   * command in B's work cgroup and raises its OOM score before exec, so a command that
+   * exhausts memory cannot take SSH down with it. Older images run commands as before.
+   */
+  private hasWorkloadWrapper(connection: Lease['connection']): Promise<boolean> {
+    let known = this.workloadWrappers.get(connection)
+    if (known === undefined) {
+      const target = { targetKey: WORKLOAD_WRAPPER, displayPath: WORKLOAD_WRAPPER }
+      known = connection.request('fs.stat', { target }, ANY)
+        .then(stat => stat !== null && typeof stat === 'object', () => false)
+      this.workloadWrappers.set(connection, known)
+    }
+    return known
   }
 
   /** Internal executor scope, never exposed as a model tool or a caller-controlled env flag. */
@@ -212,13 +235,29 @@ export class ToolEnvConnection extends Service {
 
   async connectStream(endpoint: SshStreamEndpoint, signal?: AbortSignal): Promise<Socket> {
     this.noteStartReason('stream', endpoint)
-    const finish = await this.backend.beginUse?.()
+    let finish: (() => Promise<void>) | undefined
+    try { finish = await this.backend.beginUse?.() } catch (error) {
+      signal?.throwIfAborted()
+      throw markEnvironmentFailure(toolTransportError(error, false))
+    }
     let socket: Socket
     try { socket = await this.use(lease => lease.connection.connectStream(endpoint, signal), signal, false) }
-    catch (error) { await finish?.().catch(() => {}); throw error }
+    catch (error) {
+      try { await finish?.() } catch (cleanup) {
+        signal?.throwIfAborted()
+        throw markEnvironmentFailure(withLeaseFailure(toolTransportError(error, false), cleanup))
+      }
+      signal?.throwIfAborted()
+      throw error
+    }
     this.streams.add(socket)
     this.touch()
-    socket.once('close', () => { this.streams.delete(socket); this.touch(); void finish?.().catch(() => {}) })
+    const release = trackLeaseRelease(() => socket.destroyed, async () => {
+      try { await finish?.() } catch (error) {
+        this.ctx.logger('byclaw-tool-env').warn(reportLeaseWarning(error, false))
+      }
+    })
+    socket.once('close', () => { this.streams.delete(socket); this.touch(); void release() })
     return socket
   }
 
@@ -250,6 +289,7 @@ export class ToolEnvConnection extends Service {
 
   private async use<T>(operation: (lease: Lease) => Promise<T>, signal?: AbortSignal, acquireUse = true): Promise<T> {
     let finish: (() => Promise<void>) | undefined
+    let primary: Error | undefined
     this.inflight++
     this.residualSince = undefined
     this.touch()
@@ -258,15 +298,25 @@ export class ToolEnvConnection extends Service {
       if (acquireUse) finish = await this.backend.beginUse?.()
       const epoch = this.connectionEpoch
       const lease = await this.lease()
+      signal?.throwIfAborted()
       if (epoch !== this.connectionEpoch) throw new Error('TOOL_LEASE_INVALIDATED')
       try { return await operation(lease) } catch (error) {
         if (isBroken(lease.connection)) void this.drop(lease)
-        throw error
+        signal?.throwIfAborted()
+        throw toolTransportError(error, true)
       }
+    } catch (error) {
+      signal?.throwIfAborted()
+      primary = markEnvironmentFailure(toolTransportError(error, false))
+      throw primary
     } finally {
       this.inflight--
       this.touch()
-      await finish?.()
+      try { await finish?.() } catch (error) {
+        signal?.throwIfAborted()
+        if (primary) throw markEnvironmentFailure(withLeaseFailure(primary, error))
+        this.ctx.logger('byclaw-tool-env').warn(reportLeaseWarning(error))
+      }
     }
   }
 
@@ -449,6 +499,20 @@ export function scrubEnvironment(params: unknown): unknown {
   if (typeof env !== 'object' || env === null) return params
   const kept = Object.fromEntries(Object.entries(env).filter(([key]) => !PRIVATE_ENVIRONMENT.test(key) && !HOST_CREDENTIAL_ENVIRONMENT.test(key) && !isDeploymentParameter(key)))
   return { ...params, env: kept }
+}
+
+/** On B; see ToolEnvConnection.hasWorkloadWrapper. */
+export const WORKLOAD_WRAPPER = '/usr/local/bin/byclaw-tool-workload'
+
+/** Accepts any reply: only whether the wrapper exists matters. */
+const ANY = { parse: (value: unknown) => value } as unknown as z.ZodType<unknown>
+
+/** Run a process.prepare request's command through the workload wrapper, once. */
+export function asWorkload(params: unknown): unknown {
+  if (typeof params !== 'object' || params === null) return params
+  const argv = (params as { argv?: unknown }).argv
+  if (!Array.isArray(argv) || argv.length === 0 || argv[0] === WORKLOAD_WRAPPER) return params
+  return { ...params, argv: [WORKLOAD_WRAPPER, ...argv] }
 }
 
 /** True once the inner connection failed or closed; it never recovers. */

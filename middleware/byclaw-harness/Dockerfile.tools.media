@@ -1,6 +1,6 @@
 # The browser business layer is itself built from D0.6.0_base_slim.
 # HyperFrames needs its Chromium runtime; never inherit the full Harness image.
-ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
+ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_browser
 FROM ${TOOLS_IMAGE}
 USER root
 ARG HYPERFRAMES_VERSION=0.8.226

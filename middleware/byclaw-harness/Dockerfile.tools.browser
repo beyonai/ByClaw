@@ -1,24 +1,31 @@
-# Repository-root context. Business dependencies are separate from the slim base.
-ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_base_slim
-ARG BROWSER_DONOR_IMAGE
-ARG INSTALLED_BROWSER_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness-tools:D0.6.0_browser
-# Update runtime scripts and viewer assets in an already validated browser image.
-# Pin INSTALLED_BROWSER_IMAGE by digest; the default final target below is a full build.
-FROM ${INSTALLED_BROWSER_IMAGE} AS browser-runtime-update
-USER root
-COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
-COPY --chmod=0644 middleware/byclaw-harness/browser/novnc-index.html /opt/byclaw/novnc/index.html
-COPY --chmod=0644 middleware/builtin/runtime-tools/browser-viewer/connection-bridge.mjs /opt/byclaw/novnc/connection-bridge.js
-RUN test -x /usr/local/bin/byclaw-tool-slim-entrypoint \
-    && node -e 'if(require("/etc/byclaw-tool-sandbox/capabilities.json").purpose!=="browser")process.exit(1)'
+# Browser business layer: base-slim plus Chromium, byCLI and the shared desktop.
+# Its only image inputs are base-slim and the Harness (A) it serves: the native
+# browser runtime (dsh-browser-use) comes from A at A's paths, and the Playwright
+# release that runtime pins decides which Chromium is installed. Chromium, byCLI,
+# noVNC and the X server come from domestic mirrors. Build after base-slim of the same A:
+#   docker build -f middleware/byclaw-harness/Dockerfile.tools.browser \
+#     --build-arg TOOLS_IMAGE=<base_slim of A>@sha256:<digest> \
+#     --build-arg HARNESS_IMAGE=<A>@sha256:<digest> -t byclaw-harness:<tag>_browser .
+ARG TOOLS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_base_slim
+ARG HARNESS_IMAGE=192.168.0.81:8080/byclaw/byclaw-harness:D0.6.0_slim
 
-FROM ${BROWSER_DONOR_IMAGE} AS browser-runtime
+FROM ${HARNESS_IMAGE} AS browser-runtime
 USER root
 COPY middleware/byclaw-harness/tool-sandbox/collect-browser-runtime.mjs /tmp/collect-browser-runtime.mjs
-RUN node /tmp/collect-browser-runtime.mjs /browser-payload
+RUN set -eux; \
+    node /tmp/collect-browser-runtime.mjs /browser-payload; \
+    mkdir -p /browser-meta; \
+    cd /opt/byclaw/dsh-managed/profiles/web/node_modules/@byclaw/dsh-browser-use; \
+    node -e 'const r = require("node:module").createRequire(process.cwd() + "/package.json"); process.stdout.write(r("playwright-core/package.json").version)' >/browser-meta/playwright-version; \
+    grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' /browser-meta/playwright-version
 
 FROM ${TOOLS_IMAGE} AS browser
 USER root
+# Optional Debian mirror for this build host; see configure-cn-sources.sh.
+ARG BYCLAW_APT_MIRROR
+ARG BYCLI_VERSION=2.1.78
+ARG BYCLI_EXTENSION_VERSION=2.1.29
+ARG PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright
 ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     npm_config_registry=https://registry.npmmirror.com \
     PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
@@ -35,12 +42,9 @@ ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     HYPERFRAMES_FFMPEG_PATH=/usr/bin/ffmpeg \
     HYPERFRAMES_FFPROBE_PATH=/usr/bin/ffprobe
 COPY --from=browser-runtime /browser-payload/ /
-COPY --from=browser-runtime /ms-playwright/ /ms-playwright/
-COPY --from=browser-runtime /opt/nvm/current/lib/node_modules/playwright/ /opt/nvm/current/lib/node_modules/playwright/
-COPY --from=browser-runtime /opt/nvm/current/lib/node_modules/@sovovs/bycli/ /opt/nvm/current/lib/node_modules/@sovovs/bycli/
-COPY --from=browser-runtime /opt/byclaw/novnc/ /opt/byclaw/novnc/
-COPY --chmod=0644 middleware/byclaw-harness/browser/novnc-index.html /opt/byclaw/novnc/index.html
-COPY --chmod=0644 middleware/builtin/runtime-tools/browser-viewer/connection-bridge.mjs /opt/byclaw/novnc/connection-bridge.js
+COPY --from=browser-runtime /browser-meta/playwright-version /usr/local/share/byclaw-tool-sandbox/playwright-version
+COPY --chmod=0644 middleware/byclaw-harness/browser/novnc-index.html /usr/local/share/byclaw-browser/novnc-index.html
+COPY --chmod=0644 middleware/builtin/runtime-tools/browser-viewer/connection-bridge.mjs /usr/local/share/byclaw-browser/connection-bridge.js
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-bycli-managed.py /usr/local/bin/byclaw-bycli-managed
 COPY --chmod=0755 middleware/byclaw-harness/scripts/byclaw-browser-supervisor.py /usr/local/bin/byclaw-browser-supervisor
 COPY --chmod=0755 middleware/byclaw-harness/scripts/tool-slim-entrypoint.sh /usr/local/bin/byclaw-tool-slim-entrypoint
@@ -62,14 +66,29 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     BYCLAW_BROWSER_VNC_WEB_PORT=8081 BYCLAW_BROWSER_VNC_WEB_LISTEN_ADDRESS=0.0.0.0
 COPY middleware/byclaw-harness/tool-sandbox/configure-cn-sources.sh /tmp/configure-cn-sources.sh
 RUN set -eux; \
-    ln -s ../lib/node_modules/playwright/cli.js /opt/nvm/current/bin/playwright; \
-    ln -s /usr/local/bin/byclaw-bycli-managed /opt/nvm/current/bin/bycli; \
     bash /tmp/configure-cn-sources.sh; \
-    apt-get update; \
+    apt-get -o APT::Update::Error-Mode=any update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        xvfb xauth x11vnc fontconfig fonts-liberation fonts-noto-cjk; \
+        xvfb xauth x11vnc fontconfig fonts-liberation fonts-noto-cjk novnc; \
     python3 -m pip install --no-cache-dir websockify==0.13.0; \
-    playwright install-deps chromium; \
+    # The Playwright release A's browser runtime pins, and its Chromium from the mirror.
+    playwright_version="$(cat /usr/local/share/byclaw-tool-sandbox/playwright-version)"; \
+    npm install --global --no-audit --no-fund --update-notifier=false "playwright@${playwright_version}"; \
+    test "$(playwright --version)" = "Version ${playwright_version}"; \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD= PLAYWRIGHT_DOWNLOAD_HOST="${PLAYWRIGHT_DOWNLOAD_HOST}" \
+        playwright install --with-deps chromium; \
+    # byCLI and its browser extension; the managed wrapper replaces its command.
+    npm install --global --ignore-scripts --no-audit --no-fund --update-notifier=false "@sovovs/bycli@${BYCLI_VERSION}"; \
+    test "$(bycli --version)" = "${BYCLI_VERSION}"; \
+    node -e 'const m = require("/opt/nvm/current/lib/node_modules/@sovovs/bycli/extension/manifest.json"); if (m.version !== process.argv[1] || !m.permissions?.includes("system.display")) process.exit(1)' "${BYCLI_EXTENSION_VERSION}"; \
+    ln -sf /usr/local/bin/byclaw-bycli-managed /opt/nvm/current/bin/bycli; \
+    npm cache clean --force; \
+    # The shared desktop page: Debian's noVNC plus ByClaw's index and connection bridge.
+    mkdir -p /opt/byclaw/novnc; \
+    cp -a /usr/share/novnc/. /opt/byclaw/novnc/; \
+    cp /usr/local/share/byclaw-browser/novnc-index.html /opt/byclaw/novnc/index.html; \
+    cp /usr/local/share/byclaw-browser/connection-bridge.js /opt/byclaw/novnc/connection-bridge.js; \
+    test -f /opt/byclaw/novnc/core/rfb.js; \
     browser_path="$(node -e 'process.stdout.write(require("/opt/nvm/current/lib/node_modules/playwright").chromium.executablePath())')"; \
     test -x "${browser_path}"; \
     ln -s "${browser_path}" /usr/local/bin/byclaw-playwright-chromium; \
@@ -81,7 +100,11 @@ RUN set -eux; \
     env | grep -vE '^(HOSTNAME|HOME|PWD|OLDPWD|SHLVL|_)=' >/etc/byclaw-tool-env.session-env; \
     chmod 0644 /etc/byclaw-tool-env.session-env
 COPY middleware/byclaw-harness/tool-sandbox/browser.capabilities.json /etc/byclaw-tool-sandbox/capabilities.json
+# byCLI's browser runs as a service of the tool entrypoint, beside SSH rather than above it.
+COPY --chmod=0644 middleware/byclaw-harness/tool-sandbox/services.d/browser.json /etc/byclaw-tool-sandbox/services.d/browser.json
 RUN test -x /usr/local/bin/byclaw-tool-env-sshd \
+    && test -x /usr/local/bin/byclaw-tool-base-entrypoint \
+    && test -x /usr/local/bin/byclaw-tool-workload \
     && /usr/local/bin/byclaw-playwright-chromium --version \
     && node -e 'const m=require("/etc/byclaw-tool-sandbox/capabilities.json"); if(m.purpose!=="browser") process.exit(1)'
 LABEL io.byclaw.tool-sandbox.contract="byclaw.tool-sandbox/v1" \
