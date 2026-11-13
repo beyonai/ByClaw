@@ -8,8 +8,8 @@ const consumer = process.argv[2]
 assert.ok(consumer, 'usage: verify-by-framework-runtime.mjs <integration-package-json>')
 const require = createRequire(resolve(consumer))
 const manifest = require('@byclaw/by-framework/package.json')
-assert.equal(manifest.version, '1.7.0-byclaw.1', 'consumer resolved the wrong framework version')
-assert.equal(manifest.byclaw?.dispatch, 'unbounded', 'consumer resolved an unpatched framework')
+assert.equal(manifest.version, '1.9.0', 'consumer resolved the wrong framework version')
+// 1.9.0 dispatches without a task concurrency cap; the probe below proves the resolved build does.
 const { WorkerRunner } = require('@byclaw/by-framework')
 for (const maxConcurrency of [undefined, 1, 8, 50]) {
   const runner = new WorkerRunner({ workerId: 'build-probe', getAgentTypes: () => ['probe'],

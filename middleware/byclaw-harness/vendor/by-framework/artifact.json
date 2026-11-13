@@ -1,8 +1,8 @@
 {
   "name": "@byclaw/by-framework",
-  "version": "1.7.0-byclaw.1",
-  "filename": "byclaw-by-framework-1.7.0-byclaw.1.tgz",
-  "sha256": "a4fa3df500fbc9084aca09a179830a0946f71ccdaab3e91e995f553fa6bb530e",
-  "sourceCommit": "e840492139e02439d31859023bde682387d2727d",
-  "upstreamCommit": "cdaabf0ab5e5838b881dcef92f182f65d91049e9"
+  "version": "1.9.0",
+  "filename": "byclaw-by-framework-1.9.0.tgz",
+  "sha256": "8da7870b9780d6eb79f9f5e2e764bd7f37dc7242c167090a7118082b9b7b9251",
+  "integrity": "sha512-xU60aRMSrOkuD23kie2kcZjKHIWRJXKxDpCW/k50dE8JhatYuvXEytEgktpAqHG8ydfYZeFv3vDZv4rj9ZmM2A==",
+  "sourceTag": "v1.9.0"
 }
