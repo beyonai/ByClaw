@@ -21,16 +21,17 @@ export function isCleanupRequest(method: string): boolean {
 }
 
 /**
- * Probes of a directory this host created on B, answered here whether or not B is
- * connected: it is a directory (B's volume outlives B, so it stays one), and nothing
- * more is asked of it. A turn's working-directory checks and its session-directory
- * creation probe exactly these, a round trip to B each otherwise.
+ * Probes of a directory this host created on B or has queued for creation there,
+ * answered here whether or not B is connected: it is a directory (B's volume outlives
+ * B, so it stays one; a queued one is created before anything else reaches B), and
+ * nothing more is asked of it. A turn's working-directory checks probe exactly these,
+ * a round trip to B each otherwise.
  */
-export function answerCreatedDirectory(method: string, params: unknown, createdDirectories: readonly string[]): unknown {
-  if (createdDirectories.length === 0 || params === null || typeof params !== 'object') return undefined
+export function answerKnownDirectory(method: string, params: unknown, knownDirectories: readonly string[]): unknown {
+  if (knownDirectories.length === 0 || params === null || typeof params !== 'object') return undefined
   const input = params as { path?: unknown; cwd?: unknown; target?: { targetKey?: unknown } }
   const trim = (path: string): string => { const clean = normalize(path); return clean.length > 1 ? clean.replace(/\/+$/u, '') : clean }
-  const created = new Set(createdDirectories.map(trim))
+  const created = new Set(knownDirectories.map(trim))
   const path = typeof input.path === 'string' && isAbsolute(input.path) ? trim(input.path)
     : typeof input.path === 'string' && typeof input.cwd === 'string' && isAbsolute(input.cwd) ? trim(join(input.cwd, input.path)) : undefined
   const key = typeof input.target?.targetKey === 'string' ? trim(input.target.targetKey) : undefined

@@ -51,27 +51,53 @@ describe('tool environment idle lifecycle', () => {
     vi.useRealTimers()
   })
 
-  it('creates a directory once and answers its probes here even while B is connected', async () => {
-    const mkdir = vi.fn().mockResolvedValue(undefined)
+  it('creates a directory when B is next used, once, and answers its probes here meanwhile', async () => {
+    const order: string[] = []
+    const mkdir = vi.fn(async () => { order.push('mkdir') })
     await ssh.request('spawn', {}, z.string())
     expect(ssh.connected).toBe(true)
-    await ssh.whenConnected('mkdir:/by/.sessions/7', mkdir)
-    await ssh.whenConnected('mkdir:/by/.sessions/7', mkdir)
-    expect(mkdir).toHaveBeenCalledTimes(1)
     inner.request.mockClear()
+    inner.request.mockImplementation(async (method: string) => { order.push(method); return 'done' })
+    await ssh.whenConnected('mkdir:/by/.sessions/7', mkdir)
+    await ssh.whenConnected('mkdir:/by/.sessions/7', mkdir)
+    // A model-only turn: the working-directory checks are answered here and nothing reaches B.
     const target = await ssh.request('fs.resolve', { path: '/by/.sessions/7' }, z.object({ targetKey: z.string(), displayPath: z.string() }))
     const info = await ssh.request('fs.stat', { target }, z.object({ type: z.string() }).passthrough())
     expect(info.type).toBe('directory')
+    expect(mkdir).not.toHaveBeenCalled()
     expect(inner.request).not.toHaveBeenCalled()
-    // Anything else under it is still B's to answer.
+    // The next operation that reaches B creates the directory first, once.
+    await ssh.request('process.start', { cwd: '/by/.sessions/7' }, z.string())
+    expect(order).toEqual(['mkdir', 'process.start'])
+    await ssh.whenConnected('mkdir:/by/.sessions/7', mkdir)
     await ssh.request('fs.stat', { target: { targetKey: '/by/.sessions/7/a.md', displayPath: 'a.md' } }, z.string())
-    expect(inner.request).toHaveBeenCalledTimes(1)
+    expect(mkdir).toHaveBeenCalledTimes(1)
+    expect(order).toEqual(['mkdir', 'process.start', 'fs.stat'])
+  })
+
+  it('lets deferred work reach B itself while it runs, and shares one run between concurrent operations', async () => {
+    await ssh.request('spawn', {}, z.string())
+    inner.request.mockClear()
+    let release: () => void = () => {}
+    const blocked = new Promise<void>(resolve => { release = resolve })
+    const mkdir = vi.fn(async () => { await ssh.request('process.prepare', { argv: ['/bin/mkdir', '-p', '--', '/by/x'] }, z.string()); await blocked })
+    await ssh.whenConnected('mkdir:/by/x', mkdir)
+    const first = ssh.request('process.start', {}, z.string())
+    const second = ssh.request('process.start', {}, z.string())
+    await vi.advanceTimersByTimeAsync(10)
+    // Only the deferred mkdir has reached B (after the once-per-connection workload-wrapper probe).
+    expect(inner.request.mock.calls.map(call => call[0])).toEqual(['fs.stat', 'process.prepare'])
+    release()
+    await Promise.all([first, second])
+    expect(mkdir).toHaveBeenCalledTimes(1)
+    expect(inner.request.mock.calls.map(call => call[0])).toEqual(['fs.stat', 'process.prepare', 'process.start', 'process.start'])
   })
 
   it('does not queue a directory this host already created while B is down', async () => {
     const mkdir = vi.fn().mockResolvedValue(undefined)
     await ssh.request('spawn', {}, z.string())
     await ssh.whenConnected('mkdir:/by/.sessions/8', mkdir)
+    await ssh.request('process.start', {}, z.string())
     await (ssh as unknown as { drop(): Promise<void> }).drop()
     expect(ssh.connected).toBe(false)
     const deferred = ssh as unknown as { deferred: { size: number } }

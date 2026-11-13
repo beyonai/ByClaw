@@ -7,7 +7,7 @@ import { ToolEnvIdentity } from '../src/identity.ts'
 import { ToolEnvConnection, WORKLOAD_WRAPPER, asWorkload, launchEnvironment, scrubEnvironment } from '../src/connection.ts'
 import { DeferredToolEnvironmentWork } from '../src/deferred-work.ts'
 import { resolveLocalExecutable } from '../src/local-executable.ts'
-import { answerCreatedDirectory, answerWhileDown, isCleanupRequest } from '../src/pending-directories.ts'
+import { answerKnownDirectory, answerWhileDown, isCleanupRequest } from '../src/pending-directories.ts'
 
 
 describe('connector bootstrap identity', () => {
@@ -276,18 +276,18 @@ describe('resolveLocalExecutable', () => {
   })
 })
 
-describe('answerCreatedDirectory', () => {
+describe('answerKnownDirectory', () => {
   const created = ['/by/.sessions/42/']
   it('answers resolve and stat of a directory this host created, and nothing else', () => {
-    expect(answerCreatedDirectory('fs.resolve', { path: '/by/.sessions/42' }, created)).toEqual({ targetKey: '/by/.sessions/42', displayPath: '/by/.sessions/42' })
-    expect(answerCreatedDirectory('fs.resolve', { path: '42', cwd: '/by/.sessions' }, created)).toEqual({ targetKey: '/by/.sessions/42', displayPath: '/by/.sessions/42' })
-    expect(answerCreatedDirectory('fs.stat', { target: { targetKey: '/by/.sessions/42', displayPath: 'x' } }, created)).toEqual({ version: 'created', type: 'directory' })
-    expect(answerCreatedDirectory('fs.lstat', { path: '/by/.sessions/42/' }, created)).toEqual({ version: 'created', type: 'directory' })
-    expect(answerCreatedDirectory('fs.stat', { target: { targetKey: '/by/.sessions/42/notes.md', displayPath: 'x' } }, created)).toBeUndefined()
-    expect(answerCreatedDirectory('fs.resolve', { path: '/by/.sessions' }, created)).toBeUndefined()
-    expect(answerCreatedDirectory('fs.list', { target: { targetKey: '/by/.sessions/42', displayPath: 'x' } }, created)).toBeUndefined()
-    expect(answerCreatedDirectory('fs.resolve', { path: 'relative' }, created)).toBeUndefined()
-    expect(answerCreatedDirectory('fs.stat', { target: { targetKey: '/by/.sessions/42', displayPath: 'x' } }, [])).toBeUndefined()
+    expect(answerKnownDirectory('fs.resolve', { path: '/by/.sessions/42' }, created)).toEqual({ targetKey: '/by/.sessions/42', displayPath: '/by/.sessions/42' })
+    expect(answerKnownDirectory('fs.resolve', { path: '42', cwd: '/by/.sessions' }, created)).toEqual({ targetKey: '/by/.sessions/42', displayPath: '/by/.sessions/42' })
+    expect(answerKnownDirectory('fs.stat', { target: { targetKey: '/by/.sessions/42', displayPath: 'x' } }, created)).toEqual({ version: 'created', type: 'directory' })
+    expect(answerKnownDirectory('fs.lstat', { path: '/by/.sessions/42/' }, created)).toEqual({ version: 'created', type: 'directory' })
+    expect(answerKnownDirectory('fs.stat', { target: { targetKey: '/by/.sessions/42/notes.md', displayPath: 'x' } }, created)).toBeUndefined()
+    expect(answerKnownDirectory('fs.resolve', { path: '/by/.sessions' }, created)).toBeUndefined()
+    expect(answerKnownDirectory('fs.list', { target: { targetKey: '/by/.sessions/42', displayPath: 'x' } }, created)).toBeUndefined()
+    expect(answerKnownDirectory('fs.resolve', { path: 'relative' }, created)).toBeUndefined()
+    expect(answerKnownDirectory('fs.stat', { target: { targetKey: '/by/.sessions/42', displayPath: 'x' } }, [])).toBeUndefined()
   })
 })
 

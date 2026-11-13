@@ -21,7 +21,7 @@ import type { ToolEnvIdentity } from './identity.ts'
 import { describeResidual } from './busy.ts'
 import { DeferredToolEnvironmentWork } from './deferred-work.ts'
 import { resolveLocalExecutable } from './local-executable.ts'
-import { answerCreatedDirectory, answerWhileDown, isCleanupRequest } from './pending-directories.ts'
+import { answerKnownDirectory, answerWhileDown, isCleanupRequest } from './pending-directories.ts'
 import { markEnvironmentFailure, reportLeaseWarning, toolTransportError, trackLeaseRelease, withLeaseFailure } from './transport-failure.ts'
 
 type Hello = Awaited<SshConnection['ready']>
@@ -81,6 +81,9 @@ export class ToolEnvConnection extends Service {
   private readonly deploymentScope = new AsyncLocalStorage<Readonly<Record<string, string>>>()
   private deploymentValues: Readonly<Record<string, string>> | undefined
   private readonly deferred = new DeferredToolEnvironmentWork(message => { this.ctx.logger('byclaw-tool-env').warn(message) })
+  /** Set while deferred work runs: its own requests go straight to B instead of waiting for themselves. */
+  private readonly deferredScope = new AsyncLocalStorage<true>()
+  private flushing: Promise<void> | undefined
   /** Whether each B (one per inner connection) has the workload wrapper; asked once per connection. */
   private readonly workloadWrappers = new WeakMap<object, Promise<boolean>>()
 
@@ -178,11 +181,13 @@ export class ToolEnvConnection extends Service {
    * Run `operation` on B now if it is connected, otherwise once it connects, before
    * the first operation of that connection is served. Deferred work with the same
    * key is replaced, so repeated writes to one path cost one write; a `mkdir:` key
-   * this host already ran is not run again (the directory outlives B).
+   * this host already ran is not run again (the directory outlives B). Directory
+   * creation waits for the next operation that reaches B even while B is connected,
+   * so a turn that never uses B (a model-only answer) creates nothing there.
    */
   async whenConnected(key: string, operation: () => Promise<void>): Promise<void> {
     if (this.deferred.isDone(key)) return
-    if (this.connected) {
+    if (this.connected && !key.startsWith('mkdir:')) {
       await operation()
       this.deferred.noteDone(key)
       return
@@ -218,8 +223,8 @@ export class ToolEnvConnection extends Service {
         if (local !== undefined) return result.parse(local)
       }
     }
-    // Directories this host created: connected or not, B would only confirm what is known here.
-    const created = answerCreatedDirectory(method, params, this.deferred.createdDirectories())
+    // Directories this host created or queued: connected or not, B would only confirm what is known here.
+    const created = answerKnownDirectory(method, params, [...this.deferred.createdDirectories(), ...this.deferred.pendingDirectories()])
     if (created !== undefined) { return result.parse(created) }
     // What this host can say without B (queued directories, DSH's own homes, path resolution);
     // everything else, a turn's instruction-file and Skill probes included, goes to B and starts it.
@@ -332,6 +337,8 @@ export class ToolEnvConnection extends Service {
       if (acquireUse) finish = await this.backend.beginUse?.()
       const epoch = this.connectionEpoch
       const lease = await this.lease()
+      // Work queued while B was already connected (a first directory) lands before this operation.
+      if (lease === this.live) await this.flushDeferred()
       signal?.throwIfAborted()
       if (epoch !== this.connectionEpoch) throw new Error('TOOL_LEASE_INVALIDATED')
       try { return await operation(lease) } catch (error) {
@@ -352,6 +359,15 @@ export class ToolEnvConnection extends Service {
         this.ctx.logger('byclaw-tool-env').warn(reportLeaseWarning(error))
       }
     }
+  }
+
+  /** Run queued work once, shared by every operation that arrives meanwhile; never from inside it. */
+  private flushDeferred(): Promise<void> {
+    if (this.deferredScope.getStore() === true) return Promise.resolve()
+    // A run in progress has already taken its work off the queue: wait for it even when the queue looks empty.
+    if (this.flushing === undefined && this.deferred.size === 0) return Promise.resolve()
+    this.flushing ??= this.deferredScope.run(true, () => this.deferred.run()).finally(() => { this.flushing = undefined })
+    return this.flushing
   }
 
   private lease(): Promise<Lease> {
@@ -392,7 +408,7 @@ export class ToolEnvConnection extends Service {
     // Everything a context queued for B while B was down (session directories, projections) lands before any tool runs.
     if (this.deferred.size > 0) {
       this.ctx.logger('byclaw-tool-env').info(`running ${String(this.deferred.size)} deferred operation(s) on the tool environment`)
-      await this.deferred.run()
+      await this.deferredScope.run(true, () => this.deferred.run())
     }
     return lease
   }

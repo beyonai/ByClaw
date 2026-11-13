@@ -74,9 +74,11 @@ lookups resolve on this host (same image build). What tools do (stat, list,
 read, write of real paths; processes) still goes to B and starts it. The
 trade-off: until a session's first tool call, its prompt sees no
 session-local Skills and no instruction files from the user tree.
-Directories this host created on B (session directories) are created once per
-context and, connected or not, their resolve/stat probes are answered here: B's
-volume outlives B, so they stay directories. A directory removed on B behind the
+Directories this host creates on B (session and project working directories) are
+queued even while B is connected and created right before the next operation that
+reaches B, once per context; connected or not, resolve/stat probes of a queued or
+created directory are answered here: B's volume outlives B, so they stay
+directories. A model-only turn therefore sends nothing to B. A directory removed on B behind the
 host's back is therefore not recreated until the context restarts.
 After a failed launch the `byclaw-be` backend waits before trying again
 (1 s, doubling to 30 s) and reports the cause instead of calling BE on every
