@@ -670,8 +670,6 @@ def run(manifest, prompt, root):
     model_values = os.environ.pop('BYCLAW_CODEX_CONNECTION', '')
     for key in ('CODEX_AUTH', 'CODEX_MODEL', 'CODEX_BASE_URL', 'BYCLAW_CODEX_API_KEY'):
         os.environ.pop(key, None)
-    default_home = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex')))
-    default_config = default_home / 'config.toml'
     home, cwd = prepare(manifest, root)
     with identity_lock(home / '.execution.lock'):
         try:
@@ -680,6 +678,8 @@ def run(manifest, prompt, root):
                 raise ValueError()
         except (ValueError, TypeError, AttributeError):
             raise ValueError('CODEX_MODEL_CONNECTION_UNAVAILABLE') from None
+        default_home = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex')))
+        default_config = default_home / 'config.toml'
         if manifest.get('prepareAgentSkills'):
             prepare_agent_skills(manifest, root)
         setup_config(manifest, home, cwd, default_config)
