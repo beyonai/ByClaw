@@ -183,6 +183,29 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn('result.txt', entries)
         self.assertNotIn('.byclaw/group-chat-disposition.json', entries)
 
+    def test_runtime_environments_are_excluded_without_reserving_directory_names(self):
+        python_env = self.by / 'logo-design-venv'
+        (python_env / 'bin').mkdir(parents=True)
+        (python_env / 'pyvenv.cfg').write_text('home = /usr/bin\n', encoding='utf-8')
+        (python_env / 'bin' / 'activate').write_text('# shell fixture\n', encoding='utf-8')
+        (python_env / 'bin' / 'python').write_text('binary fixture\n', encoding='utf-8')
+
+        windows_env = self.by / 'preview-tools'
+        (windows_env / 'Scripts').mkdir(parents=True)
+        (windows_env / 'Scripts' / 'activate').write_text('@echo off\n', encoding='utf-8')
+        (windows_env / 'Scripts' / 'python.exe').write_bytes(b'PE fixture')
+
+        business = self.by / 'src' / 'env'
+        business.mkdir(parents=True)
+        (business / 'config.txt').write_text('business file\n', encoding='utf-8')
+
+        entries, complete = runner.scan(self.by)
+        self.assertTrue(complete)
+        self.assertNotIn('logo-design-venv/pyvenv.cfg', entries)
+        self.assertNotIn('logo-design-venv/bin/activate', entries)
+        self.assertNotIn('preview-tools/Scripts/python.exe', entries)
+        self.assertIn('src/env/config.txt', entries)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='coding-workspace-test-')
         self.addCleanup(self.temporary.cleanup)

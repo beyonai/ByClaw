@@ -40,6 +40,7 @@ test('C01-C08 uses allowlisted context, original project/session roots, persona 
   assert.equal(prepared.persona, template.persona)
   assert.deepEqual(prepared.skills, skills)
   for (const value of ['input.txt', 'group-history/g1.md', 'Previous question', '/documents/report.md', target.text, 'user1']) assert.ok(prepared.prompt.includes(value), value)
+  assert.ok(prepared.prompt.includes('虚拟环境、依赖缓存、构建缓存和运行日志不属于项目交付物'))
   assert.ok(!JSON.stringify(prepared).includes('DO_NOT_HAND_OFF'))
   assert.ok(!prepared.persona.includes('shared-skill'), 'no hand-written Skill index in employee rules')
   const manifest = codingRunManifest(prepared, 'user1-s1-1001-codex', 'm1')

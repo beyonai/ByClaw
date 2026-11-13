@@ -551,12 +551,26 @@ MAX_TEXT = 256 * 1024
 MAX_TOTAL_TEXT = 16 * 1024 * 1024
 
 
+def is_runtime_environment(path):
+    """Recognize standard Python environments without reserving a directory name."""
+    if (path / 'pyvenv.cfg').is_file():
+        return True
+    if (path / 'bin' / 'activate').is_file() and any((path / 'bin' / name).is_file() for name in ('python', 'python3')):
+        return True
+    if (path / 'Scripts' / 'activate').is_file() and any((path / 'Scripts' / name).is_file() for name in ('python.exe', 'python')):
+        return True
+    return False
+
+
 def scan(root):
     entries = {}
     total_text = 0
     complete = True
     for directory, children, files in os.walk(root, followlinks=False):
-        children[:] = sorted(name for name in children if name not in EXCLUDED and not (Path(directory) / name).is_symlink())
+        children[:] = sorted(name for name in children
+                              if name not in EXCLUDED
+                              and not (Path(directory) / name).is_symlink()
+                              and not is_runtime_environment(Path(directory) / name))
         for name in sorted(files):
             path = Path(directory) / name
             if path.is_symlink() or name.startswith('.coding-'):
