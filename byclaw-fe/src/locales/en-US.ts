@@ -469,6 +469,7 @@ export default {
   'common.noPermissionOperation': 'Your current role does not have permission to perform this operation',
   'resource.import.finish': 'Finish',
   'common.back': 'Back',
+  'resource.import.summary': 'Added {createdCount} and updated {updatedCount} items in this import.',
   'resource.import.failedSummary': '{failedCount} items failed. Resolve the failed items and try again.',
   'resource.import.createdRange': 'Created items',
   'resource.import.updatedRange': 'Updated items',
