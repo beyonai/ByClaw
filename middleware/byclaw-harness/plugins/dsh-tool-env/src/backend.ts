@@ -33,6 +33,8 @@ export interface ToolEnvBackend {
   startSession?(sessionId: string): void
   finishSession?(sessionId: string, destroy?: boolean): Promise<void>
   acquireSession?(sessionId: string): Promise<void>
+  /** Keep (or stop keeping) B for processes left on it after every session ended. */
+  holdResidual?(hold: boolean): Promise<void>
   onInvalidated?(listener: () => void): () => void
 
   /** Make B reachable (create or resume as needed) and return its sshd endpoint. */

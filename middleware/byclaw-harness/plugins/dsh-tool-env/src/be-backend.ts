@@ -278,6 +278,7 @@ export class ByClawBeBackend implements ToolEnvBackend {
     await this.ensure()
   }
   async finishSession(sessionId: string, destroy = false): Promise<void> { await this.leases?.finishSession(sessionId, destroy) }
+  async holdResidual(hold: boolean): Promise<void> { await this.leases?.holdResidual(hold) }
   async beginUse(): Promise<() => Promise<void>> {
     const finish = await this.leases?.beginUse() ?? (() => Promise.resolve())
     const id = this.leases?.latest?.sandboxId

@@ -18,6 +18,7 @@ import type { SshStreamEndpoint } from '@deepseek-ai/dsh-ssh/schemas'
 import type { z } from 'zod'
 import type { ToolEnvBackend } from './backend.ts'
 import type { ToolEnvIdentity } from './identity.ts'
+import { describeResidual } from './busy.ts'
 import { DeferredToolEnvironmentWork } from './deferred-work.ts'
 import { resolveLocalExecutable } from './local-executable.ts'
 import { answerWhileDown, isCleanupRequest } from './pending-directories.ts'
@@ -108,7 +109,35 @@ export class ToolEnvConnection extends Service {
   runInSession<T>(sessionId: string, work: () => Promise<T>): Promise<T> { return this.backend.runInSession?.(sessionId, work) ?? work() }
   startSession(sessionId: string): void { this.backend.startSession?.(sessionId) }
   async acquireSession(sessionId: string): Promise<void> { await this.backend.acquireSession?.(sessionId) }
-  async finishSession(sessionId: string, destroy = false): Promise<void> { await this.backend.finishSession?.(sessionId, destroy) }
+  async finishSession(sessionId: string, destroy = false): Promise<void> {
+    await this.backend.finishSession?.(sessionId, destroy)
+    // Platform's idle clock starts once the last session lease is back; processes the turn left
+    // on B (`cmd &`) must claim B now, not after this side's own idle period. Off the turn's path.
+    if (!destroy) void this.retainForResidual()
+  }
+
+  /**
+   * Hold one extra lease while processes left on B run, bounded by `residualMaxMs`; the idle
+   * check re-asks and returns it. Only for backends with Platform leases and an idle check.
+   */
+  private async retainForResidual(): Promise<void> {
+    const probe = this.options.busy?.residual
+    const settled = () => this.closed || this.pausing !== undefined || !this.connected
+    if (this.backend.holdResidual === undefined || probe === undefined || this.options.idleMs <= 0 || settled()) return
+    const logger = this.ctx.logger('byclaw-tool-env')
+    try {
+      const residual = await probe()
+      if (residual.length === 0 || settled()) return
+      this.residualSince ??= Date.now()
+      if (Date.now() - this.residualSince >= (this.options.busy?.residualMaxMs ?? RESIDUAL_MAX_MS)) return
+      await this.backend.holdResidual(true)
+      // A pause that started meanwhile returns every lease; do not leave this one behind it.
+      if (settled()) { await this.backend.holdResidual(false); return }
+      logger.info(`session ended with ${String(residual.length)} process(es) still on the tool environment (${describeResidual(residual)}); holding a lease for them`)
+    } catch (error) {
+      logger.warn(`holding the tool environment for remaining processes failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
 
   /** Supply the same persistent identity used by normal tool leases, without starting compute or SSH. */
   async bootstrapKeys(serviceKey: string): Promise<{ authorizedKey: string; hostPrivateKeyBase64: string }> {
@@ -434,17 +463,26 @@ export class ToolEnvConnection extends Service {
     // A failed handshake cannot probe remote processes, but an active turn still owns B.
     if (this.live === undefined) return false
     const residual = await busy.residual?.() ?? []
-    if (residual.length === 0) { this.residualSince = undefined; return false }
+    if (residual.length === 0) { this.residualSince = undefined; await this.holdResidual(false); return false }
     const now = Date.now()
     this.residualSince ??= now
     const limit = busy.residualMaxMs ?? RESIDUAL_MAX_MS
-    const summary = residual.slice(0, 3).map(process => `${process.comm}[${String(process.pid)}]`).join(', ') + (residual.length > 3 ? ', …' : '')
+    const summary = describeResidual(residual)
     if (now - this.residualSince < limit) {
       logger.info(`tool environment idle on the connection but ${String(residual.length)} process(es) still run on it (${summary}); keeping it`)
+      // Platform reclaims B on its own once no lease is held, whatever this side decides.
+      await this.holdResidual(true)
       return true
     }
     logger.warn(`tool environment kept by ${String(residual.length)} process(es) (${summary}) for ${String(Math.round((now - this.residualSince) / 60000))} min, over the limit; releasing anyway`)
+    await this.holdResidual(false)
     return false
+  }
+
+  private async holdResidual(hold: boolean): Promise<void> {
+    try { await this.backend.holdResidual?.(hold) } catch (error) {
+      this.ctx.logger('byclaw-tool-env').warn(`${hold ? 'holding' : 'returning'} the lease for remaining processes failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   private async close(): Promise<void> {
