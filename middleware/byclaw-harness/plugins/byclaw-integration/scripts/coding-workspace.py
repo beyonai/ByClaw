@@ -293,6 +293,9 @@ def prepare(manifest, root):
 def setup_config(manifest, home, cwd, default_config):
     # Refresh from the coding image, never from another employee's CODEX_HOME/auth.json.
     data = tomllib.loads(default_config.read_text(encoding='utf-8'))
+    # Per-turn platform selection owns the connection, including on resume.
+    for key in ('model', 'model_provider', 'model_providers', 'model_reasoning_effort'):
+        data.pop(key, None)
     data['approval_policy'] = 'never'
     data['sandbox_mode'] = 'danger-full-access'
     data['developer_instructions'] = manifest['persona']
@@ -488,10 +491,19 @@ def deployment_environment(environment, workspace_root=None):
 def run(manifest, prompt, root):
     # Remove before Skill preparation or any other subprocess can inherit raw material.
     deployment_values = {k: os.environ.pop(k) for k in list(os.environ) if k.startswith('BYCLAW_DEPLOY_')}
+    model_values = os.environ.pop('BYCLAW_CODEX_CONNECTION', '')
+    for key in ('CODEX_AUTH', 'CODEX_MODEL', 'CODEX_BASE_URL', 'BYCLAW_CODEX_API_KEY'):
+        os.environ.pop(key, None)
     default_home = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex')))
     default_config = default_home / 'config.toml'
     home, cwd = prepare(manifest, root)
     with identity_lock(home / '.execution.lock'):
+        try:
+            connection = json.loads(model_values)
+            if not all(isinstance(connection.get(key), str) and connection[key] for key in ('baseUrl', 'model', 'apiKey')):
+                raise ValueError()
+        except (ValueError, TypeError, AttributeError):
+            raise ValueError('CODEX_MODEL_CONNECTION_UNAVAILABLE') from None
         if manifest.get('prepareAgentSkills'):
             prepare_agent_skills(manifest, root)
         setup_config(manifest, home, cwd, default_config)
@@ -500,10 +512,13 @@ def run(manifest, prompt, root):
         args = ['codex', 'exec', '--json', '--skip-git-repo-check']
         if thread:
             args += ['resume', thread]
-        if os.environ.get('CODEX_MODEL'):
-            args += ['--model', os.environ['CODEX_MODEL']]
-        if os.environ.get('CODEX_BASE_URL'):
-            args += ['-c', 'model_providers.byclaw.base_url=' + json.dumps(os.environ['CODEX_BASE_URL'])]
+        args += ['--model', connection['model'], '-c', 'model_provider="byclaw"']
+        provider = dict(name='ByClaw', base_url=connection['baseUrl'], wire_api='responses',
+                        env_key='BYCLAW_CODEX_API_KEY', requires_openai_auth=False)
+        for key, value in provider.items():
+            args += ['-c', 'model_providers.byclaw.' + key + '=' + json.dumps(value)]
+        if connection.get('reasoningEffort'):
+            args += ['-c', 'model_reasoning_effort=' + json.dumps(connection['reasoningEffort'])]
         publication = manifest.get('publication')
         if publication:
             schema = home / 'output-schema.json'
@@ -511,7 +526,7 @@ def run(manifest, prompt, root):
             args += ['--output-schema', str(schema)]
             prompt += '\n\n最终输出遵循 JSON Schema。answer 填用户可读答复；仅当用户要求准备群任务成果时填写 publication.text 和完整 sourcePaths，否则 publication=null。' + publication['description']
             prompt += '\n填写 publication 仅是请求；宿主调用成功后才表示已准备待确认内容，不得声称已上传、发群或完成任务。'
-        environment = dict(os.environ, CODEX_HOME=str(home), BYCLAW_AGENT_ID=manifest['employeeId'], DSH_BYCLAW_AGENT_ID=manifest['employeeId'])
+        environment = dict(os.environ, BYCLAW_CODEX_API_KEY=connection['apiKey'], CODEX_HOME=str(home), BYCLAW_AGENT_ID=manifest['employeeId'], DSH_BYCLAW_AGENT_ID=manifest['employeeId'])
         roots = list(dict.fromkeys([cwd, Path(manifest['workspace']['sessionRoot'])]))
         before = {path: scan(path) for path in roots}
         environment.update(deployment_values)

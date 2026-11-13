@@ -89,7 +89,24 @@ interface AiModelRecord {
   url?: unknown
 }
 
+/** Internal per-resolution connection; never include in diagnostics, manifests or persisted state. */
+export interface ByClawModelConnection {
+  baseUrl: string
+  model: string
+  protocol: ByClawModelProtocol
+  apiKey: string
+  headers?: Readonly<Record<string, string | null>>
+  reasoningEffort?: string
+  thinkingLevelMap?: ThinkingLevelMap
+}
+
+/** Match ordinary calls: a nonempty trusted turn credential overrides the model token. */
+export function byClawEffectiveApiKey(supplied: unknown, modelToken?: string): string | undefined {
+  return typeof supplied === 'string' && supplied.trim() !== '' ? supplied : modelToken
+}
+
 interface MaterializedModel {
+  connection: ByClawModelConnection
   selection: ByClawModelSelection
   profile: ResolvedPiAiProviderProfile
   /** Immutable route used when native adaptive explicitly overrides a canonical default. */
@@ -420,7 +437,7 @@ class ByClawPiAiAdapter extends PiAiAdapter {
     dispatch: () => AsyncIterable<StreamChunk>,
   ): AsyncIterable<StreamChunk> {
     const supplied = options.sessionId === undefined ? undefined : this.resolveRequestApiKey?.(String(options.sessionId))
-    const apiKey = supplied === undefined || supplied.trim() === '' ? undefined : supplied
+    const apiKey = byClawEffectiveApiKey(supplied)
     // Freeze auth for the whole lazy stream, including prepared calls and provider retries.
     // A shared profile or another conversation must never replace this turn's membership key.
     // Enter an empty scope too, so a nested ordinary call cannot inherit its caller's credential.
@@ -903,11 +920,18 @@ function materialize(
         }
       })()
     : undefined
+  const token = decryptByClawAuthToken(encryptedToken)
   return {
     selection,
     profile,
     ...adaptiveOverride === undefined ? {} : { adaptiveOverride },
-    token: decryptByClawAuthToken(encryptedToken),
+    connection: {
+      baseUrl, model: modelCode, protocol, apiKey: token,
+      ...headers === undefined ? {} : { headers: { ...headers } },
+      reasoningEffort: reasoning.defaultLevel ?? (reasoning.reasoning && record(instanceParam['reasoningConfig'])?.['defaultLevel'] === 'adaptive' ? 'adaptive' : undefined),
+      thinkingLevelMap: reasoning.thinkingLevelMap,
+    },
+    token,
     reasoning,
   }
 }
@@ -944,6 +968,7 @@ function defaultRecord(value: unknown): { raw: AiModelRecord; modelId: string } 
 export class ByClawDynamicModelRuntime {
   private profiles: ReadonlyMap<string, ResolvedPiAiProviderProfile> = new Map()
   private readonly tokens = new WeakMap<ResolvedPiAiProviderProfile, string>()
+  private readonly connections = new WeakMap<ModelSelection, ByClawModelConnection>()
   private readonly reasonings = new Map<string, ResolvedByClawReasoning>()
   private readonly lastGood = new Map<string, ByClawModelSelection>()
   private readonly routeModelIds = new Map<string, string>()
@@ -972,7 +997,7 @@ export class ByClawDynamicModelRuntime {
     }
     this.adapter = new ByClawPiAiAdapter({
       profiles: () => this.profiles,
-      resolveApiKey: async (_provider, profile) => REQUEST_API_KEY.getStore() ?? this.tokens.get(profile),
+      resolveApiKey: async (_provider, profile) => byClawEffectiveApiKey(REQUEST_API_KEY.getStore(), this.tokens.get(profile)),
       auth: {
         credentials: new InMemoryCredentialStore(),
         authContext: defaultProviderAuthContext(),
@@ -1017,17 +1042,29 @@ export class ByClawDynamicModelRuntime {
     const previous = this.lastGood.get(bindingId)
     if (previous !== undefined) {
       this.ctx.logger.warn(`byclaw-dsh: Redis AI model resolution failed for ${bindingId}; retaining its last-good route`)
-      return this.withThinking(
+      const selection = this.withThinking(
         { ...previous, resolution: 'last-good' },
         this.reasonings.get(previous.provider),
         requestedThinkingLevel,
       )
+      const connection = this.connections.get(previous)
+      if (connection !== undefined) this.connections.set(selection, connection)
+      return selection
     }
     if (this.fallback !== undefined) {
       this.ctx.logger.warn(`byclaw-dsh: Redis AI model resolution failed for ${bindingId}; using the configured DSH fallback`)
       return { ...this.fallback }
     }
     throw new Error(`byclaw-dsh could not resolve an AI model for ${bindingId}, and no fallback is configured`)
+  }
+
+  /** Read the exact immutable resolution, without another Redis read or mutable-route lookup. */
+  connectionFor(selection: ModelSelection, requestApiKey?: unknown, requestedThinkingLevel?: string): ByClawModelConnection | undefined {
+    const connection = this.connections.get(selection)
+    if (connection === undefined) return undefined
+    return { ...connection, apiKey: byClawEffectiveApiKey(requestApiKey, connection.apiKey)!,
+      reasoningEffort: requestedThinkingLevel === 'adaptive' || requestedThinkingLevel === 'off'
+        ? requestedThinkingLevel : selection.reasoningEffort ?? connection.reasoningEffort }
   }
 
   /** Register the classifier's environment connection independently of Redis and conversation bindings.
@@ -1043,6 +1080,7 @@ export class ByClawDynamicModelRuntime {
     if (model === undefined) throw new Error('Group-chat disposition model connection is incomplete')
     // Environment keys are plaintext; Redis token decryption does not apply to this connection.
     model.token = connection.apiKey
+    model.connection.apiKey = connection.apiKey
     model.selection = { provider: route, model: connection.model, protocol: 'openai-completions', resolution: 'local' }
     return this.publish('group-chat-disposition:environment', model)
   }
@@ -1148,6 +1186,10 @@ export class ByClawDynamicModelRuntime {
       this.registration = this.ctx.llm.registerAdapter(routes, this.adapter as unknown as LlmAdapter)
     }
     else this.registration.replace(routes)
+    this.connections.set(selection, Object.freeze({ ...materialized.connection,
+      ...(materialized.connection.headers === undefined ? {} : { headers: Object.freeze({ ...materialized.connection.headers }) }),
+      ...(materialized.connection.thinkingLevelMap === undefined ? {} : { thinkingLevelMap: Object.freeze({ ...materialized.connection.thinkingLevelMap }) }),
+    }))
     this.lastGood.set(bindingId, selection)
     return selection
   }

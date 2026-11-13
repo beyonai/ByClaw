@@ -228,10 +228,10 @@ export class ToolEnv extends ToolEnvConnection {
       try { await runtime.ssh.acquireSession(allocationSessionId) }
       catch (error) { await runtime.ssh.releaseOwned(false).catch(() => {}); await fiber.dispose(); throw error }
       this.catalogRuntimes.add(runtime.ssh)
-      const execute = async (argv: readonly string[], cwd = workspace, signal?: AbortSignal, sessionId = allocationSessionId, onStdout?: (chunk: string) => void): Promise<SandboxResult> => runtime.ssh.runInSession(sessionId, async () => {
+      const execute = async (argv: readonly string[], cwd = workspace, signal?: AbortSignal, sessionId = allocationSessionId, onStdout?: (chunk: string) => void, environment?: Readonly<Record<string, string>>): Promise<SandboxResult> => runtime.ssh.runInSession(sessionId, async () => {
         const root = posix.resolve(workspace), target = posix.resolve(cwd)
         if (target !== root && !target.startsWith(`${root}/`)) throw new Error('WORKSPACE_FORBIDDEN')
-        const process = runtime.subprocess.spawn({ argv, cwd: target, stdio: { stdin: 'ignore', stdout: { maxBytes: 1024 * 1024 }, stderr: { maxBytes: 1024 * 1024 } }, graceMs: 5000, signal })
+        const process = runtime.subprocess.spawn({ argv, cwd: target, ...(environment === undefined ? {} : { env: environment }), stdio: { stdin: 'ignore', stdout: { maxBytes: 1024 * 1024 }, stderr: { maxBytes: 1024 * 1024 } }, graceMs: 5000, signal })
         return executeSandboxProcess(process, signal, onStdout)
       })
       return {

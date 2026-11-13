@@ -30,7 +30,7 @@ coding-workspace.py〔在实际 coding 租约中执行〕
 | 最近聊天 | 携带请求中的最近 20 条 user/assistant 历史；超限提示；后续原生续聊保留 Codex 自己的历史 |
 | 附件、共享文件、云盘 | 传原路径与资源引用，本地直接读，远程由已有 Skill 按需读；不预下载全部资产 |
 | Skill | 内置项随 coding 镜像提供；每轮按 employeeId 查询关联资源与版本，工具侧下载完整目录、复用同版本缓存，不复制 Harness 本地缓存、不生成手工索引 |
-| 配置与认证 | 每轮从镜像默认配置生成专用配置；保留 CODEX_AUTH 和原模型/地址参数覆盖，不将密钥写入提示词 |
+| 配置与认证 | 复用统一模型解析、本轮模型/思考档位及可信 api_key；连接经执行环境传递，旧 CODEX_* 参数不再覆盖，不将密钥写入提示词、argv 或持久配置 |
 
 ```text
 /by/.shared/project_{id}/                有项目时的 cwd 与正式产物目录
@@ -99,3 +99,11 @@ python3 scripts/coding-native-exec-verify.py /path/to/codex
 2026-11-10 本地：路由/转换 38 项、Python 6 项、两个新增授权/Skill 测试、类型检查、构建、事件回放、延迟 Skill 与可选插件会话检查通过。真实 Windows Codex 0.167.0 的 Skill 扫描、启停、覆盖、撤销及 exec/resume 通过；续聊测试使用本地 Responses 替身，不代表真实网关可用。Windows 使用 NTFS junction 验证共享目录入口；生产 Linux 软链接待验证。
 
 完整 SkillRuntime 测试 30/34 通过；原 HEAD 在同一测试环境为 28/32，通过基线复现同样 4 个失败（未应用业务镜像的中文名称补丁及 Windows 路径差异）。原 session-cwd 检查也有 Windows 路径失败；发布客户端完整检查受到本机文件软链接权限限制。未把这些检查或 Linux、云盘、界面下载、卡片确认联调记作通过。Codex 原生读取 SKILL.md 的名称，不承诺 DSH 对历史名称所做的别名转换完全一致。
+
+## 模型连接边界
+
+普通员工继续使用原 DSH 适配器；Codex 通过同一个模型运行时取得与本轮选择绑定的连接快照，不另查 Redis 或复制默认/回退规则。可信本轮 `api_key` 优先于模型 Token，与普通员工一致。只有 Codex 执行适配负责将连接转换为 CLI 参数。
+
+当前原生边界支持 OpenAI Responses；其他协议、自定义请求头、无法转换的思考档位或不完整连接在启动 Codex 前拒绝。错误复用 `emitByClawTurnFailure`，正文显示固定安全说明和 `CODEX_MODEL_*` 错误码，执行日志记录同一原因；不输出地址、密钥或请求头。普通员工的协议能力和错误文案不变。Codex 的传输重试和采样仍由原生 CLI 管理，本次不移植普通员工逐步 Auto 路由。
+
+运行 `pnpm verify:coding-model` 检查统一选择、连接快照、凭据优先级与轮换、并发隔离、不兼容配置及原错误展示；原生 CLI 的本地 Responses 验证见 `scripts/coding-native-exec-verify.py`。实际云端模型及界面需发布后另行验收。

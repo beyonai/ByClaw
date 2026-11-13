@@ -1,10 +1,2 @@
-# Image defaults; CLI flags can override these values for one invocation.
-model = "gpt-6.1-sol"
-model_provider = "byclaw"
-
-[model_providers.byclaw]
-name = "ikuncode"
-base_url = "https://api.ikuncode.ai/v1"
-wire_api = "responses"
-env_key = "CODEX_AUTH"
-requires_openai_auth = false
+# Connections are supplied per turn by the platform model runtime.
+# Keep this file free of model endpoints and credentials.

@@ -223,7 +223,7 @@ class WorkspaceTests(unittest.TestCase):
         actual_popen = subprocess.Popen
         def launch(args, **kwargs):
             return Child(args, **kwargs) if args[0] == 'codex' else actual_popen(args, **kwargs)
-        with patch.dict(os.environ, dict(CODEX_HOME=str(self.defaults), CODEX_AUTH='test-auth-not-a-prompt', CODEX_MODEL='override-model', CODEX_BASE_URL='https://override.invalid/v1')):
+        with patch.dict(os.environ, dict(CODEX_HOME=str(self.defaults), CODEX_AUTH='test-auth-not-a-prompt', CODEX_MODEL='override-model', CODEX_BASE_URL='https://override.invalid/v1', BYCLAW_CODEX_CONNECTION=json.dumps(dict(model='platform-model', baseUrl='https://platform.invalid/v1', apiKey='platform-secret', reasoningEffort='high')))):
             with patch.object(runner.subprocess, 'Popen', launch), contextlib.redirect_stdout(output):
                 code = runner.run(manifest or self.manifest, 'current task', self.by)
         self.assertEqual(code, 0)
@@ -235,13 +235,18 @@ class WorkspaceTests(unittest.TestCase):
         original.write_text('project policy', encoding='utf-8')
         calls, _ = self.run_cli()
         data = tomllib.loads((self.home / 'config.toml').read_text(encoding='utf-8'))
-        self.assertEqual(data['model'], 'image-model')
-        self.assertEqual(data['model_providers']['byclaw']['env_key'], 'CODEX_AUTH')
+        self.assertNotIn('model', data)
+        self.assertNotIn('model_providers', data)
         self.assertNotIn('test-auth', (self.home / 'config.toml').read_text())
         self.assertEqual(data['developer_instructions'], 'RULE_CHECK')
         self.assertEqual(calls[0][1]['env']['CODEX_HOME'], str(self.home))
         self.assertEqual(calls[0][1]['env']['DSH_BYCLAW_AGENT_ID'], '1001')
-        self.assertIn('override-model', calls[0][0])
+        self.assertIn('platform-model', calls[0][0])
+        self.assertNotIn('override-model', str(calls))
+        self.assertNotIn('platform-secret', str(calls[0][0]))
+        self.assertEqual(calls[0][1]['env']['BYCLAW_CODEX_API_KEY'], 'platform-secret')
+        for key in ('CODEX_AUTH', 'CODEX_MODEL', 'CODEX_BASE_URL', 'BYCLAW_CODEX_CONNECTION'):
+            self.assertNotIn(key, calls[0][1]['env'])
         self.assertEqual(calls[0][0][-1], '-')
         self.manifest['persona'] = 'UPDATED_RULE'
         calls, events = self.run_cli()
@@ -302,15 +307,26 @@ class WorkspaceTests(unittest.TestCase):
         self.manifest['prepareAgentSkills'] = True
         observed = []
         def preparation(manifest, root):
+            self.assertNotIn('BYCLAW_CODEX_CONNECTION', os.environ)
+            self.assertNotIn('BYCLAW_CODEX_API_KEY', os.environ)
+            self.assertNotIn('CODEX_AUTH', os.environ)
             observed.append((manifest['employeeId'], root))
             manifest['skills'] = []
         with patch.object(runner, 'prepare_agent_skills', preparation):
             self.run_cli(lambda *_: self.assertEqual(len(observed), 1))
         self.assertEqual(observed, [('1001', self.by)])
-        with patch.object(runner, 'prepare_agent_skills', side_effect=ValueError('EXECUTION_SKILL_AUTH_FAILED')):
+        with patch.dict(os.environ, BYCLAW_CODEX_CONNECTION=json.dumps(dict(model='test', baseUrl='https://example.invalid/v1', apiKey='test'))), patch.object(runner, 'prepare_agent_skills', side_effect=ValueError('EXECUTION_SKILL_AUTH_FAILED')):
             with patch.object(runner.subprocess, 'Popen') as cli:
                 with self.assertRaisesRegex(ValueError, 'SKILL_AUTH_FAILED'):
                     runner.run(self.manifest, 'task', self.by)
+                cli.assert_not_called()
+
+    def test_missing_platform_connection_stops_before_skills_or_cli(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(runner, 'prepare_agent_skills') as skills:
+            with patch.object(runner.subprocess, 'Popen') as cli:
+                with self.assertRaisesRegex(ValueError, 'CODEX_MODEL_CONNECTION_UNAVAILABLE'):
+                    runner.run(self.manifest, 'task', self.by)
+                skills.assert_not_called()
                 cli.assert_not_called()
 
     def test_actual_preparer_child_receives_identity_and_existing_environment(self):

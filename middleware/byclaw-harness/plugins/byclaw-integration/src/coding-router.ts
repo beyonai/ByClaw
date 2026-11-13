@@ -1,5 +1,6 @@
 /** Deterministic employee execution routing before the DSH model gets the request. */
 import { createHash } from 'node:crypto'
+import { CodingModelConfigurationError, type CodingModelError } from './coding-model.ts'
 import type { AskAgentCommand, AgentContext } from '@byclaw/by-framework'
 import { CodexEventAdapter, type CodingEvent, type CodexEventSnapshot } from './cli-event-adapter.ts'
 import { summarizeCodingDiagnostic, type CodingDiagnosticSummary } from './coding-diagnostics.ts'
@@ -24,7 +25,7 @@ export const EXECUTION_DEFINITIONS: Readonly<Record<ExecutionType, ExecutionDefi
 
 export interface ExecutionSandbox {
   acquire(actor: string, templateKey: string, requestId: string): Promise<{ leaseId: string; workspaceRoot: string }>
-  execute(actor: string, leaseId: string, argv: readonly string[], cwd?: string, signal?: AbortSignal, onStdout?: (chunk: string) => void): Promise<{ exitCode: number | null; stdout: string; stderr: string }>
+  execute(actor: string, leaseId: string, argv: readonly string[], cwd?: string, signal?: AbortSignal, onStdout?: (chunk: string) => void, environment?: Readonly<Record<string, string>>): Promise<{ exitCode: number | null; stdout: string; stderr: string }>
   executeWithDeployment?: ExecutionSandbox['execute']
   releaseActor(actor: string): Promise<{ retainedLeases: string[]; retainedAllocations: string[] }>
 }
@@ -69,6 +70,7 @@ export interface ExecutionRouterOptions {
   prepareContext: (command: AskAgentCommand, target: ExecutionTarget, lease: {
     sandbox: ExecutionSandbox; actor: string; leaseId: string; workspaceRoot: string; signal: AbortSignal; identity: string
   }) => CodingContext | Promise<CodingContext>
+  emitConfigurationError?: (command: AskAgentCommand, context: AgentContext, error: CodingModelError) => Promise<void>
   waitForGroupChatDisposition?: (command: AskAgentCommand) => Promise<void> | undefined
   emitFileChanges?: (command: AskAgentCommand, context: AgentContext, payload: FileChangesSummaryPayload, workspace: string) => Promise<void>
   sandbox: () => ExecutionSandbox | undefined
@@ -270,7 +272,7 @@ export class ByClawExecutionRouter {
         stdoutBytes += Buffer.byteLength(chunk, 'utf8')
         if (!firstStdout && chunk) { firstStdout = true; log('first_stdout', 'success', executionStarted) }
         parser.write(chunk)
-      })
+      }, prepared.modelEnvironment)
       const stderrDiagnostic = summarizeCodingDiagnostic(processResult.stderr)
       // Keep both sources. Prefer a classified native error over unrelated stderr warnings.
       const diagnostic = parser.diagnostic && parser.diagnostic.category !== 'unknown' ? parser.diagnostic
@@ -317,6 +319,9 @@ export class ByClawExecutionRouter {
       }
       result = { answer, finalAnswer: answer, executor: definition.executor, executionType, ...(parser.threadId === undefined ? {} : { codexThreadId: parser.threadId }) }
     } catch (error) {
+      if (error instanceof CodingModelConfigurationError) {
+        await this.options.emitConfigurationError?.(command, context, error.configurationError)
+      }
       const code = failureCode()
       const knownReason = error instanceof Error ? /^(?:CODEX|EXECUTION|SANDBOX)_[A-Z_]+/u.exec(error.message)?.[0] : undefined
       failure = new Error(code, { cause: new Error(knownReason ?? code) })

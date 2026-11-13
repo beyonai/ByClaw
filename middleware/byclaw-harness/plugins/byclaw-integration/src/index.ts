@@ -66,7 +66,8 @@ import {
   BYCLAW_DSH_AGENT_TYPE,
   DEFAULT_BYCLAW_BE_BASE_URL,
 } from './protocol.ts'
-import { ByClawDshSessionRuntime } from './session-runtime.ts'
+import { ByClawDshSessionRuntime, byClawTurnModelOverride, resolveByClawTurnModelSelection, emitByClawTurnFailure } from './session-runtime.ts'
+import { codingModelEnvironment, CodingModelConfigurationError } from './coding-model.ts'
 import { ByClawInteractionStore } from './interaction-recovery.ts'
 import { installByClawSessionCwdCompatibility } from './session-cwd-compat.ts'
 import { registerAgentTemplateRuntime } from './template-runtime.ts'
@@ -1182,9 +1183,28 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       // The managed profile may have no console exporter for its isolated logger.
       // The router only supplies allowlisted metadata; write it to the host journal.
       log: entry => console.info(new Date().toISOString(), '[byclaw-execution]', `execution.lifecycle ${JSON.stringify(entry)}`),
+      emitConfigurationError: (command, context, error) => emitByClawTurnFailure({
+        emitter, sessionId: String(context.sessionId), traceId: context.traceId,
+        rootSessionId: String(command.header.sessionId), messageId: String(command.header.messageId), sourceAgentType, error,
+      }).then(() => undefined),
       prepareContext: async (command, target, lease) => {
         const template = await templateRuntime.prepareEmployee(`byclaw-employee-${target.resourceId}`, groupCoordinationFromExtra(command.extraPayload))
         lease.signal.throwIfAborted()
+        const override = byClawTurnModelOverride(command.extraPayload)
+        let connection
+        try {
+          const selection = await resolveByClawTurnModelSelection({
+            bindingId: `coding:${userCode}:${command.header.sessionId}:${target.resourceId}`,
+            configuredModelId: template.source.modelId, override,
+            resolveModel: (bindingId, modelId, thinkingLevel) => models!.resolve(bindingId, modelId, thinkingLevel),
+          })
+          connection = models!.connectionFor(selection, command.extraPayload['api_key'], override.thinkingLevel)
+        } catch (error) {
+          ctx.logger.warn(`Codex model resolution failed: ${sanitizeByClawOperationalLog(error instanceof Error ? error.message : String(error))}`)
+          throw new CodingModelConfigurationError(error instanceof Error && error.message.startsWith('BYCLAW_UNSUPPORTED_REASONING_EFFORT')
+            ? 'CODEX_MODEL_REASONING_UNSUPPORTED' : 'CODEX_MODEL_CONNECTION_UNAVAILABLE')
+        }
+        const modelEnvironment = codingModelEnvironment(connection)
         const setup: ByClawCodingSetup = { command, host: { ...sessionHost,
           byRoot: lease.workspaceRoot,
           resolveSourcePath: source => resolveByClawInboundPath(source, lease.workspaceRoot),
@@ -1198,7 +1218,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
         const initial = prepareCodingContext(command, target, template, [], setup.publication, previousCwd)
         const selected = await resolveCodingWorkspace(lease, initial.workspace, codeRepoDir, nativeCwd)
         // The current coding lease resolves builtins and current agent associations itself.
-        return prepareCodingContext(command, target, { ...template, persona: `${template.persona}\n\n${SKILL_CREATOR_POLICY}` }, [], setup.publication, previousCwd, selected)
+        return { modelEnvironment, ...prepareCodingContext(command, target, { ...template, persona: `${template.persona}\n\n${SKILL_CREATOR_POLICY}` }, [], setup.publication, previousCwd, selected) }
       },
       emitFileChanges: async (command, context, payload, workspace) => {
         const rootSessionId = String(command.header.sessionId)

@@ -1,4 +1,6 @@
 import { describeSessionToolInstanceRefs, onToolInstanceRefs, toolInstanceSourceSeq } from './instance-refs.ts'
+import { codingModelErrorMessage, type CodingModelError } from './coding-model.ts'
+
 /** Durable DSH root-session runtime used by the BYCLAW_DSH Worker. */
 
 import { ASR_NO_SPEECH_MESSAGE, ByClawVoiceRuntime, VoiceSummaryStreamFilter, byClawVoicePayload, voiceRequestFingerprint, withVoiceCancellation } from './voice-runtime.ts'
@@ -422,6 +424,7 @@ export function byClawTurnModelOverride(extraPayload: Readonly<Record<string, un
 export async function resolveByClawTurnModelSelection(params: {
   bindingId: string
   preparedSelection?: ModelSelection
+  configuredModelId?: string
   override: { modelId?: string; thinkingLevel?: string }
   resolveModel: ByClawDshSessionRuntimeOptions['resolveModel']
 }): Promise<ModelSelection> {
@@ -443,7 +446,7 @@ export async function resolveByClawTurnModelSelection(params: {
 
   return params.resolveModel(
     params.bindingId,
-    params.override.modelId ?? preparedSourceModelId,
+    params.override.modelId ?? preparedSourceModelId ?? params.configuredModelId,
     params.override.thinkingLevel,
   )
 }
@@ -459,7 +462,7 @@ export interface ByClawVoiceError {
 }
 
 export interface ByClawTurnFailurePresentation {
-  code: ByClawModelError['code'] | ByClawVoiceError['code'] | 'TURN_EXECUTION_FAILED'
+  code: ByClawModelError['code'] | ByClawVoiceError['code'] | CodingModelError['code'] | 'TURN_EXECUTION_FAILED'
   message: string
 }
 
@@ -474,7 +477,8 @@ export interface ByClawRuntimeError {
 }
 
 /** Keep operational details server-side while giving each failure domain safe guidance. */
-export function byClawTurnFailurePresentation(error: ByClawModelError | ByClawVoiceError | ByClawRuntimeError): ByClawTurnFailurePresentation {
+export function byClawTurnFailurePresentation(error: ByClawModelError | ByClawVoiceError | ByClawRuntimeError | CodingModelError): ByClawTurnFailurePresentation {
+  if (error.domain === 'CODEX_CONFIGURATION') return { code: error.code, message: codingModelErrorMessage(error) }
   if (error.domain === 'RUNTIME') {
     return { code: error.code, message: '会话运行失败，请稍后重试或联系管理员。' }
   }
@@ -500,7 +504,7 @@ export async function emitByClawTurnFailure(params: {
   rootSessionId: string
   messageId: string
   sourceAgentType: string
-  error: ByClawModelError | ByClawVoiceError | ByClawRuntimeError
+  error: ByClawModelError | ByClawVoiceError | ByClawRuntimeError | CodingModelError
 }): Promise<ByClawTurnFailurePresentation> {
   const failure = byClawTurnFailurePresentation(params.error)
   await params.emitter.emitChunk(params.sessionId, params.traceId, {

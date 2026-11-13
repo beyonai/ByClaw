@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { ByClawExecutionRouter, parseAgentExecutionMap, dispatchExecutionAsk } from '../src/coding-router.ts'
 import { CODING_WORKSPACE_RUNNER, codingWorkspace } from '../src/coding-context.ts'
+import { CodingModelConfigurationError } from '../src/coding-model.ts'
 import { CodexEventAdapter } from '../src/cli-event-adapter.ts'
 import { codingPublicText, summarizeCodingDiagnostic } from '../src/coding-diagnostics.ts'
 import { codingEventPresentation } from '../src/coding-presentation.ts'
@@ -26,8 +27,8 @@ function fixture(options = {}) {
   let dshCalls = 0
   const manager = new ToolSandboxManager([{ templateKey: 'coding', serviceKey: 'byclaw-tools-coding', capabilities: ['process.exec'], enabled: true }], async () => ({
     handshake: async () => ({ contract: 'byclaw.tool-sandbox/v1', purpose: 'coding', capabilities: ['process.exec'], operations: { protocol: 'ssh', exposure: 'private' } }),
-    execute: async (argv, cwd, signal, session, onStdout) => {
-      calls.push({ argv, cwd, signal, session })
+    execute: async (argv, cwd, signal, session, onStdout, environment) => {
+      calls.push({ argv, cwd, signal, session, environment })
       if (options.execute) return options.execute({ argv, cwd, signal, onStdout })
       const text = completed(options.answer)
       onStdout?.(text.slice(0, 17)); onStdout?.(text.slice(17))
@@ -43,8 +44,9 @@ function fixture(options = {}) {
       if (options.unauthorized) throw new Error('not authorized')
       return { kind: 'employee', resourceId: cmd.extraPayload.agent_id, text }
     },
-    prepareContext: (cmd, target) => ({ prompt: options.prompt ?? target.text, employeeId: target.resourceId, persona: '', skills: [],
-      workspace: codingWorkspace(String(cmd.header.sessionId), undefined) }),
+    emitConfigurationError: options.emitConfigurationError,
+    prepareContext: options.prepareContext ?? ((cmd, target) => ({ prompt: options.prompt ?? target.text, employeeId: target.resourceId, persona: '', skills: [],
+      workspace: codingWorkspace(String(cmd.header.sessionId), undefined), modelEnvironment: options.modelEnvironment })),
     sandbox: () => options.noSandbox ? undefined : manager,
     emit: async (_cmd, _context, event) => { events.push(event); if (options.emitFails) throw new Error('offline') },
     log: entry => { logs.push(entry); options.log?.(entry) },
@@ -538,4 +540,25 @@ test('native diagnostics retain code-only errors and nested recoverable error ev
   assert.equal(diagnostics[1].message, 'certificate verify failed')
   adapter.write(completed('完成'))
   assert.equal(adapter.finish(0), '完成')
+})
+
+test('per-turn model environment crosses the owned lease without entering argv or manifest', async () => {
+  const environment = Object.freeze({ BYCLAW_CODEX_CONNECTION: 'synthetic-secret' })
+  const f = fixture({ modelEnvironment: environment })
+  await f.run()
+  assert.equal(f.calls[0].environment, environment)
+  assert.doesNotMatch(JSON.stringify(f.calls[0].argv), /synthetic-secret/)
+  assert.doesNotMatch(f.calls[0].argv[3], /modelEnvironment|BYCLAW_CODEX_CONNECTION/)
+  assert.doesNotMatch(JSON.stringify(f.events), /synthetic-secret/)
+  assert.doesNotMatch(JSON.stringify(f.logs), /synthetic-secret/)
+})
+test('configuration failures emit safe assistant errors and still release their lease', async () => {
+  const presented = []
+  const f = fixture({ prepareContext: () => { throw new CodingModelConfigurationError('CODEX_MODEL_PROTOCOL_UNSUPPORTED') },
+    emitConfigurationError: async (_cmd, _context, error) => presented.push(error) })
+  await assert.rejects(f.run(), error => error.cause?.message === 'CODEX_MODEL_PROTOCOL_UNSUPPORTED')
+  assert.equal(presented[0].domain, 'CODEX_CONFIGURATION')
+  assert.equal(f.calls.length, 0)
+  assert.equal(f.releases.length, 1)
+  assert.equal(f.dshCalls, 0)
 })

@@ -30,7 +30,7 @@ class Responses(BaseHTTPRequestHandler):
 
     def do_POST(self):
         raw = self.rfile.read(int(self.headers['Content-Length']))
-        requests.append(json.loads(raw))
+        requests.append({**json.loads(raw), '_fixture_auth': self.headers.get('Authorization'), '_fixture_path': self.path})
         answer = json.dumps(dict(answer='NATIVE_EXEC_OK', publication=None))
         item = dict(id='msg_fixture', type='message', role='assistant', status='completed',
                     content=[dict(type='output_text', text=answer, annotations=[])])
@@ -75,6 +75,9 @@ def main():
             all_events = []
             with patch.dict(os.environ, environment):
                 for index, rule in enumerate(['RULE_FIRST', 'RULE_UPDATED']):
+                    os.environ['BYCLAW_CODEX_CONNECTION'] = json.dumps(dict(model=f'test-model-{index}',
+                        baseUrl=f'http://127.0.0.1:{server.server_port}/' + ('v1' if index == 0 else 'gateway/v1'),
+                        apiKey=f'fixture-key-{index}', reasoningEffort='high' if index == 0 else 'low'))
                     manifest['persona'] = rule
                     manifest['messageId'] = f'm{index + 1}'
                     output = io.StringIO()
@@ -89,6 +92,11 @@ def main():
             second = next(event['thread_id'] for event in all_events[1] if event['type'] == 'thread.started')
             assert first == second, (first, second)
             assert len(requests) == 2, len(requests)
+            assert [r['_fixture_auth'] for r in requests] == ['Bearer fixture-key-0', 'Bearer fixture-key-1']
+            assert [r['model'] for r in requests] == ['test-model-0', 'test-model-1']
+            assert [r['reasoning']['effort'] for r in requests] == ['high', 'low']
+            assert [r['_fixture_path'] for r in requests] == ['/v1/responses', '/gateway/v1/responses']
+            assert 'fixture-key' not in (home / 'config.toml').read_text()
             assert 'RULE_FIRST' in json.dumps(requests[0])
             assert 'RULE_UPDATED' in json.dumps(requests[1])
             assert 'NATIVE_TURN_1' in json.dumps(requests[1]), 'native resume must retain the previous input'

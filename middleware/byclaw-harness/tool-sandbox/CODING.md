@@ -23,7 +23,7 @@ docker build --platform linux/amd64 \
 不修改共享主环境的用途，不扩大员工映射，不修改五分钟空闲回收策略。
 
 配置沿用 `coding.platform.spec.example.json` 的 coding 契约及既有 SSH 身份、网络、
-持久卷和资源规格。真实 CODEX_AUTH 由用户个人参数注入，不进入镜像和源码。
+持久卷和资源规格。模型连接复用平台模型管理和本轮选择，由 Harness 通过本次进程环境传递；不再读取个人 CODEX_AUTH、CODEX_MODEL、CODEX_BASE_URL。密钥不进入镜像、源码或持久配置。
 Codex 默认配置在 /home/byclaw/.codex/config.toml；Harness 每个员工会话使用专属
 codex-home，并通过原有执行路由运行和续聊。
 

@@ -10,6 +10,8 @@ import type { ByClawCodingSetup } from './session-extensions.ts'
 
 export interface CodingContext {
   prompt: string
+  /** Executor-only material, excluded from prompts and codingRunManifest. */
+  modelEnvironment?: Readonly<Record<string, string>>
   employeeId: string
   persona: string
   skills: Array<{ name: string; path: string; enabled: boolean }>

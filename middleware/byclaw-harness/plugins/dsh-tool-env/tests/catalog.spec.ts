@@ -32,6 +32,25 @@ describe('tool sandbox catalog and independent leases', () => {
     await f.manager.dispose()
   })
 
+  it('passes each process environment through its owned lease without changing other calls', async () => {
+    const f = fixture()
+    const one = await f.manager.acquire('one', 'browser', 'one')
+    const two = await f.manager.acquire('two', 'browser', 'two')
+    const envOne = Object.freeze({ BYCLAW_CODEX_CONNECTION: 'one-secret' })
+    const envTwo = Object.freeze({ BYCLAW_CODEX_CONNECTION: 'two-secret' })
+    await Promise.all([
+      f.manager.execute('one', one.leaseId, ['native'], '/by', undefined, undefined, envOne),
+      f.manager.execute('two', two.leaseId, ['native'], '/by', undefined, undefined, envTwo),
+    ])
+    expect(f.runtimes[0]!.execute).toHaveBeenCalledWith(['native'], '/by', undefined, `one:${one.leaseId}`, undefined, envOne)
+    expect(f.runtimes[0]!.execute).toHaveBeenCalledWith(['native'], '/by', undefined, `two:${two.leaseId}`, undefined, envTwo)
+    await f.manager.execute('one', one.leaseId, ['ordinary'])
+    expect(f.runtimes[0]!.execute).toHaveBeenLastCalledWith(['ordinary'], undefined, undefined, `one:${one.leaseId}`, undefined)
+    await f.manager.release('one', one.leaseId)
+    await f.manager.release('two', two.leaseId)
+    await f.manager.dispose()
+  })
+
   it('refreshes the injected identity after allocation replacement and preserves execution controls', async () => {
     let id = 'sbx-first-12345678'
     const f = fixture(() => id)
