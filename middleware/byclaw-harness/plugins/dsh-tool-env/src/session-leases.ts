@@ -9,7 +9,20 @@ export interface ToolLeaseData {
   renewAfterMs: number
 }
 interface Owned<T> { value: T; timer?: NodeJS.Timeout; expiry?: NodeJS.Timeout }
-interface Settings { holderId?: string; idleTimeoutSeconds: number }
+interface Settings {
+  holderId?: string
+  idleTimeoutSeconds: number
+  /**
+   * How long the actorless lease outlives its last request. A turn's preparation (session
+   * directory, Skill and working-directory checks) is a burst of short requests outside any
+   * session; without this each of them acquired and returned its own lease, two Platform
+   * round trips around every request. Default {@link ACTORLESS_GRACE_MS}; 0 returns at once.
+   */
+  actorlessGraceMs?: number
+}
+
+/** Long enough to cover one turn's preparation burst; short against Platform's idle timeout. */
+export const ACTORLESS_GRACE_MS = 5000
 type Request<T> = (operation: 'acquire' | 'renew' | 'release', body: Record<string, unknown>) => Promise<T | unknown>
 
 /** Per-context leases, coordinated by Platform. No lease is acquired by a UI/session event alone. */
@@ -28,9 +41,13 @@ export class ToolSessionLeases<T extends ToolLeaseData = ToolLeaseData> {
   private readonly fallback = `operation:${randomUUID()}`
   /** Held while processes left on B outlive every session; see {@link holdResidual}. */
   private readonly residual = `residual:${randomUUID()}`
+  private readonly actorlessGraceMs: number
+  private actorlessReturn: NodeJS.Timeout | undefined
 
   constructor(private readonly settings: Settings, private readonly request: Request<T>, private readonly invalidated: () => void) {
     this.holderId = settings.holderId ?? randomUUID()
+    this.actorlessGraceMs = settings.actorlessGraceMs ?? ACTORLESS_GRACE_MS
+    if (!Number.isSafeInteger(this.actorlessGraceMs) || this.actorlessGraceMs < 0) throw new Error('INVALID_TOOL_ACTORLESS_GRACE')
     if (!Number.isSafeInteger(settings.idleTimeoutSeconds) || settings.idleTimeoutSeconds < 1 || settings.idleTimeoutSeconds > 86400) throw new Error('INVALID_TOOL_IDLE_TIMEOUT')
   }
 
@@ -61,14 +78,17 @@ export class ToolSessionLeases<T extends ToolLeaseData = ToolLeaseData> {
     })
   }
 
-  /** Hold actorless IO only until its last request/stream finishes; sessions hold through their real turn. */
+  /**
+   * Hold actorless IO until shortly after its last request/stream finishes (a burst shares one
+   * lease); sessions hold through their real turn.
+   */
   async beginUse(): Promise<() => Promise<void>> {
     if (this.closed) throw new Error('TOOL_LEASES_CLOSED')
     const sessionId = this.scope.getStore()
     const generation = sessionId ? this.sessions.get(sessionId) : undefined
     const sessions: Array<[string, number]> = sessionId && generation !== undefined ? [[sessionId, generation]] : []
     const fallback = sessions.length === 0
-    if (fallback) this.uses++
+    if (fallback) { this.uses++; this.cancelActorlessReturn() }
     else for (const [session] of sessions) this.sessionUses.set(session, (this.sessionUses.get(session) ?? 0) + 1)
     try {
       await this.serial(async () => {
@@ -81,7 +101,7 @@ export class ToolSessionLeases<T extends ToolLeaseData = ToolLeaseData> {
     return async () => {
       if (finished) return
       finished = true
-      if (fallback && --this.uses === 0) await this.serial(() => this.release(this.fallback, false))
+      if (fallback && --this.uses === 0) await this.returnActorless()
       if (!fallback) for (const [session] of sessions) {
         const count = (this.sessionUses.get(session) ?? 1) - 1
         if (count > 0) this.sessionUses.set(session, count)
@@ -114,7 +134,27 @@ export class ToolSessionLeases<T extends ToolLeaseData = ToolLeaseData> {
     else await this.finishSession(this.residual)
   }
 
+  /** Return the actorless lease once no request has used it for the grace period. */
+  private async returnActorless(): Promise<void> {
+    const release = (): Promise<void> => this.serial(async () => { if (this.uses === 0) await this.release(this.fallback, false) })
+    if (this.actorlessGraceMs === 0) return release()
+    this.cancelActorlessReturn()
+    this.actorlessReturn = setTimeout(() => {
+      this.actorlessReturn = undefined
+      // A failed return already stops renewal (release() invalidates); the Platform TTL bounds it.
+      void release().catch(() => {})
+    }, this.actorlessGraceMs)
+    this.actorlessReturn.unref()
+  }
+
+  private cancelActorlessReturn(): void {
+    if (this.actorlessReturn === undefined) return
+    clearTimeout(this.actorlessReturn)
+    this.actorlessReturn = undefined
+  }
+
   async pause(destroy = false): Promise<void> {
+    this.cancelActorlessReturn()
     // Explicit release returns this context's tokens only. Platform checks all other holders.
     // Read the keys inside the queue, so an acquisition queued before this pause is returned too.
     await this.serial(async () => { for (const key of [...this.owned.keys()]) await this.release(key, destroy) })
@@ -122,6 +162,7 @@ export class ToolSessionLeases<T extends ToolLeaseData = ToolLeaseData> {
 
   async dispose(): Promise<void> {
     this.closed = true
+    this.cancelActorlessReturn()
     this.sessions.clear()
     for (const item of this.owned.values()) { if (item.timer) clearTimeout(item.timer); if (item.expiry) clearTimeout(item.expiry) }
     await this.serial(async () => { for (const key of [...this.owned.keys()]) await this.release(key, false) })

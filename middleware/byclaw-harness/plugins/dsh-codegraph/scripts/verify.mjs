@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import yaml from 'js-yaml'
 import { codeGraphPolicy } from '../lib/index.js'
+import { HANDSHAKE_SEED, HANDSHAKE_SEED_VERSION } from '../lib/handshake-seed.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -55,7 +56,7 @@ const evaluateCwd = (env, fallbackCwd) => Function(
 assert.equal(evaluateCwd({ CODEGRAPH_MCP_CWD: '/' }, '/workspace'), '/')
 assert.equal(evaluateCwd({}, '/workspace'), '/workspace')
 
-async function listMcpTools(command) {
+async function mcpHandshake(command) {
   const child = spawn(command, ['serve', '--mcp'], {
     cwd: '/',
     env: { ...process.env, ...mcpEntry.config.env },
@@ -119,7 +120,7 @@ async function listMcpTools(command) {
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`)
     const listed = await request(2, 'tools/list', {})
     assert.equal(listed.error, undefined, JSON.stringify(listed.error))
-    return listed.result.tools.map(tool => tool.name).sort()
+    return { initialize: initialized.result, tools: listed.result }
   } finally {
     child.kill('SIGTERM')
   }
@@ -129,7 +130,19 @@ if (process.argv.includes('--runtime')) {
   const command = process.env.CODEGRAPH_COMMAND || 'codegraph'
   const { stdout } = await execFileAsync(command, ['--version'], { encoding: 'utf8' })
   assert.equal(stdout.trim(), codeGraphContract.version)
-  assert.deepEqual(await listMcpTools(command), [...codeGraphContract.mcpTools].sort())
+  const handshake = await mcpHandshake(command)
+  assert.deepEqual(handshake.tools.tools.map(tool => tool.name).sort(), [...codeGraphContract.mcpTools].sort())
+  // The plugin answers a context's handshake from its seed until a server has run: it must be
+  // what the installed CodeGraph says, or the model is shown a tool the server does not have.
+  // (A CODEGRAPH_COMMAND stand-in is not the CodeGraph the seed describes.)
+  assert.equal(HANDSHAKE_SEED_VERSION, codeGraphContract.version, 'regenerate src/handshake-seed.ts for this CodeGraph')
+  if (!process.env.CODEGRAPH_COMMAND) {
+    assert.deepEqual(HANDSHAKE_SEED['tools/list'], { result: handshake.tools }, 'src/handshake-seed.ts tools/list differs from the installed CodeGraph')
+    // `instructions` names the server's working directory, which differs here.
+    const { instructions: _seeded, ...seededInitialize } = HANDSHAKE_SEED.initialize.result
+    const { instructions: _installed, ...installedInitialize } = handshake.initialize
+    assert.deepEqual(seededInitialize, installedInitialize, 'src/handshake-seed.ts initialize differs from the installed CodeGraph')
+  }
 }
 
 console.info('ByClaw CodeGraph plugin verification passed')

@@ -21,10 +21,23 @@ import type { ToolEnvIdentity } from './identity.ts'
 import { describeResidual } from './busy.ts'
 import { DeferredToolEnvironmentWork } from './deferred-work.ts'
 import { resolveLocalExecutable } from './local-executable.ts'
-import { answerWhileDown, isCleanupRequest } from './pending-directories.ts'
+import { answerKnownDirectory, answerWhileDown, isCleanupRequest } from './pending-directories.ts'
 import { markEnvironmentFailure, reportLeaseWarning, toolTransportError, trackLeaseRelease, withLeaseFailure } from './transport-failure.ts'
 
 type Hello = Awaited<SshConnection['ready']>
+
+/** Minimum time between two re-creations of this host's directories after a missing-path failure. */
+const RECREATE_INTERVAL_MS = 5000
+
+/** A failure that names a missing path (`ENOENT`, e.g. `spawn bash ENOENT` when the working directory is gone). */
+function isMissingPath(error: unknown): boolean {
+  for (let current: unknown = error, depth = 0; current !== undefined && current !== null && depth < 5; depth++) {
+    const { code, message, cause } = current as { code?: unknown; message?: unknown; cause?: unknown }
+    if (code === 'ENOENT' || (typeof message === 'string' && /\bENOENT\b/u.test(message))) return true
+    current = cause
+  }
+  return false
+}
 
 /** Static coordinates shared by every inner connection. */
 export interface ToolEnvConnectionOptions {
@@ -81,6 +94,10 @@ export class ToolEnvConnection extends Service {
   private readonly deploymentScope = new AsyncLocalStorage<Readonly<Record<string, string>>>()
   private deploymentValues: Readonly<Record<string, string>> | undefined
   private readonly deferred = new DeferredToolEnvironmentWork(message => { this.ctx.logger('byclaw-tool-env').warn(message) })
+  /** Set while deferred work runs: its own requests go straight to B instead of waiting for themselves. */
+  private readonly deferredScope = new AsyncLocalStorage<true>()
+  private flushing: Promise<void> | undefined
+  private lastRecreate = 0
   /** Whether each B (one per inner connection) has the workload wrapper; asked once per connection. */
   private readonly workloadWrappers = new WeakMap<object, Promise<boolean>>()
 
@@ -177,12 +194,16 @@ export class ToolEnvConnection extends Service {
   /**
    * Run `operation` on B now if it is connected, otherwise once it connects, before
    * the first operation of that connection is served. Deferred work with the same
-   * key is replaced, so repeated writes to one path cost one write.
+   * key is replaced, so repeated writes to one path cost one write; a `mkdir:` key
+   * this host already ran is not run again (the directory outlives B). Directory
+   * creation waits for the next operation that reaches B even while B is connected,
+   * so a turn that never uses B (a model-only answer) creates nothing there.
    */
   async whenConnected(key: string, operation: () => Promise<void>): Promise<void> {
-    if (this.connected) {
+    if (this.deferred.isDone(key)) return
+    if (this.connected && !key.startsWith('mkdir:')) {
       await operation()
-      this.deferred.noteDone(key)
+      this.deferred.noteDone(key, operation)
       return
     }
     this.deferred.defer(key, operation)
@@ -216,6 +237,9 @@ export class ToolEnvConnection extends Service {
         if (local !== undefined) return result.parse(local)
       }
     }
+    // Directories this host created or queued: connected or not, B would only confirm what is known here.
+    const created = answerKnownDirectory(method, params, [...this.deferred.createdDirectories(), ...this.deferred.pendingDirectories()])
+    if (created !== undefined) { return result.parse(created) }
     // What this host can say without B (queued directories, DSH's own homes, path resolution);
     // everything else, a turn's instruction-file and Skill probes included, goes to B and starts it.
     if (!this.connected && this.current === undefined && !this.closed) {
@@ -229,7 +253,12 @@ export class ToolEnvConnection extends Service {
       const input = scrubbed as { env?: Readonly<Record<string, string | null>> }
       scrubbed = { ...input, env: { ...input.env, ...deployment } }
     }
-    if (method !== 'process.prepare') return await this.use(lease => lease.connection.request(method, scrubbed, result, signal, wait), signal)
+    if (method !== 'process.prepare') {
+      try { return await this.use(lease => lease.connection.request(method, scrubbed, result, signal, wait), signal) } catch (error) {
+        if (method.startsWith('process.') && isMissingPath(error)) await this.recreateDirectories()
+        throw error
+      }
+    }
     return await this.use(async lease => {
       const params = await this.hasWorkloadWrapper(lease.connection) ? asWorkload(scrubbed) : scrubbed
       return lease.connection.request(method, params, result, signal, wait)
@@ -327,6 +356,8 @@ export class ToolEnvConnection extends Service {
       if (acquireUse) finish = await this.backend.beginUse?.()
       const epoch = this.connectionEpoch
       const lease = await this.lease()
+      // Work queued while B was already connected (a first directory) lands before this operation.
+      if (lease === this.live) await this.flushDeferred()
       signal?.throwIfAborted()
       if (epoch !== this.connectionEpoch) throw new Error('TOOL_LEASE_INVALIDATED')
       try { return await operation(lease) } catch (error) {
@@ -347,6 +378,33 @@ export class ToolEnvConnection extends Service {
         this.ctx.logger('byclaw-tool-env').warn(reportLeaseWarning(error))
       }
     }
+  }
+
+  /**
+   * A process failed because a path is missing — typically its working directory, which this host
+   * created once and no longer re-creates every turn: one removed on B's volume (by a command or a
+   * file manager) would otherwise fail every command until the context restarts. Create this host's
+   * directories again (`mkdir -p`, harmless when they exist), at most every few seconds, so the
+   * model's next attempt runs; the failed one is still reported as it happened.
+   */
+  private async recreateDirectories(): Promise<void> {
+    const now = Date.now()
+    if (now - this.lastRecreate < RECREATE_INTERVAL_MS || this.deferredScope.getStore() === true) return
+    this.lastRecreate = now
+    for (const [path, operation] of this.deferred.creations()) {
+      try { await this.deferredScope.run(true, operation) } catch (error) {
+        this.ctx.logger('byclaw-tool-env').warn(`could not create ${path} again on the tool environment: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  }
+
+  /** Run queued work once, shared by every operation that arrives meanwhile; never from inside it. */
+  private flushDeferred(): Promise<void> {
+    if (this.deferredScope.getStore() === true) return Promise.resolve()
+    // A run in progress has already taken its work off the queue: wait for it even when the queue looks empty.
+    if (this.flushing === undefined && this.deferred.size === 0) return Promise.resolve()
+    this.flushing ??= this.deferredScope.run(true, () => this.deferred.run()).finally(() => { this.flushing = undefined })
+    return this.flushing
   }
 
   private lease(): Promise<Lease> {
@@ -387,7 +445,7 @@ export class ToolEnvConnection extends Service {
     // Everything a context queued for B while B was down (session directories, projections) lands before any tool runs.
     if (this.deferred.size > 0) {
       this.ctx.logger('byclaw-tool-env').info(`running ${String(this.deferred.size)} deferred operation(s) on the tool environment`)
-      await this.deferred.run()
+      await this.deferredScope.run(true, () => this.deferred.run())
     }
     return lease
   }

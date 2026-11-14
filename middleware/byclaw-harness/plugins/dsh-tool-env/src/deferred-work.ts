@@ -6,7 +6,8 @@
  */
 export class DeferredToolEnvironmentWork {
   private readonly pending = new Map<string, () => Promise<void>>()
-  private readonly created = new Set<string>()
+  /** Directories created on B, with the work that created them, to repeat if one disappears. */
+  private readonly created = new Map<string, () => Promise<void>>()
 
   constructor(private readonly log: (message: string) => void) {}
 
@@ -23,12 +24,22 @@ export class DeferredToolEnvironmentWork {
    * can describe them without starting it.
    */
   createdDirectories(): string[] {
-    return [...this.created]
+    return [...this.created.keys()]
+  }
+
+  /** The work that created each directory, to run again when B's volume lost one behind this host's back. */
+  creations(): Array<[string, () => Promise<void>]> {
+    return [...this.created.entries()]
+  }
+
+  /** Whether the work behind `key` needs no repeat: a directory this host already created stays. */
+  isDone(key: string): boolean {
+    return key.startsWith('mkdir:') && this.created.has(key.slice('mkdir:'.length))
   }
 
   /** Record that the work behind `key` ran, whether queued here or run directly because B was up. */
-  noteDone(key: string): void {
-    if (key.startsWith('mkdir:')) this.created.add(key.slice('mkdir:'.length))
+  noteDone(key: string, operation?: () => Promise<void>): void {
+    if (key.startsWith('mkdir:')) this.created.set(key.slice('mkdir:'.length), operation ?? (() => Promise.resolve()))
   }
 
   /** Remember `operation` under `key`, replacing an earlier operation with the same key. */
@@ -44,7 +55,7 @@ export class DeferredToolEnvironmentWork {
       this.pending.delete(key)
       try {
         await operation()
-        this.noteDone(key)
+        this.noteDone(key, operation)
       } catch (error) {
         this.log(`deferred tool environment work "${key}" failed: ${error instanceof Error ? error.message : String(error)}`)
       }

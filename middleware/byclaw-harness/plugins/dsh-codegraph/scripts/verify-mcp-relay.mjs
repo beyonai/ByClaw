@@ -82,6 +82,34 @@ try {
     assert.equal(cache.get('server/discover').error.code, -32601)
   }
 
+  // With a seed and nothing remembered, a session's handshake starts no server, even after a
+  // server that could not start (a tool sandbox without CodeGraph) dropped the session.
+  {
+    const seed = { initialize: { result: { serverInfo: { name: 'codegraph', version: 'seed' } } }, 'tools/list': { result: { tools: [{ name: 'codegraph_explore' }] } } }
+    const cache = new HandshakeCache(join(base, 'seeded.json'), 'key', seed)
+    await cache.load()
+    const fleet = servers(() => undefined)
+    const session = client()
+    new McpRelay(session, fleet.spawn, cache, 0, () => {})
+    session.send(initialize)
+    session.send({ jsonrpc: '2.0', method: 'notifications/initialized' })
+    session.send({ jsonrpc: '2.0', id: 2, method: 'tools/list' })
+    await waitFor(() => session.received.length === 2, 'the seeded answers')
+    assert.deepEqual(session.received.map(message => message.result), [seed.initialize.result, seed['tools/list'].result])
+    assert.equal(fleet.started.length, 0)
+    // The first call starts a server; when it ends without answering, the client reconnects and
+    // its new handshake is again answered from the seed, not by starting servers in a loop.
+    session.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'codegraph_explore' } })
+    await waitFor(() => fleet.started.length === 1, 'the call to start a server')
+    fleet.started[0].terminate()
+    await waitFor(() => session.destroyed, 'the owed call to drop the session')
+    const again = client()
+    new McpRelay(again, fleet.spawn, cache, 0, () => {})
+    again.send(initialize)
+    await waitFor(() => again.received.length === 1, 'the seeded answer')
+    assert.equal(fleet.started.length, 1)
+  }
+
   // A request the client cancels is no longer owed, so the server still ends when idle.
   {
     const cache = new HandshakeCache(join(base, 'cancel.json'), 'key')

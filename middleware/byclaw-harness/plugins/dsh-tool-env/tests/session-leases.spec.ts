@@ -3,7 +3,7 @@ import { ToolSessionLeases } from '../src/session-leases.ts'
 
 describe('Platform tool session leases', () => {
   afterEach(() => vi.useRealTimers())
-  function fixture() {
+  function fixture(settings: { actorlessGraceMs?: number } = {}) {
     let next = 0
     const calls: Array<{ operation: string; body: Record<string, unknown> }> = []
     const request = vi.fn(async (operation: string, body: Record<string, unknown>) => {
@@ -12,7 +12,7 @@ describe('Platform tool session leases', () => {
       return { sandboxId: 'sandbox-b', leaseId: body['leaseId'] ?? `lease-${++next}`, leaseToken: 'private-token', leaseExpiresAt: Date.now() + 90000, renewAfterMs: 30000 }
     })
     const lost = vi.fn()
-    const leases = new ToolSessionLeases({ holderId: 'process-user-a', idleTimeoutSeconds: 300 }, request, lost)
+    const leases = new ToolSessionLeases({ holderId: 'process-user-a', idleTimeoutSeconds: 300, ...settings }, request, lost)
     return { leases, request, calls, lost }
   }
   it('does not acquire from session/UI events; first actual use acquires separate session leases', async () => {
@@ -29,13 +29,51 @@ describe('Platform tool session leases', () => {
     expect(calls.filter(c => c.operation === 'release')).toHaveLength(2)
     await leases.dispose()
   })
-  it('releases actorless operation leases after the last concurrent operation, without a second idle delay', async () => {
-    const { leases, calls } = fixture()
+  it('without a grace period, releases actorless leases right after the last concurrent operation', async () => {
+    const { leases, calls } = fixture({ actorlessGraceMs: 0 })
     const finishA = await leases.beginUse(), finishB = await leases.beginUse()
     expect(calls.filter(c => c.operation === 'acquire')).toHaveLength(1)
     await finishA(); expect(calls.filter(c => c.operation === 'release')).toHaveLength(0)
     await finishB(); expect(calls.filter(c => c.operation === 'release')).toHaveLength(1)
     await leases.dispose()
+  })
+  it('lets a burst of actorless operations share one lease and returns it after the grace period', async () => {
+    vi.useFakeTimers()
+    const { leases, calls } = fixture({ actorlessGraceMs: 5000 })
+    for (let i = 0; i < 10; i++) await (await leases.beginUse())()
+    expect(calls.map(c => c.operation)).toEqual(['acquire'])
+    await vi.advanceTimersByTimeAsync(4999)
+    expect(calls.map(c => c.operation)).toEqual(['acquire'])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(calls.map(c => c.operation)).toEqual(['acquire', 'release'])
+    await (await leases.beginUse())()
+    expect(calls.map(c => c.operation)).toEqual(['acquire', 'release', 'acquire'])
+    await leases.dispose()
+  })
+  it('keeps the actorless lease while an operation that began during the grace period runs', async () => {
+    vi.useFakeTimers()
+    const { leases, calls } = fixture({ actorlessGraceMs: 5000 })
+    await (await leases.beginUse())()
+    await vi.advanceTimersByTimeAsync(4000)
+    const finish = await leases.beginUse()
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(calls.map(c => c.operation)).toEqual(['acquire'])
+    await finish()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(calls.map(c => c.operation)).toEqual(['acquire', 'release'])
+    await leases.dispose()
+  })
+  it('returns a lease in its grace period at once on disposal, and never again afterwards', async () => {
+    vi.useFakeTimers()
+    const { leases, calls } = fixture({ actorlessGraceMs: 5000 })
+    await (await leases.beginUse())()
+    await leases.dispose()
+    expect(calls.map(c => c.operation)).toEqual(['acquire', 'release'])
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(calls.map(c => c.operation)).toEqual(['acquire', 'release'])
+  })
+  it('rejects a negative grace period', () => {
+    expect(() => fixture({ actorlessGraceMs: -1 })).toThrow('INVALID_TOOL_ACTORLESS_GRACE')
   })
   it('renews only active leases and returns exact tokens on context disposal', async () => {
     vi.useFakeTimers()
@@ -60,7 +98,7 @@ describe('Platform tool session leases', () => {
     await leases.dispose()
   })
   it('never leases an unrelated active session when an actorless filesystem request arrives', async () => {
-    const { leases, calls } = fixture()
+    const { leases, calls } = fixture({ actorlessGraceMs: 0 })
     leases.startSession('text-only-session')
     const finish = await leases.beginUse(); await finish()
     expect(calls.filter(c => c.operation === 'acquire').map(c => c.body['sessionId'])).toEqual([expect.stringMatching(/^operation:/)])

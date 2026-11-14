@@ -21,6 +21,29 @@ export function isCleanupRequest(method: string): boolean {
 }
 
 /**
+ * Probes of a directory this host created on B or has queued for creation there,
+ * answered here whether or not B is connected: it is a directory (B's volume outlives
+ * B, so it stays one; a queued one is created before anything else reaches B), and
+ * nothing more is asked of it. A turn's working-directory checks probe exactly these,
+ * a round trip to B each otherwise.
+ */
+export function answerKnownDirectory(method: string, params: unknown, knownDirectories: readonly string[]): unknown {
+  if (knownDirectories.length === 0 || params === null || typeof params !== 'object') return undefined
+  const input = params as { path?: unknown; cwd?: unknown; target?: { targetKey?: unknown } }
+  const trim = (path: string): string => { const clean = normalize(path); return clean.length > 1 ? clean.replace(/\/+$/u, '') : clean }
+  const created = new Set(knownDirectories.map(trim))
+  const path = typeof input.path === 'string' && isAbsolute(input.path) ? trim(input.path)
+    : typeof input.path === 'string' && typeof input.cwd === 'string' && isAbsolute(input.cwd) ? trim(join(input.cwd, input.path)) : undefined
+  const key = typeof input.target?.targetKey === 'string' ? trim(input.target.targetKey) : undefined
+  switch (method) {
+    case 'fs.resolve': return path !== undefined && created.has(path) ? { targetKey: path, displayPath: path } : undefined
+    case 'fs.lstat': return path !== undefined && created.has(path) ? { version: 'created', type: 'directory' } : undefined
+    case 'fs.stat': return key !== undefined && created.has(key) ? { version: 'created', type: 'directory' } : undefined
+    default: return undefined
+  }
+}
+
+/**
  * What this host can answer about the tool environment without it. Path
  * resolution only normalizes. Directories this host has queued for creation on
  * B are directories, and so are the ones it already created there (B's volume

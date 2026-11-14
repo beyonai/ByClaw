@@ -1343,8 +1343,9 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
 /** `mkdir -p` through the context's subprocess provider, i.e. on the tool environment. */
 async function ensureRemoteDirectory(ctx: Context, path: string): Promise<void> {
   const environment = lazyToolEnvironment(ctx)
-  if (environment !== undefined && !environment.connected) {
-    // A turn may begin without B; the directory exists by the time a tool needs it.
+  if (environment !== undefined) {
+    // A turn may begin without B; the directory exists by the time a tool needs it. Through the
+    // facade either way, so a directory already created there is not created again every turn.
     await environment.whenConnected(`mkdir:${path}`, () => ensureRemoteDirectoryNow(ctx, path))
     return
   }
