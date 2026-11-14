@@ -7,6 +7,7 @@ import { CodexEventAdapter, type CodingEvent, type CodexEventSnapshot } from './
 import { summarizeCodingDiagnostic, type CodingDiagnosticSummary } from './coding-diagnostics.ts'
 import { CODING_WORKSPACE_RUNNER, codingFinalOutput, codingRunManifest, codingRepositoryState, type CodingContext } from './coding-context.ts'
 import type { FileChangesSummaryPayload } from './file-changes.ts'
+import type { CodingObservation, CodingTokenUsage } from './coding-usage.ts'
 
 export type ExecutionType = 'CODEX_CLI' | 'CLAUDE_CLI' | 'UNITY'
 export type ExecutionKind = 'codex' | 'claude' | 'unity'
@@ -32,7 +33,7 @@ export interface ExecutionSandbox {
 }
 
 export interface ExecutionTarget { resourceId: string; kind: 'employee' | 'group'; text: string }
-export interface ExecutionResult { answer: string; finalAnswer: string; executor: ExecutionKind; executionType: ExecutionType; codexThreadId?: string }
+export interface ExecutionResult { answer: string; finalAnswer: string; executor: ExecutionKind; executionType: ExecutionType; codexThreadId?: string; usage?: CodingTokenUsage }
 export interface ExecutionRouteEvent extends CodingEvent {
   employeeId: string
   executionType: ExecutionType
@@ -81,6 +82,7 @@ export interface ExecutionRouterOptions {
   emit: (command: AskAgentCommand, context: AgentContext, event: ExecutionRouteEvent) => Promise<void>
   onActivityChange?: () => void
   log?: (entry: ExecutionDiagnostic) => void
+  observe?: (entry: CodingObservation) => void
   /** Internal test seam; deployments use the fixed 10-second status interval. */
   progressIntervalMs?: number
 }
@@ -402,6 +404,15 @@ export class ByClawExecutionRouter {
     check()
     if (forwardingError) failure = new Error('EXECUTION_EVENT_FORWARDING_FAILED')
     else if (signal.aborted) failure ??= new Error(failureCode())
+    const finishedAt = Date.now()
+    try {
+      this.options.observe?.({ schemaVersion: 1, userCode: command.header.userCode, sessionId: String(command.header.sessionId),
+        messageId: String(command.header.messageId), employeeId: target.resourceId, traceId: context.traceId,
+        ...(prepared?.model === undefined ? {} : { model: prepared.model }),
+        startedAt: finishedAt - Math.round(performance.now() - queuedAt), finishedAt,
+        status: failure ? 'error' : 'success', usageComplete: parser.snapshot().turnCompleted,
+        ...(parser.usage === undefined ? {} : { usage: { ...parser.usage } }) })
+    } catch { /* Optional telemetry cannot fail or delay task completion. */ }
     if (failure) {
       const diagnostic = processOutcome.diagnostic ?? parser.diagnostic
       log('request', 'error', queuedAt, { ...processOutcome, reason: failure.cause instanceof Error ? failure.cause.message : failure.message,
@@ -409,7 +420,7 @@ export class ByClawExecutionRouter {
       throw failure
     }
     log('request', 'success', queuedAt, processOutcome)
-    return result!
+    return { ...result!, ...(parser.usage === undefined ? {} : { usage: { ...parser.usage } }) }
   }
 
   cancel(messageId: string): void {

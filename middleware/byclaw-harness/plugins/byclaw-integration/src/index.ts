@@ -1183,6 +1183,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
       // The managed profile may have no console exporter for its isolated logger.
       // The router only supplies allowlisted metadata; write it to the host journal.
       log: entry => console.info(new Date().toISOString(), '[byclaw-execution]', `execution.lifecycle ${JSON.stringify(entry)}`),
+      observe: entry => ctx.emit('byclaw/coding-observation', entry),
       emitConfigurationError: (command, context, error) => emitByClawTurnFailure({
         emitter, sessionId: String(context.sessionId), traceId: context.traceId,
         rootSessionId: String(command.header.sessionId), messageId: String(command.header.messageId), sourceAgentType, error,
@@ -1218,7 +1219,7 @@ async function activate(ctx: Context, config: Config, startup: ByClawStartupLog)
         const initial = prepareCodingContext(command, target, template, [], setup.publication, previousCwd)
         const selected = await resolveCodingWorkspace(lease, initial.workspace, codeRepoDir, nativeCwd)
         // The current coding lease resolves builtins and current agent associations itself.
-        return { modelEnvironment, ...prepareCodingContext(command, target, { ...template, persona: `${template.persona}\n\n${SKILL_CREATOR_POLICY}` }, [], setup.publication, previousCwd, selected) }
+        return { modelEnvironment, model: connection!.model, ...prepareCodingContext(command, target, { ...template, persona: `${template.persona}\n\n${SKILL_CREATOR_POLICY}` }, [], setup.publication, previousCwd, selected) }
       },
       emitFileChanges: async (command, context, payload, workspace) => {
         const rootSessionId = String(command.header.sessionId)

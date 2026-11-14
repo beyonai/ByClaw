@@ -1,5 +1,6 @@
 /** Codex exec JSONL. Public item snapshots are separate from the terminal answer. */
 import { codingPublicText, redactSshPrivateKeys, summarizeCodingDiagnostic, type CodingDiagnosticSummary } from './coding-diagnostics.ts'
+import { codingTokenUsage, type CodingTokenUsage } from './coding-usage.ts'
 
 export interface CodingEvent {
   kind: 'progress' | 'tool'
@@ -25,6 +26,7 @@ export interface CodexEventSnapshot {
   turnCompleted: boolean
   turnFailed: boolean
   finalAnswerSeen: boolean
+  usage?: CodingTokenUsage
 }
 
 export class CodexEventAdapter {
@@ -45,6 +47,7 @@ export class CodexEventAdapter {
   private readonly activeTools = new Map<string, CodingEvent>()
   threadId: string | undefined
   diagnostic: CodingDiagnosticSummary | undefined
+  usage: CodingTokenUsage | undefined
 
   constructor(
     private readonly emit: (event: CodingEvent) => void = () => {},
@@ -60,7 +63,8 @@ export class CodexEventAdapter {
       ...(this.lastEventAt === undefined ? {} : { lastEventAgeMs: Math.max(0, Math.round(performance.now() - this.lastEventAt)) }),
       toolsStarted: this.toolsStarted, toolsCompleted: this.toolsCompleted, activeTools: this.activeTools.size,
       turnCompleted: this.completed, turnFailed: this.failed,
-      finalAnswerSeen: Boolean(this.explicitAnswer?.trim() || (this.completed && this.answer.trim())) }
+      finalAnswerSeen: Boolean(this.explicitAnswer?.trim() || (this.completed && this.answer.trim())),
+      ...(this.usage === undefined ? {} : { usage: { ...this.usage } }) }
   }
 
   write(chunk: string): void {
@@ -99,7 +103,12 @@ export class CodexEventAdapter {
     this.eventCount++
     this.lastEventAt = performance.now()
     this.lastEventType = ['byclaw.workspace', 'byclaw.file_changes', 'byclaw.publication.request', 'thread.started', 'turn.started', 'turn.failed',
-      'error', 'turn.completed', 'item.started', 'item.updated', 'item.completed'].includes(event.type) ? event.type : 'unknown'
+      'byclaw.usage', 'byclaw.timing', 'error', 'turn.completed', 'item.started', 'item.updated', 'item.completed'].includes(event.type) ? event.type : 'unknown'
+    if (event.type === 'byclaw.usage') {
+      // Raw turn.completed counters may include earlier resumed turns. Only accept runner-normalized deltas.
+      if (event.source === 'native_session_delta' || event.source === 'new_thread_cli') this.usage ??= codingTokenUsage(event.usage)
+      return
+    }
     if (event.type === 'byclaw.workspace' || event.type === 'byclaw.file_changes' || event.type === 'byclaw.publication.request' || event.type === 'byclaw.timing') { this.onWorkspace(event); return }
     if (event.type === 'thread.started' && typeof event.thread_id === 'string') this.threadId = event.thread_id
     if (event.type === 'turn.started') {

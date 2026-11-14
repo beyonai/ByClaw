@@ -83,7 +83,8 @@ export class ByClawDshCommandHandler {
       content: result.finalAnswer ?? '',
       replyData: null,
       metadata: 'executor' in result
-        ? { executor: result.executor, ...(result.codexThreadId === undefined ? {} : { codexThreadId: result.codexThreadId }) }
+        ? { executor: result.executor, ...(result.codexThreadId === undefined ? {} : { codexThreadId: result.codexThreadId }),
+          ...(result.usage === undefined ? {} : { usage: { ...result.usage } }) }
         : { dshSessionId: result.dshSessionId },
     })
   }

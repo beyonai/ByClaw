@@ -70,6 +70,8 @@ export interface ByClawCodingSetup {
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
+    /** Optional metadata-only telemetry for one completed external coding request. @mode emit */
+    'byclaw/coding-observation'(payload: import('./coding-usage.ts').CodingObservation): void
     /** Compose optional CLI capabilities with the same trusted command and user-file checks. @mode serial */
     'byclaw/coding-setup'(payload: ByClawCodingSetup): void | Promise<void>
     /**

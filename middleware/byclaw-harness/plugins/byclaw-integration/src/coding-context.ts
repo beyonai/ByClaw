@@ -14,6 +14,7 @@ export interface CodingContext {
   turnInput?: { byclawPromptVersion: 1; background: string; history: Array<{ role: unknown; content: string }>; task: string }
   /** Executor-only material, excluded from prompts and codingRunManifest. */
   modelEnvironment?: Readonly<Record<string, string>>
+  model?: string
   employeeId: string
   persona: string
   skills: Array<{ name: string; path: string; enabled: boolean }>

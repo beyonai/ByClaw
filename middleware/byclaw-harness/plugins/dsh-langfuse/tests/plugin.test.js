@@ -10,15 +10,56 @@ class Span {
   spanContext() { return { traceId: this.parent?.traceId ?? this.n.toString(16).padStart(32, '0'), spanId: this.n.toString(16).padStart(16, '0'), traceFlags: 1 } }
   setAttribute(key, value) { this.attributes[key] = value }
   setStatus(value) { this.status = value }
-  end() { this.ended = true }
+  end(time) { this.ended = true; this.endTime = time }
 }
 class Telemetry {
   constructor() { this.spans = [] }
-  start(name, attrs, parent) { const span = new Span(name, attrs, parent, this.spans.length + 1); this.spans.push(span); return span }
+  start(name, attrs, parent, startTime) { const span = new Span(name, attrs, parent, this.spans.length + 1); span.startTime = startTime; this.spans.push(span); return span }
   async close() { this.closed = true }
 }
 const agent = (id = 's', parentSession) => ({ id, session: { id, header: { parentSession } } })
 function setup() { const telemetry = new Telemetry(); const sent = []; const ingestion = { enqueue: events => sent.push(events), async close() {} }; const config = resolveConfig({ baseUrl: 'http://lf', publicKey: 'pk', secretKey: 'sk', bridgeFile: path.join(os.tmpdir(), `dsh-langfuse-${randomUUID()}.json`) }, {}); return { telemetry, sent, state: new ObservationState(telemetry, ingestion, config) } }
+
+test('exports coding invocation usage to the existing user/session metrics without duplicate counting', () => {
+  const { state, telemetry, sent } = setup()
+  const payload = { schemaVersion: 1, userCode: 'merchant-user', sessionId: 'private-session', messageId: 'm1', employeeId: 'codex-employee',
+    traceId: 'platform-trace', model: 'configured-model', startedAt: 1000, finishedAt: 5000, status: 'success', usageComplete: true,
+    usage: { input_tokens: 100, output_tokens: 20, cached_input_tokens: 80 } }
+  state.codingExecution(payload)
+  state.codingExecution(payload)
+  assert.equal(telemetry.spans.length, 2)
+  const [root, model] = telemetry.spans
+  assert.equal(root.startTime, 1000)
+  assert.equal(model.startTime, 1000)
+  assert.equal(root.endTime, 5000)
+  assert.equal(model.endTime, 5000)
+  assert.equal(model.parent.spanId, root.spanContext().spanId)
+  assert.equal(model.attributes['gen_ai.request.model'], 'configured-model')
+  assert.equal(model.attributes['gen_ai.usage.input_tokens'], 100)
+  assert.equal(model.attributes['gen_ai.usage.output_tokens'], 20)
+  assert.equal(model.attributes['gen_ai.usage.cache_read.input_tokens'], 80)
+  assert.equal(model.attributes['langfuse.user.id'], 'merchant-user')
+  assert.equal(model.attributes['langfuse.session.id'], 'private-session')
+  assert.equal(sent[0][0].body.userId, 'merchant-user')
+  assert.equal(sent[0][0].body.sessionId, 'private-session')
+  assert.equal(JSON.parse(model.attributes['langfuse.observation.metadata']).usageScope, 'cli_invocation')
+  state.codingExecution({ ...payload, messageId: 'm2', status: 'error', usageComplete: false })
+  assert.match(telemetry.spans[3].status.message, /failed/)
+  assert.equal(telemetry.spans[3].attributes['gen_ai.usage.input_tokens'], 100)
+  state.codingExecution({ ...payload, messageId: 'm3', usage: undefined })
+  assert.equal(telemetry.spans[5].attributes['gen_ai.usage.input_tokens'], undefined, 'unknown is not fabricated as zero')
+})
+
+test('rejects cross-user coding observations and invalid token counts', () => {
+  const { state, telemetry } = setup()
+  state.config.userId = 'owner'
+  const payload = { schemaVersion: 1, userCode: 'other', sessionId: 's', messageId: 'm', employeeId: 'a',
+    startedAt: 1000, finishedAt: 2000, status: 'success', usage: { input_tokens: 1, output_tokens: 2 } }
+  state.codingExecution(payload)
+  assert.equal(telemetry.spans.length, 0)
+  state.codingExecution({ ...payload, userCode: 'owner', usage: { input_tokens: 1, output_tokens: 2, cached_input_tokens: 5 } })
+  assert.equal(telemetry.spans[1].attributes['gen_ai.usage.input_tokens'], undefined)
+})
 
 test('resolves OTLP configuration and Langfuse auth', () => {
   const config = resolveConfig({}, { LANGFUSE_BASE_URL: 'http://lf/', LANGFUSE_PUBLIC_KEY: 'pk', LANGFUSE_SECRET_KEY: 'sk' })

@@ -50,6 +50,7 @@ function fixture(options = {}) {
     sandbox: () => options.noSandbox ? undefined : manager,
     emit: async (_cmd, _context, event) => { events.push(event); if (options.emitFails) throw new Error('offline') },
     log: entry => { logs.push(entry); options.log?.(entry) },
+    observe: options.observe,
     progressIntervalMs: options.progressIntervalMs,
   })
   return { router, manager, environment, calls, events, releases, logs,
@@ -63,6 +64,48 @@ test('execution map parsing accepts registered types and rejects invalid maps', 
   assert.equal(parseAgentExecutionMap(undefined).size, 0)
   assert.throws(() => parseAgentExecutionMap('1001;1002'), /BYCLAW_AGENT_EXECUTION_MAP/)
   assert.throws(() => parseAgentExecutionMap('{"1001":"UNKNOWN"}'), /unknown executionType/)
+})
+
+test('accepts only normalized actual usage, without summing repeated native completion counters', () => {
+  const parser = new CodexEventAdapter()
+  parser.write(completed())
+  assert.equal(parser.usage, undefined, 'raw CLI usage is unsafe for resumed threads')
+  parser.write(jsonl({ type: 'byclaw.usage', source: 'native_session_delta', usage: { input_tokens: 50, output_tokens: 3, cached_input_tokens: 30 } }))
+  parser.write(jsonl({ type: 'byclaw.usage', source: 'native_session_delta', usage: { input_tokens: 50, output_tokens: 3, cached_input_tokens: 30 } }))
+  assert.deepEqual(parser.usage, { input_tokens: 50, output_tokens: 3, cached_input_tokens: 30 })
+  assert.equal(parser.finish(0), '6')
+  for (const usage of [{ input_tokens: -1, output_tokens: 1 }, { input_tokens: 1, output_tokens: 2, cached_input_tokens: 3 },
+    { input_tokens: '20', output_tokens: 1 }, { input_tokens: Number.MAX_SAFE_INTEGER, output_tokens: 1 }]) {
+    const malformed = new CodexEventAdapter()
+    malformed.write(jsonl({ type: 'byclaw.usage', source: 'native_session_delta', usage }))
+    assert.equal(malformed.usage, undefined)
+  }
+})
+
+test('reports usage once for duplicate delivery and preserves consumed usage when cleanup fails', async () => {
+  for (const cleanupFails of [false, true]) {
+    const observed = []
+    const usage = { input_tokens: 12, output_tokens: 2, cached_input_tokens: 8 }
+    const f = fixture({ observe: entry => observed.push(entry), cleanup: async () => { if (cleanupFails) throw new Error('cleanup') },
+      execute: async ({ onStdout }) => {
+        onStdout(completed() + jsonl({ type: 'byclaw.usage', source: 'native_session_delta', usage }))
+        return { exitCode: 0, stdout: '', stderr: '' }
+      } })
+    if (cleanupFails) await assert.rejects(f.run(), /EXECUTION_CLEANUP_RETAINED/)
+    else {
+      assert.deepEqual((await f.run()).usage, usage)
+      await f.run()
+    }
+    assert.equal(observed.length, 1)
+    assert.equal(observed[0].status, cleanupFails ? 'error' : 'success')
+    assert.equal(observed[0].userCode, 'u1')
+    assert.equal(observed[0].usageComplete, true)
+    assert.deepEqual(observed[0].usage, usage)
+    assert.ok(observed[0].finishedAt >= observed[0].startedAt)
+    assert.equal('prompt' in observed[0], false)
+  }
+  const f = fixture({ observe: () => { throw new Error('telemetry offline') } })
+  assert.equal((await f.run()).finalAnswer, '6')
 })
 test('deployment opt-in uses the dedicated coding entry and never silently falls back', async () => {
   const environment = { BYCLAW_AGENT_EXECUTION_MAP: '{"11444401":"CODEX_CLI"}', BYCLAW_DEPLOY_ENABLED: '1' }

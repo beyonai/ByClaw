@@ -304,6 +304,34 @@ class WorkspaceTests(unittest.TestCase):
         restored, _ = runner.select_prompt(json.dumps(envelope), self.home, None)
         self.assertIn('GROUP_FACT_59', restored)
 
+    def test_usage_is_a_per_invocation_delta_including_cached_input_once(self):
+        before = dict(input_tokens=100, output_tokens=10, cached_input_tokens=80)
+        after = dict(input_tokens=160, output_tokens=15, cached_input_tokens=120)
+        usage, source = runner.invocation_usage(before, after, True)
+        self.assertEqual(usage, dict(input_tokens=60, output_tokens=5, cached_input_tokens=40))
+        self.assertEqual(source, 'native_session_delta')
+        self.assertEqual(runner.invocation_usage(None, after, False)[0], after)
+        self.assertIsNone(runner.invocation_usage(None, after, True)[0])
+        self.assertIsNone(runner.invocation_usage(after, before, True)[0])
+        self.assertIsNone(runner.invocation_usage(before, None, True, after)[0])
+        self.assertEqual(runner.invocation_usage(None, None, False, after), (after, 'new_thread_cli'))
+        for value in [None, {}, dict(input_tokens=True, output_tokens=2), dict(input_tokens=-1, output_tokens=2),
+                      dict(input_tokens=1, output_tokens=2, cached_input_tokens=2)]:
+            self.assertIsNone(runner.valid_usage(value))
+
+    def test_native_usage_reads_latest_counter_and_ignores_duplicate_notifications(self):
+        self.home.mkdir(parents=True, exist_ok=True)
+        thread = '12345678-1234-1234-1234-123456789abc'
+        directory = self.home / 'sessions'
+        directory.mkdir(exist_ok=True)
+        path = directory / ('rollout-' + thread + '.jsonl')
+        usage = dict(input_tokens=50, output_tokens=3, cached_input_tokens=20)
+        event = dict(type='event_msg', payload=dict(type='token_count', info=dict(total_token_usage=usage)))
+        path.write_text('x' * (1024 * 1024 + 1) + '\n' + json.dumps(event) + '\n' + json.dumps(event) + '\n', encoding='utf-8')
+        self.assertEqual(runner.native_usage(self.home, thread), usage)
+        self.assertIsNone(runner.native_usage(self.home, '../outside'))
+        self.assertIsNone(runner.native_usage(self.home, '00000000-0000-0000-0000-000000000000'))
+
     def run_cli(self, callback=None, manifest=None):
         calls = []
         thread = '12345678-1234-1234-1234-123456789abc'
@@ -319,7 +347,8 @@ class WorkspaceTests(unittest.TestCase):
                 child.stdin = io.StringIO()
                 child.stdout = io.StringIO('\n'.join(json.dumps(item) for item in [
                     dict(type='thread.started', thread_id=thread), dict(type='turn.started'),
-                    dict(type='item.completed', item=dict(id='answer', type='agent_message', text='done')), dict(type='turn.completed')]) + '\n')
+                    dict(type='item.completed', item=dict(id='answer', type='agent_message', text='done')),
+                    dict(type='turn.completed', usage=dict(input_tokens=12, output_tokens=2, cached_input_tokens=8))]) + '\n')
             def wait(child):
                 return 0
             def poll(child):
@@ -333,6 +362,14 @@ class WorkspaceTests(unittest.TestCase):
                 code = runner.run(manifest or self.manifest, 'current task', self.by)
         self.assertEqual(code, 0)
         return calls, [json.loads(line) for line in output.getvalue().splitlines()]
+
+    def test_cli_usage_fallback_is_new_thread_only(self):
+        _, events = self.run_cli()
+        usage = [event for event in events if event['type'] == 'byclaw.usage']
+        self.assertEqual(len(usage), 1)
+        self.assertEqual(usage[0]['usage'], dict(input_tokens=12, output_tokens=2, cached_input_tokens=8))
+        _, resumed = self.run_cli()
+        self.assertFalse(any(event['type'] == 'byclaw.usage' for event in resumed))
 
     def test_config_identity_resume_and_rule_update(self):
         self.cwd.mkdir(parents=True)

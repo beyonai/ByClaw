@@ -71,7 +71,7 @@ export class OtelExporter {
     const exporter = new OTLPTraceExporter({ url: config.endpoint, headers: config.headers }); const processor = new BatchSpanProcessor(exporter, { scheduledDelayMillis: Math.max(100, config.flushIntervalMs) })
     this.provider = new BasicTracerProvider({ resource: resourceFromAttributes({ 'service.name': config.serviceName }), sampler: new ParentBasedSampler({ root: new TraceIdRatioBasedSampler(config.sampleRate) }), spanProcessors: [processor] }); this.tracer = this.provider.getTracer('byclaw-dsh-langfuse', '0.2.0')
   }
-  start(name, attributes, parent) { const parentContext = parent ? trace.setSpanContext(otelContext.active(), parent) : otelContext.active(); return this.tracer.startSpan(name, { kind: SpanKind.INTERNAL, attributes }, parentContext) }
+  start(name, attributes, parent, startTime) { const parentContext = parent ? trace.setSpanContext(otelContext.active(), parent) : otelContext.active(); return this.tracer.startSpan(name, { kind: SpanKind.INTERNAL, attributes, ...(startTime === undefined ? {} : { startTime }) }, parentContext) }
   async close() { await this.provider.forceFlush().catch(() => undefined); await this.provider.shutdown().catch(() => undefined) }
 }
 
@@ -86,7 +86,43 @@ function isFirstResponseChunk(chunk) {
 }
 
 export class ObservationState {
-  constructor(telemetry, ingestion, config) { this.telemetry = telemetry; this.ingestion = ingestion; this.config = config; this.clock = config.clock ?? Date.now; this.runs = new Map(); this.currentRuns = new Map(); this.models = new Map(); this.attempts = new Map(); this.tools = new Map(); this.subagents = new Map(); this.assemblies = new Map(); this.stepInputs = new Map() }
+  constructor(telemetry, ingestion, config) { this.telemetry = telemetry; this.ingestion = ingestion; this.config = config; this.clock = config.clock ?? Date.now; this.runs = new Map(); this.currentRuns = new Map(); this.models = new Map(); this.attempts = new Map(); this.tools = new Map(); this.subagents = new Map(); this.assemblies = new Map(); this.stepInputs = new Map(); this.codingRequests = new Set() }
+  codingExecution(payload) {
+    if (payload?.schemaVersion !== 1 || !['success', 'error'].includes(payload.status)
+      || !['userCode', 'sessionId', 'messageId', 'employeeId'].every(key => typeof payload[key] === 'string' && payload[key].length > 0)
+      || !Number.isFinite(payload.startedAt) || !Number.isFinite(payload.finishedAt) || payload.finishedAt < payload.startedAt
+      || (this.config.userId !== undefined && this.config.userId !== payload.userCode)) return
+    const key = JSON.stringify([payload.userCode, payload.sessionId, payload.messageId, payload.employeeId])
+    if (this.codingRequests.has(key)) return
+    this.codingRequests.add(key)
+    if (this.codingRequests.size > 4096) this.codingRequests.delete(this.codingRequests.values().next().value)
+    const metadata = { executor: 'codex', messageId: payload.messageId, employeeId: payload.employeeId,
+      platformTraceId: payload.traceId, usageScope: 'cli_invocation', usageComplete: payload.usageComplete === true, status: payload.status }
+    const root = this.telemetry.start('codex.run', { 'langfuse.trace.name': 'codex.run', 'langfuse.observation.type': 'span',
+      'langfuse.user.id': payload.userCode, 'langfuse.session.id': payload.sessionId,
+      'langfuse.observation.metadata': json(metadata, this.config) }, undefined, payload.startedAt)
+    const generation = this.telemetry.start('codex.invocation', { 'langfuse.observation.type': 'generation',
+      'langfuse.user.id': payload.userCode, 'langfuse.session.id': payload.sessionId, 'gen_ai.system': 'byclaw',
+      ...(typeof payload.model === 'string' && payload.model ? { 'gen_ai.request.model': payload.model } : {}),
+      'langfuse.observation.metadata': json(metadata, this.config) }, spanContext(root), payload.startedAt)
+    const usage = payload.usage
+    const count = value => Number.isSafeInteger(value) && value >= 0
+    if (usage && count(usage.input_tokens) && count(usage.output_tokens)
+      && Number.isSafeInteger(usage.input_tokens + usage.output_tokens)
+      && (usage.cached_input_tokens === undefined || (count(usage.cached_input_tokens) && usage.cached_input_tokens <= usage.input_tokens))) {
+      generation.setAttribute('gen_ai.usage.input_tokens', usage.input_tokens)
+      generation.setAttribute('gen_ai.usage.output_tokens', usage.output_tokens)
+      if (usage.cached_input_tokens !== undefined) generation.setAttribute('gen_ai.usage.cache_read.input_tokens', usage.cached_input_tokens)
+    }
+    if (payload.status === 'error') {
+      generation.setStatus({ code: SpanStatusCode.ERROR, message: 'coding execution failed' })
+      root.setStatus({ code: SpanStatusCode.ERROR, message: 'coding execution failed' })
+    }
+    generation.end(payload.finishedAt)
+    root.end(payload.finishedAt)
+    if (sampled(root)) this.ingestion.enqueue([{ type: 'trace-create', body: { id: spanContext(root).traceId,
+      name: 'codex.run', sessionId: payload.sessionId, userId: payload.userCode, metadata } }])
+  }
   ensureRun(agent, turn, input) {
     const sessionId = sessionIdOf(agent) ?? 'unknown'; const key = runKey(sessionId, turn); let run = this.runs.get(key)
     if (!run) {
@@ -160,6 +196,7 @@ export function apply(ctx, rawConfig = {}) {
   const ingestion = rawConfig.ingestion ?? new LangfuseIngestion(config, ctx.logger); const state = new ObservationState(telemetry, ingestion, config); const disposers = []; const bus = typeof ctx.root?.on === 'function' ? ctx.root : ctx
   const report = (label, work) => { try { return work() } catch (error) { ctx.logger?.warn?.(`dsh-langfuse: ${label} failed: ${error?.message ?? error}`); return undefined } }
   const on = (event, listener) => { try { const dispose = bus.on(event, listener); if (typeof dispose === 'function') disposers.push(dispose) } catch (error) { ctx.logger?.warn?.(`dsh-langfuse: event ${event} unavailable: ${error?.message ?? error}`) } }
+  on('byclaw/coding-observation', payload => report('coding usage', () => state.codingExecution(payload)))
   on('agent/inbox/claimed', payload => report('input', () => state.claim(payload)))
   on('agent/pre-step', async (payload, next) => { const decision = await next(); report('pre-step', () => state.preStep(payload, decision)); return decision })
   on('system-prompt/assemble', async (assembly, context, next) => { const result = await next(); report('assembly', () => state.assembly(context?.agent, result)); return result })
@@ -176,5 +213,5 @@ export function apply(ctx, rawConfig = {}) {
   ctx.effect(() => async () => { for (const dispose of disposers.splice(0).reverse()) dispose(); await state.close() })
 }
 
-export const DEFAULT_EVENTS = ['session/event', 'session/disposed', 'agent/inbox/claimed', 'agent/pre-step', 'agent/request', 'agent/assistant-stream', 'agent/request-error', 'subagent/start', 'subagent/end', 'tools/pre-execute', 'tools/post-execute']
+export const DEFAULT_EVENTS = ['byclaw/coding-observation', 'session/event', 'session/disposed', 'agent/inbox/claimed', 'agent/pre-step', 'agent/request', 'agent/assistant-stream', 'agent/request-error', 'subagent/start', 'subagent/end', 'tools/pre-execute', 'tools/post-execute']
 export { MAX_TEXT, MAX_ARRAY }

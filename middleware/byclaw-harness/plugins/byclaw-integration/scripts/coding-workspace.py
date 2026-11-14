@@ -757,6 +757,59 @@ def resume_id(home, identity, cwd):
     return None
 
 
+def valid_usage(value):
+    if not isinstance(value, dict):
+        return None
+    keys = ('input_tokens', 'output_tokens', 'cached_input_tokens')
+    if any(not isinstance(value.get(key), int) or isinstance(value.get(key), bool)
+           or not 0 <= value[key] <= 9007199254740991 for key in keys[:2]):
+        return None
+    result = {key: value[key] for key in keys[:2]}
+    if 'cached_input_tokens' in value:
+        cached = value['cached_input_tokens']
+        if not isinstance(cached, int) or isinstance(cached, bool) or not 0 <= cached <= value['input_tokens']:
+            return None
+        result['cached_input_tokens'] = cached
+    if result['input_tokens'] + result['output_tokens'] > 9007199254740991:
+        return None
+    return result
+
+
+def native_usage(home, thread):
+    """Bounded tail read of counters only; never publish native message contents."""
+    if not thread or not re.fullmatch(r'[a-fA-F0-9-]{36}', thread):
+        return None
+    try:
+        paths = list((home / 'sessions').rglob('*' + thread + '*.jsonl'))
+        if len(paths) != 1 or paths[0].is_symlink() or not paths[0].resolve().is_relative_to((home / 'sessions').resolve()):
+            return None
+        with paths[0].open('rb') as source:
+            source.seek(0, os.SEEK_END)
+            source.seek(max(0, source.tell() - 1024 * 1024))
+            lines = source.read().splitlines()
+        for line in reversed(lines):
+            try:
+                event = json.loads(line)
+                payload = event.get('payload') or {}
+                if event.get('type') == 'event_msg' and payload.get('type') == 'token_count':
+                    return valid_usage((payload.get('info') or {}).get('total_token_usage'))
+            except (ValueError, TypeError, AttributeError):
+                continue
+    except OSError:
+        pass
+    return None
+
+
+def invocation_usage(before, after, resumed, cli_usage=None):
+    if after is None:
+        return (valid_usage(cli_usage), 'new_thread_cli') if not resumed else (None, None)
+    if resumed and before is None:
+        return None, None
+    baseline = before if resumed else {}
+    usage = {key: value - baseline.get(key, 0) for key, value in after.items() if not resumed or key in baseline}
+    return valid_usage(usage), 'native_session_delta'
+
+
 def publication_schema():
     return dict(type='object', additionalProperties=False, required=['answer', 'publication'], properties=dict(
         answer=dict(type='string'), publication=dict(anyOf=[dict(type='null'), dict(type='object', additionalProperties=False,
@@ -849,6 +902,9 @@ def run(manifest, prompt, root):
         bridge = PublicationBridge(bridge_directory, publication['bridgeId']) if bridge_directory is not None else None
         cli_started = time.monotonic()
         first_json = first_message = final_message = turn_complete = False
+        usage_before = native_usage(home, thread)
+        native_thread = thread
+        cli_usage = None
         try:
             if bridge is not None:
                 bridge.start()
@@ -874,11 +930,13 @@ def run(manifest, prompt, root):
                             final_message = True
                             milestones.append('cli_final_message')
                     if event.get('type') == 'turn.completed':
+                        cli_usage = event.get('usage')
                         turn_complete = True
                         milestones.append('cli_turn_completed')
                     for milestone in milestones:
                         emit('byclaw.timing', stage=milestone, status='success', elapsedMs=round((time.monotonic() - cli_started) * 1000))
                     if event.get('type') == 'thread.started' and isinstance(event.get('thread_id'), str):
+                        native_thread = event['thread_id']
                         atomic_text(home / 'byclaw-session.json', json.dumps(dict(version=1, identity=manifest['identity'],
                             threadId=event['thread_id'], cwd=str(cwd), home=str(home))))
                 except json.JSONDecodeError:
@@ -915,6 +973,9 @@ def run(manifest, prompt, root):
                     with timing('runner_bridge_close'):
                         bridge.close()
                 deployment.__exit__(None, None, None)
+            usage, usage_source = invocation_usage(usage_before, native_usage(home, native_thread), bool(thread), cli_usage)
+            if usage is not None:
+                emit('byclaw.usage', source=usage_source, usage=usage)
             for path in roots:
                 scope = 'project' if path == cwd else 'session'
                 with timing('scan_after', scope=scope) as metrics:

@@ -33,6 +33,8 @@ npx @deepseek-ai/dsh web --patch "D:\MyProjectGit\ByClawGit\middleware\byclaw-ha
 - 每个 DSH `sessionId + turn` 是一个 `dsh.run` 请求根，不会跨轮覆盖 Input/Output。
 - 只有 `source.kind=user` 的 inbox 消息成为请求输入；技能目录、规则、模型切换通知等注入消息不会冒充用户输入。
 - `agent/request` 生成 `dsh.model` generation，记录最终 provider/model、实际事件提供的 token usage、输入消息、system prompt 和工具定义。
+- 外部 Codex 执行通过 `byclaw/coding-observation` 复用同一通道，生成 `codex.run` 和 `codex.invocation`，按平台用户、会话、消息和模型归属。每个 CLI 请求记录一次输入、输出及其中的缓存输入 token；缓存输入已包含在输入中，不重复相加。
+- Codex 续聊采用原生会话累计计数的本轮前后差值，避免把历史重复记账。续聊缺少可靠基线时不填 token；失败但已取得的用量仍保留。该统计汇总本次 CLI 内多次模型调用，不冒充单次 HTTP 请求，也不推算价格或真正首 token 时间。
 - `tools/pre-execute`/`post-execute` 使用同一 execution token 更新一个 `dsh.tool.*` span，内容写入 `input.value`/`output.value`。
 - 子代理通过父 Agent 的 scoped event 获取父身份；child session 与父 observation 的 trace context 同时写入内存和文件桥，供另一进程恢复。
 - `turn/end` 从 durable `assistant/message` 补写最终输出；晚到的 session/user 属性在结束时再次解析并补写根 trace。
