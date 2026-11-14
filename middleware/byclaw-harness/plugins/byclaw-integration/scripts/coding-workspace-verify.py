@@ -224,6 +224,64 @@ class WorkspaceTests(unittest.TestCase):
         self.home = Path(self.manifest['home'])
         self.cwd = cwd
 
+    def test_snapshot_reuses_unchanged_content_and_detects_committed_changes(self):
+        repo = self.repository()
+        (repo / 'old.bin').write_bytes(b'\x00before')
+        time.sleep(1.05)  # Recent timestamps are deliberately re-read (coarse/remote filesystems).
+        before = runner.scan(repo)
+        metrics = {}
+        after = runner.scan(repo, cached=before[0], metrics=metrics)
+        self.assertEqual(before, after)
+        if os.name != 'nt':
+            self.assertEqual(metrics['readBytes'], 0)
+            self.assertEqual(metrics['cacheHits'], 3)
+        (repo / 'app.txt').write_text('updated\n', encoding='utf-8', newline='\n')
+        (repo / 'new.txt').write_text('added\n', encoding='utf-8', newline='\n')
+        (repo / 'old.bin').unlink()
+        subprocess.run(['git', '-C', str(repo), 'add', '.'], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(repo), '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                        'commit', '-m', 'Committed during task'], check=True, capture_output=True)
+        after = runner.scan(repo, cached=before[0])
+        with patch.object(runner, 'emit') as emit:
+            runner.file_changes(repo, 's1', before, after, self.by)
+        files = [file for call in emit.call_args_list if call.args[0] == 'byclaw.file_changes' for file in call.kwargs['payload']['files']]
+        self.assertEqual({file['path']: file['changeType'] for file in files},
+                         {'app.txt': 'modified', 'new.txt': 'added', 'old.bin': 'deleted'})
+        self.assertTrue(next(file for file in files if file['path'] == 'old.bin')['binary'])
+
+    def test_snapshot_checks_same_size_edits_limits_and_untracked_files(self):
+        self.cwd.mkdir(parents=True)
+        path = self.cwd / 'dirty.txt'
+        path.write_text('before', encoding='utf-8')
+        before = runner.scan(self.cwd)
+        saved = path.stat()
+        path.write_text('after!', encoding='utf-8')
+        # mtime alone is insufficient; ctime/identity are part of the cache key.
+        os.utime(path, ns=(saved.st_atime_ns, saved.st_mtime_ns))
+        (self.cwd / 'untracked.txt').write_text('new', encoding='utf-8')
+        after = runner.scan(self.cwd, cached=before[0])
+        self.assertEqual(after[0]['dirty.txt']['text'], 'after!')
+        self.assertIn('untracked.txt', after[0])
+        with patch.object(runner, 'MAX_FILES', 1):
+            self.assertFalse(runner.scan(self.cwd, cached=before[0])[1])
+
+    def test_incremental_history_preserves_current_metadata_and_restores_without_native_state(self):
+        runner.prepare(self.manifest, self.by)
+        history = [{'role': 'user', 'content': 'previous question'}, {'role': 'assistant', 'content': 'previous result'}]
+        envelope = dict(byclawPromptVersion=1, background='CURRENT_PROJECT_PERMISSION', history=history, task='NEXT_TASK')
+        first, keys = runner.select_prompt(json.dumps(envelope), self.home, None)
+        self.assertIn('previous question', first)
+        state = self.home / 'byclaw-session.json'
+        state.write_text(json.dumps({'historyKeys': keys}), encoding='utf-8')
+        envelope['history'] += [{'role': 'user', 'content': 'new external message'}]
+        second, _ = runner.select_prompt(json.dumps(envelope), self.home, 'thread')
+        self.assertNotIn('previous question', second)
+        for value in ['CURRENT_PROJECT_PERMISSION', 'NEXT_TASK', 'new external message']:
+            self.assertIn(value, second)
+        restored, _ = runner.select_prompt(json.dumps(envelope), self.home, None)
+        self.assertIn('previous question', restored)
+        self.assertEqual(runner.select_prompt('legacy current task', self.home, None), ('legacy current task', None))
+
     def run_cli(self, callback=None, manifest=None):
         calls = []
         thread = '12345678-1234-1234-1234-123456789abc'

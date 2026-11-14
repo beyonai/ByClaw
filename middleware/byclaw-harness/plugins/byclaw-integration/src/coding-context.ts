@@ -10,6 +10,8 @@ import type { ByClawCodingSetup } from './session-extensions.ts'
 
 export interface CodingContext {
   prompt: string
+  /** Runner selects incremental history only after verifying the native resume state. */
+  turnInput?: { byclawPromptVersion: 1; background: string; history: Array<{ role: unknown; content: string }>; task: string }
   /** Executor-only material, excluded from prompts and codingRunManifest. */
   modelEnvironment?: Readonly<Record<string, string>>
   employeeId: string
@@ -101,10 +103,10 @@ export function prepareCodingContext(command: AskAgentCommand, target: Execution
     ]),
     JSON.stringify({ identity, workspace, groupChat: group, groupTask: inbound.groupCoordination }),
     byClawInboundTurnContextDeclaration(inbound),
-    JSON.stringify({ recentHistory: recent }),
   ].join('\n\n')
-  const prompt = [bounded(background, 40 * 1024), '<current-user-task>', target.text, '</current-user-task>'].join('\n\n')
-  return { prompt, employeeId: target.resourceId, persona: template.persona, skills, workspace,
+  const prompt = [bounded(background + '\n\n' + JSON.stringify({ recentHistory: recent }), 40 * 1024), '<current-user-task>', target.text, '</current-user-task>'].join('\n\n')
+  return { prompt, turnInput: { byclawPromptVersion: 1, background: bounded(background, 40 * 1024), history: recent, task: target.text },
+    employeeId: target.resourceId, persona: template.persona, skills, workspace,
     ...(publication === undefined ? {} : { publication }) }
 }
 

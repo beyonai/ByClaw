@@ -47,6 +47,9 @@ export interface ExecutionDiagnostic {
   executionType: ExecutionType
   templateKey: string
   stage: 'queue' | 'sandbox' | 'exec' | 'first_stdout' | 'first_activity' | 'cleanup' | 'request' | 'stderr' | 'native_error'
+    | 'prepare_context' | 'remote_execute' | 'repository_check' | 'forwarding_drain' | 'bridge_close' | 'runner'
+  runner?: { stage: string; elapsedMs: number; scope?: string; files?: number; readBytes?: number; cacheHits?: number; complete?: boolean;
+    promptBytes?: number; historyItems?: number; omittedHistoryItems?: number; resumed?: boolean }
   status: 'start' | 'waiting' | 'success' | 'error'
   elapsedMs: number
   totalElapsedMs: number
@@ -182,7 +185,7 @@ export class ByClawExecutionRouter {
         if (!forwardingError) await this.options.emit(command, context, routed)
       }).catch(error => { forwardingError = error; control.abort(new Error('EXECUTION_EVENT_FORWARDING_FAILED')) })
     }
-    const log = (stage: ExecutionDiagnostic['stage'], status: ExecutionDiagnostic['status'], startedAt: number, extra: Pick<ExecutionDiagnostic, 'exitCode' | 'reason' | 'diagnostic' | 'stderrDiagnostic' | 'nativeErrorType'> = {}) => {
+    const log = (stage: ExecutionDiagnostic['stage'], status: ExecutionDiagnostic['status'], startedAt: number, extra: Pick<ExecutionDiagnostic, 'exitCode' | 'reason' | 'diagnostic' | 'stderrDiagnostic' | 'nativeErrorType' | 'runner'> = {}) => {
       const now = performance.now()
       // Only allowlisted fields reach the logger. No prompt, argv, stdout, stderr or Error object.
       try { this.options.log?.({ sessionId: String(command.header.sessionId), messageId: String(command.header.messageId),
@@ -224,7 +227,20 @@ export class ByClawExecutionRouter {
     const parser = new CodexEventAdapter(event => emit(event, 'cli'), () => {
       if (!firstActivity) { firstActivity = true; log('first_activity', 'success', executionStarted) }
     }, event => {
-      if (event.type === 'byclaw.publication.request') {
+      if (event.type === 'byclaw.timing') {
+        const allowed = ['workspace_prepare', 'skills_prepare', 'config_prepare', 'native_resume', 'context_input', 'scan_before',
+          'scan_after', 'file_changes', 'cli_first_json', 'cli_first_message', 'cli_final_message', 'cli_turn_completed', 'cli_exit', 'runner_bridge_close']
+        if (!allowed.includes(String(event.stage)) || typeof event.elapsedMs !== 'number' || !Number.isFinite(event.elapsedMs) || event.elapsedMs < 0) return
+        const runner: NonNullable<ExecutionDiagnostic['runner']> = { stage: String(event.stage), elapsedMs: event.elapsedMs }
+        for (const key of ['files', 'readBytes', 'cacheHits', 'promptBytes', 'historyItems', 'omittedHistoryItems'] as const) {
+          if (typeof event[key] === 'number' && Number.isFinite(event[key]) && event[key] >= 0) runner[key] = event[key]
+        }
+        for (const key of ['complete', 'resumed'] as const) if (typeof event[key] === 'boolean') runner[key] = event[key]
+        if (event.scope === 'project' || event.scope === 'session') runner.scope = event.scope
+        log('runner', event.status === 'error' ? 'error' : 'success', executionStarted, { runner })
+        if (event.stage === 'cli_turn_completed') emit({ kind: 'progress', id: 'codex-finalizing', title: 'Codex 正在收尾',
+          phase: 'success', detail: '模型答复已生成，正在检查文件变更与仓库状态。' })
+      } else if (event.type === 'byclaw.publication.request') {
         if (publicationBridge === undefined) throw new Error('EXECUTION_PUBLICATION_SCOPE_MISMATCH')
         publicationBridge.accept(event)
       } else if (event.type === 'byclaw.workspace') {
@@ -263,7 +279,9 @@ export class ByClawExecutionRouter {
       signal.throwIfAborted()
       endStage('success')
       startStage('exec', 'Codex 执行任务')
+      const preparationStarted = performance.now()
       prepared = await this.options.prepareContext(command, target, { sandbox, actor, ...lease, signal, identity })
+      log('prepare_context', 'success', preparationStarted)
       signal.throwIfAborted()
       const prompt = prepared.prompt
       if (Buffer.byteLength(prompt, 'utf8') > 64 * 1024) throw new Error('EXECUTION_INPUT_TOO_LARGE')
@@ -289,7 +307,8 @@ export class ByClawExecutionRouter {
           },
         })
       }
-      const argv = ['python3', '-c', CODING_WORKSPACE_RUNNER, JSON.stringify(manifest), prompt, lease.workspaceRoot]
+      const input = prepared.turnInput === undefined ? prompt : JSON.stringify(prepared.turnInput)
+      const argv = ['python3', '-c', CODING_WORKSPACE_RUNNER, JSON.stringify(manifest), input, lease.workspaceRoot]
       executionStarted = performance.now()
       let firstStdout = false
       const deployment = await this.options.deploymentEnabled?.() ?? this.options.environment().BYCLAW_DEPLOY_ENABLED === '1'
@@ -300,6 +319,7 @@ export class ByClawExecutionRouter {
         if (!firstStdout && chunk) { firstStdout = true; log('first_stdout', 'success', executionStarted) }
         parser.write(chunk)
       }, prepared.modelEnvironment)
+      log('remote_execute', processResult.exitCode === 0 ? 'success' : 'error', executionStarted)
       const stderrDiagnostic = summarizeCodingDiagnostic(processResult.stderr)
       // Keep both sources. Prefer a classified native error over unrelated stderr warnings.
       const diagnostic = parser.diagnostic && parser.diagnostic.category !== 'unknown' ? parser.diagnostic
@@ -318,7 +338,9 @@ export class ByClawExecutionRouter {
       const output = codingFinalOutput(parser.finish(processResult.exitCode), prepared?.publication !== undefined,
         prepared?.publication?.mode !== 'mcp')
       if (prepared.workspace.repository !== undefined) {
+        const repositoryStarted = performance.now()
         const state = await codingRepositoryState(sandbox, actor, lease.leaseId, prepared.workspace.repository, lease.workspaceRoot, signal)
+        log('repository_check', 'success', repositoryStarted)
         const version = `仓库当前提交：${state.revision}；${state.dirty ? '存在未提交改动，尚未形成完整交付版本' : '工作区干净'}。`
         output.answer += `\n\n${version}`
         if (output.publication !== undefined) {
@@ -329,7 +351,9 @@ export class ByClawExecutionRouter {
       }
       let answer = output.answer
       endStage('success', undefined, processOutcome)
+      const forwardingStarted = performance.now()
       await forwarding
+      log('forwarding_drain', 'success', forwardingStarted)
       if (forwardingError) throw forwardingError
       if (output.publication !== undefined) {
         signal.throwIfAborted()
@@ -357,7 +381,8 @@ export class ByClawExecutionRouter {
       endStage('error', knownReason ?? code, processOutcome)
     } finally {
       if (heartbeat) clearInterval(heartbeat)
-      try { await publicationBridge?.close() }
+      const bridgeStarted = performance.now()
+      try { await publicationBridge?.close(); log('bridge_close', 'success', bridgeStarted) }
       catch { failure ??= new Error('EXECUTION_PUBLICATION_BRIDGE_FAILED') }
       await settleDisposition()
       if (sandbox) {

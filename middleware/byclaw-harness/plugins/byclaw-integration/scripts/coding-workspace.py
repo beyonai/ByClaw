@@ -31,6 +31,19 @@ def emit(kind, **values):
         print(json.dumps(dict(type=kind, **values), ensure_ascii=False), flush=True)
 
 
+@contextlib.contextmanager
+def timing(stage, **metadata):
+    """Only explicit counters/labels; never include prompts, paths or credentials."""
+    started = time.monotonic()
+    status = 'error'
+    try:
+        yield metadata
+        status = 'success'
+    finally:
+        emit('byclaw.timing', stage=stage, status=status,
+             elapsedMs=round((time.monotonic() - started) * 1000), **metadata)
+
+
 def atomic_text(path, text):
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if path.is_symlink():
@@ -562,21 +575,46 @@ def is_runtime_environment(path):
     return False
 
 
-def scan(root):
+def scan(root, cached=None, metrics=None):
+    """Enumerate once per directory; reuse content only for an identical stat fingerprint.
+
+    The cache is limited to this execution, never persisted. A commit cannot hide a
+    change because the comparison is of filesystem snapshots, not final git status.
+    """
     entries = {}
     total_text = 0
     complete = True
-    for directory, children, files in os.walk(root, followlinks=False):
-        children[:] = sorted(name for name in children
-                              if name not in EXCLUDED
-                              and not (Path(directory) / name).is_symlink()
-                              and not is_runtime_environment(Path(directory) / name))
-        for name in sorted(files):
-            path = Path(directory) / name
-            if path.is_symlink() or name.startswith('.coding-'):
+    cached = cached or {}
+    counters = metrics if metrics is not None else {}
+    counters.update(files=0, readBytes=0, cacheHits=0)
+    stable_before = time.time_ns() - 1_000_000_000
+    directories = [root]
+    while directories:
+        directory = directories.pop()
+        try:
+            with os.scandir(directory) as source:
+                children = sorted(source, key=lambda entry: entry.name)
+            names = {entry.name for entry in children}
+            # Avoid probing three absent environment markers in every source directory on NFS.
+            if ('pyvenv.cfg' in names or 'bin' in names or 'Scripts' in names) and is_runtime_environment(directory):
                 continue
+        except (FileNotFoundError, PermissionError):
+            complete = False
+            continue
+        subdirectories = []
+        for entry in children:
+            name = entry.name
             try:
-                info = path.stat()
+                if entry.is_symlink():
+                    continue
+                path = Path(entry.path)
+                if entry.is_dir(follow_symlinks=False):
+                    if name not in EXCLUDED:
+                        subdirectories.append(path)
+                    continue
+                if name.startswith('.coding-'):
+                    continue
+                info = entry.stat(follow_symlinks=False)
                 if not stat.S_ISREG(info.st_mode):
                     continue
                 if len(entries) >= MAX_FILES:
@@ -584,9 +622,22 @@ def scan(root):
                     break
                 text = None
                 digest = None
+                key = path.relative_to(root).as_posix()
+                fingerprint = (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+                old = cached.get(key)
                 if info.st_size <= MAX_TEXT and total_text + info.st_size <= MAX_TOTAL_TEXT:
+                    # Windows ctime is creation time, so it cannot detect an mtime-restored edit.
+                    if (os.name != 'nt' and old is not None and old.get('stable')
+                            and old.get('fingerprint') == fingerprint and old['digest'] is not None):
+                        digest, text = old['digest'], old['text']
+                        counters['cacheHits'] += 1
+                        if text is not None:
+                            total_text += len(text.encode('utf-8'))
+                        entries[key] = dict(old)
+                        continue
                     with path.open('rb') as source:
                         content = source.read(MAX_TEXT + 1)
+                    counters['readBytes'] += len(content)
                     # A concurrent writer can grow the file after stat(); never read it unbounded.
                     digest = hashlib.sha256(content).hexdigest() if len(content) <= MAX_TEXT else None
                     if digest is not None and b'\0' not in content:
@@ -595,12 +646,44 @@ def scan(root):
                             total_text += len(content)
                         except UnicodeDecodeError:
                             pass
-                entries[path.relative_to(root).as_posix()] = dict(size=info.st_size, mtime=info.st_mtime_ns, digest=digest, text=text)
+                entries[key] = dict(size=info.st_size, mtime=info.st_mtime_ns, digest=digest, text=text, fingerprint=fingerprint,
+                                    stable=max(info.st_mtime_ns, info.st_ctime_ns) < stable_before)
             except (FileNotFoundError, PermissionError):
                 complete = False
         if not complete and len(entries) >= MAX_FILES:
             break
+        directories.extend(reversed(subdirectories))
+    counters.update(files=len(entries), complete=complete)
     return entries, complete
+
+
+def select_prompt(value, home, thread):
+    """Legacy callers remain valid; missing native state always restores full history."""
+    try:
+        data = json.loads(value)
+    except ValueError:
+        return value, None
+    if not isinstance(data, dict) or data.get('byclawPromptVersion') != 1:
+        return value, None
+    history = data['history']
+    keys = [hashlib.sha256(json.dumps(item, ensure_ascii=False, sort_keys=True).encode()).hexdigest() for item in history]
+    previous = []
+    if thread:
+        state = json.loads((home / 'byclaw-session.json').read_text(encoding='utf-8'))
+        previous = state.get('historyKeys', [])
+    known = set(previous)
+    selected = [(key, item) for key, item in zip(keys, history) if key not in known]
+    def render():
+        return data['background'] + '\n\n' + json.dumps({'recentHistory': [item for _, item in selected]}, ensure_ascii=False)
+    background = render()
+    while selected and len(background.encode()) > 40 * 1024:
+        selected.pop(0)
+        background = render()
+    prompt = '\n\n'.join([background, '<current-user-task>', data['task'], '</current-user-task>'])
+    emit('byclaw.timing', stage='context_input', status='success', elapsedMs=0,
+         promptBytes=len(prompt.encode()), historyItems=len(selected), omittedHistoryItems=len(history) - len(selected), resumed=bool(thread))
+    # Store only hashes, and only after a successful native turn. Bound state size.
+    return prompt, list(dict.fromkeys([*previous, *(key for key, _ in selected)]))[-256:]
 
 
 def file_changes(root, session_id, before, after, by_root):
@@ -612,7 +695,7 @@ def file_changes(root, session_id, before, after, by_root):
         # A bounded scan cannot prove absence outside its covered set.
         if (old is None and not before_complete) or (new is None and not after_complete):
             continue
-        if old == new or (old and new and old['digest'] is not None and old['digest'] == new['digest']):
+        if old == new or (old and new and old.get('fingerprint') is not None and old['fingerprint'] == new.get('fingerprint')) or (old and new and old['digest'] is not None and old['digest'] == new['digest']):
             continue
         old_text, new_text = old and old['text'], new and new['text']
         binary = (old is not None and old_text is None) or (new is not None and new_text is None)
@@ -712,7 +795,8 @@ def run(manifest, prompt, root):
     model_values = os.environ.pop('BYCLAW_CODEX_CONNECTION', '')
     for key in ('CODEX_AUTH', 'CODEX_MODEL', 'CODEX_BASE_URL', 'BYCLAW_CODEX_API_KEY'):
         os.environ.pop(key, None)
-    home, cwd = prepare(manifest, root)
+    with timing('workspace_prepare'):
+        home, cwd = prepare(manifest, root)
     with identity_lock(home / '.execution.lock'):
         try:
             connection = json.loads(model_values)
@@ -723,9 +807,13 @@ def run(manifest, prompt, root):
         default_home = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex')))
         default_config = default_home / 'config.toml'
         if manifest.get('prepareAgentSkills'):
-            prepare_agent_skills(manifest, root)
-        bridge_directory = setup_config(manifest, home, cwd, default_config)
-        thread = resume_id(home, manifest['identity'], cwd)
+            with timing('skills_prepare'):
+                prepare_agent_skills(manifest, root)
+        with timing('config_prepare'):
+            bridge_directory = setup_config(manifest, home, cwd, default_config)
+        with timing('native_resume'):
+            thread = resume_id(home, manifest['identity'], cwd)
+            prompt, history_keys = select_prompt(prompt, home, thread)
         emit('byclaw.workspace', status='resumed' if thread else 'created')
         args = ['codex', 'exec', '--json', '--skip-git-repo-check']
         if thread:
@@ -749,13 +837,18 @@ def run(manifest, prompt, root):
                 prompt += '\n填写 publication 仅是请求；宿主调用成功后才表示已准备待确认内容，不得声称已上传、发群或完成任务。'
         environment = dict(os.environ, BYCLAW_CODEX_API_KEY=connection['apiKey'], CODEX_HOME=str(home), BYCLAW_AGENT_ID=manifest['employeeId'], DSH_BYCLAW_AGENT_ID=manifest['employeeId'])
         roots = list(dict.fromkeys([cwd, Path(manifest['workspace']['sessionRoot'])]))
-        before = {path: scan(path) for path in roots}
+        before = {}
+        for path in roots:
+            with timing('scan_before', scope='project' if path == cwd else 'session') as metrics:
+                before[path] = scan(path, metrics=metrics)
         environment.update(deployment_values)
         deployment = deployment_environment(environment, root)
         environment = deployment.__enter__()
         deploying = 'BYCLAW_DEPLOY_CONTEXT' in environment
         child = None
         bridge = PublicationBridge(bridge_directory, publication['bridgeId']) if bridge_directory is not None else None
+        cli_started = time.monotonic()
+        first_json = first_message = final_message = turn_complete = False
         try:
             if bridge is not None:
                 bridge.start()
@@ -768,6 +861,23 @@ def run(manifest, prompt, root):
             for line in child.stdout:
                 try:
                     event = json.loads(line)
+                    milestones = []
+                    if not first_json:
+                        first_json = True
+                        milestones.append('cli_first_json')
+                    item = event.get('item') or {}
+                    if event.get('type') == 'item.completed' and item.get('type') == 'agent_message':
+                        if not first_message:
+                            first_message = True
+                            milestones.append('cli_first_message')
+                        if item.get('phase') == 'final_answer' and not final_message:
+                            final_message = True
+                            milestones.append('cli_final_message')
+                    if event.get('type') == 'turn.completed':
+                        turn_complete = True
+                        milestones.append('cli_turn_completed')
+                    for milestone in milestones:
+                        emit('byclaw.timing', stage=milestone, status='success', elapsedMs=round((time.monotonic() - cli_started) * 1000))
                     if event.get('type') == 'thread.started' and isinstance(event.get('thread_id'), str):
                         atomic_text(home / 'byclaw-session.json', json.dumps(dict(version=1, identity=manifest['identity'],
                             threadId=event['thread_id'], cwd=str(cwd), home=str(home))))
@@ -777,6 +887,13 @@ def run(manifest, prompt, root):
                     sys.stdout.write(line)
                     sys.stdout.flush()
             code = child.wait()
+            emit('byclaw.timing', stage='cli_exit', status='success' if code == 0 else 'error',
+                 elapsedMs=round((time.monotonic() - cli_started) * 1000))
+            if code == 0 and turn_complete and history_keys is not None:
+                state_path = home / 'byclaw-session.json'
+                state = json.loads(state_path.read_text(encoding='utf-8'))
+                state['historyKeys'] = history_keys
+                atomic_text(state_path, json.dumps(state))
         finally:
             try:
                 if child is not None:
@@ -795,10 +912,15 @@ def run(manifest, prompt, root):
                     child.stdout.close()
             finally:
                 if bridge is not None:
-                    bridge.close()
+                    with timing('runner_bridge_close'):
+                        bridge.close()
                 deployment.__exit__(None, None, None)
             for path in roots:
-                file_changes(path, Path(manifest['workspace']['sessionRoot']).name, before[path], scan(path), root)
+                scope = 'project' if path == cwd else 'session'
+                with timing('scan_after', scope=scope) as metrics:
+                    after = scan(path, cached=before[path][0], metrics=metrics)
+                with timing('file_changes', scope=scope):
+                    file_changes(path, Path(manifest['workspace']['sessionRoot']).name, before[path], after, root)
         return code
 
 

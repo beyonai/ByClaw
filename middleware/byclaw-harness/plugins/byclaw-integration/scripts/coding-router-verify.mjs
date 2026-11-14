@@ -562,3 +562,19 @@ test('configuration failures emit safe assistant errors and still release their 
   assert.equal(f.releases.length, 1)
   assert.equal(f.dshCalls, 0)
 })
+
+test('runner timing uses allowlisted counters and finalizing progress does not complete a failed turn', async () => {
+  const f = fixture({ execute: async ({ onStdout }) => {
+    onStdout(jsonl({ type: 'byclaw.timing', stage: 'scan_after', elapsedMs: 12, status: 'success', scope: 'project',
+      files: 3, readBytes: 0, cacheHits: 3, complete: true, prompt: 'private-prompt', token: 'private-token' },
+    { type: 'byclaw.timing', stage: 'untrusted-private-stage', elapsedMs: 7 },
+    { type: 'byclaw.timing', stage: 'cli_turn_completed', elapsedMs: 30, status: 'success' }))
+    return { exitCode: 1, stdout: '', stderr: '' }
+  } })
+  await assert.rejects(f.run(), /EXECUTION_FAILED/)
+  assert.deepEqual(f.logs.filter(log => log.stage === 'runner').map(log => log.runner.stage), ['scan_after', 'cli_turn_completed'])
+  assert.equal(f.logs.find(log => log.runner?.stage === 'scan_after').runner.cacheHits, 3)
+  assert.doesNotMatch(JSON.stringify(f.logs), /private-prompt|private-token|untrusted-private/)
+  assert.ok(f.events.some(event => event.id === 'codex-finalizing'))
+  assert.equal(f.releases.length, 1)
+})
