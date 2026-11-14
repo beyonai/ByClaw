@@ -66,6 +66,32 @@ test('C09 identity separates employees/sessions and the no-project cwd is the or
   assert.throws(() => prepareCodingContext(bad, target, template, skills), /INVALID_HISTORY/)
 })
 
+test('real group snapshot messages join incremental history while current metadata and policy stay in background', () => {
+  const cmd = command()
+  cmd.extraPayload.groupContextSnapshot = {
+    schemaVersion: 'byclaw.group-chat-context/v1', conversationKey: 'g1',
+    snapshot: { beforeMessageId: 'latest', generatedAt: 123 },
+    truncation: { truncated: true, omittedMessageCount: 4 },
+    messages: Array.from({ length: 60 }, (_, id) => ({
+      messageId: `group-${id}`, role: 'user', content: `GROUP_FACT_${id}:` + 'x'.repeat(400),
+      speaker: { displayName: 'Customer' }, replyTo: { messageId: 'quoted', content: 'quoted fact' },
+      attachments: [{ filePath: '/by/.shared/project_8/design.txt' }], api_key: 'DO_NOT_HAND_OFF',
+    })),
+  }
+  const prepared = prepareCodingContext(cmd, target, template, skills)
+  const input = prepared.turnInput
+  assert.equal(input.history.filter(item => item.role === 'group-reference').length, 60)
+  assert.ok(!input.background.includes('GROUP_FACT_'))
+  for (const value of ['latest', 'omittedMessageCount', 'group-history/g1.md', 'input.txt', 'context_policy: Public conversation facts only']) {
+    assert.ok(input.background.includes(value), value)
+  }
+  assert.ok(Buffer.byteLength(input.background) < 10 * 1024)
+  assert.equal(JSON.parse(input.history[0].content).replyTo.content, 'quoted fact')
+  assert.equal(JSON.parse(input.history[0].content).attachments[0].filePath, '/by/.shared/project_8/design.txt')
+  assert.ok(prepared.prompt.includes('GROUP_FACT_'), 'legacy callers retain the bounded full context')
+  assert.ok(!JSON.stringify(prepared).includes('DO_NOT_HAND_OFF'))
+})
+
 test('background is bounded with a visible notice and never truncates the current question', () => {
   const cmd = command()
   cmd.extraPayload.history = Array.from({ length: 50 }, () => ({ role: 'user', content: 'x'.repeat(5000) }))

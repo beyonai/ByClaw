@@ -282,6 +282,28 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn('previous question', restored)
         self.assertEqual(runner.select_prompt('legacy current task', self.home, None), ('legacy current task', None))
 
+    def test_group_facts_are_deduplicated_but_edits_and_current_snapshot_are_sent(self):
+        runner.prepare(self.manifest, self.by)
+        facts = [{'role': 'group-reference', 'content': json.dumps(dict(
+            conversationKey='g1', messageId=str(i), content='GROUP_FACT_' + str(i),
+            speaker={'displayName': 'Customer'}, attachments=[{'filePath': '/by/design.txt'}]))}
+            for i in range(60)]
+        envelope = dict(byclawPromptVersion=1, background='CURRENT_SNAPSHOT_PERMISSION', history=facts, task='TASK')
+        first, keys = runner.select_prompt(json.dumps(envelope), self.home, None)
+        self.assertIn('GROUP_FACT_0', first)
+        self.assertIn('GROUP_FACT_59', first)
+        (self.home / 'byclaw-session.json').write_text(json.dumps({'historyKeys': keys}), encoding='utf-8')
+        second, _ = runner.select_prompt(json.dumps(envelope), self.home, 'thread')
+        self.assertNotIn('GROUP_FACT_', second)
+        self.assertIn('CURRENT_SNAPSHOT_PERMISSION', second)
+        self.assertLess(len(second.encode()), len(first.encode()) / 10)
+        facts[0] = {'role': 'group-reference', 'content': 'EDITED_GROUP_FACT_0'}
+        changed, _ = runner.select_prompt(json.dumps(envelope), self.home, 'thread')
+        self.assertIn('EDITED_GROUP_FACT_0', changed)
+        self.assertNotIn('GROUP_FACT_59', changed)
+        restored, _ = runner.select_prompt(json.dumps(envelope), self.home, None)
+        self.assertIn('GROUP_FACT_59', restored)
+
     def run_cli(self, callback=None, manifest=None):
         calls = []
         thread = '12345678-1234-1234-1234-123456789abc'
