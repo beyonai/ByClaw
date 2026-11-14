@@ -161,7 +161,7 @@ class GroupChatGatewayExecutorTest extends I18nTestSupport {
         assertThat(decorated).containsOnlyOnce("/by/.sessions/60/.byclaw/context/members/group-members.json");
         assertThat(child.getMessageContent()).doesNotContain("group-chat-disposition.json");
         Map<?, ?> groupChat = (Map<?, ?>) params.get("groupChat");
-        assertThat(groupChat.get("executionId")).isEqualTo(50L);
+        assertThat(groupChat.get("executionId")).isEqualTo("50");
         assertThat(groupChat.get("groupHistoryPath"))
             .isEqualTo("/by/.sessions/60/.byclaw/context/turn/group-history.json");
         assertThat(groupChat.get("originalContent")).isEqualTo(child.getMessageContent());
@@ -280,6 +280,31 @@ class GroupChatGatewayExecutorTest extends I18nTestSupport {
     }
 
     @Test
+    void privateCoordinatedRootAttachesExecutionScopeWithoutGroupBroadcastMarkers() {
+        when(executions.selectByCandidateSessionId(60L)).thenReturn(null);
+        ByaiGroupChatTask direct = new ByaiGroupChatTask();
+        direct.setTaskSessionId(60L); direct.setGroupSessionId(10L); direct.setStatus("PRIVATE");
+        direct.setInitiatorUserId(30L); direct.setTargetAgentId(40L);
+        when(tasks.selectById(60L)).thenReturn(direct);
+        var scopes = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCoordinationService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(executor, "coordinationService", scopes);
+        Map<String, Object> scope = Map.of("mode", "COORDINATED", "coordinatorAgentId", "40",
+            "taskSessionId", "60", "groupSessionId", "10", "allowedAgentIds", List.of("50"));
+        when(scopes.findScope(60L)).thenReturn(scope);
+        ChatProcessContext context = new ChatProcessContext(null, new AssistantChatDto());
+        context.sessionId = 60L; context.userId = 30L;
+        context.assistantChatDto.setAgentId(40L);
+        Map<String, Object> gateway = new HashMap<>();
+
+        String result = executor.decorate(context, "完成待办", gateway).toString();
+
+        assertThat(gateway).containsEntry("groupCoordination", scope).containsEntry("cwd", "/by/.sessions/60")
+            .containsKeys("groupCoordinator", "groupPrivatePublication").doesNotContainKey("groupChat");
+        assertThat(result).contains("统一协调").doesNotContain("group-chat-disposition.json");
+        verifyNoInteractions(historyFiles);
+    }
+
+    @Test
     void onlyActivePrivateTaskFollowupsReceiveDeliveryReminderWithoutReclassification() {
         execution.setStatus("CONVERSATION");
         ByaiGroupChatTask task = new ByaiGroupChatTask();
@@ -360,7 +385,7 @@ class GroupChatGatewayExecutorTest extends I18nTestSupport {
             Map<String, Object> params = new HashMap<>();
             String result = (String) executor.decorate(context, "继续", params);
             assertThat(result).contains("task-history.jsonl", "group-history.json", "[任务交付提醒]", "/by/.sessions/60/.byclaw/task-delivery.json").doesNotContain("群聊判定协议");
-            assertThat(((Map<?, ?>) params.get("groupChat")).get("targetAgentId")).isEqualTo(40L);
+            assertThat(((Map<?, ?>) params.get("groupChat")).get("targetAgentId")).isEqualTo("40");
             verify(taskAuthorization).requireActiveAgent(60L, agentId);
         }
         assertThat(task.getTargetAgentId()).isEqualTo(40L);

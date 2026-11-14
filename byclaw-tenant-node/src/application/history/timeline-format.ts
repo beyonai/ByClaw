@@ -86,6 +86,10 @@ export async function displayMessages(
       messageId: row.messageId,
       // Notification consumers must verify a committed complete message before delivery.
       complete: row.isComplete === true,
+      // Expose only the public card reference, never private runtime metadata.
+      metadata: !recalled(source) && !isSnapshotOnly(meta) &&
+        ["HUMAN_TASK_PROPOSAL", "HUMAN_TASK_BATCH"].includes(meta.kind) && meta.batchId != null
+        ? { scene: "GROUP_CHAT", kind: meta.kind, batchId: String(meta.batchId) } : undefined,
       clientRequestId: meta.clientRequestId,
       responseId: isSnapshotOnly(meta) ? undefined : meta.responseId,
       mentionAllUsers: !recalled(source) && !isSnapshotOnly(meta) && meta.mentionAllUsers === true,

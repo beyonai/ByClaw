@@ -260,6 +260,8 @@ Redis 模型的 `instanceParam.connectTimeoutSec` 只限制 TCP/TLS 建立连接
 
 外部 Worker 委派经已有 Gateway 转交本次用户输入的文件和文档引用，支持 COMMON_FILE、KG_DOC_FILE 及兼容 KG_DOC。文件字段与资源字段使用白名单投影，排除员工引用及根员工身份、模型覆盖；文件夹等不支持的资源类型明确失败回传团长。此步骤只转交已有引用，不额外上传文件或增加外部目的地，执行者仍须属于当前任务冻结范围。
 
+真人待办的 PRIVATE 协调私聊沿用同一服务端协作范围，提交权限只绑定主私聊。外部 Worker 载荷移除根会话的 `groupPrivatePublication`、`groupChat`、`humanTaskId` 和 `tenantGroupTask`，委派结果返回协调者后由主私聊准备提交；子执行不能继承主会话的发布或提交身份。可独立运行 `node scripts/group-worker-publication-verify.mjs` 检查此载荷边界。
+
 存量 ACTIVE 任务首次续聊时，只接受服务端提供的 DIRECT scope 一次性升级；原 employee template、外部任务 ID、cwd、生命周期不变，保留原会话上下文。既有 scope 不能扩大，普通会话不能改绑成 COORDINATED。单员工请求团长的协助子会话不重复输出平台 CHAT/TASK 分类。
 
 成员使用配置中的执行方式：稳定 HARNESS / BYCLAW_DSH 类型在 Harness 内运行；BYCLAW_CODE / BYCLAW_EXE 的 SDK 派发使用当前用户 Worker 后缀，并固定同一类型的在线 Worker；不存在精确 Worker 时失败，不接受跨引擎 fallback。团队成员不继承 ENABLE_DSH 对用户根请求的全局路由覆写。FROM_THIRD 且 INTERFACE/A2A 的成员需要专门的接口任务适配器；当前显式拒绝，不用默认 Worker 替代。

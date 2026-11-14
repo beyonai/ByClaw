@@ -38,6 +38,13 @@ public interface ByaiGroupChatTaskMapper extends BaseMapper<ByaiGroupChatTask> {
 
     int restoreClosedDirectSession(@Param("taskId") Long taskId, @Param("now") Date now);
 
+    @org.apache.ibatis.annotations.Select("SELECT COUNT(*) FROM byai_group_human_task_session WHERE task_session_id=#{taskId}")
+    int countHumanBinding(@Param("taskId") Long taskId);
+
+    /** 专用待办私聊不参与普通固定员工私聊的最早会话选择。 */
+    @org.apache.ibatis.annotations.Select("SELECT COUNT(*) FROM byai_group_human_task_session h JOIN byai_group_human_task t ON t.human_task_id=h.human_task_id WHERE h.task_session_id=#{taskId} AND h.entry_type='PRIVATE' AND t.group_session_id=#{groupId}")
+    int countHumanPrivateBinding(@Param("taskId") Long taskId, @Param("groupId") Long groupId);
+
     ByaiSession selectLegacyDirectSession(@Param("groupId") Long groupId, @Param("userId") Long userId, @Param("agentId") Long agentId);
 
     ByaiGroupChatTask selectDirectOwner(@Param("sessionId") Long sessionId);

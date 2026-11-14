@@ -84,6 +84,8 @@ public class GroupChatTaskAuthorizationService {
             throw new IllegalArgumentException(I18nUtil.get("groupchat.task.agentDenied"));
         }
         requireAuthorizedGroupAgent(task.getGroupSessionId(), agentId);
+        // 真人待办私聊按独立绑定授权，不与普通固定员工私聊竞争最早会话。
+        if (taskMapper.countHumanPrivateBinding(task.getTaskSessionId(), task.getGroupSessionId()) > 0) return;
         // 已经绑定时以绑定为准；首次打开前也只允许最早的历史私聊接受写入。
         ByaiGroupChatTask canonical = taskMapper.selectBoundDirect(task.getGroupSessionId(), task.getInitiatorUserId(), agentId);
         if (canonical == null) {

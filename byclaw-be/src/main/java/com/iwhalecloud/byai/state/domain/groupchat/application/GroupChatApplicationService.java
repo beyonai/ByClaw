@@ -75,6 +75,10 @@ import com.iwhalecloud.byai.state.domain.chat.model.MessageResourceDto;
 /** 群聊资源创建和成员管理用例。 */
 @Service
 public class GroupChatApplicationService {
+    @Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.humantask.HumanTaskService humanTasks;
+    @Autowired
+    private GroupChatTaskService humanExecutionTasks;
     /** Immutable server-owned scope marker; NONE distinguishes personal groups from storage fallback IDs. */
     public static final String BUSINESS_ENTERPRISE_EXT = SharedQuotaAdmission.BUSINESS_ENTERPRISE_EXT;
     @Autowired
@@ -299,6 +303,13 @@ public class GroupChatApplicationService {
                 return existing.getMessageId();
             }
         }
+        if (command.getHumanTaskId() != null) {
+            JSONObject human = humanTasks.task(command.getHumanTaskId());
+            if (!session.getSessionId().toString().equals(human.getString("groupSessionId"))
+                || "ACCEPTED".equals(human.getString("status")) || mentionedAgentIds.isEmpty()) {
+                throw new GroupChatMessageRejectedException("HUMAN_TASK_INVALID_EXECUTION");
+            }
+        }
         Long messageId = sequenceService.nextVal();
         ByaiMessage message = new ByaiMessage();
         message.setId(messageId);
@@ -318,6 +329,7 @@ public class GroupChatApplicationService {
         message.setMessageRef(command.getReplyToMessageId() != null ? command.getReplyToMessageId() : command.getSourceMessageId());
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("scene", "GROUP_CHAT");
+        if (command.getHumanTaskId() != null) metadata.put("humanTaskId", command.getHumanTaskId().toString());
         metadata.put("clientRequestId", command.getClientRequestId());
         metadata.put("resourceList", command.getResourceList());
         metadata.put("mentionAllUsers", Boolean.TRUE.equals(command.getMentionAllUsers()));
@@ -360,6 +372,7 @@ public class GroupChatApplicationService {
                 var execution = executionCoordinator.enqueueCoordinated(session.getSessionId(), messageId,
                     command.getReplyToMessageId(), CurrentUserHolder.getCurrentUserId(), coordinatorId,
                     new ArrayList<>(mentionedAgentIds));
+                bindHumanExecution(command, execution);
                 Map<String, Object> scope = coordinationService.findScope(execution.getCandidateSessionId());
                 metadata.put("groupCoordination", scope);
                 message.setMetadata(JSON.toJSONString(metadata));
@@ -369,7 +382,8 @@ public class GroupChatApplicationService {
             else {
                 Long agentId = mentionedAgentIds.iterator().next();
                 var execution = executionCoordinator.enqueue(session.getSessionId(), messageId,
-                    command.getReplyToMessageId(), CurrentUserHolder.getCurrentUserId(), agentId, null, messageId);
+                    command.getHumanTaskId() == null ? command.getReplyToMessageId() : null, CurrentUserHolder.getCurrentUserId(), agentId, null, messageId);
+                bindHumanExecution(command, execution);
                 if (coordinationService.findScope(execution.getCandidateSessionId()) == null) {
                     List<Long> collaborators = memberService.findSessionMembers(session.getSessionId(), "AGENT", null)
                         .stream().map(ByaiSessionMember::getMemObjId).toList();
@@ -379,8 +393,12 @@ public class GroupChatApplicationService {
             }
         }
         else {
-            mentionedAgentIds.forEach(agentId -> executionCoordinator.enqueue(session.getSessionId(), messageId,
-                command.getReplyToMessageId(), CurrentUserHolder.getCurrentUserId(), agentId, null, messageId));
+            mentionedAgentIds.forEach(agentId -> {
+                var execution = executionCoordinator.enqueue(session.getSessionId(), messageId,
+                    command.getHumanTaskId() == null ? command.getReplyToMessageId() : null,
+                    CurrentUserHolder.getCurrentUserId(), agentId, null, messageId);
+                bindHumanExecution(command, execution);
+            });
         }
         // A rejected continuation must not leave a broadcast message whose database transaction rolled back.
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -509,6 +527,14 @@ public class GroupChatApplicationService {
      * 以及对话上传的 COMMON_FILE）。它们只是消息内容的一部分，不是群成员，不能参与成员
      * 校验、ID 转换或 Agent 委派；原始 resourceList 会继续保存到消息元数据并广播给客户端。
      */
+    private void bindHumanExecution(ChatMessage command,
+        com.iwhalecloud.byai.manager.entity.groupchat.ByaiGroupChatExecution execution) {
+        if (command.getHumanTaskId() == null) return;
+        JSONObject human = humanTasks.task(command.getHumanTaskId());
+        humanExecutionTasks.promote(execution, human.getString("title"), null);
+        humanTasks.bind(command.getHumanTaskId(), execution.getCandidateSessionId(), "GROUP");
+    }
+
     private Set<Long> validateAndResolveMemberResources(Long sessionId, List<ResourceVo> resourceList) {
         Set<Long> agentIds = new LinkedHashSet<>();
         Map<Long, String> referencedMemberTypes = new HashMap<>();
@@ -1133,6 +1159,50 @@ public class GroupChatApplicationService {
             restorePrivateSession(task);
         }
         groupChatTaskMapper.insertDirectBinding(task);
+        return task;
+    }
+
+    /** 每个待办使用独立私聊，避免固定员工私聊被永久绑定到首次待办。 */
+    @Transactional
+    public ByaiGroupChatTask createHumanTaskPrivateSession(Long groupSessionId, Long agentId) {
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        sessionService.lockById(groupSessionId);
+        ByaiSession group = authorizationService.requireGroup(groupSessionId);
+        authorizationService.requireCurrentUserMember(groupSessionId);
+        ByaiSessionMember agent = requireDirectMember(groupSessionId, agentId);
+        return savePrivateTask(saveDirectSession(group, userId, agentId), agent);
+    }
+
+    /** 待办多员工私聊由群内已启用的工作助手协调，授权范围只包含本次选择的员工。 */
+    @Transactional
+    public ByaiGroupChatTask createHumanTaskPrivateSession(Long groupSessionId, List<Long> agentIds) {
+        if (agentIds == null || agentIds.isEmpty() || agentIds.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw new IllegalArgumentException("HUMAN_TASK_INVALID_AGENT_IDS");
+        }
+        List<Long> selected = agentIds.stream().distinct().sorted().toList();
+        if (selected.size() > 100) throw new IllegalArgumentException("HUMAN_TASK_INVALID_AGENT_IDS");
+        if (selected.size() == 1) return createHumanTaskPrivateSession(groupSessionId, selected.getFirst());
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        if (userId == null || userId <= 0) throw new IllegalArgumentException(I18nUtil.get("groupchat.loginRequired"));
+        sessionService.lockById(groupSessionId);
+        ByaiSession group = authorizationService.requireGroup(groupSessionId);
+        authorizationService.requireCurrentUserMember(groupSessionId);
+        selected.forEach(agentId -> requireDirectMember(groupSessionId, agentId));
+        // Private creation must not enable coordination or add a missing assistant to the group.
+        if (workAssistantService == null || coordinationService == null
+            || sessionExtService.findOneByExtParamCode(groupSessionId, GroupWorkAssistantService.COORDINATOR_EXT) == null) {
+            throw new IllegalArgumentException("HUMAN_TASK_COORDINATOR_UNAVAILABLE");
+        }
+        Long coordinatorId = workAssistantService.resolveCoordinatorId(groupSessionId);
+        var resource = coordinatorId == null ? null : resourceService.findById(coordinatorId);
+        if (resource == null || !"DIG_EMPLOYEE".equals(resource.getResourceBizType())
+            || !Integer.valueOf(2).equals(resource.getResourceStatus())) {
+            throw new IllegalArgumentException("HUMAN_TASK_COORDINATOR_UNAVAILABLE");
+        }
+        ByaiSessionMember coordinator = requireDirectMember(groupSessionId, coordinatorId);
+        ByaiGroupChatTask task = savePrivateTask(saveDirectSession(group, userId, coordinatorId), coordinator);
+        task.setGroupCoordination(coordinationService.resolveForExecution(groupSessionId, task.getTaskSessionId(),
+            selected, coordinatorId, GroupChatCoordinationService.COORDINATED));
         return task;
     }
 

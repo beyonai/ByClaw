@@ -1,3 +1,5 @@
+import { humanTaskRoutes } from './human-task-routes.js';
+import type { HumanTaskRepository } from '../../infrastructure/persistence/human-task-repository.js';
 import Fastify from "fastify";
 import type { SecureContextOptions } from "node:tls";
 import type { Config } from "../../config.js";
@@ -45,6 +47,7 @@ const readOnlyPosts = new Set([
 ]);
 
 export interface HttpServices {
+  humanTasks?: Pick<HumanTaskRepository, 'call'>;
   memberGroupRemoval?: MemberGroupRemoval;
   requireExecution?(): Promise<void>;
   operations?: OperationsQueries;
@@ -110,7 +113,14 @@ export function createApp(
       !management &&
       !memberAdministration &&
       !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
-      !(req.method === "POST" && readOnlyPosts.has(req.routeOptions.url ?? ""))
+      !(
+        req.method === "POST" &&
+        (readOnlyPosts.has(req.routeOptions.url ?? "") ||
+          (req.routeOptions.url === "/internal/v1/group-human-tasks/:action" &&
+            ["proposalSender", "proposal", "batch", "task", "list", "groupList", "counts", "history", "binding", "request"].includes(
+              (req.params as { action: string }).action,
+            )))
+      )
     )
       await services.requireExecution?.();
     if (!(management ? services.connected() : services.ready()))
@@ -129,6 +139,7 @@ export function createApp(
   );
   app.register(async (scope) => schemaRoutes(scope, config, services.schema, services.schemaState));
   if (services.forwards) groupForwardRoutes(app, config.enterpriseId, services.forwards);
+  if (services.humanTasks) humanTaskRoutes(app, services.humanTasks);
   historyRoutes(app, services.history);
   if (services.forwardSources) forwardSourceRoutes(app, services.forwardSources);
   commandRoutes(app, config, services.commands);

@@ -11,6 +11,7 @@ import { publicationIdSchema } from './ids.ts'
 export interface GroupTaskPublicationBinding {
   readonly taskId: string
   readonly userCode: string
+  readonly humanTaskId?: string
   readonly privateGroupId?: string
   readonly enterpriseId?: string
 }

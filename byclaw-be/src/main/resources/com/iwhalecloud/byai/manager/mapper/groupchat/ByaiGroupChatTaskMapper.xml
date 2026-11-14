@@ -93,6 +93,7 @@
         SELECT t.* FROM byai_group_chat_task t
         WHERE t.group_session_id = #{groupId} AND t.initiator_user_id = #{userId} AND t.target_agent_id = #{agentId}
           AND <include refid="privateOrLegacyCancelled"/> AND <include refid="privateSessionExists"/>
+          AND NOT EXISTS (SELECT 1 FROM byai_group_human_task_session h WHERE h.task_session_id = t.task_session_id)
         ORDER BY CASE WHEN t.status = 'PRIVATE' THEN 0 ELSE 1 END, t.create_time, t.task_session_id LIMIT 1
     </select>
 

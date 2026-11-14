@@ -299,6 +299,12 @@ public class GroupChatContextService {
             message.setResponseId(passive ? null : responseId);
             message.setGroupCoordination(passive ? null : toCoordination(source.getMetadata()));
             message.setTaskId(passive ? null : toMetadataString(source.getMetadata(), "taskId"));
+            String cardKind = toMetadataString(source.getMetadata(), "kind");
+            String batchId = toMetadataString(source.getMetadata(), "batchId");
+            if (!source.isRecalled() && !passive && batchId != null
+                && ("HUMAN_TASK_PROPOSAL".equals(cardKind) || "HUMAN_TASK_BATCH".equals(cardKind))) {
+                message.setMetadata(java.util.Map.of("scene", "GROUP_CHAT", "kind", cardKind, "batchId", batchId));
+            }
             message.setUsage(source.getUsage());
             message.setKind(Integer.valueOf(5).equals(source.getUsage()) ? "SYSTEM_EVENT"
                 : toMetadataString(source.getMetadata(), "kind"));

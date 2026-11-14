@@ -137,7 +137,8 @@ public class GroupChatWebSocketService {
             new GroupMessagePayload(message.getChatContent(), message.getResourceList() == null ? java.util.List.of() : message.getResourceList(), message.getFiles(),
                 message.getReplyToMessageId() == null ? null : message.getReplyToMessageId().toString(),
                 message.getSenderName(), (String) coordinator.get("coordinatorAgentId"),
-                (String) coordinator.get("coordinatorName"), (Boolean) coordinator.get("coordinatorAuthorized"), message.getMentionAllUsers()), message.getClientRequestId());
+                (String) coordinator.get("coordinatorName"), (Boolean) coordinator.get("coordinatorAuthorized"), message.getMentionAllUsers(),
+                message.getHumanTaskId() == null ? null : message.getHumanTaskId().toString()), message.getClientRequestId());
         if (result == null || result.messageId() == null) {
             throw new IllegalStateException("tenant group message was not committed");
         }

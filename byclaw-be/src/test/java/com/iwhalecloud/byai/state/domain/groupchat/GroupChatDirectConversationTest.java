@@ -133,6 +133,8 @@ class GroupChatDirectConversationTest extends I18nTestSupport {
             CREATE TABLE byai_session (session_id BIGINT PRIMARY KEY, parent_session_id BIGINT, creator_id BIGINT,
                 object_id BIGINT, session_type VARCHAR, state VARCHAR, update_time TIMESTAMP, create_time TIMESTAMP)
             """);
+        db.execute("CREATE TABLE byai_group_human_task_session(task_session_id BIGINT PRIMARY KEY, human_task_id BIGINT, entry_type VARCHAR)");
+        db.execute("CREATE TABLE byai_group_human_task(human_task_id BIGINT PRIMARY KEY, group_session_id BIGINT)");
         db.execute("CREATE TABLE byai_session_ext(session_id BIGINT, ext_param_code VARCHAR, ext_param_value VARCHAR)");
         db.execute("CREATE TABLE byai_group_chat_execution(candidate_session_id BIGINT)");
         db.execute("CREATE TABLE byai_group_chat_turn(candidate_session_id BIGINT, gateway_session_id VARCHAR)");
@@ -412,6 +414,16 @@ class GroupChatDirectConversationTest extends I18nTestSupport {
         db.execute("ALTER TABLE public_message DROP CONSTRAINT test_reject");
         assertThat(confirm(id).getText()).isEqualTo("恢复后发布");
         assertThat(db.queryForObject("SELECT COUNT(*) FROM public_message", Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    void humanTaskPrivateSessionDoesNotCompeteWithTheOrdinaryEmployeeConversation() {
+        historical(60L, 30L, "PRIVATE", "2025-01-01");
+        historical(62L, 30L, "PRIVATE", "2025-01-02");
+        db.execute("INSERT INTO byai_group_human_task VALUES(70,10)");
+        db.execute("INSERT INTO byai_group_human_task_session VALUES(60,70,'PRIVATE')");
+        assertThat(open(10L, 30L, 40L)).isEqualTo(62L);
+        assertThat(guard.beforeTurn(60L, 40L, null)).isNull();
     }
 
     @Test

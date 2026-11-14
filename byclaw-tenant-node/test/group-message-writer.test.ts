@@ -34,6 +34,17 @@ function setup(payload: Record<string, any>, coordinatorAgentId?: string) {
 }
 
 describe("tenant group message", () => {
+  it("starts bound human work as TASK and persists the human association", async () => {
+    const {context,query}=setup({chatContent:'do task',resourceList:[{resourceType:'DIG_EMPLOYEE',resourceId:'42'}],humanTaskId:'900'});
+    const original=query.getMockImplementation()!;
+    query.mockImplementation(async(sql,parameters=[])=>sql.startsWith('SELECT status FROM byai.byai_group_human_task')?[{status:'PENDING'}]:original(sql,parameters));
+    const result=await sendGroupMessage(context);
+    expect(result.dispatches[0]?.humanTaskId).toBe('900');
+    expect(query.mock.calls.some(([sql])=>sql.startsWith('INSERT INTO byai.byai_group_chat_task'))).toBe(true);
+    expect(query.mock.calls.some(([sql])=>sql.startsWith('INSERT INTO byai.byai_group_chat_execution'))).toBe(false);
+    expect(query.mock.calls.some(([sql])=>sql.startsWith('INSERT INTO byai.byai_group_human_task_session'))).toBe(true);
+  });
+
   it("indexes all current humans once, excluding sender, without dispatching agents", async () => {
     const { context, query } = setup({
       chatContent: "@所有人 通知",

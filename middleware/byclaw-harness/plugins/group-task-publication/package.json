@@ -26,7 +26,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "verify": "pnpm build && node scripts/verify.mjs && node scripts/session-verify.mjs"
+    "verify": "pnpm build && node scripts/verify.mjs && node scripts/session-verify.mjs && node scripts/human-task-verify.mjs"
   },
   "dependencies": {
     "zod": "4.4.3",

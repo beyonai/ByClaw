@@ -53,6 +53,19 @@ export async function projectGroupTaskAnswer(
     );
     return;
   }
+  // A human task's agent answer stays private until its owner confirms a submission version.
+  const human = await first(
+    db,
+    "SELECT human_task_id FROM byai.byai_group_human_task_session WHERE enterprise_id=$1 AND task_session_id=$2",
+    [enterpriseId, event.sessionId],
+  );
+  if (human) {
+    await db.query(
+      "UPDATE byai.byai_group_chat_task SET turn_status='WAITING_USER',update_time=CURRENT_TIMESTAMP WHERE task_session_id=$1",
+      [event.sessionId],
+    );
+    return;
+  }
   const scope = await readGroupCoordination(db, event.sessionId);
   if (scope?.mode === "COORDINATED") {
     if (

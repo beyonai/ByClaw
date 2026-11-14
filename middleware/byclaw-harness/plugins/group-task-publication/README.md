@@ -57,3 +57,11 @@ pnpm --filter @byclaw/dsh-group-task-publication run verify
 Uncertain outcomes identify the failure stage: transport, HTTP status, JSON decoding, response validation, or task identity mismatch. Diagnostics expose only fixed labels, status codes, and known field names; raw response contents and credentials are excluded. POST is never automatically retried.
 
 Runtime logs use the `[group-task-publication]` prefix and a per-call `requestId`. They record validation/authentication/file-check stages, the POST URL and timeout, HTTP status, content type, a bounded sanitized response summary (`code`, `msg`, IDs, creation time, text length, and attachment count), and success or failure. Network failures include recognized transport codes and cancellation state. Request headers, full publication text, attachment paths, and unknown response fields are excluded. Non-JSON responses log only their length.
+
+## Human-assigned group tasks
+
+Set `taskManagerAgentIds` to the employee resource IDs allowed to draft human-task proposals (default: `[]`). The DSH tool `prepare_group_human_tasks` is registered only when the trusted inbound `groupChat.targetAgentId` matches. It uses host session identity and fresh login headers; model input supplies items and optional batch/revision for replacement. It never confirms a proposal or creates final tasks on behalf of the initiator.
+
+A trusted `groupChat.humanTaskId` or `groupPrivatePublication.humanTaskId` changes the publication tool's wording to pending human-task submission. Preparing a draft still does not upload, submit, or send group messages. The BE uses the persisted session binding to select `complete` behavior. CLI runtimes retain publication preparation but do not gain the new proposal tool automatically.
+
+`pnpm run verify` includes keyless scope, schema, identity, idempotency, and resumed-binding checks. Live provider acceptance is not established by those checks.

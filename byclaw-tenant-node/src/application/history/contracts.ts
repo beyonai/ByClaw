@@ -35,7 +35,12 @@ export interface HistoryRepository {
   acknowledgements(sessionId: string, messageIds: string[]): Promise<Row[]>;
   session(id: string): Promise<Row | null>;
   member(sessionId: string, userId: string): Promise<Row | null>;
-  activeDirectTaskId(groupId: string, actor: string, agentId: string): Promise<string | null>;
+  activeDirectTaskId(
+    groupId: string,
+    actor: string,
+    agentId: string,
+    humanTaskSessionId?: string,
+  ): Promise<string | null>;
   groupMemberApiKey(sessionId: string, userId: string): Promise<string | null>;
   groupMemberId(sessionId: string, userId: string): Promise<string | null>;
   members(sessionId: string): Promise<Row[]>;

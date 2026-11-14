@@ -5,6 +5,16 @@ import { readFile } from "node:fs/promises";
 import { validateScript } from "../src/infrastructure/schema/script-validator.js";
 
 const names = [
+  "byai_group_human_task_batch",
+  "byai_group_human_task",
+  "byai_group_human_task_session",
+  "byai_group_human_task_submission",
+  "byai_group_human_task_review",
+  "byai_group_human_task_submit_request",
+  "idx_human_task_initiator",
+  "idx_human_task_assignee",
+  "idx_human_task_batch",
+  "idx_human_task_session_task",
   "byai_group_chat_direct_binding",
   "byai_group_chat_private_publication",
   "byai_session_member",

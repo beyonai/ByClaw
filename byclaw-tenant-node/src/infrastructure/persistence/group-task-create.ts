@@ -12,6 +12,7 @@ export interface GroupDispatch {
   taskSessionId: string;
   targetAgentId: string;
   dispatchId?: string;
+  humanTaskId?: string;
   groupCoordination?: GroupCoordination;
 }
 
@@ -34,7 +35,14 @@ export async function createGroupTasks(
   const coordinatorAgentId = coordinator?.extParamValue;
   if (selected.length > 1 && !coordinatorAgentId)
     throw new DomainError("GROUP_COORDINATOR_NOT_CONFIGURED");
+  const humanTaskId = command.payload.humanTaskId;
+  if(humanTaskId != null) {
+    if(typeof humanTaskId!=='string' || !/^[1-9][0-9]{0,18}$/.test(humanTaskId))throw new DomainError('HUMAN_TASK_INVALID_ID');
+    const human=await first(db,'SELECT status FROM byai.byai_group_human_task WHERE human_task_id=$1 AND group_session_id=$2 AND enterprise_id=$3',[humanTaskId,command.sessionId,command.enterpriseId]);
+    if(!human || human.status==='ACCEPTED')throw new DomainError('HUMAN_TASK_NOT_WRITABLE');
+  }
   const coordinated = selected.length > 1;
+  const forceTask = coordinated || humanTaskId != null;
   const targets = coordinated ? [coordinatorAgentId] : selected;
   let allowedAgentIds = selected.filter((id) => id !== coordinatorAgentId);
   if (!coordinated && coordinatorAgentId) {
@@ -64,13 +72,13 @@ export async function createGroupTasks(
       enterprise_id: command.enterpriseId,
       session_name: truncateUtf8(content, 255) || "群聊任务",
       session_type: "h_as",
-      state: coordinated ? "GROUP_TASK" : "GROUP_TASK_CANDIDATE",
+      state: forceTask ? "GROUP_TASK" : "GROUP_TASK_CANDIDATE",
       object_id: agentId,
       last_seq: "0",
       create_time: new Date(),
       update_time: new Date(),
     });
-    if (coordinated)
+    if (forceTask)
       await insert(db, "byai_group_chat_task", {
         task_session_id: taskSessionId,
         group_session_id: command.sessionId,
@@ -122,7 +130,9 @@ export async function createGroupTasks(
         ext_param_code: GROUP_COORDINATION_SCOPE,
         ext_param_value: JSON.stringify(scope),
       });
+    if(humanTaskId) await insert(db,'byai_group_human_task_session',{task_session_id:taskSessionId,enterprise_id:command.enterpriseId,human_task_id:humanTaskId,entry_type:'GROUP',create_time:new Date()});
     dispatches.push({
+      ...(humanTaskId ? {humanTaskId} : {}),
       taskSessionId,
       targetAgentId: agentId,
       dispatchId,

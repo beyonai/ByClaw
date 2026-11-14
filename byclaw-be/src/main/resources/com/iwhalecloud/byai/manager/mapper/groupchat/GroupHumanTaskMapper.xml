@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.groupchat.GroupHumanTaskMapper">
+    <sql id="pendingReviewPredicate">
+        initiator_user_id = #{actor} AND status = 'PENDING_REVIEW'
+    </sql>
+
+    <sql id="pendingCompletionPredicate">
+        assignee_user_id = #{actor} AND initiator_user_id != #{actor} AND status IN ('PENDING', 'CHANGES_REQUESTED')
+    </sql>
+
+    <sql id="pendingModificationPredicate">
+        assignee_user_id = #{actor} AND initiator_user_id != #{actor} AND status = 'CHANGES_REQUESTED'
+    </sql>
+
+    <!-- The optional group narrows existing ownership filters; it never grants access. -->
+    <sql id="groupFilter">
+        <if test="groupSessionId != null">
+            AND group_session_id = #{groupSessionId}
+        </if>
+    </sql>
+
+    <!-- Sharing this predicate keeps pagination totals aligned with role-based business views. -->
+    <sql id="listPredicate">
+        WHERE enterprise_id = #{tenant}
+        <include refid="groupFilter"/>
+        <choose>
+            <when test="view == @com.iwhalecloud.byai.common.constants.groupchat.HumanTaskListView@PENDING_REVIEW">
+                AND (<include refid="pendingReviewPredicate"/>)
+            </when>
+            <when test="view == @com.iwhalecloud.byai.common.constants.groupchat.HumanTaskListView@PENDING_COMPLETION">
+                AND (<include refid="pendingCompletionPredicate"/>)
+            </when>
+            <when test="view == @com.iwhalecloud.byai.common.constants.groupchat.HumanTaskListView@PENDING_MODIFICATION">
+                AND (<include refid="pendingModificationPredicate"/>)
+            </when>
+            <otherwise>
+                <choose>
+                    <when test="relation == 'INITIATED'">
+                        AND initiator_user_id = #{actor}
+                    </when>
+                    <when test="relation == 'ASSIGNED'">
+                        AND assignee_user_id = #{actor}
+                    </when>
+                    <otherwise>
+                        AND (initiator_user_id = #{actor} OR assignee_user_id = #{actor})
+                    </otherwise>
+                </choose>
+                <if test="status != null">
+                    AND status = #{status}
+                </if>
+            </otherwise>
+        </choose>
+    </sql>
+
+    <select id="list" resultType="java.lang.String">
+        SELECT payload
+        FROM byai_group_human_task
+        <include refid="listPredicate"/>
+        ORDER BY human_task_id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*)
+        FROM byai_group_human_task
+        <include refid="listPredicate"/>
+    </select>
+    <!-- Group visibility is authorized by the service; selected people are independent AND filters. -->
+    <sql id="groupListPredicate">
+        WHERE enterprise_id = #{tenant}
+          AND group_session_id = #{groupSessionId}
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        <if test="initiatorUserIds != null and !initiatorUserIds.isEmpty()">
+            AND initiator_user_id IN
+            <foreach collection="initiatorUserIds" item="userId" open="(" separator="," close=")">
+                #{userId}
+            </foreach>
+        </if>
+        <if test="assigneeUserIds != null and !assigneeUserIds.isEmpty()">
+            AND assignee_user_id IN
+            <foreach collection="assigneeUserIds" item="userId" open="(" separator="," close=")">
+                #{userId}
+            </foreach>
+        </if>
+    </sql>
+
+    <select id="listGroup" resultType="java.lang.String">
+        SELECT payload
+        FROM byai_group_human_task
+        <include refid="groupListPredicate"/>
+        ORDER BY human_task_id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countGroup" resultType="long">
+        SELECT COUNT(*)
+        FROM byai_group_human_task
+        <include refid="groupListPredicate"/>
+    </select>
+
+    <!-- All counters share one database snapshot and never load task payloads. -->
+    <select id="counts" resultType="java.util.HashMap">
+        SELECT COUNT(CASE WHEN <include refid="pendingReviewPredicate"/> THEN 1 END) AS "pendingReview",
+               COUNT(CASE WHEN <include refid="pendingCompletionPredicate"/> THEN 1 END) AS "pendingCompletion",
+               COUNT(CASE WHEN <include refid="pendingModificationPredicate"/> THEN 1 END) AS "pendingModification"
+        FROM byai_group_human_task
+        WHERE enterprise_id = #{tenant}
+        <include refid="groupFilter"/>
+          AND (initiator_user_id = #{actor} OR assignee_user_id = #{actor})
+    </select>
+</mapper>

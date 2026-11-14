@@ -426,8 +426,10 @@ public class GroupChatTurnCoordinator {
                             && (persisted.getTraceId() == null || (isPreparationFailure(error)
                                 && Objects.equals(persisted.getTraceId(), turn.getTraceId())))) {
                             turns.markFailed(turn.getExecutionId(), "START_FAILED", error.getMessage(), new Date());
-                            if (responseNotifier != null) { responseNotifier.afterCommit(turn); }
-                            if (coordination != null && coordination.isCoordinated(persisted.getCandidateSessionId())) {
+                            if (responseNotifier != null) {
+                                responseNotifier.afterCommit(turn);
+                            }
+                            if (isPrecreatedTask(persisted.getCandidateSessionId())) {
                                 taskService.failTurnStart(persisted.getCandidateSessionId(), persisted.getExecutionId());
                             }
                             wakeAfterCommit(persisted.getCandidateSessionId());
@@ -500,8 +502,7 @@ public class GroupChatTurnCoordinator {
             return false;
         }
         ByaiGroupChatTask task = tasks.selectById(first.getCandidateSessionId());
-        boolean coordinatedInitial = task != null && coordination != null
-            && coordination.isCoordinated(first.getCandidateSessionId())
+        boolean coordinatedInitial = task != null && isPrecreatedTask(first.getCandidateSessionId())
             && Objects.equals(task.getDispatchId(), first.getExecutionId())
             && Objects.equals(task.getCurrentTurnId(), first.getExecutionId());
         if (task != null && "ACTIVE".equals(task.getStatus())
@@ -541,7 +542,7 @@ public class GroupChatTurnCoordinator {
         if (responseNotifier != null) {
             responseNotifier.afterCommit(turn);
         }
-        if (coordination != null && coordination.isCoordinated(turn.getCandidateSessionId())) {
+        if (isPrecreatedTask(turn.getCandidateSessionId())) {
             ByaiGroupChatTask task = tasks.selectById(turn.getCandidateSessionId());
             if (task != null && Objects.equals(task.getDispatchId(), turn.getExecutionId())
                 && Objects.equals(task.getCurrentTurnId(), turn.getExecutionId())) {
@@ -549,6 +550,12 @@ public class GroupChatTurnCoordinator {
             }
         }
         wakeAfterCommit(turn.getCandidateSessionId());
+    }
+
+    /** 提前提升为任务的协调/真人待办都必须释放启动占位。 */
+    private boolean isPrecreatedTask(Long sessionId) {
+        return coordination != null && coordination.isCoordinated(sessionId)
+            || tasks.countHumanBinding(sessionId) > 0;
     }
 
     private void requireMembers(Long group, Long user, Long agent) {

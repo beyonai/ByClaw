@@ -77,6 +77,8 @@ export class HistoryAccess {
             task.groupSessionId,
             actor,
             task.targetAgentId,
+            // Human-task roots are separately bound and never compete with ordinary fixed private chats.
+            task.humanTaskId == null ? undefined : sessionId,
           );
           // 此字段仅来自已鉴权的私聊根任务，不能由客户端、扩展字段或子会话继承。
           if (active != null && String(active) === String(sessionId))

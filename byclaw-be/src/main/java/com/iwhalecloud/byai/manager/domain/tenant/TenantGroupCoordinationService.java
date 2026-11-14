@@ -39,6 +39,9 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class TenantGroupCoordinationService implements ChatGatewayRequestDecorator {
     @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.iwhalecloud.byai.state.domain.groupchat.humantask.HumanTaskService humanTasks;
+    @org.springframework.beans.factory.annotation.Autowired
     private TenantGroupMessageDisplayService messageDisplayService;
     @org.springframework.beans.factory.annotation.Autowired
     private com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatMemberRoutingService memberRouting;
@@ -171,7 +174,8 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
                     throw forbidden();
             });
             params.put("groupCoordination", scope);
-            if (!child) params.put("tenantGroupTask", scope.get("taskSessionId"));
+            // 私聊协调沿普通聊天存储，不能被租户群任务镜像器广播进度。
+            if (!child && !params.containsKey("groupPrivatePublication")) params.put("tenantGroupTask", scope.get("taskSessionId"));
         }
         request.setExtParams(params);
         return groupMembers;
@@ -182,12 +186,28 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         if (context == null || context.tenantContext == null) return content;
         // 复用本次授权检查返回的名单，不把可由客户端伪造的成员数据保存在 extParams 中。
         List<?> groupMembers = validateRequest(context.tenantContext, context.assistantChatDto);
+        var humanBinding = humanTasks == null ? null : humanTasks.binding(context.sessionId);
+        var humanTask = humanBinding == null ? null : humanTasks.task(humanBinding.getLong("humanTaskId"));
         if (context.assistantChatDto.getExtParams().get("groupPrivatePublication") instanceof Map<?, ?> direct) {
             // 使用 Node 已鉴权的原群读取当前用户凭据，不添加群任务执行或广播上下文。
             context.setGroupSessionId(Long.valueOf(direct.get("groupSessionId").toString()));
-            gatewayParams.put("groupPrivatePublication", direct);
+            Map<String, Object> publication = new HashMap<>();
+            direct.forEach((key, value) -> publication.put(key.toString(), value));
+            if (humanTasks != null) {
+                var human = humanTasks.binding(context.sessionId);
+                if (human != null) publication.put("humanTaskId", human.getString("humanTaskId"));
+            }
+            gatewayParams.put("groupPrivatePublication", publication);
+            Object privateContent = content;
+            if (context.assistantChatDto.getExtParams().get("groupCoordination") instanceof Map<?, ?> privateScope) {
+                // 保留根会话的协作能力，发布身份仍仅属于这个已鉴权的私聊。
+                Map<String, Object> routed = attachCoordination(context, privateScope, gatewayParams);
+                privateContent = decorateText(content, text -> prompts.appendCoordination(text, routed));
+            }
+            if (humanTask != null) return decorateText(privateContent, text -> prompts.appendHumanTaskContext(text, context.sessionId,
+                humanTask, "prepare_group_task_publication".equals(context.assistantChatDto.getMessageIntent())));
             return "prepare_group_task_publication".equals(context.assistantChatDto.getMessageIntent())
-                ? decorateText(content, text -> prompts.appendPublicationPreparation(text, context.sessionId)) : content;
+                ? decorateText(privateContent, text -> prompts.appendPublicationPreparation(text, context.sessionId)) : privateContent;
         }
         Object scope = context.assistantChatDto.getExtParams().get("groupCoordination");
         if (!(scope instanceof Map<?, ?> map)) {
@@ -197,27 +217,30 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
                 gatewayParams.put("cwd", "/by/.sessions/" + context.sessionId);
                 Object decorated = appendContext(context, Map.of("groupSessionId", candidate.get("groupSessionId"),
                     "taskSessionId", candidate.get("candidateSessionId")), content, gatewayParams, groupMembers);
-                return decorateText(decorated, text -> candidatePrompt(text, candidate, context.sessionId));
+                return decorateText(decorated, text -> humanTask == null ? candidatePrompt(text, candidate, context.sessionId)
+                    : prompts.appendHumanTaskContext(text, context.sessionId, humanTask,
+                        "prepare_group_task_publication".equals(context.assistantChatDto.getMessageIntent())));
+            }
+            if (humanTask != null) {
+                gatewayParams.put("cwd", "/by/.sessions/" + context.sessionId);
+                Object decorated = appendContext(context, Map.of("groupSessionId", humanTask.getString("groupSessionId"),
+                    "taskSessionId", context.sessionId.toString()), content, gatewayParams, groupMembers);
+                return decorateText(decorated, text -> prompts.appendHumanTaskContext(text, context.sessionId, humanTask,
+                    "prepare_group_task_publication".equals(context.assistantChatDto.getMessageIntent())));
             }
             return content;
         }
-        gatewayParams.put("groupCoordination", memberRouting.withRoutes(map, users.findById(context.tenantContext.userId()).getUserCode()));
-        GroupChatCoordinationService.attachDshTarget(context.assistantChatDto, map, gatewayParams);
+        attachCoordination(context, map, gatewayParams);
         String coordinatorId = String.valueOf(map.get("coordinatorAgentId"));
         var coordinator = resources.findById(Long.valueOf(coordinatorId));
-        if (coordinator == null) throw forbidden();
-        Map<String, Object> coordinatorMetadata = new HashMap<>();
-        coordinatorMetadata.put("id", coordinatorId);
-        coordinatorMetadata.put("name", coordinator.getResourceName());
-        if (coordinator.getWorkerAgentType() != null && !coordinator.getWorkerAgentType().isBlank()) {
-            coordinatorMetadata.put("agentType", coordinator.getWorkerAgentType());
-            coordinatorMetadata.put("workerAgentType", coordinator.getWorkerAgentType());
-        }
-        gatewayParams.put("groupCoordinator", coordinatorMetadata);
         Object decorated = appendContext(context, map, content, gatewayParams, groupMembers);
         gatewayParams.put("cwd", "/by/.sessions/" + context.sessionId);
         Object dispatch = context.assistantChatDto.getExtParams().get("groupDispatch");
-        if (dispatch instanceof Map<?, ?> candidate && Boolean.TRUE.equals(context.assistantChatDto.getExtParams().get("tenantGroupCandidate"))
+        if (humanTask != null) {
+            decorated = decorateText(decorated, text -> prompts.appendHumanTaskContext(text, context.sessionId, humanTask,
+                "prepare_group_task_publication".equals(context.assistantChatDto.getMessageIntent())));
+        }
+        else if (dispatch instanceof Map<?, ?> candidate && Boolean.TRUE.equals(context.assistantChatDto.getExtParams().get("tenantGroupCandidate"))
             && !"COORDINATED".equals(map.get("mode"))) {
             decorated = decorateText(decorated, text -> candidatePrompt(text, candidate, context.sessionId));
         }
@@ -232,7 +255,7 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         if ("COORDINATED".equals(map.get("mode"))) {
             return decorateText(decorated, text -> text + "\n\n本次请求已由平台确定为 GROUP_TASK。你是群组工作助手，只能协调本次 allowedAgentIds 中的数字员工。"
                 + "通过结构化协作工具委派并接收结果；正文中的 @ 仅用于展示。不要重新判断或降级为 CHAT。"
-                + "任务成果沿现有待发布确认流程交付。");
+                + (humanTask == null ? "任务成果沿现有待发布确认流程交付。" : "任务成果等待负责人确认提交后交由发起人验收。"));
         }
         if ("DIRECT".equals(map.get("mode"))) {
             return decorateText(decorated, text -> text + "\n\n你正在回复工作组中的用户。确需执行任务且需要协助时，仅向群组工作助手（ID=" + coordinatorId
@@ -241,6 +264,26 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
                 + "协助结果用于继续当前任务，缺少用户必须提供的材料时向用户询问。");
         }
         return decorated;
+    }
+
+    /** 根私聊与群任务复用相同的服务端路由范围，不生成公开群消息标识。 */
+    private Map<String, Object> attachCoordination(ChatProcessContext context, Map<?, ?> scope, Map<String, Object> gatewayParams) {
+        Map<String, Object> routed = memberRouting.withRoutes(scope, users.findById(context.tenantContext.userId()).getUserCode());
+        gatewayParams.put("groupCoordination", routed);
+        GroupChatCoordinationService.attachDshTarget(context.assistantChatDto, scope, gatewayParams);
+        String coordinatorId = String.valueOf(scope.get("coordinatorAgentId"));
+        var coordinator = resources.findById(Long.valueOf(coordinatorId));
+        if (coordinator == null) throw forbidden();
+        Map<String, Object> coordinatorMetadata = new HashMap<>();
+        coordinatorMetadata.put("id", coordinatorId);
+        coordinatorMetadata.put("name", coordinator.getResourceName());
+        if (coordinator.getWorkerAgentType() != null && !coordinator.getWorkerAgentType().isBlank()) {
+            coordinatorMetadata.put("agentType", coordinator.getWorkerAgentType());
+            coordinatorMetadata.put("workerAgentType", coordinator.getWorkerAgentType());
+        }
+        gatewayParams.put("groupCoordinator", coordinatorMetadata);
+        gatewayParams.put("cwd", "/by/.sessions/" + context.sessionId);
+        return routed;
     }
 
     private String candidatePrompt(String text, Map<?, ?> candidate, Long sessionId) {
@@ -303,9 +346,15 @@ public class TenantGroupCoordinationService implements ChatGatewayRequestDecorat
         var membersFile = contextFiles.prepareGroupMemberSnapshot(initiator.getUserCode(), request, context.traceId,
             context.userMessageId, snapshot, buildMemberRoster(members, context.assistantChatDto.getAgentId(), scope));
         gatewayParams.put("groupContextSnapshot", file.snapshot());
-        gatewayParams.put("groupChat", Map.of("schemaVersion", "byclaw.group-chat-ref/v1", "conversationKey", groupId,
+        Map<String, Object> groupChat = new HashMap<>(Map.of("schemaVersion", "byclaw.group-chat-ref/v1", "conversationKey", groupId,
             "beforeMessageId", boundary, "childSessionId", context.sessionId.toString(),
-            "initiatorUserId", context.tenantContext.userId(), "targetAgentId", context.assistantChatDto.getAgentId()));
+            "initiatorUserId", Long.toString(context.tenantContext.userId()), "targetAgentId", context.assistantChatDto.getAgentId().toString()));
+        if (humanTasks != null) {
+            var human = humanTasks.binding(context.sessionId);
+            if (human != null) groupChat.put("humanTaskId", human.getString("humanTaskId"));
+        }
+        groupChat.put("enterpriseId", Long.toString(context.tenantContext.enterpriseId()));
+        gatewayParams.put("groupChat", groupChat);
         context.setGroupSessionId(Long.valueOf(groupId));
         return decorateText(content, text -> prompts.appendGroupMembers(prompts.appendGroupHistory(text, file), membersFile));
     }

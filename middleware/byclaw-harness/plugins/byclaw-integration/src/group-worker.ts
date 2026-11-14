@@ -31,6 +31,8 @@ function eventText(event: WorkerEvent): string {
 export function externalWorkerPayload(extra: Readonly<Record<string, unknown>>, employeeId: string, modelId?: string): Record<string, unknown> {
   const result: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(extra)) {
+    // Publication and human-task submission belong to the root session only.
+    if (['groupPrivatePublication', 'groupChat', 'humanTaskId', 'tenantGroupTask'].includes(key)) continue
     if (/^(agent|employee|digitalEmployee|model|master_model|persona|template|source_agent|worker_agent|dsh_|byclaw_root|groupCoordination|groupTask|groupContextSnapshot|resource|attachment|file)/i.test(key)) continue
     if (['extParams','ext_params','metadata'].includes(key) && typeof value === 'string') continue
     if (['extParams','ext_params','metadata'].includes(key) && typeof value === 'object' && value !== null && !Array.isArray(value)) {

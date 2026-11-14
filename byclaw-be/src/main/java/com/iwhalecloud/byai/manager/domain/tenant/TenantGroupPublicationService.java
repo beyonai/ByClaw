@@ -22,6 +22,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class TenantGroupPublicationService {
     @org.springframework.beans.factory.annotation.Autowired
+    private com.iwhalecloud.byai.state.domain.groupchat.application.HumanTaskCompletionBridge humanTaskCompletion;
+    @org.springframework.beans.factory.annotation.Autowired
     private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatAgentMentionParser mentions;
     @org.springframework.beans.factory.annotation.Autowired
     private MultiDeviceBroadcastService broadcaster;
@@ -41,6 +43,10 @@ public class TenantGroupPublicationService {
     }
 
     public JsonNode complete(TenantRequestContext tenant, Long taskId, GroupChatTaskCompleteRequest request) {
+        if (humanTaskCompletion != null) {
+            var submitted = humanTaskCompletion.complete(taskId, request);
+            if (submitted != null) return mapper.valueToTree(submitted);
+        }
         JsonNode task = data.read(tenant, "group-chat/tasks/" + taskId);
         Long pendingId = request == null ? null : request.getPendingPublicationId();
         if (pendingId != null && (request.getText() != null || request.getFiles() != null && !request.getFiles().isEmpty()))

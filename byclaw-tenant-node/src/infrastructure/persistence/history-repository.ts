@@ -7,7 +7,7 @@ import { groupNameExists } from "./group-name.js";
 import type { SqlSession } from "../../application/database-ports.js";
 import type { HistoryRepository, MessageFilter, Row } from "../../application/history.js";
 import { readGroupCandidate } from "./group-candidate.js";
-import { findDirectTask, rankedDirectTasks, requireGroupAgent } from "./group-direct-task.js";
+import { findDirectTask, rankedDirectTasks, requireGroupAgent, requireWritableDirectTask } from "./group-direct-task.js";
 
 const camel = (row: Row): Row =>
   Object.fromEntries(
@@ -92,7 +92,13 @@ export class SqlHistoryRepository implements HistoryRepository {
     groupId: string,
     actor: string,
     agentId: string,
+    humanTaskSessionId?: string,
   ): Promise<string | null> {
+    if (humanTaskSessionId !== undefined) {
+      // Validate the exact persisted human binding, owner, group and employee before exposing the marker.
+      await requireWritableDirectTask(this.db, this.tenantId, groupId, actor, agentId, humanTaskSessionId);
+      return humanTaskSessionId;
+    }
     await requireGroupAgent(this.db, groupId, agentId, this.tenantId);
     return (
       (await findDirectTask(this.db, this.tenantId, groupId, actor, agentId))?.taskSessionId ?? null
@@ -223,8 +229,8 @@ export class SqlHistoryRepository implements HistoryRepository {
   async task(taskId: string) {
     return (
       (
-        await this.read("SELECT * FROM byai.byai_group_chat_task WHERE task_session_id=$1", [
-          taskId,
+        await this.read("SELECT t.*,b.human_task_id FROM byai.byai_group_chat_task t JOIN byai.byai_session s ON s.session_id=t.task_session_id AND s.enterprise_id=$2 LEFT JOIN byai.byai_group_human_task_session b ON b.task_session_id=t.task_session_id AND b.enterprise_id=$2 WHERE t.task_session_id=$1", [
+          taskId, this.tenantId,
         ])
       )[0] ?? null
     );

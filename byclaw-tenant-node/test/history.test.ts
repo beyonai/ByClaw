@@ -48,6 +48,44 @@ const message = (overrides: Row = {}) => ({
   ...overrides,
 });
 describe("tenant history use cases", () => {
+  it("authorizes human-task private roots independently of ordinary fixed employee chats", async () => {
+    const { repo, service } = setup();
+    vi.mocked(repo.session).mockImplementation(async (id) => ({
+      sessionId: id,
+      enterpriseId: "10",
+      creatorId: "20",
+      sessionType: id === "30" ? "hs_as" : "h_as",
+    }));
+    vi.mocked(repo.task).mockResolvedValue({
+      groupSessionId: "30",
+      initiatorUserId: "20",
+      targetAgentId: "90",
+      status: "PRIVATE",
+      humanTaskId: "70",
+    });
+    vi.mocked(repo.activeDirectTaskId).mockImplementation(async (...args) => args[3] ?? "99");
+    vi.mocked(repo.extensions).mockResolvedValue([
+      {
+        extParamCode: "group_coordination_scope",
+        extParamValue: JSON.stringify({
+          schemaVersion: "byclaw.group-coordination/v1",
+          mode: "COORDINATED",
+          groupSessionId: "30",
+          taskSessionId: "50",
+          coordinatorAgentId: "90",
+          allowedAgentIds: ["42"],
+        }),
+      },
+    ]);
+
+    expect(await service.access("20", "50")).toMatchObject({
+      groupDirectTask: { groupSessionId: "30", targetAgentId: "90" },
+      groupCoordination: { mode: "COORDINATED", taskSessionId: "50" },
+    });
+    expect(repo.activeDirectTaskId).toHaveBeenCalledWith("30", "20", "90", "50");
+    await expect(service.access("21", "50")).rejects.toThrow("RESOURCE_NOT_ACCESSIBLE");
+  });
+
   it("returns only the authorized active membership ID when BE will read its Redis credential", async () => {
     const { repo, service } = setup();
     vi.mocked(repo.groupMemberId).mockResolvedValue("9007199254740993");

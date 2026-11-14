@@ -26,6 +26,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
       (key) =>
         ![
           "chatContent",
+          "humanTaskId",
           "mentionAllUsers",
           "resourceList",
           "files",
@@ -173,6 +174,7 @@ export async function sendGroupMessage(context: CommandContext): Promise<GroupMe
       mentionAllUsers: payload.mentionAllUsers === true,
       executionBackend: persistOnly ? "LOCAL" : undefined,
       sourceMessageId: payload.sourceMessageId,
+      humanTaskId: payload.humanTaskId,
       targetAgentId: payload.targetAgentId,
     }),
     related_resources: payload.files?.length ? JSON.stringify({ files: payload.files }) : null,

@@ -14,6 +14,13 @@ public class GroupChatTaskPublicationResponse {
     private Long messageId;
     @JsonSerialize(using = ToStringSerializer.class)
     private Long pendingPublicationId;
+    /** 绑定真人待办时返回提交版本，不产生新的群 messageId。 */
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long humanTaskId;
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long submissionId;
+    private Integer version;
+    private String status;
     private String text;
     private List<GroupChatTaskFile> files;
 }

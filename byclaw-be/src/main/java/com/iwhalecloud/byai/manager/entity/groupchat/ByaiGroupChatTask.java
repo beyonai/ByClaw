@@ -18,6 +18,10 @@ public class ByaiGroupChatTask {
     /** Identifies which runtime owns task execution; legacy persisted tasks are remote. */
     @com.baomidou.mybatisplus.annotation.TableField(exist = false)
     private String executionBackend = "REMOTE";
+    /** 仅绑定真人待办时提供，任务主状态仍归真人待办所有。 */
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    @JsonSerialize(using = ToStringSerializer.class)
+    private Long humanTaskId;
     @com.baomidou.mybatisplus.annotation.TableField(exist = false)
     private Map<String, Object> groupCoordination;
     @TableId(value = "task_session_id", type = IdType.INPUT)

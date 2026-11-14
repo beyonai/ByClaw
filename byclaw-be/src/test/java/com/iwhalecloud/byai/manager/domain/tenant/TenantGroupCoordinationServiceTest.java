@@ -538,6 +538,26 @@ class TenantGroupCoordinationServiceTest extends I18nTestSupport {
     }
 
     @Test
+    void privateCoordinatedRootAttachesExecutionScopeWithoutGroupBroadcastMarkers() {
+        Map<String, Object> scope = scope("COORDINATED");
+        stored(scope, "90");
+        when(resources.findById(90L)).thenReturn(coordinator());
+        when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/50"), eq(null), any()))
+            .thenReturn(Map.of("groupCoordination", scope, "targetAgentId", "90",
+                "groupDirectTask", Map.of("groupSessionId", "30", "targetAgentId", "90")));
+        ChatProcessContext context = executionContext(request(90L));
+        Map<String, Object> gateway = new HashMap<>();
+
+        String result = service.decorate(context, "完成待办", gateway).toString();
+
+        assertThat(gateway).containsEntry("groupCoordination", scope).containsEntry("cwd", "/by/.sessions/50")
+            .containsKeys("groupCoordinator", "groupPrivatePublication").doesNotContainKey("groupChat");
+        assertThat(context.assistantChatDto.getExtParams()).doesNotContainKeys("tenantGroupTask", "groupDispatch");
+        assertThat(result).contains("统一协调").doesNotContain("group-chat-disposition.json");
+        verify(files, never()).prepareGroupSnapshot(any(), any(), any(), any(), any());
+    }
+
+    @Test
     void ordinarySessionCannotAuthorizePublicationBySupplyingPrivateScope() {
         when(node.request(eq(tenant), eq("GET"), eq("/internal/v1/sessions/50"), eq(null), any()))
             .thenReturn(Map.of("sessionId", "50"));

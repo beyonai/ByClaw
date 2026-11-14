@@ -74,6 +74,12 @@ public class GroupChatTaskService {
     private com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatResponseNotifier responseNotifier;
 
     @Autowired
+    @Lazy
+    private HumanTaskCompletionBridge humanTaskCompletion;
+    @Autowired
+    @Lazy
+    private com.iwhalecloud.byai.state.domain.groupchat.humantask.HumanTaskService humanTasks;
+    @Autowired
     private GroupChatCoordinationService coordinationService;
     // Chat preparation depends on the task guard; defer resolving the reverse stop dependency.
     @Autowired
@@ -194,11 +200,19 @@ public class GroupChatTaskService {
     public ByaiGroupChatTask detail(Long taskId) {
         ByaiGroupChatTask task = taskAuthorizationService.requireInitiator(taskId);
         if (coordinationService != null) coordinationService.attach(task);
+        if (humanTasks != null) {
+            JSONObject binding = humanTasks.binding(taskId);
+            if (binding != null) task.setHumanTaskId(binding.getLong("humanTaskId"));
+        }
         return task;
     }
 
     @Transactional
     public GroupChatTaskPublicationResponse complete(Long taskId, GroupChatTaskCompleteRequest request) {
+        if (humanTaskCompletion != null) {
+            GroupChatTaskPublicationResponse submitted = humanTaskCompletion.complete(taskId, request);
+            if (submitted != null) return submitted;
+        }
         ByaiGroupChatTask task = taskAuthorizationService.requireTask(taskId);
         // 先锁群再锁任务，与解散工作组的顺序一致，避免发布与解散并发。
         sessionService.lockById(task.getGroupSessionId());

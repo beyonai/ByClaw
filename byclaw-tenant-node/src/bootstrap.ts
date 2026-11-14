@@ -1,3 +1,4 @@
+import { HumanTaskRepository } from './infrastructure/persistence/human-task-repository.js';
 import { requireExecutionPolicy } from "./application/execution-policy.js";
 import MemberGroupRemoval from "./application/MemberGroupRemoval.js";
 import { SqlForwardSourceAuthorityReader } from "./infrastructure/persistence/group-forward-source-authority.js";
@@ -115,6 +116,7 @@ export async function bootstrap(config: Config) {
           config.commercialManaged ?? false,
           quotas,
         ),
+      humanTasks: new HumanTaskRepository(connection, config.enterpriseId),
       forwards: new SqlGroupForwardStore(connection, config.enterpriseId),
       mirror,
       history,

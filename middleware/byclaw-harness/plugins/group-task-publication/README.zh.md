@@ -57,3 +57,11 @@ pnpm --filter @byclaw/dsh-group-task-publication run verify
 结果不确定时，错误会区分连接失败、HTTP 状态、JSON 解析、响应校验及任务身份不匹配。诊断只包含固定说明、状态码和已知字段名，不包含原始响应内容或凭证，也不会自动重试 POST。
 
 运行日志统一使用 `[group-task-publication]` 前缀，每次调用通过 `requestId` 关联。日志包含参数、鉴权、文件校验阶段，POST 地址和超时配置，HTTP 状态、Content-Type，经过脱敏和长度限制的响应摘要（code、msg、ID、创建时间、正文长度、附件数量），以及成功或失败结果。网络失败会记录可识别的连接错误码和取消状态。不打印请求头、完整发布正文、附件路径和未知响应字段；非 JSON 响应只记录长度。
+
+## 真人待办
+
+配置 `taskManagerAgentIds` 为允许使用待办提案工具的数字员工资源 ID 字符串数组（默认 `[]`）。员工名称可以任意设置或修改；工具仅按可信入站 `groupChat.targetAgentId` 匹配，不依赖显示名。匹配时 DSH Agent 注册 `prepare_group_human_tasks`。工具从宿主取得 sourceTaskSessionId 和用户登录头，模型只提供完整条目列表及更新时的 batchId/expectedRevision；创建和编辑提案不代表确认派发。确认必须由原发起人在客户端完成。相同入站消息和提案内容使用稳定请求标识；不会自动重试写入或替换验收版本。
+
+关联真人待办的执行会话，通过可信 `groupChat.humanTaskId` 或 `groupPrivatePublication.humanTaskId` 持久化关联标记，成果准备工具改为“等待确认提交任务”的说明。仍然只准备草稿，不上传、不提交、不发送群消息。BE `complete` 负责按持久化关联分流，不能仅凭模型标记改变业务行为。
+
+新增提案工具只接入 DSH Agent 工具上下文；CLI coding runtime 继续获得成果草稿能力，未新增提案适配。业务 API 见 `byclaw-be/docs/api/group-human-tasks.md`。本地无密钥验证运行 `pnpm run verify`，包括真实工具注册 schema、作用域、身份拒绝、重复请求、更新版本和待办标记恢复；平台实请求需要另行验证。

@@ -50,6 +50,7 @@ import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatCandidat
 import com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTurnCoordinator;
 import com.iwhalecloud.byai.state.domain.groupchat.domain.GroupChatMessageRejectedException;
 import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatGatewayExecutor;
+import com.iwhalecloud.byai.state.domain.groupchat.infrastructure.GroupChatResponseNotifier;
 import com.iwhalecloud.byai.state.domain.session.service.SessionMemberService;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -64,6 +65,23 @@ class GroupChatTurnCoordinatorTest extends I18nTestSupport {
     private GroupChatContextService contextService;
     private final Map<String, ByaiGroupChatExecution> anchorRows = new HashMap<>();
     private final Map<String, ByaiGroupChatTurn> turnRows = new HashMap<>();
+
+    @Test
+    void blockedHumanTaskInitialTurnReleasesTheExecutionSlot() {
+        GroupChatResponseNotifier notifier = mock(GroupChatResponseNotifier.class);
+        ReflectionTestUtils.setField(coordinator, "responseNotifier", notifier);
+        var service = mock(com.iwhalecloud.byai.state.domain.groupchat.application.GroupChatTaskService.class);
+        ReflectionTestUtils.setField(coordinator, "taskService", service);
+        when(tasks.countHumanBinding(90L)).thenReturn(1);
+        ByaiGroupChatTurn turn = new ByaiGroupChatTurn();
+        turn.setExecutionId(80L); turn.setCandidateSessionId(90L);
+        ByaiGroupChatTask task = new ByaiGroupChatTask();
+        task.setDispatchId(80L); task.setCurrentTurnId(80L);
+        when(tasks.selectById(90L)).thenReturn(task);
+        ReflectionTestUtils.invokeMethod(coordinator, "block", turn, "MEMBERSHIP_CHANGED");
+        verify(service).failTurnStart(90L, 80L);
+        verify(notifier).afterCommit(turn);
+    }
 
     @BeforeEach
     void setup() {

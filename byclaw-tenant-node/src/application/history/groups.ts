@@ -224,7 +224,7 @@ export class GroupHistory extends HistoryAccess {
     await this.access(actor, task.groupSessionId, true);
     if (task.initiatorUserId !== actor) throw new DomainError("RESOURCE_NOT_ACCESSIBLE");
     if (
-      task.status === "PRIVATE" &&
+      task.status === "PRIVATE" && !task.humanTaskId &&
       (await this.repository.activeDirectTaskId(task.groupSessionId, actor, task.targetAgentId)) !==
         taskId
     )

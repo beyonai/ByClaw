@@ -65,3 +65,15 @@ it('exposes explicit message completeness for notification access checks', async
   ]);
   expect(messages.map(message => message.complete)).toEqual([true, false, false]);
 });
+
+
+it("projects human card batch metadata without exposing internal fields", async () => {
+  const repository = { tasks: vi.fn(async () => []), acknowledgements: vi.fn(async () => []) } as unknown as HistoryRepository;
+  const results = await displayMessages(repository, ["HUMAN_TASK_PROPOSAL", "HUMAN_TASK_BATCH"].map(kind => ({
+    sessionId: "30", messageId: "99", usage: 2,
+    metadata: JSON.stringify({ scene: "GROUP_CHAT", kind, batchId: "9007199254740999", secret: "private" }),
+  })), "7");
+  for (const result of results) {
+    expect(result.metadata).toEqual({ scene: "GROUP_CHAT", kind: result.kind, batchId: "9007199254740999" });
+  }
+});

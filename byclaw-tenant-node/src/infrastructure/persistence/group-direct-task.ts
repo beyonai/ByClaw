@@ -26,6 +26,7 @@ export const rankedDirectTasks = `
   LEFT JOIN byai.byai_group_chat_direct_binding b ON b.group_session_id=t.group_session_id
     AND b.initiator_user_id=t.initiator_user_id AND b.target_agent_id=t.target_agent_id
   WHERE t.group_session_id=$3 AND t.initiator_user_id=$2
+    AND NOT EXISTS (SELECT 1 FROM byai.byai_group_human_task_session human WHERE human.task_session_id=t.task_session_id)
     AND (t.status='PRIVATE' OR (t.status='CANCELLED' AND t.turn_status='PRIVATE'))
     AND (b.task_session_id IS NULL OR t.task_session_id=b.task_session_id)`;
 
@@ -53,6 +54,13 @@ export async function requireWritableDirectTask(
   taskId: string,
 ) {
   await requireGroupAgent(db, group, agent, tenant);
+  // Human tasks own separate private sessions; they never replace the ordinary fixed group binding.
+  const human = await first(db, `SELECT 1 FROM byai.byai_group_human_task_session b
+    JOIN byai.byai_group_human_task h ON h.human_task_id=b.human_task_id AND h.enterprise_id=b.enterprise_id
+    JOIN byai.byai_session s ON s.session_id=b.task_session_id AND s.enterprise_id=b.enterprise_id
+    WHERE b.enterprise_id=$1 AND b.task_session_id=$2 AND h.group_session_id=$3
+      AND s.creator_id=$4 AND s.object_id=$5 AND s.state!='CLOSED' AND b.entry_type='PRIVATE'`,[tenant,taskId,group,actor,agent]);
+  if(human)return;
   const direct = await findDirectTask(db, tenant, group, actor, agent);
   if (direct?.taskSessionId !== taskId || direct.sessionState === "CLOSED")
     throw new DomainError("RESOURCE_NOT_ACCESSIBLE");

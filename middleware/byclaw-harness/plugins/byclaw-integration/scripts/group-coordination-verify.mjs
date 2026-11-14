@@ -130,6 +130,17 @@ assert.equal(sanitized.extParams.dsh_target_session_id,undefined)
 assert.equal(sanitized.extParams.modelId,undefined)
 assert.equal(externalWorkerPayload({metadata:JSON.stringify({resourceList:[{resourceType:'COMMON_FILE',resourceId:'video'}]})},'b').metadata,undefined)
 
+// Delegated workers must not inherit the root's publication or human-task submission authority.
+const privateChild = externalWorkerPayload({
+  groupPrivatePublication: { taskSessionId: 'root', groupSessionId: 'g', humanTaskId: '123' },
+  groupChat: { childSessionId: 'root', conversationKey: 'g' }, humanTaskId: '123', tenantGroupTask: 'root',
+  extParams: { groupPrivatePublication: { taskSessionId: 'root' }, humanTaskId: '123' },
+}, 'b')
+for (const key of ['groupPrivatePublication', 'groupChat', 'humanTaskId', 'tenantGroupTask']) {
+  assert.equal(privateChild[key], undefined)
+  assert.equal(privateChild.extParams[key], undefined)
+}
+
 // SDK execution state and exact root event identity jointly determine completion.
 async function bridge(statuses, options = {}, originExtra = {}, originContent) {
   let sent

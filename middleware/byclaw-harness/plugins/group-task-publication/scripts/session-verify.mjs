@@ -124,9 +124,22 @@ try {
   const absentHeader = { sessionId: 'extension-absent' }
   await runtime.handleFor(command(hacu, absentHeader), selection)
   assert.equal(snapshots.at(-1).registered.has('prepare_group_task_publication'), false, 'Integration works without the optional plugin')
-  let plugin = await ctx.plugin(PublicationPlugin)
+  let plugin = await ctx.plugin(PublicationPlugin, { taskManagerAgentIds: ['22'] })
   fibers.push(plugin)
   assert.equal(ctx.tools.schemas().length, 0)
+
+  const manager = await runtime.handleFor(command({ groupChat: {
+    conversationKey: '11', childSessionId: '9007199254741888', targetAgentId: '22',
+  } }, { sessionId: '9007199254741888', messageId: '99' }), selection)
+  assert.equal(ctx.tools.schemas(manager.handle.agent).some(tool => tool.name === 'prepare_group_human_tasks'), true)
+  assert.equal(ctx.tools.schemas().some(tool => tool.name === 'prepare_group_human_tasks'), false)
+  await runtime.handleFor(command({ groupChat: {
+    conversationKey: '11', childSessionId: '9007199254741888', targetAgentId: '23',
+  } }, { sessionId: '9007199254741888', messageId: '100' }), selection)
+  assert.equal(ctx.tools.schemas(manager.handle.agent).some(tool => tool.name === 'prepare_group_human_tasks'), false)
+  await runtime.handleFor(command({ groupChat: {
+    conversationKey: '11', childSessionId: '9007199254741888', targetAgentId: '22',
+  } }, { sessionId: '9007199254741888', messageId: '101' }), selection)
 
   // CLI eligibility uses the same durable activation without constructing an Agent
   // or requesting credentials until there is an explicit publication request.
@@ -161,6 +174,7 @@ try {
   assert.equal(reused.handle.agent, created.handle.agent)
 
   await plugin.dispose()
+  assert.equal(ctx.tools.schemas(manager.handle.agent).some(tool => tool.name === 'prepare_group_human_tasks'), false)
   assert.equal(ctx.tools.schemas(created.handle.agent).some(tool => tool.name === 'prepare_group_task_publication'), false)
   assert.equal(closes, 1)
   plugin = await ctx.plugin(PublicationPlugin, { timeoutMs: 10000 }); fibers.push(plugin)

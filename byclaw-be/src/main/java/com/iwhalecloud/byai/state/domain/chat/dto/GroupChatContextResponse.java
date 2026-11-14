@@ -54,6 +54,9 @@ public class GroupChatContextResponse {
 
         private String kind;
 
+        /** Public card metadata only; internal message metadata is never exposed wholesale. */
+        private java.util.Map<String, Object> metadata;
+
         /** 消息用途；5 为会话展示事件，不是模型指令。 */
         private Integer usage;
 
